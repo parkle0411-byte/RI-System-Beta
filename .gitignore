@@ -1,0 +1,17 @@
+# 機密與備份 — 絕對不能進版控
+secrets/
+backups/
+*.bak
+
+# 前端建置產物與相依套件
+frontend/node_modules/
+frontend/dist/
+
+# Python
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/.venv/
+
+# 一般雜項
+.DS_Store
+*.log
