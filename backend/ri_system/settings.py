@@ -39,6 +39,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "fxrates",
     "masterdata",
+    "personnel",
+    "cases",
 ]
 
 MIDDLEWARE = [
