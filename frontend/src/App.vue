@@ -8,6 +8,7 @@
       <el-menu mode="horizontal" background-color="#303133" text-color="#fff" router style="flex: 1; border: none">
         <el-menu-item index="/">系統狀態</el-menu-item>
         <el-menu-item index="/fx-rates">FX Rates</el-menu-item>
+        <el-menu-item index="/master-data">Master Data</el-menu-item>
       </el-menu>
     </el-header>
     <el-main>
