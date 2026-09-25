@@ -4,6 +4,18 @@
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
 
+## 固定技術規格（VM）
+
+| 層 | 規格 | 鎖定方式 |
+|---|---|---|
+| 前端 | Vue 3.5.43 ＋ Element Plus 2.14.6 ＋ Vite 7（7.3.6），元件（SFC）加正式建置 | `frontend/package.json` 精確版本 ＋ `package-lock.json`，Dockerfile 用 `npm ci` |
+| 後端／管理 | Django 5.2.17 ＋ DRF 3.16.1 ＋ Gunicorn 23.0.0 ＋ mysqlclient 2.3.0 | `backend/requirements.txt` 精確版本 |
+| Web／反向代理 | Nginx 1.28（目前 1.28.3） | `nginx:1.28-alpine` |
+| 資料庫 | MySQL 8.4.11 | `compose.yaml` 固定在目前使用中映像的摘要（`8.4.11` 標籤在 9/21 被重新打包過，MySQL 版本相同、底層不同，所以固定摘要而不是標籤） |
+
+前端因此**不沿用 Alpha 的無建置（UMD）前端**，畫面以 Vue 元件重寫；API 格式維持與 Alpha 一致，方便對照。
+要升級任何一項，必須先更新這張表與鎖定檔，並重跑全部測試。
+
 ## 檢查漂移
 
 Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又被改了，請對 Claude 說「檢查漂移」：

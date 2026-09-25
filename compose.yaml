@@ -2,7 +2,8 @@ name: ri-system
 
 services:
   mysql:
-    image: mysql:8.4
+    # MySQL 8.4.11，固定在「目前正在跑的那一個映像」的摘要（8.4.11 標籤之後被重新打包過，底層不同）
+    image: mysql@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
     container_name: ri-mysql
     restart: unless-stopped
 

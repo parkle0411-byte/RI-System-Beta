@@ -1,4 +1,5 @@
-Django>=5.2,<5.3
-djangorestframework>=3.16,<3.17
-gunicorn>=23,<24
-mysqlclient>=2.2,<3
+# 固定規格（不使用範圍，避免重建時悄悄換版本）
+Django==5.2.17
+djangorestframework==3.16.1
+gunicorn==23.0.0
+mysqlclient==2.3.0
