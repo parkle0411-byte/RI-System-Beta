@@ -5,6 +5,8 @@ import * as accounting from './lib/accounting.js'
 import * as paymentTerms from './lib/payment-terms.js'
 import * as caseDraft from './lib/case-draft.js'
 import * as apiExcerpts from './lib/api-excerpts.js'
+import * as signedSlip from './lib/signed-slip-reminders.js'
+import * as documentsExcerpts from './lib/case-documents-excerpts.js'
 
 const fns = {
   stripFacilityTag: accounting.stripFacilityTag,
@@ -22,6 +24,18 @@ const fns = {
   normalizeDraft: caseDraft.normalizeDraft,
   validateAnnounceReady: caseDraft.validateAnnounceReady,
   ...apiExcerpts,
+  ...documentsExcerpts,
+  // lib/signed-slip-reminders.js（名稱加 slip 前綴，避免與 Announce 的同名函式衝突）
+  slipReinsurerKey: signedSlip.reinsurerKey,
+  slipRequiredReinsurers: signedSlip.requiredReinsurers,
+  slipDateUtc: signedSlip.dateUtc,
+  slipAddDays: signedSlip.addDays,
+  slipDaysBetween: signedSlip.daysBetween,
+  slipTaipeiToday: signedSlip.taipeiToday,
+  slipMissingSignedReinsurers: signedSlip.missingSignedReinsurers,
+  slipReminderDue: signedSlip.reminderDue,
+  slipSignedSlipTracking: signedSlip.signedSlipTracking,
+  slipIsReservedTestEmail: signedSlip.isReservedTestEmail,
 }
 
 // 讓「new Date()」（不帶參數）回傳固定時間，其餘行為不變；只在需要時暫時替換。

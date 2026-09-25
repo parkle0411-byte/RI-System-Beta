@@ -11,6 +11,8 @@ import sys
 
 from cases import draft
 from cases import workflow as wf
+from cases import documents as docs
+from cases.calc import signed_slip as slip
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
 from cases.calc.jsnum import UNDEFINED
@@ -41,7 +43,29 @@ FUNCTIONS = {
     "buildRenewalPayload": lambda a, now: wf.build_renewal_payload(*a),
     "buildReversedPayload": lambda a, now: wf.build_reversed_payload(*a),
     "appendNotification": lambda a, now: wf.append_notification(*a),
+    "documentsReinsurerKey": lambda a, now: docs.reinsurer_key(*a),
+    "documentsRequiredReinsurers": lambda a, now: docs.required_reinsurers(*a),
+    "documentsCoverageFor": lambda a, now: docs.coverage_for(*a),
+    "safeFilename": lambda a, now: docs.safe_filename(*a),
+    # Alpha 的上限是 5 MB（VM 是 10 MB）：用 Alpha 的上限比對邏輯；bytes 以 JSON.stringify(Uint8Array) 的樣子比對
+    "decodeAndValidate": lambda a, now: _uint8(docs.decode_and_validate(*a, max_bytes=5 * 1024 * 1024)),
+    "slipReinsurerKey": lambda a, now: slip.reinsurer_key(*a),
+    "slipRequiredReinsurers": lambda a, now: slip.required_reinsurers(*a),
+    "slipDateUtc": lambda a, now: slip.date_utc(*a),
+    "slipAddDays": lambda a, now: slip.add_days(*a),
+    "slipDaysBetween": lambda a, now: slip.days_between(*a),
+    "slipTaipeiToday": lambda a, now: slip.taipei_today(now),
+    "slipMissingSignedReinsurers": lambda a, now: slip.missing_signed_reinsurers(*a),
+    "slipReminderDue": lambda a, now: slip.reminder_due(*(list(a) + [UNDEFINED] * (4 - len(a)))),
+    "slipSignedSlipTracking": lambda a, now: slip.signed_slip_tracking(*a, now=now),
+    "slipIsReservedTestEmail": lambda a, now: slip.is_reserved_test_email(*a),
 }
+
+
+def _uint8(result):
+    if isinstance(result, dict) and isinstance(result.get("bytes"), bytes):
+        return {**result, "bytes": {str(i): b for i, b in enumerate(result["bytes"])}}
+    return result
 
 
 def to_json_value(x):

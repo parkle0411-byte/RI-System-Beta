@@ -14,20 +14,22 @@ trap 'rm -rf "$WORK"' EXIT
 docker exec ri-backend python -m qa.calc.vectors "${CALC_VECTORS:-1200}" > "$WORK/vectors.json"
 
 # 驗證副本沒有被改動：雜湊必須與 MANIFEST.md 記錄的相同
-for f in accounting payment-terms case-draft; do
+for f in accounting payment-terms case-draft signed-slip-reminders; do
   want=$(grep -o "lib/$f.js\` | [0-9]* | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
   got=$(sha256sum "backend/qa/alpha_js/lib/$f.js" | cut -d' ' -f1)
   [ "$want" = "$got" ] || { echo "  Alpha 原始碼副本 lib/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
 done
 
-# 節錄檔（api-excerpts.js）同樣要與 MANIFEST.md 記錄的雜湊相同
-want=$(grep -o "excerpts/api-excerpts.js\` | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
-got=$(sha256sum backend/qa/alpha_js/excerpts/api-excerpts.js | cut -d' ' -f1)
-[ "$want" = "$got" ] || { echo "  節錄檔 excerpts/api-excerpts.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
+# 節錄檔同樣要與 MANIFEST.md 記錄的雜湊相同
+for f in api-excerpts case-documents-excerpts; do
+  want=$(grep -o "excerpts/$f.js\` | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
+  got=$(sha256sum "backend/qa/alpha_js/excerpts/$f.js" | cut -d' ' -f1)
+  [ "$want" = "$got" ] || { echo "  節錄檔 excerpts/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
+done
 
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/backend/qa/alpha_js:/alpha:ro" -v "$PWD/backend/qa/calc:/calc:ro" -v "$WORK:/data" node:22-alpine sh -c '
-    mkdir -p /tmp/w/node_modules && cp -r /alpha/lib /tmp/w/lib && cp /alpha/excerpts/api-excerpts.js /tmp/w/lib/ && cp /calc/harness.mjs /tmp/w/ &&
+    mkdir -p /tmp/w/node_modules && cp -r /alpha/lib /tmp/w/lib && cp /alpha/excerpts/*.js /tmp/w/lib/ && cp /calc/harness.mjs /tmp/w/ &&
     ln -s ../lib /tmp/w/node_modules/lib && echo "{\"type\":\"module\"}" > /tmp/w/package.json &&
     cd /tmp/w && node harness.mjs /data/vectors.json > /data/js.json'
 

@@ -71,6 +71,9 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/cases.js` | `a69b83d985026d9782d2bba3892d8210c23dcd9f0ac5e205259dfcca9a6ae18f` | `backend/cases/views.py`（`CasesView`）、`cases/resolve.py` | 完成（含 #7、#8；含 Snapshot／Audit）。以 `qa/suites/cases_api.py` 驗證，並已用 26 種故意破壞確認測試抓得到 |
 | `api/case-announce.js` | `af6d6ed9e8658f2d5d99aa42d526b122a339e899c65779342fdb4680c8c94a6b` | `backend/cases/workflow_views.py`（`AnnounceView`）、`cases/workflow.py` | 完成（Announce、TW Reference 流水號、批單編號；含 Snapshot／Audit）。純函式與 Alpha JS 差異測試逐位一致 |
 | `api/case-workflow.js` | `a74a399b9c8536151ad14ced2b4f29590fef7d8f2431582a388e873f134756cb` | `backend/cases/workflow_views.py`（`WorkflowView`）、`cases/workflow.py` | 完成（狀態、Endorsement、Renewal、Reverse、通知會計）。資料整理邏輯與 Alpha JS 差異測試逐位一致 |
+| `api/case-documents.js` | `0db7421c95f10b83650cc3a006d96cd6a6747d77327c2219cee295e3b006ef77` | `backend/cases/document_views.py`（`CaseDocumentsView`）、`cases/documents.py`、`cases/storage.py` | 完成（上傳、列表、下載、勾選、刪除；含 #11、Audit）。純函式與 Alpha JS 逐位一致；測試組 `case_documents` 73 項 |
+| `lib/signed-slip-reminders.js` | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` | `backend/cases/calc/signed_slip.py` | 函式全部移植並與 Alpha JS 逐位一致（目前只有文件 API 用到 `signedSlipTracking`；寄信提醒 #10 尚未開始） |
+| `migrations/0008_create_case_documents.sql` | `bd0d2ee6e9fc68b2d75fc2093d1886654448743bf2ead2d2a693e742798b8fc1` | `cases/models.py`、`cases/migrations/0002` | 完成（上限改為 10 MB，見下） |
 
 ## 只有資料表，尚無 API（Model only）
 
@@ -79,7 +82,6 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0002_create_cases.sql` | `9e3a6164f8676df6dc0ce6fe4d7e5f9f700bfecd82aa32532fa400ab36b4aa68` | `cases/models.py` |
 | `migrations/0006_add_case_uid.sql` | `59ad607b7e4c8f16854812ea7eb71ee332e831857228a837dece540f35ab31a5` | `cases/models.py` |
 | `migrations/0007_expand_reinsurance_structures.sql` | `8e4e344972e9c6c8b5e9313514e8d33cc28c87f771ad42eafab95cee4d2dfea2` | `cases/models.py` |
-| `migrations/0008_create_case_documents.sql` | `bd0d2ee6e9fc68b2d75fc2093d1886654448743bf2ead2d2a693e742798b8fc1` | `cases/models.py` |
 | `migrations/0009_add_announce_workflow.sql` | `cd7b0f75dd953391fd500804ebdd48f53853cf7cb22d5cafbe9e1b9ae37deb4c` | `cases/models.py`（含 ReferenceSequence） |
 | `migrations/0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `d7b2d9d8…` / `ceb171d9…` | `cases/models.py` |
 
@@ -92,8 +94,8 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 尚未開始
 
-`api/case-documents.js`（#11）、`api/draft-recycle-bin.js`（含 `0005`、`0019`、`0032`）、`api/accounting.js`（API 本身；它用的 `lib/accounting.js` 已完成）、`api/production-report.js`＋`lib/production-report.js`（#16，含 `0016`）、`api/claims.js`、`api/dashboard*.js`（含 `0018`）、
-`api/payment-reminders.js`（#9，含 `0029`–`0031`）、`api/signed-slip-reminders.js`＋`lib/signed-slip-reminders.js`（#10，含 `0017`）、
+`api/draft-recycle-bin.js`（含 `0005`、`0019`、`0032`）、`api/accounting.js`（API 本身；它用的 `lib/accounting.js` 已完成）、`api/production-report.js`＋`lib/production-report.js`（#16，含 `0016`）、`api/claims.js`、`api/dashboard*.js`（含 `0018`）、
+`api/payment-reminders.js`（#9，含 `0029`–`0031`）、`api/signed-slip-reminders.js`（#10，含 `0017`；它用的 `lib/signed-slip-reminders.js` 已完成）、
 `api/render-document-pdf.js`（#19、#21）、`api/data-reconciliation.js`、`api/foundation-status.js`、前端 `public/*`（`app.js` 含 #7、#17、#22；以 Vue 元件重寫，`case-calculations.js` 會以 `cases/calc/totals.py` 的統一算法為準）。
 
 不需要移植：`hatchable.toml`、`public/vendor/*`（前端改用 npm 套件，見「固定技術規格」）、`AGENTS.md`、`README.md`。
@@ -124,6 +126,14 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | Reverse 遇到 `transactions` 內有 `null` | 拋 TypeError（未處理的伺服器錯誤） | 409 `transactions_corrupt`，不改任何資料 | 2026-09-25 你的決定（差異測試發現）；正常流程不會寫出 null |
 | Announce 之後的 `payload.status` | 資料庫的 `status` 變 `posted`，但 `payload.status` 維持 `draft`（下一次編輯才更新）；Alpha 的 API 與 lib 都沒有讀 `payload.status` | 同 Alpha（照搬） | 只是不一致，沒有已知影響；前端若要讀狀態請用欄位 `status` |
 | 對 `/api/case-announce` 發 GET | 405 | 403（權限檢查在方法分派之前） | 兩者都是拒絕 |
+| 案件文件單檔上限 | 5 MB | **10 MB**（資料表 CHECK 約束也改為 10 MB：`cases/migrations/0002`） | 2026-09-25 你的決定。Nginx 請求上限 20 MB（10 MB 檔案的 base64 約 14 MB）、Django `DATA_UPLOAD_MAX_MEMORY_SIZE` 16 MB |
+| 案件文件的檔案本體 | Hatchable storage | Docker volume `case_documents`（容器內 `/data/documents`），路徑即 `storage_key`；先寫暫存檔再原子 rename；路徑限制在根目錄內 | 2026-09-25 你的決定。**不在 MySQL 備份裡，要另外備份**（見「維運」） |
+| 刪除案件文件 | 任何狀態都能實體刪除（連同檔案） | **只有 Draft 能刪**；Announce 之後回 409 `document_delete_locked`，只能取消勾選，檔案保留作為證據 | 2026-09-25 你的決定 |
+| `signedSlipReminder.outboundEnabled` | 固定 `true` | 依設定 `RI_SIGNED_SLIP_OUTBOUND_ENABLED`，預設 `false`（VM 尚未設定寄信） | 2026-09-25 你的決定：如實回報 |
+| 下載時檔案本體不見 | 未處理的錯誤 | 404 `file_content_missing`（並寫入錯誤日誌） | 不應該發生；發生時要能看出是資料遺失 |
+| 檔名含落單的 UTF-16 代理字元（例如 JSON 裡的 `\ud83d`） | Node 寫進 PostgreSQL 時換成 U+FFFD | 同樣換成 U+FFFD 再存（MySQL 不接受落單代理字元） | 結果與 Alpha 相同 |
+| 文件 API 的 fileId 是 36 個「-」這類「格式對但不是 UUID」 | PostgreSQL 轉型失敗（未處理的錯誤） | 404 `file_not_found` | |
+| 文件頁與 Announce 的再保人名稱比對 | 文件頁（與 Signed Slip 提醒）**不**去掉「(Facility)」，Announce 會去掉 | 同 Alpha（照搬） | 兩處規則不同但實務上一致：上傳時只能選案件上的原名。只有同一案件同時有「X」與「X (Facility)」時兩邊的「需要幾家」才會不同。**建議 Alpha 統一** |
 | Personnel 停用時間 | 每次儲存都會覆寫 `deactivated_by/at` | 只在「在職 → 停用」那一刻記錄，之後編輯已停用的人不覆寫 | 保留真正的停用時間 |
 | Personnel Audit 的 before 內容 | `before_data` 用列表格式（含 `accountBound`、`updatedAt`），`after_data` 用另一種格式 | before 與 after 都用同一種格式（`personnel_state`） | Alpha 兩邊格式不一致，比對差異時不方便 |
 | Personnel GET 的 `scope` | `authentication: company_vm_deferred`、`credentialsEnabled: false` | 如實回報：`django_session`、`credentialsEnabled: true`、`rolesEnforced: true` | VM 已啟用登入 |
@@ -139,6 +149,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 只重新套用資料庫權限與 Audit trigger | `scripts/db_harden.sh` |
 | 以維護者身分執行 manage.py（需要 DDL 或 DELETE 時） | `scripts/manage_as_owner.sh <指令>` |
 | 建立／停用／重新啟用／重設帳號 | `docker exec ri-backend python manage.py create_ri_account\|disable_ri_account\|enable_ri_account\|reset_ri_password --personnel-id N …` |
+| 備份案件文件（volume） | `docker exec ri-backend tar czf - -C /data/documents . > backups/case-documents-$(date +%Y%m%d-%H%M%S).tar.gz && chmod 600 backups/case-documents-*.tar.gz`（與 MySQL 備份同時做，兩者才對得起來） |
 | 唯讀資料檢視 | 瀏覽器開 `/admin/`（System Administrator；主畫面上方有「資料檢視（唯讀）」連結）。要新增資料表或 model 時，在該 app 的 `admin.py` 用 `ReadOnlyModelAdmin` 註冊，其他寫法會被忽略 |
 | 備份 | `docker exec ri-mysql sh -c 'mysqldump -uroot -p"$(cat /run/secrets/mysql_root_password)" --single-transaction --routines --triggers ri_system' > backups/…sql`（`backups/` 不進版控） |
 

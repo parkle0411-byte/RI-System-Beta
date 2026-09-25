@@ -27,7 +27,12 @@ RUN echo build-only > /tmp/build_secret \
     && rm /tmp/build_secret
 
 RUN useradd --create-home --uid 10001 appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && mkdir -p /data/documents \
+    && chown 1001:1001 /data/documents \
+    && chmod 750 /data/documents
+# ↑ 案件文件的 volume 掛載點。compose 以 1001:1001 執行（見 compose.yaml 的 user）；
+#   新建立的 named volume 會沿用這個目錄的擁有者與權限。
 
 USER appuser
 

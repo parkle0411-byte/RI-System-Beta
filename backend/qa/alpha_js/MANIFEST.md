@@ -8,6 +8,7 @@
 | `lib/accounting.js` | 135 | `e0acc3c8091b843d89aaa7c52dea5a7aba3be15499d8919b3c61b94fb471ac02` |
 | `lib/payment-terms.js` | 248 | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` |
 | `lib/case-draft.js` | 385 | `42983151fe3b0ec514abbcad750357ef71d2e2dd7086a9a4d009cd8d54bdd338` |
+| `lib/signed-slip-reminders.js` | 95 | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` |
 
 ## 節錄（`excerpts/api-excerpts.js`）
 
@@ -20,6 +21,15 @@
 | 檔案 | SHA-256 |
 |---|---|
 | `excerpts/api-excerpts.js` | `8b923741953d52f2c643f62dbf060ab2ad50c8f48e70ae29902059b92e738111` |
+
+### `excerpts/case-documents-excerpts.js`
+
+由程式從 `api/case-documents.js`（231 行，雜湊 `0db7421c95f10b83650cc3a006d96cd6a6747d77327c2219cee295e3b006ef77`，先確認整檔雜湊相同）
+原樣切出第 9、16–34、61–93 行，前面加說明、最後加一行 `export`（名稱加 `documents` 前綴，避免與 Announce 的同名函式衝突）。
+
+| 檔案 | SHA-256 |
+|---|---|
+| `excerpts/case-documents-excerpts.js` | `c8d56984be7b2b775227e6bf8ba87a3a6f56b69ec5f5f870192050de3ac97877` |
 
 ## Alpha 改了這些檔案時
 

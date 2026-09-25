@@ -31,7 +31,8 @@ DOCUMENT_KIND_CHOICES = [
     ("confirmation", "Confirmation"),
 ]
 
-MAX_DOCUMENT_BYTES = 5 * 1024 * 1024
+# 單檔上限：VM 10 MB（2026-09-25 你的決定；Alpha 是 5 MB）。改這裡要一併產生 migration（資料表有 CHECK 約束）。
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 
 
 class Case(models.Model):
@@ -167,8 +168,8 @@ class Case(models.Model):
 
 class CaseDocument(models.Model):
     """
-    對應 Alpha 的 ri_case_documents 表（只有 metadata）。
-    檔案本體的存放位置（storage_key 指向哪裡）尚未決定，上傳／下載留待後續步驟。
+    對應 Alpha 的 ri_case_documents 表（metadata）。
+    檔案本體放在 Docker volume（settings.CASE_DOCUMENT_ROOT），路徑即 storage_key，見 cases/storage.py。
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

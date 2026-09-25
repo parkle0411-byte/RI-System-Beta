@@ -62,6 +62,10 @@ services:
       - mysql_app_password
       - mysql_runtime_password
 
+    volumes:
+      # 案件文件的檔案本體（不在 MySQL 備份裡，要另外備份；見 MIGRATION-STATUS.md「維運」）
+      - case_documents:/data/documents
+
     networks:
       - backend
 
@@ -103,6 +107,7 @@ secrets:
 
 volumes:
   mysql_data:
+  case_documents:
 
 networks:
   backend:

@@ -25,6 +25,13 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# 案件文件的檔案本體（Docker volume `case_documents` 掛在這裡；見 cases/storage.py）
+CASE_DOCUMENT_ROOT = os.getenv("RI_CASE_DOCUMENT_ROOT", "/data/documents")
+# 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
+DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
+# Signed Slip 提醒信：VM 尚未設定寄信（SMTP 未決定），如實回報 false
+SIGNED_SLIP_OUTBOUND_ENABLED = os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false").lower() == "true"
+
 AUDIT_LOG_ENABLED = (
     os.getenv("AUDIT_LOG_ENABLED", "false").lower() == "true"
 )
