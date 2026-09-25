@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 
@@ -16,7 +18,7 @@ class FxRate(models.Model):
     rate = models.DecimalField(
         max_digits=18,
         decimal_places=6,
-        validators=[MinValueValidator(0.000001), MaxValueValidator(1000)],
+        validators=[MinValueValidator(Decimal("0.000001")), MaxValueValidator(Decimal("1000"))],
     )
     row_version = models.BigIntegerField(default=1)
     is_locked = models.BooleanField(default=False)

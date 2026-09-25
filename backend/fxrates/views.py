@@ -20,14 +20,20 @@ class FxRatesView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        rates = FxRate.objects.all().order_by("-year_month", "currency")
+        # 與 Alpha 相同：月份由新到舊，同月份內依 USD, EUR, JPY, GBP, HKD, MYR 排序
+        rates = sorted(FxRate.objects.all(), key=lambda r: CURRENCIES.index(r.currency))
+        rates.sort(key=lambda r: r.year_month, reverse=True)
         return Response({
             "ok": True,
+            "displayVersion": "V 0.003",
             "rates": FxRateSerializer(rates, many=True).data,
             "policy": {
                 "baseCurrency": "TWD",
                 "baseRate": 1,
                 "maintainedCurrencies": CURRENCIES,
+                "externalRateSource": False,
+                "lockedMonthsEditable": False,
+                "completeMonthRequired": True,
             },
         })
 
@@ -151,6 +157,7 @@ class FxRatesView(APIView):
         saved.sort(key=lambda r: CURRENCIES.index(r.currency))
         return Response({
             "ok": True,
+            "displayVersion": "V 0.003",
             "yearMonth": year_month,
             "rates": FxRateSerializer(saved, many=True).data,
         })

@@ -8,7 +8,7 @@ TODO: 尚未實作 ri_entity_snapshots / ri_audit_log 寫入，
 """
 import re
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -106,6 +106,26 @@ def serialize_record(record):
     return MasterRecordSerializer(record).data
 
 
+def unique_violation_response(exc):
+    """
+    對應 Alpha #18：先檢查再寫入之間有空窗，兩個幾乎同時的請求都能通過應用層檢查。
+    資料庫唯一約束是最終防線；違反時轉成與應用層檢查相同的 409，而不是 500。
+    MySQL 的錯誤訊息會帶約束名稱（Duplicate entry ... for key 'ri_master_records.<name>'）。
+    """
+    message = str(exc)
+    if "ri_master_records_type_name_unique" in message:
+        return Response(
+            {"error": "duplicate_name", "message": "This name already exists in the selected master-data type."},
+            status=409,
+        )
+    if "ri_master_records_type_code_unique" in message:
+        return Response(
+            {"error": "duplicate_code", "message": "This code already exists in the selected master-data type."},
+            status=409,
+        )
+    return None
+
+
 class MasterDataView(APIView):
     """
     GET  /api/master-data?entityType=xxx   -> 列表 + counts
@@ -172,15 +192,23 @@ class MasterDataView(APIView):
                     status=409,
                 )
 
-            record = MasterRecord.objects.create(
-                entity_type=entity_type,
-                code=code or None,
-                name=name,
-                is_active=True,
-                payload=payload,
-                created_by=ACTOR_PLACEHOLDER,
-                updated_by=ACTOR_PLACEHOLDER,
-            )
+            try:
+                # 巢狀 atomic（savepoint）：違反唯一約束時只回滾這一步，外層交易仍可用
+                with transaction.atomic():
+                    record = MasterRecord.objects.create(
+                        entity_type=entity_type,
+                        code=code or None,
+                        name=name,
+                        is_active=True,
+                        payload=payload,
+                        created_by=ACTOR_PLACEHOLDER,
+                        updated_by=ACTOR_PLACEHOLDER,
+                    )
+            except IntegrityError as exc:
+                response = unique_violation_response(exc)
+                if response is None:
+                    raise
+                return response
 
         return Response(
             {"ok": True, "displayVersion": "V 0.003", "record": serialize_record(record)},
@@ -276,6 +304,13 @@ class MasterDataView(APIView):
             else:
                 current.deactivated_by = ACTOR_PLACEHOLDER
                 current.deactivated_at = timezone.now()
-            current.save()
+            try:
+                with transaction.atomic():
+                    current.save()
+            except IntegrityError as exc:
+                response = unique_violation_response(exc)
+                if response is None:
+                    raise
+                return response
 
         return Response({"ok": True, "displayVersion": "V 0.003", "record": serialize_record(current)})

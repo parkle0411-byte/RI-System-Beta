@@ -42,6 +42,12 @@ class MasterRecord(models.Model):
                 fields=["entity_type", "code"],
                 name="ri_master_records_type_code_unique",
             ),
+            # 對應 Alpha migration 0033（#18）：資料庫層是重複名稱的最終防線。
+            # MySQL utf8mb4_0900_ai_ci 本身不分大小寫（也不分重音），效果等同 Alpha 的 lower(name)。
+            models.UniqueConstraint(
+                fields=["entity_type", "name"],
+                name="ri_master_records_type_name_unique",
+            ),
         ]
         indexes = [
             models.Index(fields=["entity_type", "is_active"]),

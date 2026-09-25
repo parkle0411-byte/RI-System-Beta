@@ -32,14 +32,8 @@ async function loadRates() {
     const res = await fetch('/api/fx-rates', { headers: { Accept: 'application/json' }, cache: 'no-store' })
     const body = await res.json()
     if (!res.ok) throw new Error(body.message || body.error || ('HTTP ' + res.status))
-    rates.value = Array.isArray(body.rates) ? body.rates.map((r) => ({
-      yearMonth: r.year_month,
-      currency: r.currency,
-      rate: r.rate,
-      rowVersion: r.row_version,
-      isLocked: r.is_locked,
-      updatedAt: r.updated_at
-    })) : []
+    // API 回傳格式與 Alpha 一致（駝峰、rate 為數字），可直接使用
+    rates.value = Array.isArray(body.rates) ? body.rates : []
   } catch (err) {
     errorMsg.value = err instanceof Error ? err.message : String(err)
   } finally {
