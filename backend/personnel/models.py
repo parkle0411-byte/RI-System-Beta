@@ -36,7 +36,7 @@ class Personnel(models.Model):
     （見 MIGRATION-VM-NOTES 的登入決策），待 Django 帳號機制完成後再接上。
     """
 
-    name = models.CharField(max_length=120)
+    name = models.CharField(max_length=160)  # Alpha 的 cleanText(name, 160)
     email = models.CharField(max_length=254, null=True, blank=True)
     department = models.CharField(max_length=40, choices=DEPARTMENT_CHOICES)
     role_code = models.CharField(max_length=40, choices=ROLE_CODE_CHOICES)
@@ -45,7 +45,7 @@ class Personnel(models.Model):
     account_status = models.CharField(
         max_length=20, choices=ACCOUNT_STATUS_CHOICES, default="not_configured"
     )
-    supervisor_name = models.CharField(max_length=120, null=True, blank=True)
+    supervisor_name = models.CharField(max_length=160, null=True, blank=True)
     supervisor_email = models.CharField(max_length=254, null=True, blank=True)
     row_version = models.BigIntegerField(default=1)
 

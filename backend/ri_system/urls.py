@@ -1,6 +1,9 @@
 from django.contrib import admin
 from django.urls import include, path
 
+from personnel.account_views import CreateAccountView, DisableAccountView, ResetPasswordView
+from personnel.views import PersonnelOptionsView, PersonnelView
+
 from .auth_views import AppContextView, ChangePasswordView, CsrfView, LoginView, LogoutView
 from .views import health
 
@@ -15,4 +18,9 @@ urlpatterns = [
     path("api/fx-rates", include("fxrates.urls")),
     path("api/master-data", include("masterdata.urls")),
     path("api/audit-log", include("audit.urls")),
+    path("api/personnel", PersonnelView.as_view(), name="personnel"),
+    path("api/personnel-options", PersonnelOptionsView.as_view(), name="personnel-options"),
+    path("api/personnel-accounts", CreateAccountView.as_view(), name="personnel-account-create"),
+    path("api/personnel-accounts/disable", DisableAccountView.as_view(), name="personnel-account-disable"),
+    path("api/personnel-accounts/reset-password", ResetPasswordView.as_view(), name="personnel-account-reset"),
 ]

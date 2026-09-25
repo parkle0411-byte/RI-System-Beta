@@ -5,13 +5,15 @@ import Login from '../views/Login.vue'
 import SystemStatus from '../views/SystemStatus.vue'
 import FxRates from '../views/FxRates.vue'
 import MasterData from '../views/MasterData.vue'
+import Personnel from '../views/Personnel.vue'
 
 // meta.permission：進入該頁所需的權限（與後端 permission_map 對應，名稱與 Alpha 相同）
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
   { path: '/', name: 'system-status', component: SystemStatus },
   { path: '/fx-rates', name: 'fx-rates', component: FxRates, meta: { permission: 'fx.read' } },
-  { path: '/master-data', name: 'master-data', component: MasterData, meta: { permission: 'mdm.read' } }
+  { path: '/master-data', name: 'master-data', component: MasterData, meta: { permission: 'mdm.read' } },
+  { path: '/personnel', name: 'personnel', component: Personnel, meta: { permission: 'personnel.read' } }
 ]
 
 const router = createRouter({

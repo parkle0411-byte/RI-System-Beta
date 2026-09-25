@@ -53,6 +53,7 @@ async function savePassword() {
         <el-menu-item index="/">系統狀態</el-menu-item>
         <el-menu-item v-if="can('fx.read')" index="/fx-rates">FX Rates</el-menu-item>
         <el-menu-item v-if="can('mdm.read')" index="/master-data">Master Data</el-menu-item>
+        <el-menu-item v-if="can('personnel.read')" index="/personnel">Personnel</el-menu-item>
       </el-menu>
       <span style="font-size: 14px">{{ auth.principal.name }}（{{ auth.principal.roleLabel }}）</span>
       <el-button size="small" @click="openPassword">修改密碼</el-button>

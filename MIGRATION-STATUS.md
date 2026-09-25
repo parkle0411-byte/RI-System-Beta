@@ -20,6 +20,9 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0010_create_fx_rates.sql` | `0875485cf1049e3d6a39bc004decc950c9a547def9f6d82ceccd43204a965e4d` | `fxrates/models.py`、migrations | 完成 |
 | `api/master-data.js` | `52604668228e90ded3a1815f65f1e2435fef0b73c6a75adb6401fdbc3f8eb4c7` | `backend/masterdata/views.py` | 完成（含 #18） |
 | `migrations/0001_create_master_records.sql` | `f8dde66dc346c860cbeaa436770c7dbc8af190db2b125c18ffcb732df1e7b393` | `masterdata/models.py` | 完成 |
+| `api/personnel.js` | `b8c98af9a6ca3a8acd3c5fa28933588df5b25e10c44d7bd859c217a1a5a3742e` | `backend/personnel/views.py`（`PersonnelView`） | 完成（含 #14、#15，含 Audit／Snapshot） |
+| `api/personnel-options.js` | `98e355b36501883a3bf0c11bd8f7ec42ddc779ef742cae021c9719facc0112ad` | `backend/personnel/views.py`（`PersonnelOptionsView`） | 完成 |
+| `migrations/0011_create_personnel_accounts.sql`、`0012_add_internal_account_fields.sql`、`0013_add_personnel_auth_user_index.sql` | `e65f5d93…` / `5d0ce5cf…` / `e029be6d…` | `personnel/models.py`（姓名欄位放寬到 160，同 Alpha） | 完成 |
 | `migrations/0033_add_master_records_ci_unique_indexes.sql` | `24f40ef637d6a4213ca6c59864c6012ed4fd8075b3e7ad704228e237c7338884` | `masterdata/migrations/0002` | 完成（MySQL 的 ai_ci 排序規則已不分大小寫） |
 | `lib/authorization.js` | `86a63b152e9e6eace0be0817bfc87647c142e101e27f1106b815b71489457954` | `backend/ri_system/authz.py` | 完成（含 #13 的取捨，見下） |
 | `api/app-context.js` | `952e70d6bd75625b4b3830227c7ec3bec8b9da697e3e9e3540076edf418ec991` | `ri_system/auth_views.py` `AppContextView` | 完成 |
@@ -38,9 +41,6 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0007_expand_reinsurance_structures.sql` | `8e4e344972e9c6c8b5e9313514e8d33cc28c87f771ad42eafab95cee4d2dfea2` | `cases/models.py` |
 | `migrations/0008_create_case_documents.sql` | `bd0d2ee6e9fc68b2d75fc2093d1886654448743bf2ead2d2a693e742798b8fc1` | `cases/models.py` |
 | `migrations/0009_add_announce_workflow.sql` | `cd7b0f75dd953391fd500804ebdd48f53853cf7cb22d5cafbe9e1b9ae37deb4c` | `cases/models.py`（含 ReferenceSequence） |
-| `migrations/0011_create_personnel_accounts.sql` | `e65f5d93d083b52621247701be86c4d6cf704b9e87e622524d677212ed0cfa80` | `personnel/models.py` |
-| `migrations/0012_add_internal_account_fields.sql` | `5d0ce5cf14894926083504240c31ff13fc583ac001eeeaf08d26ef99ba21188f` | `personnel/models.py` |
-| `migrations/0013_add_personnel_auth_user_index.sql` | `e029be6d3d90bf3aaf70d005f4df5b5d56e0de0c9783a5f9c46e1f9b577788c7` | `personnel/models.py` |
 | `migrations/0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `d7b2d9d8…` / `ceb171d9…` | `cases/models.py` |
 
 ## 資料（不是程式碼）
@@ -52,7 +52,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 尚未開始
 
-`api/personnel.js`（#14、#15）、`api/personnel-options.js`、`api/cases.js`（#7、#8）、`lib/case-draft.js`、`api/case-announce.js`、`api/case-workflow.js`、
+`api/cases.js`（#7、#8）、`lib/case-draft.js`、`api/case-announce.js`、`api/case-workflow.js`、
 `api/case-documents.js`（#11）、`api/draft-recycle-bin.js`（含 `0005`、`0019`、`0032`）、`api/accounting.js`＋`lib/accounting.js`（#3）、
 `lib/payment-terms.js`、`api/production-report.js`＋`lib/production-report.js`（#16，含 `0016`）、`api/claims.js`、`api/dashboard*.js`（含 `0018`）、
 `api/payment-reminders.js`（#9，含 `0029`–`0031`）、`api/signed-slip-reminders.js`＋`lib/signed-slip-reminders.js`（#10，含 `0017`）、
@@ -70,7 +70,12 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 專案協作者路徑（#13） | Hatchable 協作者可自動成為 admin | 不存在；所有人都必須是綁定 Personnel 的 Django 帳號 | VM 沒有這個概念 |
 | 資料庫帳號 | 單一 | `ri_app`（維護：migrate、DDL）與 `ri_runtime`（網站：最小權限，多數表無 DELETE） | 案件與主檔永不實體刪除，在資料庫層落實 |
 | 稽核事件 | 無帳號事件 | 帳號建立／停用／重設密碼都會記錄（不含密碼） | VM 才有登入 |
-| 帳號管理 | 尚無 | 指令：`create_ri_account`、`disable_ri_account`、`reset_ri_password`（將於 Personnel API 完成後改為畫面） | |
+| 帳號管理 | 尚無（Alpha 的登入由 Hatchable 代管） | 管理員畫面與 API（`/api/personnel-accounts`，需 `accounts.manage`）＋同樣邏輯的 CLI 指令，共用 `personnel/accounts.py`。密碼由系統產生、只顯示一次；不能停用或重設自己；不能停用最後一位啟用中的管理員 | VM 才有登入 |
+| Personnel 停用時間 | 每次儲存都會覆寫 `deactivated_by/at` | 只在「在職 → 停用」那一刻記錄，之後編輯已停用的人不覆寫 | 保留真正的停用時間 |
+| Personnel Audit 的 before 內容 | `before_data` 用列表格式（含 `accountBound`、`updatedAt`），`after_data` 用另一種格式 | before 與 after 都用同一種格式（`personnel_state`） | Alpha 兩邊格式不一致，比對差異時不方便 |
+| Personnel GET 的 `scope` | `authentication: company_vm_deferred`、`credentialsEnabled: false` | 如實回報：`django_session`、`credentialsEnabled: true`、`rolesEnforced: true` | VM 已啟用登入 |
+| Personnel 列表欄位 | 無登入帳號名稱 | `accountUsername`（僅 `accounts.manage` 看得到） | 管理員畫面需要 |
+| 停用中帳號換 Email | 解除綁定，可重新邀請 | 解除綁定，可為新 Email 重新建立帳號；舊的 Django 帳號保持停用（`ri_runtime` 沒有 DELETE 權限，也不該刪，稽核仍能對應） | |
 
 ## 維運
 
