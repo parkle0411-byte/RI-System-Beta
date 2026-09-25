@@ -1,7 +1,7 @@
 from ri_system.admin_site import ReadOnlyModelAdmin
 from django.contrib import admin
 
-from .models import Case, CaseDocument, ReferenceSequence
+from .models import Case, CaseDocument, DraftRecycleBin, ReferenceSequence
 
 
 @admin.register(Case)
@@ -26,3 +26,11 @@ class CaseDocumentAdmin(ReadOnlyModelAdmin):
 @admin.register(ReferenceSequence)
 class ReferenceSequenceAdmin(ReadOnlyModelAdmin):
     list_display = ("prefix", "last_value", "updated_at")
+
+
+@admin.register(DraftRecycleBin)
+class DraftRecycleBinAdmin(ReadOnlyModelAdmin):
+    list_display = ("id", "original_case", "original_case_version", "deleted_by", "deleted_at", "restore_deadline", "restored_at")
+    list_filter = ("restored_at",)
+    list_select_related = ("original_case",)
+    ordering = ("-deleted_at", "-id")

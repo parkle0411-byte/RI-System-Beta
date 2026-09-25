@@ -3,6 +3,7 @@ from django.urls import include, path
 
 from personnel.account_views import CreateAccountView, DisableAccountView, EnableAccountView, ResetPasswordView
 from cases.document_views import CaseDocumentsView
+from cases.recycle_views import DraftRecycleBinView
 from cases.views import CasesView
 from cases.workflow_views import AnnounceView, WorkflowView
 from personnel.views import PersonnelOptionsView, PersonnelView
@@ -22,6 +23,7 @@ urlpatterns = [
     path("api/master-data", include("masterdata.urls")),
     path("api/audit-log", include("audit.urls")),
     path("api/cases", CasesView.as_view(), name="cases"),
+    path("api/draft-recycle-bin", DraftRecycleBinView.as_view(), name="draft-recycle-bin"),
     path("api/case-documents", CaseDocumentsView.as_view(), name="case-documents"),
     path("api/case-announce", AnnounceView.as_view(), name="case-announce"),
     path("api/case-workflow", WorkflowView.as_view(), name="case-workflow"),

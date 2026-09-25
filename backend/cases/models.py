@@ -1,5 +1,6 @@
 import uuid
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
@@ -227,3 +228,49 @@ class ReferenceSequence(models.Model):
 
     def __str__(self):
         return f"{self.prefix}:{self.last_value}"
+
+
+RECYCLE_RETENTION_YEARS = 5
+
+
+class DraftRecycleBin(models.Model):
+    """
+    對應 Alpha 的 ri_draft_recycle_bin（0005、0019、0032）：被丟進回收桶的 Draft。
+
+    - 案件本身不刪除，只標記 recycled_at；這裡保存丟棄當下的完整案件內容（case_snapshot）與還原期限。
+    - 永久刪除一律禁止：permanently_deleted_* 欄位保留（與 Alpha 相同），但 CHECK 約束讓它們永遠只能是 NULL；
+      網站使用的 ri_runtime 對這張表也沒有 DELETE 權限。
+    """
+
+    original_case = models.ForeignKey(
+        Case, on_delete=models.PROTECT, related_name="recycle_entries", db_column="original_case_id"
+    )
+    original_case_version = models.BigIntegerField()
+    case_snapshot = models.JSONField(encoder=DjangoJSONEncoder)
+    deleted_by = models.CharField(max_length=120)
+    deleted_at = models.DateTimeField()
+    restore_deadline = models.DateTimeField()
+    restored_by = models.CharField(max_length=120, null=True, blank=True)
+    restored_at = models.DateTimeField(null=True, blank=True)
+    permanently_deleted_by = models.CharField(max_length=120, null=True, blank=True)
+    permanently_deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ri_draft_recycle_bin"
+        constraints = [
+            models.CheckConstraint(condition=Q(original_case_version__gt=0),
+                                   name="ri_draft_recycle_bin_version_check"),
+            models.CheckConstraint(
+                condition=Q(restored_at__isnull=True, restored_by__isnull=True)
+                | Q(restored_at__isnull=False, restored_by__isnull=False),
+                name="ri_draft_recycle_bin_restore_actor",
+            ),
+            models.CheckConstraint(
+                condition=Q(permanently_deleted_by__isnull=True, permanently_deleted_at__isnull=True),
+                name="ri_draft_recycle_bin_no_permanent_delete",
+            ),
+        ]
+        indexes = [models.Index(fields=["-deleted_at"], name="ri_draft_recycle_bin_pending")]
+
+    def __str__(self):
+        return f"recycle:{self.pk} case:{self.original_case_id}"

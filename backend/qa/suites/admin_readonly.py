@@ -74,7 +74,7 @@ try:
 
         # --- 註冊了什麼 ---
         registered = {m.__name__ for m in admin.site._registry}
-        check("exactly the 8 RI models are registered", registered == {"Case", "CaseDocument", "ReferenceSequence", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot"}, registered)
+        check("exactly the 9 RI models are registered", registered == {"Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot"}, registered)
         check("Django User / Group (password hashes) are NOT registered", User not in admin.site._registry and "Group" not in registered)
         try: admin.site.register(User, admin.ModelAdmin)
         except Exception: pass
@@ -85,7 +85,7 @@ try:
         check("index lists the data areas, not the user/group area", "Cases" in page and "Audit" in page and "/admin/auth/" not in page, page[:200])
 
         # --- 可以看 ---
-        lists = ["cases/case", "cases/casedocument", "cases/referencesequence", "personnel/personnel", "masterdata/masterrecord", "fxrates/fxrate", "audit/auditlog", "audit/entitysnapshot"]
+        lists = ["cases/case", "cases/casedocument", "cases/referencesequence", "cases/draftrecyclebin", "personnel/personnel", "masterdata/masterrecord", "fxrates/fxrate", "audit/auditlog", "audit/entitysnapshot"]
         for l in lists:
             r = adm.get(f"/admin/{l}/"); check(f"list page /admin/{l}/ -> 200", r.status_code == 200, r.status_code)
         for label, url, needle in [("case", f"/admin/cases/case/{case.pk}/change/", "ZZ 中文 Insured"), ("personnel", f"/admin/personnel/personnel/{sales_p.pk}/change/", sales_p.name),
