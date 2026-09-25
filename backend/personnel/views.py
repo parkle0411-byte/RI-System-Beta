@@ -155,6 +155,7 @@ def serialize(person, usernames=None):
     }
     if usernames is not None:  # 只有 accounts.manage 看得到登入帳號名稱（VM 專有欄位）
         data["accountUsername"] = usernames.get(person.auth_user_id or "", "")
+        data["accountMustChangePassword"] = person.must_change_password
     return data
 
 

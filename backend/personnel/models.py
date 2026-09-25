@@ -63,6 +63,8 @@ class Personnel(models.Model):
     account_activated_at = models.DateTimeField(null=True, blank=True)
     account_disabled_by = models.CharField(max_length=120, null=True, blank=True)
     account_disabled_at = models.DateTimeField(null=True, blank=True)
+    # VM 專有：管理員建立帳號／重設密碼／重新啟用帳號後，本人第一次登入必須先改密碼（見 ri_system/authz.py）
+    must_change_password = models.BooleanField(default=False)
 
     class Meta:
         db_table = "ri_personnel"

@@ -1,5 +1,5 @@
 """
-帳號生命週期（建立 / 停用 / 重設密碼）的唯一實作。
+帳號生命週期（建立 / 停用 / 重新啟用 / 重設密碼）的唯一實作。
 管理指令（CLI）與管理員畫面（API）都呼叫這裡，行為與稽核紀錄完全一致。
 
 - 初始密碼有兩種來源：管理員指定，或（留空時）由系統隨機產生。
@@ -119,6 +119,7 @@ def create_account(*, personnel_id, username, email, actor, source, request_id=N
         person.account_activated_at = now
         person.account_disabled_by = None
         person.account_disabled_at = None
+        person.must_change_password = True  # 管理員知道這組密碼，本人第一次登入要自己改
         if email:
             person.email = email
         person.row_version += 1
@@ -132,7 +133,8 @@ def create_account(*, personnel_id, username, email, actor, source, request_id=N
         record_audit(entity_type="personnel", entity_id=person.pk, action="create_account",
                      before=before, after=after, actor=actor, source=source, request_id=request_id,
                      metadata={"username": username, "accountUserId": user.pk,
-                               "passwordSource": "generated" if generated else "admin"})
+                               "passwordSource": "generated" if generated else "admin",
+                               "mustChangePassword": True})
     return person, user, password, generated
 
 
@@ -171,6 +173,46 @@ def disable_account(*, personnel_id, actor, source, request_id=None, acting_pers
     return person, user, ended
 
 
+def enable_account(*, personnel_id, actor, source, request_id=None):
+    """
+    重新啟用被停用的帳號。回傳 (person, user)。
+
+    - 沿用原本的登入名稱與密碼，不產生新密碼；但一律要求「第一次登入先改密碼」：
+      帳號可能是因為疑似外洩才被停用，不應該讓停用前的密碼原封不動地恢復可用。
+      （若本人已忘記原密碼，啟用後再用「重設密碼」。）
+    - 在職狀態是獨立的（Alpha #15）：停用中的人員不能啟用帳號，要先讓人員恢復在職。
+    """
+    User = get_user_model()
+    with transaction.atomic():
+        person = _lock(personnel_id)
+        if not person.auth_user_id:
+            raise AccountError("no_account", f"{person.name} has no account.", 409)
+        if person.account_status != "disabled":
+            raise AccountError("not_disabled", f"{person.name}'s account is not disabled (status: {person.account_status}).", 409)
+        if not person.is_active:
+            raise AccountError("personnel_inactive", f"{person.name} is inactive; activate the Personnel record first.", 409)
+
+        before = personnel_state(person)
+        user = User.objects.get(pk=int(person.auth_user_id))
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        person.account_status = "active"
+        person.account_disabled_by = None
+        person.account_disabled_at = None
+        person.must_change_password = True
+        person.row_version += 1
+        person.updated_by = actor["id"]
+        person.save()
+
+        after = personnel_state(person)
+        record_snapshot(entity_type="personnel", entity_id=person.pk, version=person.row_version,
+                        reason="personnel_account_enabled", data=after, created_by=actor["id"])
+        record_audit(entity_type="personnel", entity_id=person.pk, action="enable_account",
+                     before=before, after=after, actor=actor, source=source, request_id=request_id,
+                     metadata={"username": user.username, "mustChangePassword": True})
+    return person, user
+
+
 def reset_password(*, personnel_id, actor, source, request_id=None, acting_personnel_id=None):
     """回傳 (person, user, new_password, sessions_ended)。"""
     User = get_user_model()
@@ -185,9 +227,11 @@ def reset_password(*, personnel_id, actor, source, request_id=None, acting_perso
         user.set_password(password)
         user.save(update_fields=["password"])
         ended = end_sessions(user)
+        person.must_change_password = True  # 新密碼是管理員（或 CLI）給的，本人登入後要自己改
+        person.save(update_fields=["must_change_password"])  # 不動 row_version：它不是 Personnel 的編輯內容
         state = personnel_state(person)
         # 密碼本身絕不寫入；只記錄「重設過」與結束了幾個 session
         record_audit(entity_type="personnel", entity_id=person.pk, action="reset_account_password",
                      before=state, after=state, actor=actor, source=source, request_id=request_id,
-                     metadata={"username": user.username, "sessionsEnded": ended})
+                     metadata={"username": user.username, "sessionsEnded": ended, "mustChangePassword": True})
     return person, user, password, ended

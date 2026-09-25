@@ -16,6 +16,11 @@ export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
 }
 
+let onPasswordChangeRequired = () => {}
+export function setPasswordChangeRequiredHandler(fn) {
+  onPasswordChangeRequired = fn
+}
+
 function readCookie(name) {
   const hit = document.cookie.split('; ').find((row) => row.startsWith(name + '='))
   return hit ? decodeURIComponent(hit.slice(name.length + 1)) : ''
@@ -47,6 +52,7 @@ export async function api(url, { method = 'GET', body, quiet401 = false } = {}) 
   }
   if (!res.ok) {
     if (res.status === 401 && !quiet401) onUnauthorized()
+    if (res.status === 403 && data && data.error === 'PASSWORD_CHANGE_REQUIRED') onPasswordChangeRequired()
     const message =
       (data && (data.message || data.detail)) ||
       (res.status === 429 ? '嘗試次數過多，請稍後再試。' : `HTTP ${res.status}`)

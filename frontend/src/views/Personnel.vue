@@ -189,7 +189,7 @@ async function createAccount() {
     if (body.initialPassword) {
       showSecret('帳號已建立', body.username, body.initialPassword)
     } else {
-      ElMessage.success(`帳號 ${body.username} 已建立，請把您設定的初始密碼交給本人，並請他登入後立刻修改。`)
+      ElMessage.success(`帳號 ${body.username} 已建立，請把您設定的初始密碼交給本人；他第一次登入時必須先修改密碼。`)
     }
     await load()
   } catch (e) {
@@ -232,6 +232,28 @@ async function disableAccount(row) {
   try {
     await api('/api/personnel-accounts/disable', { method: 'POST', body: { personnelId: row.id } })
     ElMessage.success('帳號已停用')
+    await load()
+  } catch (e) {
+    await report(e)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function enableAccount(row) {
+  try {
+    await ElMessageBox.confirm(
+      `重新啟用「${row.name}」的帳號後，他可以用原本的登入名稱與密碼登入，但第一次登入必須先修改密碼。` +
+        '若他已經忘記原本的密碼，啟用後請再按「重設密碼」。確定嗎？',
+      '重新啟用帳號',
+      { type: 'warning', confirmButtonText: '重新啟用', cancelButtonText: '取消' })
+  } catch {
+    return
+  }
+  saving.value = true
+  try {
+    await api('/api/personnel-accounts/enable', { method: 'POST', body: { personnelId: row.id } })
+    ElMessage.success('帳號已重新啟用（第一次登入須修改密碼）')
     await load()
   } catch (e) {
     await report(e)
@@ -305,6 +327,7 @@ onMounted(load)
           <el-tag :type="ACCOUNT_STATUS[row.accountStatus]?.type || 'info'" size="small">
             {{ ACCOUNT_STATUS[row.accountStatus]?.label || row.accountStatus }}
           </el-tag>
+          <el-tag v-if="row.accountMustChangePassword && row.accountStatus === 'active'" type="warning" size="small" effect="plain" style="margin-left: 6px">待改密碼</el-tag>
           <span v-if="row.accountUsername" style="margin-left: 6px; color: #606266; font-size: 12px">{{ row.accountUsername }}</span>
         </template>
       </el-table-column>
@@ -322,6 +345,7 @@ onMounted(load)
               <el-button link type="warning" @click="resetPassword(row)">重設密碼</el-button>
               <el-button link type="danger" @click="disableAccount(row)">停用帳號</el-button>
             </template>
+            <el-button v-if="row.accountStatus === 'disabled'" link type="success" @click="enableAccount(row)">重新啟用帳號</el-button>
           </template>
         </template>
       </el-table-column>
@@ -372,7 +396,7 @@ onMounted(load)
         <el-input v-model="accountDialog.password" type="password" show-password autocomplete="new-password" placeholder="留空則由系統產生隨機密碼" />
         <div style="color: #909399; font-size: 12px; line-height: 1.5; margin-top: 4px">
           {{ PASSWORD_RULE_TEXT }}<br />
-          管理員設定的密碼不會再顯示；請自行告知本人，並請他登入後立刻修改。
+          管理員設定的密碼不會再顯示；請自行告知本人。他第一次登入時必須先修改密碼。
         </div>
       </el-form-item>
     </el-form>
@@ -384,7 +408,7 @@ onMounted(load)
 
   <!-- 一次性密碼 -->
   <el-dialog v-model="secretDialog.visible" :title="secretDialog.title" width="480px" :close-on-click-modal="false" :close-on-press-escape="false" :show-close="false">
-    <el-alert type="warning" show-icon :closable="false" title="這組密碼只會顯示這一次，關閉後無法再查看。請現在交給本人，並請他登入後立刻修改密碼。" style="margin-bottom: 16px" />
+    <el-alert type="warning" show-icon :closable="false" title="這組密碼只會顯示這一次，關閉後無法再查看。請現在交給本人；他第一次登入時必須先修改密碼。" style="margin-bottom: 16px" />
     <el-form label-width="70px">
       <el-form-item label="帳號">
         <el-input :model-value="secretDialog.username" readonly>

@@ -4,6 +4,7 @@
   POST /api/personnel-accounts                 建立帳號   {personnelId, username, email?, initialPassword?}
                                                initialPassword 留空 → 系統產生並回傳一次；有填 → 管理員指定，不回傳
   POST /api/personnel-accounts/disable         停用帳號   {personnelId}
+  POST /api/personnel-accounts/enable          重新啟用帳號 {personnelId}（沿用原密碼，但第一次登入須改密碼）
   POST /api/personnel-accounts/reset-password  重設密碼   {personnelId} → 回傳一次性新密碼
 
 密碼只出現在這一次回應（Cache-Control: no-store），不會寫進資料庫明文、日誌或 Audit。
@@ -71,6 +72,14 @@ class DisableAccountView(AccountBase):
             acting_personnel_id=request.ri_principal.pk,
         )
         return Response({"ok": True, "person": serialize_with_username(person, user.username), "sessionsEnded": ended})
+
+
+class EnableAccountView(AccountBase):
+    def run(self, request, person_id, actor, request_id):
+        person, user = accounts.enable_account(
+            personnel_id=person_id, actor=actor, source="application", request_id=request_id,
+        )
+        return Response({"ok": True, "person": serialize_with_username(person, user.username)})
 
 
 class ResetPasswordView(AccountBase):

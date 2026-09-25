@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { api, ApiError, setUnauthorizedHandler } from './api'
+import { api, ApiError, setPasswordChangeRequiredHandler, setUnauthorizedHandler } from './api'
 
 // 目前登入者與權限（來源：後端 /api/app-context，格式與 Alpha 相同）。
 // 前端的權限判斷只影響「顯示什麼」；真正的權限檢查在後端，前端不能作為安全防線。
@@ -39,11 +39,16 @@ export async function logout() {
 }
 
 export async function changePassword(currentPassword, newPassword) {
-  await api('/api/auth/change-password', { method: 'POST', body: { currentPassword, newPassword } })
+  const data = await api('/api/auth/change-password', { method: 'POST', body: { currentPassword, newPassword } })
+  if (data && data.principal) auth.principal = data.principal // mustChangePassword 會在這裡變回 false
 }
 
 // 任何 API 回 401（session 過期或被停用）時，清掉登入狀態；路由守衛會帶回登入頁。
 export function installUnauthorizedHandler(router) {
+  // 後端因為「必須先改密碼」拒絕業務 API 時（例如管理員剛重設了密碼），畫面也切到強制改密碼
+  setPasswordChangeRequiredHandler(() => {
+    if (auth.principal) auth.principal.mustChangePassword = true
+  })
   setUnauthorizedHandler(() => {
     auth.principal = null
     if (router.currentRoute.value.name !== 'login') {

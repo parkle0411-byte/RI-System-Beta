@@ -33,4 +33,4 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Account created for {person.name} ({person.department}, role={person.role_code})"))
         self.stdout.write(f"  username : {user.username}")
         self.stdout.write(f"  password : {password}")
-        self.stdout.write("  This password is shown ONCE. Ask the user to change it after the first login.")
+        self.stdout.write("  This password is shown ONCE. The user is required to change it at the first login.")

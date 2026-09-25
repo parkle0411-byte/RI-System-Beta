@@ -81,6 +81,8 @@ class ChangePasswordView(NoStoreMixin, APIView):
         new = str(request.data.get("newPassword") or "")
         if not request.user.check_password(current):
             raise AuthError(400, "INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
+        if person.must_change_password and new == current:
+            raise AuthError(400, "PASSWORD_UNCHANGED", "The new password must be different from the temporary password.")
         try:
             validate_password(new, request.user)
         except ValidationError as exc:
@@ -88,4 +90,7 @@ class ChangePasswordView(NoStoreMixin, APIView):
         request.user.set_password(new)
         request.user.save(update_fields=["password"])
         update_session_auth_hash(request, request.user)  # 改密碼後保持目前這個 session 登入
+        if person.must_change_password:
+            person.must_change_password = False
+            person.save(update_fields=["must_change_password"])
         return Response({"ok": True, "changedAt": timezone.now().isoformat(), "principal": serialize_principal(person)})

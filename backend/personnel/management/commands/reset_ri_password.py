@@ -24,4 +24,4 @@ class Command(BaseCommand):
             raise CommandError(e.message)
         self.stdout.write(self.style.SUCCESS(f"Password reset for {person.name} (username: {user.username})"))
         self.stdout.write(f"  password : {password}")
-        self.stdout.write("  Shown ONCE. Ask the user to change it after the next login.")
+        self.stdout.write("  Shown ONCE. The user is required to change it at the first login.")

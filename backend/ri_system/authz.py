@@ -94,6 +94,7 @@ def serialize_principal(person):
         "isActive": person.is_active,
         "isSplitEligible": person.is_split_eligible,
         "accountStatus": person.account_status,
+        "mustChangePassword": person.must_change_password,  # VM 專有（Alpha 沒有）
         "permissions": permissions_for_role(person.role_code),
     }
 
@@ -117,10 +118,15 @@ class RIPermission(BasePermission):
     """
     view 以 permission_map = {"GET": "fx.read", "POST": "fx.write"} 宣告每個 HTTP 方法所需權限。
     沒有宣告的方法一律拒絕（預設拒絕）。通過後 request.ri_principal 為 Personnel。
+
+    必須先改密碼（must_change_password）的人，所有業務 API 一律拒絕（PASSWORD_CHANGE_REQUIRED），
+    不管前端有沒有擋。登入、登出、app-context、改密碼不經過這裡，所以仍然可用。
     """
 
     def has_permission(self, request, view):
         person = load_principal(request)
+        if person.must_change_password:
+            raise AuthError(403, "PASSWORD_CHANGE_REQUIRED", "You must change your password before using the system.")
         required = getattr(view, "permission_map", {}).get(request.method)
         if required is None or not has_permission(person, required):
             raise AuthError(403, "PERMISSION_DENIED", "You do not have permission for this operation.")
