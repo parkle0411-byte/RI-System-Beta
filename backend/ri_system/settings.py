@@ -30,7 +30,7 @@ AUDIT_LOG_ENABLED = (
 )
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    "ri_system.apps.RIAdminConfig",  # 唯讀的 Django admin（見 ri_system/admin_site.py）
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",

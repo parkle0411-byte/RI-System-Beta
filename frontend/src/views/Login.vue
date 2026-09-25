@@ -29,7 +29,9 @@ async function submit() {
     const target = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
       ? route.query.redirect
       : '/'
-    router.replace(target)
+    // /admin/ 不是 SPA 的路由（Django 的唯讀管理），要整頁跳轉
+    if (target.startsWith('/admin/')) window.location.assign(target)
+    else router.replace(target)
   } catch (e) {
     errorMsg.value = MESSAGES[e.code] || e.message || '登入失敗'
   } finally {

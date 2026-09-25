@@ -66,6 +66,7 @@ async function savePassword() {
         <el-menu-item v-if="can('personnel.read')" index="/personnel">Personnel</el-menu-item>
       </el-menu>
       <span v-if="forced" style="flex: 1" />
+      <a v-if="can('accounts.manage') && !forced" href="/admin/" style="color: #fff; font-size: 14px">資料檢視（唯讀）</a>
       <span style="font-size: 14px">{{ auth.principal.name }}（{{ auth.principal.roleLabel }}）</span>
       <el-button v-if="!forced" size="small" @click="openPassword">修改密碼</el-button>
       <el-button size="small" @click="doLogout">登出</el-button>

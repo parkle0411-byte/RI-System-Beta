@@ -72,6 +72,8 @@ services:
   nginx:
     build:
       context: ./frontend
+      additional_contexts:
+        django: service:backend  # 從 backend 映像複製 Django admin 的靜態檔
     image: ri-frontend:local
     container_name: ri-nginx
     restart: unless-stopped

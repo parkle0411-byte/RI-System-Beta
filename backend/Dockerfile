@@ -19,6 +19,13 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
+# 唯讀 Django admin 的靜態檔（CSS/JS）：建置時收集，由 Nginx 提供（見 frontend/Dockerfile）。
+# collectstatic 不連資料庫，settings 需要的密碼檔在建置時用假的。
+RUN echo build-only > /tmp/build_secret \
+    && DJANGO_SECRET_KEY_FILE=/tmp/build_secret MYSQL_PASSWORD_FILE=/tmp/build_secret \
+       python manage.py collectstatic --noinput \
+    && rm /tmp/build_secret
+
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 
