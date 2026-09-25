@@ -155,11 +155,11 @@ async function toggleActive(row) {
 }
 
 // ---------- 帳號（僅 System Administrator） ----------
-const accountDialog = reactive({ visible: false, person: null, username: '', email: '' })
+const accountDialog = reactive({ visible: false, person: null, username: '', email: '', password: '' })
 const secretDialog = reactive({ visible: false, title: '', username: '', password: '' })
 
 function openCreateAccount(row) {
-  Object.assign(accountDialog, { visible: true, person: row, username: (row.email || '').toLowerCase(), email: row.email || '' })
+  Object.assign(accountDialog, { visible: true, person: row, username: (row.email || '').toLowerCase(), email: row.email || '', password: '' })
 }
 
 function showSecret(title, username, password) {
@@ -171,18 +171,29 @@ function closeSecret() {
 }
 
 async function createAccount() {
+  const password = accountDialog.password
+  if (password && password.length < 8) return ElMessage.error('初始密碼至少需要 8 個字元；留空則由系統產生。')
   saving.value = true
   try {
     const body = await api('/api/personnel-accounts', {
       method: 'POST',
-      body: { personnelId: accountDialog.person.id, username: accountDialog.username, email: accountDialog.email }
+      body: {
+        personnelId: accountDialog.person.id, username: accountDialog.username, email: accountDialog.email,
+        // 留空 = 由系統隨機產生；有填 = 管理員指定的初始密碼
+        ...(password ? { initialPassword: password } : {})
+      }
     })
     accountDialog.visible = false
-    showSecret('帳號已建立', body.username, body.initialPassword)
+    if (body.initialPassword) {
+      showSecret('帳號已建立', body.username, body.initialPassword)
+    } else {
+      ElMessage.success(`帳號 ${body.username} 已建立，請把您設定的初始密碼交給本人，並請他登入後立刻修改。`)
+    }
     await load()
   } catch (e) {
     await report(e)
   } finally {
+    accountDialog.password = '' // 密碼不留在畫面的記憶體裡
     saving.value = false
   }
 }
@@ -355,6 +366,13 @@ onMounted(load)
         <el-input v-model="accountDialog.username" placeholder="小寫英數字與 . _ @ + -，至少 3 個字元" />
       </el-form-item>
       <el-form-item label="Email"><el-input v-model="accountDialog.email" placeholder="選填，會寫入人員資料" /></el-form-item>
+      <el-form-item label="初始密碼">
+        <el-input v-model="accountDialog.password" type="password" show-password autocomplete="new-password" placeholder="留空則由系統產生隨機密碼" />
+        <div style="color: #909399; font-size: 12px; line-height: 1.5; margin-top: 4px">
+          至少 8 個字元，不能太常見、不能是純數字、不能和帳號太像。<br />
+          管理員設定的密碼不會再顯示；請自行告知本人，並請他登入後立刻修改。
+        </div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="accountDialog.visible = false">取消</el-button>

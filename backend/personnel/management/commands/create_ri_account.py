@@ -24,7 +24,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         try:
-            person, user, password = create_account(
+            person, user, password, _generated = create_account(
                 personnel_id=opts["personnel_id"], username=opts["username"], email=opts["email"],
                 actor=CLI_ACTOR, source="cli",
             )

@@ -1,7 +1,8 @@
 """
 帳號管理 API（VM 專有；Alpha 沒有，因為 Alpha 的登入由 Hatchable 代管）。全部需要 accounts.manage（System Administrator）。
 
-  POST /api/personnel-accounts                 建立帳號   {personnelId, username, email?} → 回傳一次性初始密碼
+  POST /api/personnel-accounts                 建立帳號   {personnelId, username, email?, initialPassword?}
+                                               initialPassword 留空 → 系統產生並回傳一次；有填 → 管理員指定，不回傳
   POST /api/personnel-accounts/disable         停用帳號   {personnelId}
   POST /api/personnel-accounts/reset-password  重設密碼   {personnelId} → 回傳一次性新密碼
 
@@ -44,16 +45,23 @@ class AccountBase(NoStoreMixin, APIView):
 
 
 class CreateAccountView(AccountBase):
+    """
+    initialPassword 有填 -> 管理員指定的初始密碼（須通過密碼規則，且不會再回傳）。
+    沒填 -> 系統隨機產生，只在這次回應回傳一次。
+    """
+
     def run(self, request, person_id, actor, request_id):
-        person, user, password = accounts.create_account(
+        supplied = request.data.get("initialPassword")
+        person, user, password, generated = accounts.create_account(
             personnel_id=person_id, username=request.data.get("username"), email=request.data.get("email"),
+            password=str(supplied) if supplied not in (None, "") else None,
             actor=actor, source="application", request_id=request_id,
         )
-        return Response(
-            {"ok": True, "person": serialize_with_username(person, user.username),
-             "username": user.username, "initialPassword": password},
-            status=201,
-        )
+        body = {"ok": True, "person": serialize_with_username(person, user.username),
+                "username": user.username, "passwordSource": "generated" if generated else "admin"}
+        if generated:
+            body["initialPassword"] = password  # 只有系統產生的才回傳；管理員自己設的不回傳
+        return Response(body, status=201)
 
 
 class DisableAccountView(AccountBase):

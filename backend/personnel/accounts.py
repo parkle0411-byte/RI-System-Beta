@@ -2,7 +2,9 @@
 帳號生命週期（建立 / 停用 / 重設密碼）的唯一實作。
 管理指令（CLI）與管理員畫面（API）都呼叫這裡，行為與稽核紀錄完全一致。
 
-- 初始密碼由系統隨機產生，只回傳給呼叫者一次，不寫入資料庫明文、日誌或 Audit。
+- 初始密碼有兩種來源：管理員指定，或（留空時）由系統隨機產生。
+  無論哪種都不寫入資料庫明文、日誌或 Audit；系統產生的只回傳給呼叫者一次，管理員自己設的不再回傳。
+  管理員指定的密碼與使用者自己改密碼走同一套 Django 密碼規則（長度、常見密碼、純數字、與帳號名太像）。
 - 每個動作與它的 Audit / Snapshot 在同一個交易內；稽核寫入失敗就整個回滾。
 - 「最後一位啟用中的管理員」與「不能停用自己」的保護放在這裡，讓 CLI 與 API 都受同樣限制。
 """
@@ -11,7 +13,9 @@ import secrets
 import string
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.contrib.sessions.models import Session
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -59,8 +63,27 @@ def _lock(personnel_id):
         raise AccountError("personnel_not_found", "Personnel record was not found.", 404)
 
 
-def create_account(*, personnel_id, username, email, actor, source, request_id=None):
-    """回傳 (person, user, password)。"""
+MAX_PASSWORD_LENGTH = 128
+
+
+def check_admin_password(password, username, email):
+    """管理員指定的初始密碼必須通過與一般使用者相同的密碼規則。"""
+    if not password.strip():
+        raise AccountError("weak_password", "Password must not be blank.")
+    if len(password) > MAX_PASSWORD_LENGTH:
+        raise AccountError("weak_password", f"Password must be at most {MAX_PASSWORD_LENGTH} characters.")
+    candidate = get_user_model()(username=username, email=email)  # 只用來檢查「與帳號資料太像」，不會存檔
+    try:
+        validate_password(password, candidate)
+    except ValidationError as exc:
+        raise AccountError("weak_password", " ".join(exc.messages))
+
+
+def create_account(*, personnel_id, username, email, actor, source, request_id=None, password=None):
+    """
+    password 有值 = 管理員指定的初始密碼；None 或空字串 = 系統隨機產生。
+    回傳 (person, user, password, generated)；generated 為 False 時，password 是呼叫者自己給的，不應再回傳給畫面。
+    """
     User = get_user_model()
     username = str(username or "").strip().lower()  # 帳號一律小寫，登入時也不分大小寫
     email = str(email or "").strip().lower()
@@ -80,8 +103,13 @@ def create_account(*, personnel_id, username, email, actor, source, request_id=N
         if email and Personnel.objects.filter(email__iexact=email).exclude(pk=person.pk).exists():
             raise AccountError("email_taken", f"Email '{email}' already belongs to another Personnel record.", 409)
 
+        generated = not password
+        if generated:
+            password = generate_password()
+        else:
+            check_admin_password(password, username, email)
+
         before = personnel_state(person)
-        password = generate_password()
         user = User.objects.create_user(username=username, email=email, password=password)
         now = timezone.now()
         person.auth_user_id = str(user.pk)
@@ -103,8 +131,9 @@ def create_account(*, personnel_id, username, email, actor, source, request_id=N
         # 只記錄「誰、什麼帳號、什麼角色」，不含密碼
         record_audit(entity_type="personnel", entity_id=person.pk, action="create_account",
                      before=before, after=after, actor=actor, source=source, request_id=request_id,
-                     metadata={"username": username, "accountUserId": user.pk})
-    return person, user, password
+                     metadata={"username": username, "accountUserId": user.pk,
+                               "passwordSource": "generated" if generated else "admin"})
+    return person, user, password, generated
 
 
 def disable_account(*, personnel_id, actor, source, request_id=None, acting_personnel_id=None):
