@@ -94,6 +94,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 作業 | 指令 |
 |---|---|
 | 套用 migration（之後一定要重新授權） | `scripts/migrate.sh` |
+| **一鍵執行全部驗證**（每次改動後都要跑） | `scripts/run_qa.sh`（可加參數 `suites`／`parity`／`calc` 只跑一部分） |
 | 只重新套用資料庫權限與 Audit trigger | `scripts/db_harden.sh` |
 | 以維護者身分執行 manage.py（需要 DDL 或 DELETE 時） | `scripts/manage_as_owner.sh <指令>` |
 | 建立／停用／重設帳號 | `docker exec ri-backend python manage.py create_ri_account\|disable_ri_account\|reset_ri_password …` |
