@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { can } from '../auth'
+import { PASSWORD_RULE_TEXT, checkPassword } from '../passwordRule'
 
 // 與 Alpha 的 PERSONNEL_DEPARTMENTS / PERSONNEL_ROLES / DEFAULT_ROLE_BY_DEPARTMENT 相同
 const DEPARTMENTS = [
@@ -172,7 +173,8 @@ function closeSecret() {
 
 async function createAccount() {
   const password = accountDialog.password
-  if (password && password.length < 8) return ElMessage.error('初始密碼至少需要 8 個字元；留空則由系統產生。')
+  const problem = password ? checkPassword(password) : ''
+  if (problem) return ElMessage.error(`${problem}（初始密碼留空則由系統產生）`)
   saving.value = true
   try {
     const body = await api('/api/personnel-accounts', {
@@ -369,7 +371,7 @@ onMounted(load)
       <el-form-item label="初始密碼">
         <el-input v-model="accountDialog.password" type="password" show-password autocomplete="new-password" placeholder="留空則由系統產生隨機密碼" />
         <div style="color: #909399; font-size: 12px; line-height: 1.5; margin-top: 4px">
-          至少 8 個字元，不能太常見、不能是純數字、不能和帳號太像。<br />
+          {{ PASSWORD_RULE_TEXT }}<br />
           管理員設定的密碼不會再顯示；請自行告知本人，並請他登入後立刻修改。
         </div>
       </el-form-item>

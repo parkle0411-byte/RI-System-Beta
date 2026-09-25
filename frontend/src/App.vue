@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { auth, can, changePassword, logout } from './auth'
+import { PASSWORD_RULE_TEXT, checkPassword } from './passwordRule'
 
 const router = useRouter()
 
@@ -21,8 +22,9 @@ function openPassword() {
 }
 
 async function savePassword() {
-  if (pwd.next.length < 8) {
-    ElMessage.error('新密碼至少需要 8 個字元。')
+  const problem = checkPassword(pwd.next)
+  if (problem) {
+    ElMessage.error(problem)
     return
   }
   if (pwd.next !== pwd.confirm) {
@@ -65,12 +67,13 @@ async function savePassword() {
   </el-container>
 
   <el-dialog v-model="pwdVisible" title="修改密碼" width="420px">
+    <el-alert type="info" show-icon :closable="false" :title="PASSWORD_RULE_TEXT" style="margin-bottom: 16px" />
     <el-form label-width="110px" @submit.prevent="savePassword">
       <el-form-item label="目前密碼">
         <el-input v-model="pwd.current" type="password" show-password autocomplete="current-password" />
       </el-form-item>
       <el-form-item label="新密碼">
-        <el-input v-model="pwd.next" type="password" show-password autocomplete="new-password" placeholder="至少 8 個字元" />
+        <el-input v-model="pwd.next" type="password" show-password autocomplete="new-password" placeholder="至少 8 個字元，含英文字母與數字" />
       </el-form-item>
       <el-form-item label="確認新密碼">
         <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password" />

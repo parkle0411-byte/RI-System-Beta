@@ -122,19 +122,15 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {"login": os.getenv("RI_LOGIN_THROTTLE", "10/min")},
 }
 
+# 密碼規則（要告知同事的規則）：至少 8 個字元，且必須同時包含英文字母與數字。
+# 前端的提示文字在 frontend/src/passwordRule.js，兩邊要一起改。
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
         "OPTIONS": {"min_length": 8},
     },
     {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+        "NAME": "ri_system.password_validators.LetterAndDigitValidator",
     },
 ]
 
