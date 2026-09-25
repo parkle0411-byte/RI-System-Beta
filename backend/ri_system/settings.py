@@ -91,12 +91,43 @@ DATABASES = {
     }
 }
 
+# ---- 登入 / Session / CSRF ----
+# 目前 VM 是純 HTTP（區網）。上正式環境加上 HTTPS 後，DJANGO_COOKIE_SECURE 必須設為 true。
+COOKIE_SECURE = os.getenv("DJANGO_COOKIE_SECURE", "false").lower() == "true"
+SESSION_COOKIE_NAME = "ri_sessionid"
+SESSION_COOKIE_AGE = 8 * 60 * 60  # 8 小時，閒置滑動延長
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = COOKIE_SECURE
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_FAILURE_VIEW = "ri_system.views.csrf_failure"
+CSRF_COOKIE_SECURE = COOKIE_SECURE
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        "http://192.168.1.127:8080,http://localhost:8080,http://127.0.0.1:8080",
+    ).split(",")
+    if origin.strip()
+]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    # 預設拒絕：任何沒有明確宣告權限的 view 都需要登入
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "EXCEPTION_HANDLER": "ri_system.authz.ri_exception_handler",
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_THROTTLE_RATES": {"login": os.getenv("RI_LOGIN_THROTTLE", "10/min")},
+}
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
     },
     {
         "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",

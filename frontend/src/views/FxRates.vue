@@ -1,6 +1,8 @@
 <script setup>
 import { computed, reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { api } from '../api'
+import { can } from '../auth'
 
 const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR']
 
@@ -29,9 +31,7 @@ async function loadRates() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const res = await fetch('/api/fx-rates', { headers: { Accept: 'application/json' }, cache: 'no-store' })
-    const body = await res.json()
-    if (!res.ok) throw new Error(body.message || body.error || ('HTTP ' + res.status))
+    const body = await api('/api/fx-rates')
     // API 回傳格式與 Alpha 一致（駝峰、rate 為數字），可直接使用
     rates.value = Array.isArray(body.rates) ? body.rates : []
   } catch (err) {
@@ -86,16 +86,13 @@ async function saveRates() {
   }
   saving.value = true
   try {
-    const res = await fetch('/api/fx-rates', {
+    await api('/api/fx-rates', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
+      body: {
         yearMonth: form.yearMonth,
         rates: form.rates.map((r) => ({ currency: r.currency, rate: Number(r.rate), rowVersion: r.rowVersion }))
-      })
+      }
     })
-    const body = await res.json()
-    if (!res.ok) throw new Error(body.message || body.error || ('HTTP ' + res.status))
     dialogVisible.value = false
     ElMessage.success('已儲存本月匯率')
     await loadRates()
@@ -118,7 +115,7 @@ onMounted(loadRates)
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>FX Rates（每月 USD/EUR/JPY/GBP/HKD/MYR 對 TWD 匯率）</span>
-        <el-button type="primary" @click="openDialog()">新增／編輯月份</el-button>
+        <el-button v-if="can('fx.write')" type="primary" @click="openDialog()">新增／編輯月份</el-button>
       </div>
     </template>
 
@@ -135,7 +132,7 @@ onMounted(loadRates)
       <div v-for="month in groupedMonths" :key="month" style="margin-bottom: 24px">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
           <strong>{{ month }}</strong>
-          <el-button size="small" @click="openDialog(month)">編輯</el-button>
+          <el-button v-if="can('fx.write')" size="small" @click="openDialog(month)">編輯</el-button>
         </div>
         <el-table :data="rowsForMonth(month)" border size="small">
           <el-table-column prop="currency" label="幣別" width="100" />

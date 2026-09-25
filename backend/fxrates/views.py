@@ -4,9 +4,10 @@ from decimal import Decimal, InvalidOperation
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
 from .models import CURRENCIES, FxRate
 from .serializers import FxRateSerializer
@@ -14,10 +15,11 @@ from .serializers import FxRateSerializer
 YEAR_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
-class FxRatesView(APIView):
-    # TODO: 尚未接上登入權限系統（對應 Alpha 的 fx.read / fx.write）。
-    # VM 上的登入機制完成前，先開放給所有已連線的使用者，之後要收緊。
-    permission_classes = [AllowAny]
+
+class FxRatesView(NoStoreMixin, APIView):
+    # 對應 Alpha 的 fx.read / fx.write：Finance Staff 只能讀；Finance Manager 與 Admin 可新增及修改。
+    permission_classes = [RIPermission]
+    permission_map = {"GET": "fx.read", "POST": "fx.write"}
 
     def get(self, request):
         # 與 Alpha 相同：月份由新到舊，同月份內依 USD, EUR, JPY, GBP, HKD, MYR 排序
@@ -95,7 +97,7 @@ class FxRatesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        actor = getattr(request.user, "username", None) or "vm-dev"
+        actor = actor_from(request.ri_principal)["id"]
 
         with transaction.atomic():
             existing = {

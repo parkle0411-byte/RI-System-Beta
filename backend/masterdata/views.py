@@ -1,8 +1,7 @@
 """
 Master Data API (masterdata) - 對應 Hatchable Alpha 的 api/master-data.js。
 
-TODO: 尚未接上登入權限系統（對應 Alpha 的 mdm.read / mdm.write）。
-VM 上的登入機制完成前，先開放給所有已連線的使用者，之後要收緊。
+權限：GET 需要 mdm.read；POST / PUT 需要 mdm.write（角色矩陣見 ri_system/authz.py）。
 TODO: 尚未實作 ri_entity_snapshots / ri_audit_log 寫入，
 之後要做成共用模組再補上（對應 Alpha 目前也暫停 audit log 寫入的狀態）。
 """
@@ -10,18 +9,16 @@ import re
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
-from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
 from .models import MasterRecord
 from .serializers import MasterRecordSerializer
 
 ALLOWED_TYPES = {"ae", "reinsurer", "reinsured", "class", "foreign_broker", "clause"}
 UNIVERSAL_CLAUSE_CODES = {"LMA3333", "INTERMEDIARY"}
-
-# TODO: 暫時使用固定 actor，登入機制完成後改為 request.user
-ACTOR_PLACEHOLDER = "vm-system"
 
 
 def clean_text(value, max_len):
@@ -106,6 +103,7 @@ def serialize_record(record):
     return MasterRecordSerializer(record).data
 
 
+
 def unique_violation_response(exc):
     """
     對應 Alpha #18：先檢查再寫入之間有空窗，兩個幾乎同時的請求都能通過應用層檢查。
@@ -126,14 +124,15 @@ def unique_violation_response(exc):
     return None
 
 
-class MasterDataView(APIView):
+class MasterDataView(NoStoreMixin, APIView):
     """
     GET  /api/master-data?entityType=xxx   -> 列表 + counts
     POST /api/master-data                   -> 新增
     PUT  /api/master-data                   -> 編輯（含 optimistic lock）
     """
 
-    permission_classes = [AllowAny]
+    permission_classes = [RIPermission]
+    permission_map = {"GET": "mdm.read", "POST": "mdm.write", "PUT": "mdm.write"}
 
     def get(self, request):
         requested_type = clean_text(request.query_params.get("entityType"), 40).lower()
@@ -157,6 +156,7 @@ class MasterDataView(APIView):
 
     def post(self, request):
         body = request.data or {}
+        actor = actor_from(request.ri_principal)["id"]
         entity_type = clean_text(body.get("entityType"), 40).lower()
         code = clean_text(body.get("code"), 80).upper()
         name = clean_text(body.get("name"), 240)
@@ -201,8 +201,8 @@ class MasterDataView(APIView):
                         name=name,
                         is_active=True,
                         payload=payload,
-                        created_by=ACTOR_PLACEHOLDER,
-                        updated_by=ACTOR_PLACEHOLDER,
+                        created_by=actor,
+                        updated_by=actor,
                     )
             except IntegrityError as exc:
                 response = unique_violation_response(exc)
@@ -217,6 +217,7 @@ class MasterDataView(APIView):
 
     def put(self, request):
         body = request.data or {}
+        actor = actor_from(request.ri_principal)["id"]
         try:
             record_id = int(body.get("id"))
             expected_version = int(body.get("rowVersion"))
@@ -297,12 +298,12 @@ class MasterDataView(APIView):
             current.is_active = is_active
             current.payload = payload
             current.row_version = current.row_version + 1
-            current.updated_by = ACTOR_PLACEHOLDER
+            current.updated_by = actor
             if is_active:
                 current.deactivated_by = None
                 current.deactivated_at = None
             else:
-                current.deactivated_by = ACTOR_PLACEHOLDER
+                current.deactivated_by = actor
                 current.deactivated_at = timezone.now()
             try:
                 with transaction.atomic():

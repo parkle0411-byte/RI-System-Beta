@@ -5,7 +5,7 @@
     </el-tabs>
 
     <div class="toolbar">
-      <el-button type="primary" @click="openCreateDialog">新增</el-button>
+      <el-button v-if="can('mdm.write')" type="primary" @click="openCreateDialog">新增</el-button>
     </div>
 
     <el-table :data="records" v-loading="loading" style="width: 100%">
@@ -16,7 +16,7 @@
           <el-tag :type="row.isActive ? 'success' : 'info'">{{ row.isActive ? '啟用' : '停用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100">
+      <el-table-column v-if="can('mdm.write')" label="操作" width="100">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEditDialog(row)">編輯</el-button>
         </template>
@@ -80,6 +80,8 @@
 <script setup>
 import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { api } from '../api'
+import { can } from '../auth'
 
 const entityTypeOptions = [
   { value: 'ae', label: 'AE' },
@@ -112,9 +114,7 @@ function entityTypeLabel(value) {
 async function loadRecords() {
   loading.value = true
   try {
-    const res = await fetch(`/api/master-data?entityType=${activeType.value}`)
-    const data = await res.json()
-    if (!data.ok) throw new Error(data.message || '載入失敗')
+    const data = await api(`/api/master-data?entityType=${activeType.value}`)
     records.value = data.records
   } catch (e) {
     ElMessage.error(e.message || '載入失敗')
@@ -162,25 +162,14 @@ async function save() {
       name: form.name,
       payload: form.payload,
     }
-    let res
     if (editingRecord.value) {
       body.id = editingRecord.value.id
       body.rowVersion = editingRecord.value.rowVersion
       body.isActive = form.isActive
-      res = await fetch('/api/master-data', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      await api('/api/master-data', { method: 'PUT', body })
     } else {
-      res = await fetch('/api/master-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      await api('/api/master-data', { method: 'POST', body })
     }
-    const data = await res.json()
-    if (!res.ok || !data.ok) throw new Error(data.message || '儲存失敗')
     ElMessage.success('儲存成功')
     dialogVisible.value = false
     await loadRecords()
