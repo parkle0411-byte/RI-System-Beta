@@ -12,6 +12,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
 from .models import MasterRecord
@@ -103,6 +104,22 @@ def serialize_record(record):
     return MasterRecordSerializer(record).data
 
 
+AUDIT_METADATA = {"displayVersion": "V 0.003", "milestone": "reinsurer-fixed-clauses"}
+
+
+def master_state(record, blank_code=False):
+    """Snapshot / Audit 內容，欄位與順序與 Alpha 的 jsonb_build_object 相同。"""
+    return {
+        "id": record.id,
+        "entityType": record.entity_type,
+        "code": (record.code or "") if blank_code else record.code,
+        "name": record.name,
+        "displayOrder": record.display_order,
+        "isActive": record.is_active,
+        "rowVersion": record.row_version,
+        "payload": record.payload or {},
+    }
+
 
 def unique_violation_response(exc):
     """
@@ -156,7 +173,8 @@ class MasterDataView(NoStoreMixin, APIView):
 
     def post(self, request):
         body = request.data or {}
-        actor = actor_from(request.ri_principal)["id"]
+        actor_info = actor_from(request.ri_principal)
+        actor = actor_info["id"]
         entity_type = clean_text(body.get("entityType"), 40).lower()
         code = clean_text(body.get("code"), 80).upper()
         name = clean_text(body.get("name"), 240)
@@ -210,6 +228,17 @@ class MasterDataView(NoStoreMixin, APIView):
                     raise
                 return response
 
+            after = master_state(record)
+            record_snapshot(
+                entity_type="master_record", entity_id=record.id, version=record.row_version,
+                reason="master_created", data=after, created_by=actor,
+            )
+            record_audit(
+                entity_type="master_record", entity_id=record.id, action="create_master",
+                before=None, after=after, actor=actor_info,
+                request_id=request_id_from(request), metadata=AUDIT_METADATA,
+            )
+
         return Response(
             {"ok": True, "displayVersion": "V 0.003", "record": serialize_record(record)},
             status=201,
@@ -217,7 +246,8 @@ class MasterDataView(NoStoreMixin, APIView):
 
     def put(self, request):
         body = request.data or {}
-        actor = actor_from(request.ri_principal)["id"]
+        actor_info = actor_from(request.ri_principal)
+        actor = actor_info["id"]
         try:
             record_id = int(body.get("id"))
             expected_version = int(body.get("rowVersion"))
@@ -293,6 +323,8 @@ class MasterDataView(NoStoreMixin, APIView):
                     status=409,
                 )
 
+            before = master_state(current, blank_code=True)
+            was_active = current.is_active
             current.code = code or None
             current.name = name
             current.is_active = is_active
@@ -313,5 +345,22 @@ class MasterDataView(NoStoreMixin, APIView):
                 if response is None:
                     raise
                 return response
+
+            after = master_state(current)
+            if was_active == current.is_active:
+                action, reason = "update_master", "master_updated"
+            elif current.is_active:
+                action, reason = "reactivate_master", "master_reactivated"
+            else:
+                action, reason = "deactivate_master", "master_deactivated"
+            record_snapshot(
+                entity_type="master_record", entity_id=current.id, version=current.row_version,
+                reason=reason, data=after, created_by=actor,
+            )
+            record_audit(
+                entity_type="master_record", entity_id=current.id, action=action,
+                before=before, after=after, actor=actor_info,
+                request_id=request_id_from(request), metadata=AUDIT_METADATA,
+            )
 
         return Response({"ok": True, "displayVersion": "V 0.003", "record": serialize_record(current)})

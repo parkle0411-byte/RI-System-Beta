@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "masterdata",
     "personnel",
     "cases",
+    "audit",
 ]
 
 MIDDLEWARE = [

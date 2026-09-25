@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
 from .models import CURRENCIES, FxRate
@@ -14,6 +15,17 @@ from .serializers import FxRateSerializer
 
 YEAR_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
+
+def fx_state(rate):
+    """Snapshot / Audit 內容，欄位與 Alpha 的 jsonb_build_object 相同（rate 為數字）。"""
+    return {
+        "id": rate.id,
+        "yearMonth": rate.year_month,
+        "currency": rate.currency,
+        "rate": float(rate.rate),
+        "rowVersion": rate.row_version,
+        "isLocked": rate.is_locked,
+    }
 
 
 class FxRatesView(NoStoreMixin, APIView):
@@ -97,7 +109,9 @@ class FxRatesView(NoStoreMixin, APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        actor = actor_from(request.ri_principal)["id"]
+        actor_info = actor_from(request.ri_principal)
+        actor = actor_info["id"]
+        request_id = request_id_from(request)
 
         with transaction.atomic():
             existing = {
@@ -139,6 +153,7 @@ class FxRatesView(NoStoreMixin, APIView):
             now = timezone.now()
             for row in parsed:
                 current = existing.get(row["currency"])
+                before = fx_state(current) if current else None
                 if current:
                     current.rate = row["rate"]
                     current.row_version += 1
@@ -155,6 +170,20 @@ class FxRatesView(NoStoreMixin, APIView):
                         updated_by=actor,
                     )
                     saved.append(created)
+
+                row_saved = saved[-1]
+                after = fx_state(row_saved)
+                record_snapshot(
+                    entity_type="fx_rate", entity_id=row_saved.id, version=row_saved.row_version,
+                    reason="monthly_fx_rates_saved", data=after, created_by=actor,
+                )
+                # Alpha 的 FX 只寫 snapshot、沒有 Audit 事件；VM 依「所有新增與修改都要有 Audit」補上。
+                record_audit(
+                    entity_type="fx_rate", entity_id=row_saved.id,
+                    action="update_fx_rate" if before else "create_fx_rate",
+                    before=before, after=after, actor=actor_info, request_id=request_id,
+                    metadata={"displayVersion": "V 0.003", "milestone": "monthly-fx-rates"},
+                )
 
         saved.sort(key=lambda r: CURRENCIES.index(r.currency))
         return Response({

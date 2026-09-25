@@ -47,17 +47,19 @@ services:
       DJANGO_DEBUG: "false"
       DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,192.168.1.127"
       DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
-      AUDIT_LOG_ENABLED: "false"
+      AUDIT_LOG_ENABLED: "true"
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
       MYSQL_DATABASE: ri_system
-      MYSQL_USER: ri_app
-      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      # 平常請求用最小權限的 ri_runtime；migrate 等維護作業用 scripts/manage_as_owner.sh 改回 ri_app
+      MYSQL_USER: ri_runtime
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_runtime_password
       TZ: Asia/Taipei
 
     secrets:
       - django_secret_key
       - mysql_app_password
+      - mysql_runtime_password
 
     networks:
       - backend
@@ -93,6 +95,8 @@ secrets:
     file: ./secrets/mysql_app_password
   django_secret_key:
     file: ./secrets/django_secret_key
+  mysql_runtime_password:
+    file: ./secrets/mysql_runtime_password
 
 volumes:
   mysql_data:

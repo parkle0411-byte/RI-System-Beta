@@ -16,6 +16,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from audit.services import CLI_ACTOR, record_audit, record_snapshot
+from personnel.audit_state import personnel_state
 from personnel.models import Personnel
 
 ALPHABET = string.ascii_letters + string.digits + "!@#%^*-_=+"
@@ -57,6 +59,7 @@ class Command(BaseCommand):
             if email and Personnel.objects.filter(email__iexact=email).exclude(pk=person.pk).exists():
                 raise CommandError(f"Email '{email}' already belongs to another Personnel record.")
 
+            before = personnel_state(person)
             password = generate_password()
             user = User.objects.create_user(username=username, email=email, password=password)
             now = timezone.now()
@@ -72,6 +75,18 @@ class Command(BaseCommand):
             person.row_version += 1
             person.updated_by = "cli"
             person.save()
+
+            after = personnel_state(person)
+            record_snapshot(
+                entity_type="personnel", entity_id=person.pk, version=person.row_version,
+                reason="personnel_account_created", data=after, created_by="cli",
+            )
+            # 只記錄「誰、什麼帳號、什麼角色」，不含密碼
+            record_audit(
+                entity_type="personnel", entity_id=person.pk, action="create_account",
+                before=before, after=after, actor=CLI_ACTOR, source="cli",
+                metadata={"username": username, "accountUserId": user.pk},
+            )
 
         self.stdout.write(self.style.SUCCESS(f"Account created for {person.name} ({person.department}, role={person.role_code})"))
         self.stdout.write(f"  username : {username}")

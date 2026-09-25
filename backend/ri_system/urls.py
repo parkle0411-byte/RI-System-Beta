@@ -14,4 +14,5 @@ urlpatterns = [
     path("api/app-context", AppContextView.as_view(), name="app-context"),
     path("api/fx-rates", include("fxrates.urls")),
     path("api/master-data", include("masterdata.urls")),
+    path("api/audit-log", include("audit.urls")),
 ]

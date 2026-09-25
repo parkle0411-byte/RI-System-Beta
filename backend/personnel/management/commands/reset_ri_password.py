@@ -10,6 +10,8 @@ from django.contrib.sessions.models import Session
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from audit.services import CLI_ACTOR, record_audit
+from personnel.audit_state import personnel_state
 from personnel.management.commands.create_ri_account import generate_password
 from personnel.models import Personnel
 
@@ -33,9 +35,18 @@ class Command(BaseCommand):
             password = generate_password()
             user.set_password(password)
             user.save(update_fields=["password"])
+            ended = 0
             for session in Session.objects.all():
                 if str(session.get_decoded().get("_auth_user_id")) == str(user.pk):
                     session.delete()
+                    ended += 1
+            state = personnel_state(person)
+            # 密碼本身絕不寫入；只記錄「重設過」與結束了幾個 session
+            record_audit(
+                entity_type="personnel", entity_id=person.pk, action="reset_account_password",
+                before=state, after=state, actor=CLI_ACTOR, source="cli",
+                metadata={"username": user.username, "sessionsEnded": ended},
+            )
         self.stdout.write(self.style.SUCCESS(f"Password reset for {person.name} (username: {user.username})"))
         self.stdout.write(f"  password : {password}")
         self.stdout.write("  Shown ONCE. Ask the user to change it after the next login.")

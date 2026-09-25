@@ -11,6 +11,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from audit.services import CLI_ACTOR, record_audit, record_snapshot
+from personnel.audit_state import personnel_state
 from personnel.models import Personnel
 
 
@@ -29,6 +31,7 @@ class Command(BaseCommand):
                 raise CommandError(f"Personnel {opts['personnel_id']} does not exist.")
             if not person.auth_user_id:
                 raise CommandError(f"{person.name} has no account.")
+            before = personnel_state(person)
             user = User.objects.get(pk=int(person.auth_user_id))
             user.is_active = False
             user.save(update_fields=["is_active"])
@@ -43,4 +46,15 @@ class Command(BaseCommand):
             person.row_version += 1
             person.updated_by = "cli"
             person.save()
+
+            after = personnel_state(person)
+            record_snapshot(
+                entity_type="personnel", entity_id=person.pk, version=person.row_version,
+                reason="personnel_account_disabled", data=after, created_by="cli",
+            )
+            record_audit(
+                entity_type="personnel", entity_id=person.pk, action="disable_account",
+                before=before, after=after, actor=CLI_ACTOR, source="cli",
+                metadata={"username": user.username, "sessionsEnded": ended},
+            )
         self.stdout.write(self.style.SUCCESS(f"Account for {person.name} disabled; {ended} session(s) ended."))
