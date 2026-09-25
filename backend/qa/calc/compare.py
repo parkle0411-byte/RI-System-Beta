@@ -10,6 +10,7 @@ import math
 import sys
 
 from cases import draft
+from cases import workflow as wf
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
 from cases.calc.jsnum import UNDEFINED
@@ -29,6 +30,17 @@ FUNCTIONS = {
     "reminderKind": lambda a, now: pt.reminder_kind(*a),
     "normalizeDraft": lambda a, now: draft.normalize_draft(*a),
     "validateAnnounceReady": lambda a, now: draft.validate_announce_ready(*a),
+    "reinsurerKey": lambda a, now: wf.reinsurer_key(*a),
+    "requiredReinsurers": lambda a, now: wf.required_reinsurers(*a),
+    "coverageFor": lambda a, now: wf.coverage_for(*a),
+    "sameIds": lambda a, now: wf.same_ids(*a),
+    "referencePrefix": lambda a, now: wf.reference_prefix(*a),
+    "shiftYear": lambda a, now: wf.shift_year(*a),
+    "resetSharedPayload": lambda a, now: wf.reset_shared_payload(*a),
+    "buildEndorsementPayload": lambda a, now: wf.build_endorsement_payload(*a),
+    "buildRenewalPayload": lambda a, now: wf.build_renewal_payload(*a),
+    "buildReversedPayload": lambda a, now: wf.build_reversed_payload(*a),
+    "appendNotification": lambda a, now: wf.append_notification(*a),
 }
 
 

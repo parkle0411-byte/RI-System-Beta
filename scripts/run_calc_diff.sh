@@ -20,9 +20,14 @@ for f in accounting payment-terms case-draft; do
   [ "$want" = "$got" ] || { echo "  Alpha 原始碼副本 lib/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
 done
 
+# 節錄檔（api-excerpts.js）同樣要與 MANIFEST.md 記錄的雜湊相同
+want=$(grep -o "excerpts/api-excerpts.js\` | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
+got=$(sha256sum backend/qa/alpha_js/excerpts/api-excerpts.js | cut -d' ' -f1)
+[ "$want" = "$got" ] || { echo "  節錄檔 excerpts/api-excerpts.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
+
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/backend/qa/alpha_js:/alpha:ro" -v "$PWD/backend/qa/calc:/calc:ro" -v "$WORK:/data" node:22-alpine sh -c '
-    mkdir -p /tmp/w/node_modules && cp -r /alpha/lib /tmp/w/lib && cp /calc/harness.mjs /tmp/w/ &&
+    mkdir -p /tmp/w/node_modules && cp -r /alpha/lib /tmp/w/lib && cp /alpha/excerpts/api-excerpts.js /tmp/w/lib/ && cp /calc/harness.mjs /tmp/w/ &&
     ln -s ../lib /tmp/w/node_modules/lib && echo "{\"type\":\"module\"}" > /tmp/w/package.json &&
     cd /tmp/w && node harness.mjs /data/vectors.json > /data/js.json'
 

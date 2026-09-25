@@ -251,6 +251,8 @@ def build(count_each=1200):
         maybe_omit(item, "outstanding", R.choice([0, 0.004, 0.005, 100, 1234.56, -5, None, MISSING, "50", "abc", 1e9]))
         add({"fn": "reminderKind", "args": [R.choice([{k: v for k, v in item.items() if v is not MISSING}] * 10 + [None, "x", {}]),
                                              R.choice(DATES_VALID + ["2026-09-18", "2026-09-25", "2026-10-02", "2026-10-09", "2026-09-04", "2026-08-28"])]})
+    from . import workflow_vectors
+    vectors.extend(workflow_vectors.build(count_each))
     from . import draft_vectors
     vectors.extend(draft_vectors.build(max(count_each // 2, 1)))
     return vectors
