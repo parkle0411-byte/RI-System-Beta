@@ -9,6 +9,7 @@ import json
 import math
 import sys
 
+from cases import draft
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
 from cases.calc.jsnum import UNDEFINED
@@ -26,6 +27,8 @@ FUNCTIONS = {
     "buildPaymentSchedule": lambda a, now: pt.build_payment_schedule(a[0], now),
     "deriveLedgerSettlement": lambda a, now: pt.derive_ledger_settlement(a[0], a[1], now),
     "reminderKind": lambda a, now: pt.reminder_kind(*a),
+    "normalizeDraft": lambda a, now: draft.normalize_draft(*a),
+    "validateAnnounceReady": lambda a, now: draft.validate_announce_ready(*a),
 }
 
 

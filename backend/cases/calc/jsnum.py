@@ -288,3 +288,157 @@ def iso_date_prefix(days):
     y, m, d = civil_from_days(days)
     year = f"{y:04d}" if 0 <= y <= 9999 else ("+" if y > 0 else "-") + f"{abs(y):06d}"
     return f"{year}-{m:02d}-{d:02d}"[:10]
+
+
+# ---------- 字串：UTF-16 單位、JSON、排序 ----------
+
+def js_len(text):
+    """String.prototype.length（UTF-16 單位；表情符號等佔 2）。"""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def js_slice(text, start=0, end=None):
+    """String.prototype.slice：以 UTF-16 單位計算，支援負數索引；可能把代理對切成一半（與 JavaScript 相同）。"""
+    raw = text.encode("utf-16-le", "surrogatepass")
+    n = len(raw) // 2
+
+    def norm(i, default):
+        if i is None:
+            return default
+        return max(n + i, 0) if i < 0 else min(i, n)
+
+    a, b = norm(start, 0), norm(end, n)
+    return raw[2 * a:2 * b].decode("utf-16-le", "surrogatepass") if a < b else ""
+
+
+_JSON_ESC = {'"': '\\"', "\\": "\\\\", "\b": "\\b", "\f": "\\f", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def js_json_quote(text):
+    out = ['"']
+    for ch in text:
+        code = ord(ch)
+        if ch in _JSON_ESC:
+            out.append(_JSON_ESC[ch])
+        elif code < 0x20 or 0xD800 <= code <= 0xDFFF:   # 控制字元與「落單的」代理字元
+            out.append("\\u%04x" % code)
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+def _key_order(keys):
+    """JavaScript 物件的鍵順序：像整數的鍵先（由小到大），其餘依插入順序。"""
+    ints = sorted((k for k in keys if k.isascii() and k.isdigit() and (k == "0" or not k.startswith("0")) and int(k) < 2 ** 32 - 1), key=int)
+    return ints + [k for k in keys if k not in set(ints)]
+
+
+def js_json_stringify(value):
+    """JSON.stringify(value)（只支援 JSON 相容的資料；undefined 的鍵省略、陣列中的 undefined 變 null）。"""
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, (int, float)):
+        x = float(value)
+        return js_num_str(x) if js_is_finite(x) else "null"
+    if isinstance(value, str):
+        return js_json_quote(value)
+    if isinstance(value, list):
+        return "[" + ",".join("null" if v is UNDEFINED else js_json_stringify(v) for v in value) + "]"
+    if isinstance(value, dict):
+        parts = [js_json_quote(k) + ":" + js_json_stringify(value[k]) for k in _key_order(list(value)) if value[k] is not UNDEFINED]
+        return "{" + ",".join(parts) + "}"
+    return "null"
+
+
+def json_roundtrip(value):
+    """JSON.parse(JSON.stringify(value))：深層複製；-0 變 0、NaN/Infinity 變 null。"""
+    if isinstance(value, dict):
+        return {k: json_roundtrip(value[k]) for k in _key_order(list(value)) if value[k] is not UNDEFINED}
+    if isinstance(value, list):
+        return [None if v is UNDEFINED else json_roundtrip(v) for v in value]
+    if isinstance(value, float):
+        if not js_is_finite(value):
+            return None
+        return 0.0 if value == 0 else value
+    return value
+
+
+def js_number_out(x):
+    """整數值的數字輸出成 int（JSON 寫出來是 5 而不是 5.0）；其餘不變。"""
+    if isinstance(x, float) and js_is_finite(x) and x == math.floor(x) and abs(x) < 2 ** 53:
+        return int(x)
+    return x
+
+
+def js_upper(text):
+    return text.upper()
+
+
+# ICU（en）排序：符號 < 數字 < 字母（不分大小寫比較；相同時小寫在前）。
+# 順序表由 Node 的 localeCompare('en') 實測而得（可印 ASCII）。
+_ICU_ASCII = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$0123456789"
+
+
+# 沒有標準分解、但 ICU 有明確排序規則的拉丁字母（由 Node 的 localeCompare('en') 逐一實測）
+_LATIN_EXPAND = {"Æ": "AE", "Œ": "OE"}                              # 展開成兩個字母，中間夾一個「連字」次要權重
+# 對應字母＋一個落在重音序列「特定位置」的次要權重（Node 實測）：Ø 在 ˙ 與 ¸ 之間；Đ、Ł 在 ¯ 與 ̉ 之間；Ð 在所有重音之後
+_LATIN_STROKE = {"Ø": ("O", 42.5), "Ð": ("D", 300), "Đ": ("D", 45.5), "Ł": ("L", 45.5)}
+_LATIN_OWN_PRIMARY = {"Ŋ": 100 + 13.5}                              # 獨立字母，排在 N 與 O 之間
+# 組合重音符號在次要層級的先後（Node 實測）：´ ` ˘ ^ ˇ ° ¨ ˝ ~ ˙ ¸ ˛ ¯ …
+_MARK_ORDER = [0x301, 0x300, 0x306, 0x302, 0x30C, 0x30A, 0x308, 0x30B, 0x303, 0x307, 0x327, 0x328, 0x304, 0x309, 0x30F, 0x311,
+               0x31B, 0x323, 0x324, 0x325, 0x326, 0x32D, 0x32E, 0x330, 0x331]
+_MARK_WEIGHT = {code: 33 + i for i, code in enumerate(_MARK_ORDER)}
+_SEC_BASE, _SEC_LIGATURE = 32, 301
+
+
+def js_locale_key(text):
+    """
+    String.prototype.localeCompare(other, 'en') 的排序鍵（ICU 的多層比較：主要 → 次要（重音）→ 第三（大小寫、相容字形））。
+    已用 Node 逐類量測、與 ICU 一致：可印 ASCII、拉丁字母（含重音、不同重音的先後，以及 Æ Œ Ø Ð Đ Ł Ŋ）、
+    相容字形（如 Ǆ、ﬁ）、控制字元（完全忽略）、希臘字母、西里爾字母、中日韓文字。
+    **已知不一致**：非 ASCII 的符號與貨幣符號（€ © ™ ° ± × 等）——ICU 把它們排在數字之前，這裡依碼位排在最後。
+    Clause 代碼實務上是英數字與底線，不受影響；若日後代碼會用到這類符號，需補上對照表。
+    """
+    import unicodedata
+
+    primary, secondary, tertiary = [], [], []
+
+    def element(weight, tert=0):
+        primary.append(weight)
+        secondary.append(_SEC_BASE)
+        tertiary.append(tert)
+
+    for original in unicodedata.normalize("NFC", text):
+        expansion = unicodedata.normalize("NFKD", original)
+        compat = 2 if expansion != unicodedata.normalize("NFD", original) else 0     # 相容字形：只在第三層與一般字母不同
+        for ch in expansion:
+            code = ord(ch)
+            upper = ch.upper()
+            case = 1 if ch.isupper() else 0
+            if upper in _LATIN_EXPAND:
+                first, second = _LATIN_EXPAND[upper]
+                element(100 + ord(first.lower()) - 97, compat + case)
+                secondary.append(_SEC_LIGATURE)
+                element(100 + ord(second.lower()) - 97, compat + case)
+            elif upper in _LATIN_STROKE:
+                letter, weight = _LATIN_STROKE[upper]
+                element(100 + ord(letter.lower()) - 97, compat + case)
+                secondary.append(weight)
+            elif upper in _LATIN_OWN_PRIMARY:
+                element(_LATIN_OWN_PRIMARY[upper], compat + case)
+            elif ch in _ICU_ASCII:
+                element(_ICU_ASCII.index(ch), compat)
+            elif ch.isascii() and ch.isalpha():
+                element(100 + ord(ch.lower()) - 97, compat + case)
+            elif unicodedata.category(ch) in ("Cc", "Cf") and code < 0xa0:
+                continue                                                 # 完全可忽略
+            elif unicodedata.combining(ch):
+                secondary.append(_MARK_WEIGHT.get(code, 200 + code % 100))   # 重音記號：只加在次要層級
+            else:
+                element(1000 + code)
+    return (primary, secondary, tertiary)

@@ -14,7 +14,7 @@ trap 'rm -rf "$WORK"' EXIT
 docker exec ri-backend python -m qa.calc.vectors "${CALC_VECTORS:-1200}" > "$WORK/vectors.json"
 
 # 驗證副本沒有被改動：雜湊必須與 MANIFEST.md 記錄的相同
-for f in accounting payment-terms; do
+for f in accounting payment-terms case-draft; do
   want=$(grep -o "lib/$f.js\` | [0-9]* | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
   got=$(sha256sum "backend/qa/alpha_js/lib/$f.js" | cut -d' ' -f1)
   [ "$want" = "$got" ] || { echo "  Alpha 原始碼副本 lib/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }

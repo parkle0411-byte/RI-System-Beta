@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import * as accounting from './lib/accounting.js'
 import * as paymentTerms from './lib/payment-terms.js'
+import * as caseDraft from './lib/case-draft.js'
 
 const fns = {
   stripFacilityTag: accounting.stripFacilityTag,
@@ -17,6 +18,8 @@ const fns = {
   buildPaymentSchedule: paymentTerms.buildPaymentSchedule,
   deriveLedgerSettlement: paymentTerms.deriveLedgerSettlement,
   reminderKind: paymentTerms.reminderKind,
+  normalizeDraft: caseDraft.normalizeDraft,
+  validateAnnounceReady: caseDraft.validateAnnounceReady,
 }
 
 // 讓「new Date()」（不帶參數）回傳固定時間，其餘行為不變；只在需要時暫時替換。
