@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "personnel",
     "cases",
     "production",
+    "dashboard",
     "audit",
 ]
 

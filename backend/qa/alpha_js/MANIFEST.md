@@ -51,6 +51,16 @@
 |---|---|
 | `excerpts/production-excerpts.js` | `ecfaed1cd3835b6537ad3b399bf8fab1a5b2c661cd52c7e1dbbb40640cd05640` |
 
+### `excerpts/dashboard-excerpts.js`
+
+由程式從 `api/dashboard.js`（206 行，雜湊 `26002e5ca5fa431860e2cd7c677fbe4d52cbabb094de77c8d9c793625bb79561`，先確認整檔雜湊相同）
+原樣切出第 8–81 行（輔助函式）與第 114–205 行（handler 在三個查詢之後的全部敘述），後者外面加上測試用的外殼函式 `dashboardSummary`
+（外殼提供查詢結果與 `res.json`），前面加 import。
+
+| 檔案 | SHA-256 |
+|---|---|
+| `excerpts/dashboard-excerpts.js` | `b5b6a3ef3baa10f576485ddd402c30121c3886ebd021af2a0d52d7e3785713df` |
+
 ## Alpha 改了這些檔案時
 
 1. 對 Claude 說「檢查漂移」，它會比對 Alpha 目前的雜湊，告訴你哪些檔案變了。

@@ -15,6 +15,7 @@ from cases import documents as docs
 from cases import ledger
 from production import calc as prod
 from production import closing
+from dashboard import calc as dash
 from cases.calc import signed_slip as slip
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
@@ -65,9 +66,15 @@ FUNCTIONS = {
     "buildProductionPreview": lambda a, now: prod.build_production_preview(*a),
     "productionKeysForCase": lambda a, now: prod.production_keys_for_case(*a),
     "nextProductionMonth": lambda a, now: prod.next_production_month(*a),
+    "dashboardSummary": lambda a, now: dash.build_dashboard(a[0], a[1], a[2], _now(now)),
     "productionConfirmCase": lambda a, now: closing.confirm_case(*a),
     "accountingLedgerRows": lambda a, now: dict(zip(("rows", "warnings"), ledger.ledger_rows(a[0], now))),
 }
+
+
+def _now(value):
+    from datetime import datetime
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _uint8(result):
