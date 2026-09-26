@@ -17,6 +17,7 @@ from production import calc as prod
 from production import closing
 from dashboard import calc as dash
 from cases import document_markup as docgen
+from reminders import messages as rem
 from cases.calc import signed_slip as slip
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
@@ -72,6 +73,17 @@ FUNCTIONS = {
     "accountingLedgerRows": lambda a, now: dict(zip(("rows", "warnings"), ledger.ledger_rows(a[0], now))),
     "renderPdfRejectUnsafeMarkup": lambda a, now: docgen.reject_unsafe_markup(a[0]),
     "renderPdfMarkupStatus": lambda a, now: _markup_status(a[0]),
+    "payEsc": lambda a, now: rem.esc(a[0]),
+    "payValidEmail": lambda a, now: rem.valid_email(a[0]),
+    "payLabel": lambda a, now: rem.label(a[0]),
+    "payMessage": lambda a, now: rem.message(*a),
+    "payResolveRecipients": lambda a, now: rem.resolve_recipients(*a),
+    "payFinanceEmails": lambda a, now: rem.finance_emails(a[0]),
+    "payDueKind": lambda a, now: rem.due_kind(*a),
+    "slipEscapeHtml": lambda a, now: rem.escape_html(a[0]),
+    "slipValidEmailApi": lambda a, now: rem.valid_email(a[0]),
+    "slipContactFor": lambda a, now: rem.contact_for(*a),
+    "slipReminderMessage": lambda a, now: rem.reminder_message(*a),
 }
 
 

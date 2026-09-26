@@ -21,7 +21,7 @@ for f in accounting payment-terms case-draft signed-slip-reminders production-re
 done
 
 # 節錄檔同樣要與 MANIFEST.md 記錄的雜湊相同
-for f in api-excerpts case-documents-excerpts accounting-excerpts production-excerpts dashboard-excerpts render-pdf-excerpts; do
+for f in api-excerpts case-documents-excerpts accounting-excerpts production-excerpts dashboard-excerpts render-pdf-excerpts reminders-excerpts; do
   want=$(grep -o "excerpts/$f.js\` | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
   got=$(sha256sum "backend/qa/alpha_js/excerpts/$f.js" | cut -d' ' -f1)
   [ "$want" = "$got" ] || { echo "  節錄檔 excerpts/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }

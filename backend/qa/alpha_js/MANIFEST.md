@@ -76,3 +76,15 @@
 | 檔案 | SHA-256 |
 |---|---|
 | `excerpts/render-pdf-excerpts.js` | `8da173d97483b0565bb6d5068be28b2a02543996ba58e55892d06a838f330b88` |
+
+### `excerpts/reminders-excerpts.js`
+
+由程式從 `api/payment-reminders.js`（223 行，雜湊 `14d5c92bc56dd9e176d05216104599b2bd682a512a4ddc332ddd90ad84c0dced`）與
+`api/signed-slip-reminders.js`（232 行，雜湊 `4bf1b2d5f60b44c6e3cf3c026b4196296e8265576e44b575eb7919a346368617`）切出（先確認兩檔整檔雜湊相同）：
+付款第 19–100 行（`esc`、`validEmail`、`label`、`message`、`resolveRecipients`、`dueKind`）、第 129–131 行（Finance 收件人篩選，外殼 `payFinanceEmails`）；
+Signed Slip 第 18–57 行（`escapeHtml`、`validEmail`、`contactFor`、`reminderMessage`，包在區塊內避免與付款的同名函式衝突）。
+import 只保留用到的 `daysBetweenDates`、`addCalendarDays`；最後的 `export` 加上 `pay`／`slip` 前綴。
+
+| 檔案 | SHA-256 |
+|---|---|
+| `excerpts/reminders-excerpts.js` | `a7f7662e7d538614a43fd2bf9dd98a44d73270c293899962869fbe2be3cc2266` |

@@ -16,3 +16,4 @@ backend/.venv/
 .DS_Store
 *.log
 qa/ui/out/
+logs/

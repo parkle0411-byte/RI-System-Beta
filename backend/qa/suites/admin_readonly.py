@@ -74,7 +74,7 @@ try:
 
         # --- 註冊了什麼 ---
         registered = {m.__name__ for m in admin.site._registry}
-        check("exactly the 9 RI models are registered", registered == {"Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot"}, registered)
+        check("exactly the 11 RI models are registered (incl. the two reminder logs)", registered == {"Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot", "SignedSlipAlert", "PaymentAlert"}, registered)
         check("Django User / Group (password hashes) are NOT registered", User not in admin.site._registry and "Group" not in registered)
         try: admin.site.register(User, admin.ModelAdmin)
         except Exception: pass

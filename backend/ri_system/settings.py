@@ -29,8 +29,19 @@ ALLOWED_HOSTS = [
 CASE_DOCUMENT_ROOT = os.getenv("RI_CASE_DOCUMENT_ROOT", "/data/documents")
 # 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
 DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
-# Signed Slip 提醒信：VM 尚未設定寄信（SMTP 未決定），如實回報 false
-SIGNED_SLIP_OUTBOUND_ENABLED = os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false").lower() == "true"
+# 提醒信（Signed Slip #10、付款 #9）：SMTP 尚未決定，VM 目前「不寄信」——提醒照常產生，記成 suppressed（reminders/runner.py）。
+# 決定 SMTP 後設定 RI_EMAIL_*，再把 RI_REMINDER_EMAIL_ENABLED 設為 true。文件 API 的 signedSlipReminder.outboundEnabled 也據此如實回報。
+REMINDER_EMAIL_ENABLED = os.getenv("RI_REMINDER_EMAIL_ENABLED", os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false")).lower() == "true"
+SIGNED_SLIP_OUTBOUND_ENABLED = REMINDER_EMAIL_ENABLED
+REMINDER_LINK_URL = os.getenv("RI_REMINDER_LINK_URL", "http://192.168.1.127:8080")
+REMINDER_LINK_TEXT = os.getenv("RI_REMINDER_LINK_TEXT", "開啟 Reinsurance Department System")
+REMINDER_MESSAGE_ID_DOMAIN = os.getenv("RI_REMINDER_MESSAGE_ID_DOMAIN", "ri-dev.tw-insure.com")
+EMAIL_BACKEND = os.getenv("RI_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = os.getenv("RI_EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("RI_EMAIL_PORT", "25"))
+EMAIL_USE_TLS = os.getenv("RI_EMAIL_USE_TLS", "false").lower() == "true"
+EMAIL_TIMEOUT = 30
+DEFAULT_FROM_EMAIL = os.getenv("RI_EMAIL_FROM", "ri-system@tw-insure.com")
 
 # 產生 PDF：內部的 Gotenberg（Chromium）服務，不對外開放（compose.yaml 的 pdf 服務）
 PDF_RENDERER_URL = os.getenv("RI_PDF_RENDERER_URL", "http://pdf:3000")
@@ -55,6 +66,7 @@ INSTALLED_APPS = [
     "production",
     "dashboard",
     "conversion",
+    "reminders",
     "audit",
 ]
 

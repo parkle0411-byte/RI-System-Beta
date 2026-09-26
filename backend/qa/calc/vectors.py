@@ -265,6 +265,8 @@ def build(count_each=1200):
     vectors.extend(dashboard_vectors.build(max(count_each // 2, 1)))
     from . import render_pdf_vectors
     vectors.extend(render_pdf_vectors.build(count_each))
+    from . import reminder_vectors
+    vectors.extend(reminder_vectors.build(count_each))
     return vectors
 
 
