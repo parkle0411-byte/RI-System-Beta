@@ -14,3 +14,5 @@ VM 的 Vue 元件是照這些檔案移植的；Alpha 之後改了畫面，先比
 `case-calculations.js`（`f8fdc38c…`）沒有複製：VM 的畫面合計改用「記帳的逐步進位算法」（`src/alpha/caseCalculations.js`，
 與後端 `cases/calc/totals.py` 相同），見 MIGRATION-STATUS.md「案件合計」。
 `src/alpha/lib/accounting.js` 是 Alpha `lib/accounting.js` 的原樣副本（`e0acc3c8…`，與 `backend/qa/alpha_js/lib/accounting.js` 相同）。
+`src/alpha/production-xlsx.js` 是 Alpha `public/production-xlsx.js` 的原樣副本（`256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59`），
+由 `src/views/Production.vue` 載入；它需要的 JSZip 用 npm 套件 `jszip` 3.10.1（與 Alpha 的 `vendor/jszip.min.js` 同版）。

@@ -4,6 +4,7 @@
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
+  python3 ui_test.py F   管理員：Production Report 預覽 → 排除一家再保人 → 產生 → 下載 Excel → 關帳（部分確認）；下個月 → 產生 → 關帳（全部確認）→ SOA 出現保費交易
   python3 ui_test.py E   業務人員：Claim 分頁新增理賠、改準備金、記理賠付款（出險日、付款日期必填），SOA 出現理賠交易
   python3 ui_test.py D   （案件此時是 Announced）Finance Staff：Accounting 帳本、記付款、沖銷；管理員：從帳本開啟案件的 SOA 分頁
 """
@@ -125,7 +126,7 @@ def phase_a(page):
     check("sidebar shows Alpha's navigation for an admin", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "Audit Log"], labels)
     for label, marker in [("Account List", "All cases"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
-                          ("Production Report", "Queued for migration"), ("Accounting", "Payment schedule (")]:
+                          ("Production Report", "Versioned monthly close"), ("Accounting", "Payment schedule (")]:
         nav(page, label)
         check(f"{label} page loads", page.get_by_text(marker).first.is_visible())
     logout(page)
@@ -590,6 +591,90 @@ def phase_e(page):
     logout(page)
 
 
+def production_month(page, month_label):
+    """月份選擇器（格式 MMM YYYY）：輸入後按 Enter，再按 Preview。"""
+    field = page.locator("#production-month")
+    field.fill(month_label)
+    field.press("Enter")
+    page.locator(".production-heading").click()
+    page.get_by_role("button", name="Preview").click()
+    page.wait_for_timeout(1200)
+
+
+def month_label(offset=0):
+    import datetime as dt
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date().replace(day=1)
+    y, m = today.year + (today.month - 1 + offset) // 12, (today.month - 1 + offset) % 12 + 1
+    return dt.date(y, m, 1).strftime("%b %Y"), f"{y:04d}-{m:02d}"
+
+
+def phase_f(page):
+    import zipfile
+    login(page, "ui.admin")
+    nav(page, "Production Report")
+    label, ym = month_label(0)
+    next_label, next_ym = month_label(1)
+    production_month(page, label)
+    rows = page.locator(".production-table .el-table__body-wrapper .el-table__row").filter(has_text="TWPAR2603001")
+    check(f"{ym} preview lists the case: one row per reinsurer", rows.count() == 2, rows.count())
+    check("no missing FX warning (USD saved in phase B)", page.locator(".el-alert", has_text="exchange rate required").count() == 0)
+    snap(page, "production-preview")
+
+    beta = rows.filter(has_text="UI Re Beta").first
+    beta.get_by_role("button", name="Exclude R/I").click()
+    box = page.locator(".el-message-box")
+    box.wait_for()
+    box.locator("input").fill("UI waiting for signed slip")
+    box.get_by_role("button", name="Exclude").click()
+    check("row deferred to the next month", message(page, f"Item deferred to {next_ym}"))
+    page.wait_for_timeout(800)
+    deferred = page.locator(".table-card", has=page.locator("h2", has_text="Excluded and deferred items"))
+    check("excluded list shows the reinsurer, reason and target month", deferred.count() == 1 and "UI waiting for signed slip" in deferred.inner_text() and next_ym in deferred.inner_text())
+
+    page.get_by_role("button", name="Generate Production Report").click()
+    check("V1 generated", message(page, f"Production Report {ym} V1 generated"))
+    page.wait_for_timeout(800)
+    versions = page.locator(".table-card", has=page.locator("h2", has_text="Report versions"))
+    with page.expect_download() as dl:
+        versions.get_by_role("button", name="Download XLSX").first.click()
+    path = "out/production-v1.xlsx"
+    dl.value.save_as(path)
+    check("download name Production_Report_<month>_V1.xlsx", dl.value.suggested_filename == f"Production_Report_{ym}_V1.xlsx", dl.value.suggested_filename)
+    with zipfile.ZipFile(path) as z:
+        sheet = z.read("xl/worksheets/sheet1.xml").decode()
+        workbook = z.read("xl/workbook.xml").decode()
+    check("xlsx: header row, the included reinsurer, not the deferred one, dates with slashes", "Original Insured" in sheet and "UI Re Alpha" in sheet
+          and "UI Re Beta" not in sheet and "2026/03/01" in sheet and f"Production Report {ym}" in workbook, sheet[:200])
+
+    versions.get_by_role("button", name="Close month").click()
+    confirm_box(page, "Close month")
+    check("month closed; the case is only partly confirmed (0 fully Confirmed)", message(page, f"Production Report {ym} closed · 0 case(s) fully Confirmed"))
+    page.wait_for_timeout(800)
+    check("closed banner shown, Generate hidden", page.locator(".el-alert", has_text=f"{ym} is closed").count() == 1
+          and page.get_by_role("button", name="Generate Production Report").count() == 0)
+    snap(page, "production-closed")
+
+    production_month(page, next_label)
+    rows = page.locator(".production-table .el-table__body-wrapper .el-table__row").filter(has_text="TWPAR2603001")
+    check(f"{next_ym}: the deferred reinsurer appears", rows.count() == 1 and "UI Re Beta" in rows.first.inner_text(), rows.count())
+    page.get_by_role("button", name="Generate Production Report").click()
+    check("next month V1 generated", message(page, f"Production Report {next_ym} V1 generated"))
+    page.wait_for_timeout(800)
+    page.locator(".table-card", has=page.locator("h2", has_text="Report versions")).get_by_role("button", name="Close month").click()
+    confirm_box(page, "Close month")
+    check("next month closed; the case is now fully Confirmed", message(page, f"Production Report {next_ym} closed · 1 case(s) fully Confirmed"))
+    page.wait_for_timeout(800)
+
+    open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
+    check("case header shows Confirmed", "Confirmed" in page.locator(".page-header p").inner_text(), page.locator(".page-header p").inner_text())
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="SOA").click()
+    page.wait_for_timeout(600)
+    soa = page.locator(".overview-card").filter(has_text="Statement of Account").first.inner_text()
+    check("SOA lists premium transactions (Leg 1-3) numbered from the TW Ref", "TWPAR2603001-R1-TX1" in soa and "TWPAR2603001-R2-TX1" in soa, soa[:400])
+    snap(page, "soa-after-close")
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -597,7 +682,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e}[PHASE](page)
+        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

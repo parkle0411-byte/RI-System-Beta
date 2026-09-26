@@ -4,9 +4,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { shell } from '../alpha/shell'
 
-const pendingCopy = {
-  production: 'Production Report rules will be migrated after the case and endorsement data contracts are stable.'
-}
+const pendingCopy = {}
 const route = useRoute()
 const pendingDescription = computed(() => pendingCopy[route.name] || 'This screen is queued for migration.')
 </script>

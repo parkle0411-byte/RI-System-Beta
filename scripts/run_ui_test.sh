@@ -39,4 +39,12 @@ run_phase B || STATUS=1
 run_phase C || STATUS=1
 run_phase D || STATUS=1
 run_phase E || STATUS=1
+# Production Report：下個月（台北時間）的 USD 匯率先放好，階段 F 才能在下個月產生與關帳
+docker exec ri-ut-backend python manage.py shell -c "
+import datetime as dt
+from fxrates.models import FxRate
+t = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
+y, m = (t.year + 1, 1) if t.month == 12 else (t.year, t.month + 1)
+FxRate.objects.create(year_month=f'{y:04d}-{m:02d}', currency='USD', rate='31.2', created_by='seed', updated_by='seed'); print('next-month fx seeded')" 2>&1 | grep seeded
+run_phase F || STATUS=1
 exit $STATUS

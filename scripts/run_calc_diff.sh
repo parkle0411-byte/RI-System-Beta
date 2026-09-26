@@ -27,6 +27,10 @@ for f in api-excerpts case-documents-excerpts accounting-excerpts production-exc
   [ "$want" = "$got" ] || { echo "  節錄檔 excerpts/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
 done
 
+# 前端的 Alpha 原樣副本（Production Report 的 Excel 產生程式）同樣不可改動
+[ "$(sha256sum frontend/src/alpha/production-xlsx.js | cut -d' ' -f1)" = "256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59" ] \
+  || { echo "  frontend/src/alpha/production-xlsx.js 與 Alpha 的 public/production-xlsx.js 不同，請勿手動修改" >&2; exit 1; }
+
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/backend/qa/alpha_js:/alpha:ro" -v "$PWD/backend/qa/calc:/calc:ro" -v "$WORK:/data" node:22-alpine sh -c '
     mkdir -p /tmp/w/node_modules && cp -r /alpha/lib /tmp/w/lib && cp /alpha/excerpts/*.js /tmp/w/lib/ && cp /calc/harness.mjs /tmp/w/ &&
