@@ -3,6 +3,7 @@ from django.urls import include, path
 
 from personnel.account_views import CreateAccountView, DisableAccountView, EnableAccountView, ResetPasswordView
 from cases.accounting_views import AccountingView
+from cases.claims_views import ClaimsView
 from cases.document_views import CaseDocumentsView
 from cases.recycle_views import DraftRecycleBinView
 from cases.views import CasesView
@@ -29,6 +30,7 @@ urlpatterns = [
     path("api/case-announce", AnnounceView.as_view(), name="case-announce"),
     path("api/case-workflow", WorkflowView.as_view(), name="case-workflow"),
     path("api/accounting", AccountingView.as_view(), name="accounting"),
+    path("api/claims", ClaimsView.as_view(), name="claims"),
     path("api/personnel", PersonnelView.as_view(), name="personnel"),
     path("api/personnel-options", PersonnelOptionsView.as_view(), name="personnel-options"),
     path("api/personnel-accounts", CreateAccountView.as_view(), name="personnel-account-create"),
