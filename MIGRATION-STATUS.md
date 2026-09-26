@@ -104,11 +104,12 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | Alpha 來源 | VM 作法 |
 |---|---|
 | 主檔 74、人員 23、匯率 7（含 `0020`、`0022`–`0025` 產生的資料） | 2026-09-25 以 `import_alpha_reference` 一次匯入，內容雜湊對帳一致；`backfill_audit_baseline` 補上 snapshot 與 Audit 事件。不含 email、不含任何帳號 |
+| 切換時的全部業務資料（案件、文件、回收桶、Production、目標、流水號；主檔／人員／匯率對到或新增） | `import_alpha_cutover`（`backend/conversion/`，含 `0018` 的轉換批次表）。**已用合成資料演練通過**（`qa/conversion/rehearse.sh`，見下方「切換（資料轉換）」）；從 Alpha 匯出真實資料與檔案的方法尚未決定 |
+| `ri_payment_alerts`、`ri_signed_slip_alerts`（提醒信紀錄） | VM 還沒有這兩張表：切換時原始內容存在轉換批次的 item（status = excluded），提醒信移植後再依批次的案件對照匯入 |
 | `0026` 暫停 Audit 的 trigger、`0027`、`0028` | **不移植**（VM 不暫停 Audit；0027／0028 是 Alpha 內部資料修正） |
 
 ## 尚未開始
 
-`0018`（資料轉換控制表，隨資料轉換一起做）、
 `api/payment-reminders.js`（#9，含 `0029`–`0031`）、`api/signed-slip-reminders.js`（#10，含 `0017`；它用的 `lib/signed-slip-reminders.js` 已完成）、
 `api/render-document-pdf.js`（#19、#21）、`api/data-reconciliation.js`、`api/foundation-status.js`、前端其餘部分：產生 Word／PDF（`docx-generator.js`、`docx-templates.js`、`pdf-generator.js`、`pdf-assets.js`）。Alpha 前端原檔的逐位元組副本在 `frontend/alpha-reference/`。
 
@@ -203,10 +204,41 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 備份案件文件（volume） | `docker exec ri-backend tar czf - -C /data/documents . > backups/case-documents-$(date +%Y%m%d-%H%M%S).tar.gz && chmod 600 backups/case-documents-*.tar.gz`（與 MySQL 備份同時做，兩者才對得起來） |
 | 畫面測試（無頭 Chromium） | `scripts/run_ui_test.sh`：另起用完即丟的測試環境（獨立資料庫、合成資料、隨機密鑰），跑完整套刪除；截圖在 `qa/ui/out/`（不進版控）。正式資料庫完全不動 |
 | 前端與後端的案件合計一致 | `scripts/run_qa.sh totals`（`all` 也會跑） |
+| 切換轉換演練（合成資料、兩套用完即丟的環境） | `qa/conversion/rehearse.sh`（`KEEP=1` 保留工作目錄；`REUSE_WORK=<目錄>` 重用上次環境 A 的匯出，只跑 B） |
 | 唯讀資料檢視 | 瀏覽器開 `/admin/`（System Administrator；主畫面上方有「資料檢視（唯讀）」連結）。要新增資料表或 model 時，在該 app 的 `admin.py` 用 `ReadOnlyModelAdmin` 註冊，其他寫法會被忽略 |
 | 備份 | `docker exec ri-mysql sh -c 'mysqldump -uroot -p"$(cat /run/secrets/mysql_root_password)" --single-transaction --routines --triggers ri_system' > backups/…sql`（`backups/` 不進版控） |
 
 **新增資料表後一定要跑 `scripts/migrate.sh`**：`ri_runtime` 對新表沒有任何權限，直接跑 `manage.py migrate` 會讓網站對新表失敗。
+
+## 切換（資料轉換）
+
+2026-09-26 的決定：**重新編號**（Alpha 的數字 ID 依對照表全部換成 VM 的 ID）；主檔／人員／匯率用名稱對到 VM 現有資料，
+**內容有差異就整批停止並列出差異**；案件等業務表 VM 端**必須是空的**；**登入帳號切換後重新建立**；**Audit／Snapshot 歷史不搬**，
+從轉換事件開始（每筆匯入的資料在 VM 寫一份 Snapshot 與一筆 `import_alpha_record` Audit，`source = data_migration`）。
+
+- 需要重新對應的所有位置列在 `backend/conversion/remap.py` 開頭（案件 ID、人員 ID、主檔 ID、`personnel:<id>` 操作者；payload 裡的
+  `ownerPersonnelId`、`splitParties[].personnelId`、`accountingNotifications[].accountingPersonnelId`、`confirmedProductionKeys`、
+  `paymentEntries[].createdBy`；Production 報表列與排除紀錄的 key；回收桶的案件快照）。數字的型別保持不變（文字的 "12" 還是文字）。
+  UUID（案件 `case_uid`、文件、報表 `report_uid`、排除紀錄）不變，文件的 `storage_key` 也不變。
+- Production 報表的 `source_signature` 含有列 ID，匯入後用新 ID 重算；Alpha 原本的簽章若與它自己的列不符，會記在批次 item 的 issue。
+- 預設 dry-run（整批做完、對帳後回滾，只留一筆 `dry_run` 批次摘要）；`--apply` 才提交；任何一項不符就整批回滾，已寫出的文件檔也刪除。
+- 對帳四項：各表筆數；**來回比對**（匯入的每一筆轉回 Alpha 的 ID 後與來源逐欄相同）；參照完整性；財務控制總數（各幣別原始保費、
+  交易筆數與金額、未結／已結筆數、文件總位元組、各狀態報表數）；**第五項：獨立完整性檢查**（`backend/conversion/integrity.py`）：
+  不用 `remap.py`，自己用 case_uid／姓名／主檔自然鍵重建對照，逐一檢查每個 ID 位置是否換成應有的 VM 值、引用是否存在
+  （含回收桶快照的 `id` 必須等於 `original_case_id`、排除紀錄的 key 開頭必須是它自己的案件）；`--apply` 時再檢查每份文件的
+  檔案本體在 VM 文件庫、大小與 SHA-256 相同。原因：來回比對正反都用 `remap.py`，漏換的位置正反都漏、會互相抵消
+  （2026-09-26 故意破壞測試發現排除紀錄 key、回收桶快照漏換都沒被抓到）。
+- 人員的 email 不匯入（沿用 9/25 第一次匯入的規則）；帳號欄位不匯入也不比對。
+
+**演練**（`qa/conversion/rehearse.sh`，約 5 分鐘；只用合成資料，不碰 Alpha、不碰 VM 正式資料庫）：一套測試環境扮演 Alpha，用 API 建出
+6 件案件（分績、付款與沖銷、理賠含負數付款、批單、分期、回收桶、Reverse 待沖銷、Production 排除延後＋關帳、下月 valid 報表、目標），
+擷取所有畫面 API 輸出後匯出成 Alpha 格式；另一套全新環境先把流水號推開（ID 一定不同），先驗證三種壞檔（主檔內容不同、文件被竄改、
+缺文件）都會被擋下、dry-run 不留資料，再正式匯入、確認第二次匯入被拒絕，最後擷取同樣的 API 輸出：**6 件案件與 8 個畫面的輸出逐項相同**；
+並在新環境關掉 A 留下的 valid 報表（成功，兩件案件正確變成 Confirmed）。
+
+切換當天的步驟（草案，細節待定）：1) 通知 Alpha 停止寫入；2) 從 Alpha 匯出（**方法待決定**：資料表與 Hatchable storage 的文件檔）；
+3) VM 備份 MySQL 與文件 volume；4) 清空 VM 測試資料（見下，先問你）；5) `import_alpha_cutover … --files …` dry-run，看報告；
+6) `--apply`；7) 抽查畫面；8) 重新建立登入帳號。
 
 ## 切換前的待辦
 

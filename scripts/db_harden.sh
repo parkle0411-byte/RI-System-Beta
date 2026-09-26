@@ -7,7 +7,7 @@
 #     - ri_audit_log、ri_entity_snapshots：只有 SELECT、INSERT（Audit 只能新增，至少保存二十年）
 #     - django_migrations、django_content_type、auth_permission：只讀
 #     - django_session、ri_case_documents：可 DELETE
-#     - ri_production_exclusions：只有 SELECT、INSERT（Production 的排除紀錄只新增，不修改也不刪除）
+#     - ri_production_exclusions、ri_data_migration_items：只有 SELECT、INSERT（排除紀錄、轉換對照只新增，不修改也不刪除）
 #     - 其餘所有資料表：SELECT、INSERT、UPDATE，沒有 DELETE
 #       （對應「案件與已被引用的主檔永不實體刪除，只能停用／封存」）
 #     - 沒有 DDL、沒有 TRIGGER、沒有 DROP／TRUNCATE
@@ -32,7 +32,7 @@ TABLES=$(echo "SELECT table_name FROM information_schema.tables WHERE table_sche
 APPEND_ONLY="ri_audit_log ri_entity_snapshots"
 READ_ONLY="django_migrations django_content_type auth_permission"
 CAN_DELETE="django_session ri_case_documents"
-INSERT_ONLY="ri_production_exclusions"
+INSERT_ONLY="ri_production_exclusions ri_data_migration_items"
 in_list() { [[ " $2 " == *" $1 "* ]]; }
 
 {
