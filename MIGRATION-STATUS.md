@@ -6,13 +6,23 @@
 
 ## 固定技術規格（VM）
 
-| 層 | 規格 | 鎖定方式 |
-|---|---|---|
-| 前端 | Vue 3.5.43 ＋ Element Plus 2.14.6 ＋ Vite 7（7.3.6），元件（SFC）加正式建置；JSZip 3.10.1（Production Report 的 Excel，與 Alpha 同版，2026-09-26 加入） | `frontend/package.json` 精確版本 ＋ `package-lock.json`，Dockerfile 用 `npm ci` |
-| 後端／管理 | Django 5.2.17 ＋ DRF 3.16.1 ＋ Gunicorn 23.0.0 ＋ mysqlclient 2.3.0 | `backend/requirements.txt` 精確版本 |
-| Web／反向代理 | Nginx 1.28（目前 1.28.3） | `nginx:1.28-alpine` |
-| 產生 PDF | Gotenberg 8.37.0（Chromium 152；字型 Liberation Sans 與 Noto Sans CJK，映像內建），2026-09-26 加入 | `compose.yaml` 固定標籤＋摘要（`sha256:f29984bd…`）；只在內部網路 `pdf`，沒有對外埠、連不到 MySQL 與網際網路 |
-| 資料庫 | MySQL 8.4.11 | `compose.yaml` 固定在目前使用中映像的摘要（`8.4.11` 標籤在 9/21 被重新打包過，MySQL 版本相同、底層不同，所以固定摘要而不是標籤） |
+| Layer | Stack |
+|---|---|
+| Frontend | Vue 3.5.43 + Element Plus 2.14.6 + Vite 7.3.6（另有 Vue Router 4.6.4、JSZip 3.10.1） |
+| Backend/Admin Panel | Django 5.2.17 + DRF 3.16.1 + Gunicorn 23.0.0 + mysqlclient 2.3.0（Python 3.13） |
+| Web Server / Reverse Proxy | Nginx 1.28（1.28.3） |
+| DBMS | MySQL 8.4.11 |
+| PDF Service | Gotenberg 8.37.0（Chromium 152；字型 Liberation Sans、Noto Sans CJK） |
+| Host / Container Runtime | Debian GNU/Linux 13（trixie）+ Docker 29.8.1 + Docker Compose v5.5.1 |
+
+各元件的鎖定方式（2026-09-26 實際核對執行中的版本）：
+
+- **Frontend**：`frontend/package.json` 精確版本＋`package-lock.json`，Dockerfile 用 `npm ci` 在 `node:22-alpine` 建置。JSZip 是 Production Report 的 Excel 與 Word 產生用（與 Alpha 同版，2026-09-26 加入）。Alpha 的 Word／PDF 產生檔原樣放在 `frontend/public/alpha-documents/`，不經 Vite 打包。
+- **Backend/Admin Panel**：`backend/requirements.txt` 精確版本，基底映像 `python:3.13-slim-bookworm`。Admin Panel 是唯讀的 Django admin（`/admin/`，只有 System Administrator）。
+- **Web Server / Reverse Proxy**：`nginx:1.28-alpine`（與前端靜態檔同一個映像）。對外開 80 與 8080 埠：同事用 `http://ri-dev.tw-insure.com`，舊網址 `http://192.168.1.127:8080` 繼續可用。目前是 HTTP（HTTPS 暫緩）。
+- **DBMS**：`compose.yaml` 固定在目前使用中映像的摘要（`8.4.11` 標籤在 9/21 被重新打包過，MySQL 版本相同、底層不同，所以固定摘要而不是標籤）。網站以最小權限的 `ri_runtime` 連線。
+- **PDF Service**：`compose.yaml` 固定標籤＋摘要（`gotenberg/gotenberg:8.37.0@sha256:f29984bd…`）；只在內部網路 `pdf`，沒有對外埠、連不到 MySQL 與網際網路，關閉 JavaScript。
+- **Host / Container Runtime**：主機時區 Asia/Taipei（提醒排程的 cron 依賴它，`scripts/install_reminder_cron.sh` 會檢查）。
 
 前端因此**不沿用 Alpha 的無建置（UMD）前端**，畫面以 Vue 元件重寫；API 格式維持與 Alpha 一致，方便對照。
 要升級任何一項，必須先更新這張表與鎖定檔，並重跑全部測試。
