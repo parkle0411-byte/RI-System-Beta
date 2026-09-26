@@ -5,6 +5,7 @@ Master Data API (masterdata) - 對應 Hatchable Alpha 的 api/master-data.js。
 TODO: 尚未實作 ri_entity_snapshots / ri_audit_log 寫入，
 之後要做成共用模組再補上（對應 Alpha 目前也暫停 audit log 寫入的狀態）。
 """
+import json
 import re
 
 from django.db import IntegrityError, transaction
@@ -31,10 +32,28 @@ def normalize_clause_code(value):
     return re.sub(r"\s+", "_", text)
 
 
+_MISSING = object()
+
+
+def _reject_constant(name):
+    raise ValueError(name)  # JSON.parse 不接受 NaN / Infinity
+
+
 def validate_payload(entity_type, supplied, fallback=None):
+    """
+    對應 Alpha 的 masterPayload()：
+      - 沒有送 payload（_MISSING）→ 沿用 fallback
+      - 送字串 → 先 JSON.parse（Alpha 的畫面就是送 JSON 字串）
+      - 其他不是物件的值（含 null、陣列）→ 錯誤
+    """
     fallback = fallback if isinstance(fallback, dict) else {}
-    if supplied is None:
+    if supplied is _MISSING:
         return fallback, None
+    if isinstance(supplied, str):
+        try:
+            supplied = json.loads(supplied, parse_constant=_reject_constant)
+        except ValueError:
+            return None, "Master-data payload must be an object."
     if not isinstance(supplied, dict):
         return None, "Master-data payload must be an object."
 
@@ -194,7 +213,7 @@ class MasterDataView(NoStoreMixin, APIView):
                 status=400,
             )
 
-        payload, err = validate_payload(entity_type, body.get("payload"), {})
+        payload, err = validate_payload(entity_type, body.get("payload", _MISSING), {})
         if err:
             return Response({"error": "invalid_fixed_clauses", "message": err}, status=400)
 
@@ -306,7 +325,7 @@ class MasterDataView(NoStoreMixin, APIView):
 
             payload, err = validate_payload(
                 entity_type,
-                body.get("payload") if "payload" in body else None,
+                body.get("payload", _MISSING),
                 current.payload or {},
             )
             if err:
