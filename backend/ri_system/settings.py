@@ -20,7 +20,7 @@ ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(
         "DJANGO_ALLOWED_HOSTS",
-        "127.0.0.1,localhost,192.168.1.127",
+        "127.0.0.1,localhost,192.168.1.127,ri-dev.tw-insure.com,ri-dev",
     ).split(",")
     if host.strip()
 ]
@@ -33,7 +33,7 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
 # 決定 SMTP 後設定 RI_EMAIL_*，再把 RI_REMINDER_EMAIL_ENABLED 設為 true。文件 API 的 signedSlipReminder.outboundEnabled 也據此如實回報。
 REMINDER_EMAIL_ENABLED = os.getenv("RI_REMINDER_EMAIL_ENABLED", os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false")).lower() == "true"
 SIGNED_SLIP_OUTBOUND_ENABLED = REMINDER_EMAIL_ENABLED
-REMINDER_LINK_URL = os.getenv("RI_REMINDER_LINK_URL", "http://192.168.1.127:8080")
+REMINDER_LINK_URL = os.getenv("RI_REMINDER_LINK_URL", "http://ri-dev.tw-insure.com")
 REMINDER_LINK_TEXT = os.getenv("RI_REMINDER_LINK_TEXT", "開啟 Reinsurance Department System")
 REMINDER_MESSAGE_ID_DOMAIN = os.getenv("RI_REMINDER_MESSAGE_ID_DOMAIN", "ri-dev.tw-insure.com")
 EMAIL_BACKEND = os.getenv("RI_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")

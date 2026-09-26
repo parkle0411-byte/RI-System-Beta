@@ -46,7 +46,11 @@ services:
 
     environment:
       DJANGO_DEBUG: "false"
-      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,192.168.1.127"
+      # 同事用 http://ri-dev.tw-insure.com（公司 DNS 已指向 192.168.1.127）；短名 ri-dev 靠 DNS 搜尋網域也能連
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost,192.168.1.127,ri-dev.tw-insure.com,ri-dev"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "http://ri-dev.tw-insure.com,http://ri-dev,http://192.168.1.127,http://192.168.1.127:8080,http://localhost:8080,http://127.0.0.1:8080"
+      # 提醒信裡「開啟 Reinsurance Department System」的連結
+      RI_REMINDER_LINK_URL: "http://ri-dev.tw-insure.com"
       DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
       AUDIT_LOG_ENABLED: "true"
       MYSQL_HOST: mysql
@@ -120,7 +124,8 @@ services:
       TZ: Asia/Taipei
 
     ports:
-      - "8080:80"
+      - "80:80"      # http://ri-dev.tw-insure.com（不用打連接埠）
+      - "8080:80"    # 舊網址 http://192.168.1.127:8080 繼續可用
 
     networks:
       - edge

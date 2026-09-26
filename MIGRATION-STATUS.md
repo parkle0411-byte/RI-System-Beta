@@ -149,7 +149,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 提醒排程 | Hatchable scheduler（UTC 01:00／01:30），每次最多 10 件，一分鐘後接著跑 | 主機 cron 台北 09:00／09:30（`scripts/install_reminder_cron.sh`），一次處理完，`moreWork` 一律 false；結果附加到 `logs/reminders.log` | Hatchable 的限制在 VM 不存在 |
 | 提醒紀錄的內容 | 只存收件人與狀態 | 另存產生當下的信件主旨與內文（`subject`、`body_html`、`body_text`） | 2026-09-26 你的決定：案件明細預覽「當天會寄出的原文」 |
 | 查看提醒紀錄 | 沒有畫面（只有資料表與 Audit） | 案件明細新增「Reminders」分頁（`GET /api/case-reminders`，看得到案件的人就能看）：兩種提醒的紀錄、設定錯誤（來自 Audit）、信件預覽（沙箱 iframe）；兩張表也加進唯讀的 `/admin/` | 2026-09-26 你的決定：放在案件明細 |
-| 提醒信的連結 | 「開啟 RI System (Alpha)」→ ri-system-alpha.hatchable.site | 「開啟 Reinsurance Department System」→ `RI_REMINDER_LINK_URL`（預設 `http://192.168.1.127:8080`） | 2026-09-26 你的決定；其餘主旨與內文逐字同 Alpha |
+| 提醒信的連結 | 「開啟 RI System (Alpha)」→ ri-system-alpha.hatchable.site | 「開啟 Reinsurance Department System」→ `RI_REMINDER_LINK_URL`（`http://ri-dev.tw-insure.com`） | 2026-09-26 你的決定；其餘主旨與內文逐字同 Alpha |
 | Signed Slip 提醒裡缺文件的再保人名稱 | 顯示比對用的鍵值（去空白、全小寫，例如「ui re beta (facility)」） | 信件、提醒紀錄與 Reminders 分頁顯示案件上的原始名稱（「UI Re Beta (Facility)」）；判斷哪幾家缺文件的邏輯不變 | 2026-09-26 你的決定（疑似 Alpha 的小問題）；**建議 Alpha 也修** |
 | 提醒紀錄的 status 約束 | `ri_payment_alerts.status` 沒有 CHECK | 兩張表都有 CHECK（pending／sent／simulated／suppressed／failed） | |
 | 下載時檔案本體不見 | 未處理的錯誤 | 404 `file_content_missing`（並寫入錯誤日誌） | 不應該發生；發生時要能看出是資料遺失 |
@@ -216,6 +216,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 畫面測試（無頭 Chromium） | `scripts/run_ui_test.sh`：另起用完即丟的測試環境（獨立資料庫、合成資料、隨機密鑰），跑完整套刪除；截圖在 `qa/ui/out/`（不進版控）。正式資料庫完全不動 |
 | 前端與後端的案件合計一致 | `scripts/run_qa.sh totals`（`all` 也會跑） |
 | 切換轉換演練（合成資料、兩套用完即丟的環境） | `qa/conversion/rehearse.sh`（`KEEP=1` 保留工作目錄；`REUSE_WORK=<目錄>` 重用上次環境 A 的匯出，只跑 B） |
+| 網址 | 同事使用 **http://ri-dev.tw-insure.com**（公司 DNS 已把這個名稱指向 192.168.1.127；短名 `http://ri-dev` 也可以）；舊網址 `http://192.168.1.127:8080` 繼續可用。Nginx 同時開 80 與 8080 埠；Django 允許的主機名稱在 `compose.yaml` 的 `DJANGO_ALLOWED_HOSTS`。**目前是 HTTP，密碼與資料以明文在區網傳送**（HTTPS 暫緩，見切換前的待辦） |
 | 提醒排程 | 安裝／更新：`scripts/install_reminder_cron.sh`（`--remove` 移除）；手動執行：`docker exec ri-backend python manage.py run_signed_slip_reminders`（或 `run_payment_reminders`，可加 `--today YYYY-MM-DD` 測試）；結果在 `logs/reminders.log`（不進版控）。**收件人靠人員的 e-mail 與主管 e-mail**：缺了就只記「設定錯誤」（案件明細的 Reminders 分頁看得到） |
 | PDF 服務 | `docker compose up -d pdf`；健康檢查 `docker exec ri-backend python -c "import urllib.request;print(urllib.request.urlopen('http://pdf:3000/health').status)"`。沒有資料、不用備份；產生失敗時看 `docker logs ri-pdf` |
 | 唯讀資料檢視 | 瀏覽器開 `/admin/`（System Administrator；主畫面上方有「資料檢視（唯讀）」連結）。要新增資料表或 model 時，在該 app 的 `admin.py` 用 `ReadOnlyModelAdmin` 註冊，其他寫法會被忽略 |
