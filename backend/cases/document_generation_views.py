@@ -111,10 +111,12 @@ def render_pdf(document_html):
     """
     Alpha：browser.pdf(url, { format: "A4", printBackground: true })。
     Gotenberg 的紙張以英吋計：A4 = 8.27 × 11.7；邊界預設 0.39 英吋，要明確設成 0（版面本身就是 794×1123 px 的絕對定位）。
+    generateTaggedPdf：Hatchable 的 browser.pdf 會產生加標籤（無障礙結構）的 PDF，VM 也加上；以同一份版面實測，第 1–4 頁的內容串流
+    與 Alpha 逐位元組相同（2026-09-26）。
     """
     body, content_type = _multipart(
         {"paperWidth": "8.27", "paperHeight": "11.7", "marginTop": "0", "marginBottom": "0", "marginLeft": "0",
-         "marginRight": "0", "printBackground": "true", "preferCssPageSize": "false"},
+         "marginRight": "0", "printBackground": "true", "preferCssPageSize": "false", "generateTaggedPdf": "true"},
         {"files": ("index.html", document_html.encode("utf-8"), "text/html; charset=utf-8")})
     req = urllib.request.Request(f"{settings.PDF_RENDERER_URL.rstrip('/')}/forms/chromium/convert/html", data=body,
                                  method="POST", headers={"Content-Type": content_type})

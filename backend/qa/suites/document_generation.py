@@ -118,6 +118,7 @@ try:
         check("cover PDF for a Draft -> 200 application/pdf", r.status_code == 200 and r["Content-Type"] == "application/pdf", (r.status_code, data[:200]))
         check("response is a real PDF with 2 A4 pages", data.startswith(b"%PDF-") and pages(data) == 2 and b"MediaBox [0 0 595.91998 842.88]" in data, (data[:8], pages(data)))
         check("Cache-Control no-store", "no-store" in r.get("Cache-Control", ""))
+        check("tagged PDF (accessibility structure) like Alpha's browser.pdf", b"/StructTreeRoot" in data and b"/Marked true" in data)
         a = gen_audit(draft.case_uid).order_by("-id").first()
         check("audit generate_document (pdf, cover) with the actor", gen_audit(draft.case_uid).count() == before + 1 and a.metadata == {"kind": "cover", "format": "pdf"}
               and a.actor_id == f"personnel:{sales_p.pk}" and a.after_data["format"] == "pdf" and "markup" not in json.dumps(a.after_data), a and (a.metadata, a.after_data))
