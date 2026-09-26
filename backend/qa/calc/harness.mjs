@@ -8,6 +8,8 @@ import * as apiExcerpts from './lib/api-excerpts.js'
 import * as signedSlip from './lib/signed-slip-reminders.js'
 import * as documentsExcerpts from './lib/case-documents-excerpts.js'
 import * as accountingExcerpts from './lib/accounting-excerpts.js'
+import * as production from './lib/production-report.js'
+import * as productionExcerpts from './lib/production-excerpts.js'
 
 const fns = {
   stripFacilityTag: accounting.stripFacilityTag,
@@ -27,6 +29,10 @@ const fns = {
   ...apiExcerpts,
   ...documentsExcerpts,
   ...accountingExcerpts,
+  buildProductionPreview: production.buildProductionPreview,
+  productionKeysForCase: production.productionKeysForCase,
+  nextProductionMonth: production.nextProductionMonth,
+  ...productionExcerpts,
   // lib/signed-slip-reminders.js（名稱加 slip 前綴，避免與 Announce 的同名函式衝突）
   slipReinsurerKey: signedSlip.reinsurerKey,
   slipRequiredReinsurers: signedSlip.requiredReinsurers,

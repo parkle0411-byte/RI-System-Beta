@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "masterdata",
     "personnel",
     "cases",
+    "production",
     "audit",
 ]
 

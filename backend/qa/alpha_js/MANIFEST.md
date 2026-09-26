@@ -9,6 +9,7 @@
 | `lib/payment-terms.js` | 248 | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` |
 | `lib/case-draft.js` | 385 | `42983151fe3b0ec514abbcad750357ef71d2e2dd7086a9a4d009cd8d54bdd338` |
 | `lib/signed-slip-reminders.js` | 95 | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` |
+| `lib/production-report.js` | 211 | `4474c028d35fa1cb474a1188020eb7619e3df678b7e933e27ce2f9fcba48c3ba` |
 
 ## 節錄（`excerpts/api-excerpts.js`）
 
@@ -39,6 +40,16 @@
 | 檔案 | SHA-256 |
 |---|---|
 | `excerpts/accounting-excerpts.js` | `46509d7f4cbfe6144d184b36a289a38fd53e7d30598a8f4589ba4d9cd9b36a77` |
+
+### `excerpts/production-excerpts.js`
+
+由程式從 `api/production-report.js`（355 行，雜湊 `669afb28d56692b9fbd0a842aa5f2a818eb9ffb5a2baa0915a4ed9ab0fd8271a`，先確認整檔雜湊相同）
+原樣切出 closeReport() 的第 241–288 行（整理一個案件：確認 key、沖銷分錄、保費交易），外面加上測試用的外殼函式 `productionConfirmCase`
+（外殼的宣告、`closedCases` 的初值與 `return` 是測試加的），前面加 import。
+
+| 檔案 | SHA-256 |
+|---|---|
+| `excerpts/production-excerpts.js` | `ecfaed1cd3835b6537ad3b399bf8fab1a5b2c661cd52c7e1dbbb40640cd05640` |
 
 ## Alpha 改了這些檔案時
 

@@ -259,6 +259,8 @@ def build(count_each=1200):
     vectors.extend(draft_vectors.build(max(count_each // 2, 1)))
     from . import accounting_vectors
     vectors.extend(accounting_vectors.build(max(count_each // 2, 1)))
+    from . import production_vectors
+    vectors.extend(production_vectors.build(max(count_each // 2, 1)))
     return vectors
 
 
