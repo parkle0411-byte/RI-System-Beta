@@ -73,9 +73,10 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/case-workflow.js` | `a74a399b9c8536151ad14ced2b4f29590fef7d8f2431582a388e873f134756cb` | `backend/cases/workflow_views.py`（`WorkflowView`）、`cases/workflow.py` | 完成（狀態、Endorsement、Renewal、Reverse、通知會計）。資料整理邏輯與 Alpha JS 差異測試逐位一致 |
 | `api/case-documents.js` | `0db7421c95f10b83650cc3a006d96cd6a6747d77327c2219cee295e3b006ef77` | `backend/cases/document_views.py`（`CaseDocumentsView`）、`cases/documents.py`、`cases/storage.py` | 完成（上傳、列表、下載、勾選、刪除；含 #11、Audit）。純函式與 Alpha JS 逐位一致；測試組 `case_documents` 73 項 |
 | `lib/signed-slip-reminders.js` | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` | `backend/cases/calc/signed_slip.py` | 函式全部移植並與 Alpha JS 逐位一致（目前只有文件 API 用到 `signedSlipTracking`；寄信提醒 #10 尚未開始） |
+| `api/accounting.js` | `ddd2cc0a643038a40de352e4d946d22c4d639aa1210cb0dd207ee3a16b16984a` | `backend/cases/accounting_views.py`（`AccountingView`）、`cases/ledger.py`（`ledger_rows`） | 完成（帳本、記付款、沖銷；含 Snapshot／Audit）。帳本 `ledgerRows` 與 Alpha JS 差異測試逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `accounting_api` 77 項；19 種故意破壞全部抓到（其中 3 種帳本的破壞由差異測試抓到） |
 | `api/draft-recycle-bin.js` | `0de8068d01da61ab036add0599639ed2f68bb9fa9057dd25f75db7673e9a7df8` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
 | `migrations/0005_create_draft_recycle_bin.sql`、`0019_lock_draft_recycle_policy.sql`、`0032_add_draft_recycle_bin_case_fk.sql` | `97cfe172…` / `eb607919…` / `b9bdfb0d…` | `cases/models.py`（`DraftRecycleBin`）、`cases/migrations/0003` | 完成（CHECK 禁止永久刪除、外鍵、索引；`ri_runtime` 沒有 DELETE） |
-| `public/index.html`（外框、Account List、案件明細、新增／編輯表單、回收桶、MDM、Personnel、FX、Audit） | `72de4a046c42d0dc6acc3eae3773975f8bfea8aa675e639fc50c29efe8383e00` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（Dashboard、Production、Accounting、Claims、產生文件、Target settings 尚未移植，顯示 Alpha 的「Queued for migration」或「later milestone」卡片） |
+| `public/index.html`（外框、Account List、案件明細、新增／編輯表單、回收桶、MDM、Personnel、FX、Audit、Accounting） | `72de4a046c42d0dc6acc3eae3773975f8bfea8aa675e639fc50c29efe8383e00` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（Dashboard、Production、Claims、產生文件、Target settings 尚未移植，顯示 Alpha 的「Queued for migration」或「later milestone」卡片） |
 | `public/app.js`（上述畫面的邏輯） | `a2427dcb41711e94ddacee421a93b560075f414891a72b033ffaa858e2190427` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
 | `public/theme.css`、`public/overview.css`、`public/development-alignment.css` | `af2b57f0…` / `bceafbf2…` / `2da6fba1…` | `frontend/src/alpha/styles/`（原樣，載入順序同 Alpha） | 完成 |
 | `migrations/0008_create_case_documents.sql` | `bd0d2ee6e9fc68b2d75fc2093d1886654448743bf2ead2d2a693e742798b8fc1` | `cases/models.py`、`cases/migrations/0002` | 完成（上限改為 10 MB，見下） |
@@ -99,9 +100,9 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 尚未開始
 
-`api/accounting.js`（API 本身；它用的 `lib/accounting.js` 已完成）、`api/production-report.js`＋`lib/production-report.js`（#16，含 `0016`）、`api/claims.js`、`api/dashboard*.js`（含 `0018`）、
+`api/production-report.js`＋`lib/production-report.js`（#16，含 `0016`）、`api/claims.js`、`api/dashboard*.js`（含 `0018`）、
 `api/payment-reminders.js`（#9，含 `0029`–`0031`）、`api/signed-slip-reminders.js`（#10，含 `0017`；它用的 `lib/signed-slip-reminders.js` 已完成）、
-`api/render-document-pdf.js`（#19、#21）、`api/data-reconciliation.js`、`api/foundation-status.js`、前端其餘部分：Dashboard、Production、Accounting、Claims 畫面，產生 Word／PDF（`docx-generator.js`、`docx-templates.js`、`pdf-generator.js`、`pdf-assets.js`、`production-xlsx.js`）。Alpha 前端原檔的逐位元組副本在 `frontend/alpha-reference/`。
+`api/render-document-pdf.js`（#19、#21）、`api/data-reconciliation.js`、`api/foundation-status.js`、前端其餘部分：Dashboard、Production、Claims 畫面，產生 Word／PDF（`docx-generator.js`、`docx-templates.js`、`pdf-generator.js`、`pdf-assets.js`、`production-xlsx.js`）。Alpha 前端原檔的逐位元組副本在 `frontend/alpha-reference/`。
 
 不需要移植：`hatchable.toml`、`public/vendor/*`（前端改用 npm 套件，見「固定技術規格」）、`AGENTS.md`、`README.md`。
 
@@ -138,6 +139,15 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 下載時檔案本體不見 | 未處理的錯誤 | 404 `file_content_missing`（並寫入錯誤日誌） | 不應該發生；發生時要能看出是資料遺失 |
 | 檔名含落單的 UTF-16 代理字元（例如 JSON 裡的 `\ud83d`） | Node 寫進 PostgreSQL 時換成 U+FFFD | 同樣換成 U+FFFD 再存（MySQL 不接受落單代理字元） | 結果與 Alpha 相同 |
 | 文件 API 的 fileId 是 36 個「-」這類「格式對但不是 UUID」 | PostgreSQL 轉型失敗（未處理的錯誤） | 404 `file_not_found` | |
+| 記帳帳本讀取的案件數 | 最多 1000 件（`LIMIT 1000`），其餘直接不顯示、沒有警告 | 全部讀取 | 2026-09-26 你的決定 |
+| 記付款、沖銷的案件狀態 | API 不檢查狀態（Draft 也能記；畫面只列 Announced／Confirmed） | 只接受 Announced（posted）／Confirmed（closed），其他回 409 `accounting_status_locked` | 2026-09-26 你的決定 |
+| 付款日期 | 記付款只檢查 `YYYY-MM-DD` 的形狀（`2026-13-45` 會通過）；沖銷完全不檢查；預設日期用 UTC 的今天（台灣早上 8 點前是前一天） | 兩者都必須是真實存在的日期（記付款 400 `invalid_payment`、沖銷 400 `invalid_payment_date`）；沖銷沒給日期時與畫面預設都用台北的今天 | 2026-09-26 你的決定；到期日與逾期本來就用台北日期 |
+| 記付款、沖銷的 Snapshot | 只寫 Audit | 補寫 Snapshot（`payment_recorded`、`payment_reversed`） | 延續 2026-09-25「row_version 增加就寫 Snapshot」的決定 |
+| 記付款、沖銷的並行控制 | 先比對版本，再以 UPDATE ＋「除以零」事後檢查 | 先鎖案件列，檢查與寫入在同一個鎖內 | 行為相同（版本不符回 409 `version_conflict`） |
+| 帳本遇到 `paymentEntries` 裡有 `null` | 整個帳本拋錯（`entry.scheduleKey`） | 略過非物件的項目 | 正常流程不會寫出 null；不讓一筆壞資料擋住整個帳本 |
+| Accounting 表格的「Partial payment」字樣 | `<br v-if="row.partial"><small>Partial payment</small>`：`v-if` 只套到換行，**每一列都顯示** | 只在真的部分付款時顯示 | 2026-09-26 你的決定（畫面測試發現）；**建議 Alpha 也修** |
+| Accounting 點 TW Ref 開啟案件 | 同一頁切換到案件的 SOA 分頁 | 導向 `/cases?case=…&tab=soa`，載入後開 SOA 分頁 | VM 每個畫面是一個路由 |
+| Accounting 的 `settle` 動作（標記理賠交易已結清） | 前端有 `settleSelectedTransactions()`，但 API 不支援、畫面也沒有入口 | 不移植 | 無法執行的死碼 |
 | 文件頁與 Announce 的再保人名稱比對 | 文件頁（與 Signed Slip 提醒）**不**去掉「(Facility)」，Announce 會去掉 | 同 Alpha（照搬） | 兩處規則不同但實務上一致：上傳時只能選案件上的原名。只有同一案件同時有「X」與「X (Facility)」時兩邊的「需要幾家」才會不同。**建議 Alpha 統一** |
 | 丟進回收桶、還原的 Snapshot | 只寫 Audit（`row_version` 加 1 卻沒有 Snapshot） | 補寫 Snapshot（`draft_recycled`、`draft_restored`） | 比照 2026-09-25 你對 Reverse／通知會計的決定（每個版本都要有 Snapshot）；建議 Alpha 也補 |
 | 回收桶的並行控制 | 事後「除以零」檢查 | 先鎖案件列（還原時也鎖回收桶那一列），檢查與寫入在同一個鎖內 | MySQL 沒有對應寫法；結果相同 |

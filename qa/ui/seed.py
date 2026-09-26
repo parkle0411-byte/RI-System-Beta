@@ -23,7 +23,7 @@ person("UI Admin", "admin", "admin", "ui.admin")
 sales = person("UI Sales", "reinsurance", "sales", "ui.sales")
 person("UI Partner", "reinsurance", "sales")
 person("UI Viewer", "business_1", "viewer", "ui.viewer")
-person("UI Finance", "finance", "accounting")
+person("UI Finance", "finance", "accounting", "ui.finance")
 person("UI Newcomer", "business_2", "viewer", "ui.newcomer", must_change=True)
 
 

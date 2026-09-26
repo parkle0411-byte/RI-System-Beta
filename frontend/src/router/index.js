@@ -10,6 +10,7 @@ import FxRates from '../views/FxRates.vue'
 import MasterData from '../views/MasterData.vue'
 import Personnel from '../views/Personnel.vue'
 import AuditLog from '../views/AuditLog.vue'
+import Accounting from '../views/Accounting.vue'
 import PendingView from '../views/PendingView.vue'
 import SystemStatus from '../views/SystemStatus.vue'
 
@@ -44,7 +45,7 @@ export function navAllowed(item) {
   return item.permission ? can(item.permission) : (item.anyPermission || []).some(can)
 }
 
-const component = { cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog }
+const component = { cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting }
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
   { path: '/', name: 'home', redirect: () => (allNavigation.find(navAllowed) || { path: '/system-status' }).path },

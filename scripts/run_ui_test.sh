@@ -37,4 +37,5 @@ run_phase A || STATUS=1
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
 run_phase B || STATUS=1
 run_phase C || STATUS=1
+run_phase D || STATUS=1
 exit $STATUS

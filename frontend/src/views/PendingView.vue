@@ -5,8 +5,7 @@ import { useRoute } from 'vue-router'
 import { shell } from '../alpha/shell'
 
 const pendingCopy = {
-  production: 'Production Report rules will be migrated after the case and endorsement data contracts are stable.',
-  accounting: 'Confirmed cases generate Development-compatible transaction cycles; settlement is controlled from the consolidated ledger.'
+  production: 'Production Report rules will be migrated after the case and endorsement data contracts are stable.'
 }
 const route = useRoute()
 const pendingDescription = computed(() => pendingCopy[route.name] || 'This screen is queued for migration.')

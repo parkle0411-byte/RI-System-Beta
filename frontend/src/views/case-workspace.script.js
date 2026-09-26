@@ -6,9 +6,11 @@
 //   - 金額合計用統一的逐步進位算法（src/alpha/caseCalculations.js）
 //   - startEditCase 允許 Reversed（Alpha 漏了，「Correct reversed case」按了沒反應）
 //   - 文件單檔上限 10 MB（Alpha 5 MB）
+//   - 從 Accounting 點 TW Ref 會帶 ?case=…&tab=soa 過來（Alpha 是同一頁切換）：載入後直接開該案件的 SOA 分頁
 //   - Claims、產生 Word／PDF 文件的後端尚未移植：Claim 分頁顯示 Alpha 自己的「later milestone」卡片；產生文件的按鈕停用
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '../api'
 import { can } from '../auth'
 import { RICaseCalculations } from '../alpha/caseCalculations'
@@ -1094,7 +1096,22 @@ export function useCaseWorkspace() {
     loadData()
   })
 
-  onMounted(loadData)
+  // Accounting 的「開啟案件」：/cases?case=<caseUid>&tab=soa（Alpha 的 openAccountingCase）
+  const route = useRoute()
+  const router = useRouter()
+  async function openFromQuery() {
+    const caseUid = typeof route.query.case === 'string' ? route.query.case : ''
+    if (!caseUid) return
+    const tab = route.query.tab === 'soa' ? 'soa' : ''
+    router.replace({ path: '/cases' })
+    await startViewCase({ caseUid })
+    if (tab && selectedCase.value?.caseUid === caseUid) caseDetailTab.value = tab
+  }
+
+  onMounted(async () => {
+    await loadData()
+    await openFromQuery()
+  })
 
   return {
     can, activeView, currentHeader, loading, saving, saveMessage,

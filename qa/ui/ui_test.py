@@ -4,6 +4,7 @@
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
+  python3 ui_test.py D   （案件此時是 Announced）Finance Staff：Accounting 帳本、記付款、沖銷；管理員：從帳本開啟案件的 SOA 分頁
 """
 import re
 import sys
@@ -123,7 +124,7 @@ def phase_a(page):
     check("sidebar shows Alpha's navigation for an admin", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "Audit Log"], labels)
     for label, marker in [("Account List", "All cases"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
-                          ("Production Report", "Queued for migration"), ("Accounting", "Queued for migration")]:
+                          ("Production Report", "Queued for migration"), ("Accounting", "Payment schedule (")]:
         nav(page, label)
         check(f"{label} page loads", page.get_by_text(marker).first.is_visible())
     logout(page)
@@ -443,6 +444,87 @@ def phase_c(page):
     logout(page)
 
 
+def acc_row(page, party):
+    return page.locator(".table-card .el-table__row").filter(has_text="TWPAR2603001").filter(has_text=party).first
+
+
+def phase_d(page):
+    login(page, "ui.finance")
+    labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
+    check("Finance Staff sees Production Report, Accounting, FX Rates", labels == ["Production Report", "Accounting", "FX Rates"], labels)
+    nav(page, "Accounting")
+    page.locator(".table-card .el-table__row").first.wait_for()
+    rows = page.locator(".table-card .el-table__row").filter(has_text="TWPAR2603001")
+    check("ledger lists the Announced case: Cedant + 2 Reinsurers", rows.count() == 3, rows.count())
+    ced = acc_row(page, "Cedant")
+    check("VM fix: no 'Partial payment' on rows with nothing paid (Alpha shows it on every row)", "Partial payment" not in rows.first.inner_text(), rows.first.inner_text())
+    check("cedant row: Record payment button, no case link for Finance", ced.get_by_role("button", name="Record payment").is_visible()
+          and ced.locator(".table-action").count() == 0, ced.inner_text())
+    snap(page, "accounting-ledger")
+
+    fill(page.locator(".table-card").first, page, "TW Ref", "nothing-matches")
+    page.wait_for_timeout(300)
+    check("TW Ref filter: no rows", page.get_by_text("No payment schedule rows match these filters.").is_visible())
+    fill(page.locator(".table-card").first, page, "TW Ref", "twpar2603")
+    page.wait_for_timeout(300)
+    pick(page.locator(".table-card").first, page, "Payment party", "Reinsurer")
+    check("Payment party = Reinsurer: 2 rows", page.locator(".table-card .el-table__row").filter(has_text="TWPAR2603001").count() == 2)
+    item(page.locator(".table-card").first, page, "Payment party").locator(".el-select__wrapper").first.hover()
+    item(page.locator(".table-card").first, page, "Payment party").locator(".el-select__clear").first.click()
+    page.wait_for_timeout(300)
+
+    outstanding_before = ced.locator("td").nth(6).inner_text()
+    ced.get_by_role("button", name="Record payment").click()
+    dlg = page.locator(".review-dialog").filter(has_text="Record partial payment")
+    dlg.wait_for()
+    today = page.evaluate("new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())")
+    shown = item(dlg, page, "Payment date").locator("input").first.input_value()
+    check("payment date defaults to today in Taipei (VM)", shown == today, (shown, today))
+    fill(dlg, page, "Amount", "100")
+    fill(dlg, page, "Note", "UI partial payment")
+    check("dialog shows the outstanding after this entry", "Outstanding after this entry" in dlg.inner_text())
+    snap(page, "accounting-payment")
+    dlg.get_by_role("button", name="Record payment").click()
+    check("payment recorded", message(page, "Payment recorded against the selected installment and party"))
+    page.wait_for_timeout(800)
+    ced = acc_row(page, "Cedant")
+    text = ced.inner_text()
+    check("cedant row: Paid 100.00, Partial payment", "100.00" in text and "Partial payment" in text and ced.locator("td").nth(6).inner_text() != outstanding_before, text)
+
+    ced.get_by_role("button", name="Record payment").click()
+    dlg = page.locator(".review-dialog").filter(has_text="Record partial payment")
+    dlg.wait_for()
+    hist = dlg.locator(".repeat-row")
+    check("payment history lists the payment with a Reverse button", hist.count() == 1 and "Payment" in hist.first.inner_text() and hist.first.get_by_role("button", name="Reverse").is_visible())
+    hist.first.get_by_role("button", name="Reverse").click()
+    confirm_box(page, "Create reversal")
+    check("reversal created", message(page, "Reversal entry created"))
+    page.wait_for_timeout(800)
+    ced = acc_row(page, "Cedant")
+    check("after reversal: no longer partial, outstanding back to the original", "Partial payment" not in ced.inner_text() and ced.locator("td").nth(6).inner_text() == outstanding_before,
+          (ced.inner_text(), outstanding_before))
+    ced.get_by_role("button", name="Record payment").click()
+    dlg = page.locator(".review-dialog").filter(has_text="Record partial payment")
+    dlg.wait_for()
+    hist = dlg.locator(".repeat-row")
+    check("history keeps the payment and the reversal; the reversed payment has no Reverse button", hist.count() == 2 and "Reversal" in hist.nth(1).inner_text()
+          and dlg.get_by_role("button", name="Reverse").count() == 0, dlg.inner_text()[:300])
+    snap(page, "accounting-history")
+    dlg.get_by_role("button", name="Cancel").click()
+    logout(page)
+
+    login(page, "ui.admin")
+    nav(page, "Accounting")
+    page.locator(".table-card .el-table__row").first.wait_for()
+    acc_row(page, "Cedant").locator(".table-action", has_text="TWPAR2603001").click()
+    page.locator(".case-detail-tabs").wait_for()
+    page.wait_for_timeout(800)
+    active = page.locator(".case-detail-tabs .el-tabs__item.is-active").inner_text().strip()
+    check("admin: TW Ref in the ledger opens the case on the SOA tab", page.url.endswith("/cases") and "SOA" in active, (page.url, active))
+    snap(page, "accounting-open-case")
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -450,7 +532,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "B": phase_b, "C": phase_c}[PHASE](page)
+        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

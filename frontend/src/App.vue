@@ -110,7 +110,7 @@ async function savePassword() {
           <el-button class="header-secondary-button" @click="doLogout">Log out</el-button>
         </div>
       </header>
-      <div class="data-version-strip"><strong>VM · V 0.003</strong> · Company VM (Django + MySQL) · Audit Log recording enabled<br><small>Case forms: use Save draft / Save changes / Review &amp; Confirm. Claims, SOA settlement, Accounting, Production Report, Dashboard and document generation are still being migrated.</small></div>
+      <div class="data-version-strip"><strong>VM · V 0.003</strong> · Company VM (Django + MySQL) · Audit Log recording enabled<br><small>Case forms: use Save draft / Save changes / Review &amp; Confirm. Claims, SOA settlement, Production Report, Dashboard and document generation are still being migrated.</small></div>
 
       <section class="content-area">
         <el-alert v-if="shell.error" title="Data could not be loaded" :description="shell.error" type="error" :closable="false" show-icon></el-alert>
