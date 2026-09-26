@@ -3,7 +3,7 @@
 // （loadPersonnel、openPersonnelDialog、onPersonnelDepartmentChange、onPersonnelRoleChange、onSupervisorSelected、
 //   savePersonnel、togglePersonnelStatus、accountStatusLabel、sortedPersonnelRecords）。
 // VM 專有（Alpha 的登入由 Hatchable 代管）：登入帳號的建立／重設密碼／停用／重新啟用、重新啟用在職、Email 鎖定規則。
-// Alpha 的「Annual target settings」頁籤需要 dashboard-targets API，VM 尚未移植，先顯示「Queued for migration」。
+// Alpha 的「Annual target settings」頁籤在 TargetSettings.vue。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, apiFetch } from '../api'
@@ -15,6 +15,7 @@ import {
 } from '../alpha/constants'
 import { departmentLabel, jsonOrThrow, reportWriteError, roleLabel } from '../alpha/format'
 import { shell } from '../alpha/shell'
+import TargetSettings from './TargetSettings.vue'
 
 const personnelDepartments = PERSONNEL_DEPARTMENTS
 const personnelRoles = PERSONNEL_ROLES
@@ -328,7 +329,7 @@ onMounted(loadPersonnel)
   </template>
 
   <template v-else>
-    <section class="pending-card"><span class="pending-badge">Queued for migration</span><h2>Annual brokerage target settings</h2><p>Annual and monthly TWD targets used by the Dashboard YTD Brokerage Trend chart will be migrated together with the Dashboard.</p><div class="pending-rule"></div><p class="pending-note">This tab remains stable while each legacy screen is migrated and verified one at a time.</p></section>
+    <TargetSettings />
   </template>
 
   <el-dialog v-model="personnelDialogVisible" class="master-dialog" width="min(760px, 94vw)" :close-on-click-modal="false">

@@ -47,4 +47,5 @@ t = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
 y, m = (t.year + 1, 1) if t.month == 12 else (t.year, t.month + 1)
 FxRate.objects.create(year_month=f'{y:04d}-{m:02d}', currency='USD', rate='31.2', created_by='seed', updated_by='seed'); print('next-month fx seeded')" 2>&1 | grep seeded
 run_phase F || STATUS=1
+run_phase G || STATUS=1
 exit $STATUS

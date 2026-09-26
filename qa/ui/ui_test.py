@@ -4,6 +4,7 @@
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
+  python3 ui_test.py G   管理員：業績目標（新增、修改、停用、重新啟用）；Dashboard 顯示案件、目標與趨勢
   python3 ui_test.py F   管理員：Production Report 預覽 → 排除一家再保人 → 產生 → 下載 Excel → 關帳（部分確認）；下個月 → 產生 → 關帳（全部確認）→ SOA 出現保費交易
   python3 ui_test.py E   業務人員：Claim 分頁新增理賠、改準備金、記理賠付款（出險日、付款日期必填），SOA 出現理賠交易
   python3 ui_test.py D   （案件此時是 Announced）Finance Staff：Accounting 帳本、記付款、沖銷；管理員：從帳本開啟案件的 SOA 分頁
@@ -121,7 +122,8 @@ def header_title(page):
 
 def phase_a(page):
     login(page, "ui.admin")
-    check("admin lands on the first navigation entry (Dashboard pending card)", page.url.endswith("/dashboard") and page.locator(".pending-card").is_visible(), page.url)
+    page.locator(".rdash").wait_for()
+    check("admin lands on the first navigation entry (Dashboard)", page.url.endswith("/dashboard") and page.get_by_text("YTD Case Volume").is_visible(), page.url)
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
     check("sidebar shows Alpha's navigation for an admin", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "Audit Log"], labels)
     for label, marker in [("Account List", "All cases"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
@@ -675,6 +677,58 @@ def phase_f(page):
     logout(page)
 
 
+def phase_g(page):
+    login(page, "ui.admin")
+    nav(page, "Personnel & Accounts")
+    page.locator(".mdm-tab", has_text="Annual target settings").click()
+    page.wait_for_timeout(600)
+    check("targets tab: VM text (Dashboard uses targets, Audit recorded)", page.get_by_text("Targets feed the Dashboard brokerage trend").is_visible()
+          and page.get_by_text("every change is recorded in the Audit Log").is_visible())
+    page.get_by_role("button", name="+ Monthly target").click()
+    dlg = page.locator(".master-dialog").filter(has_text="dashboard target")
+    dlg.wait_for()
+    month_value = item(dlg, page, "Period").locator("input").first.input_value()
+    import datetime as dt
+    tpe = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
+    check("monthly target defaults to this month (Taipei)", month_value == tpe.strftime("%b %Y"), month_value)
+    check("dialog text: snapshot and Audit Log event", "immutable snapshot and an Audit Log event" in dlg.inner_text())
+    fill(dlg, page, "Target amount (TWD)", "500000")
+    dlg.get_by_role("button", name="Add target").click()
+    check("monthly target added", message(page, "Target added"))
+    page.wait_for_timeout(600)
+    row = page.locator(".table-card .el-table__row").filter(has_text=tpe.strftime("%Y-%m")).first
+    check("target listed: Monthly, 500,000, Active, version 1", "Monthly" in row.inner_text() and "500,000" in row.inner_text() and "Active" in row.inner_text(), row.inner_text())
+    row.get_by_role("button", name="Edit").click()
+    dlg = page.locator(".master-dialog").filter(has_text="dashboard target")
+    dlg.wait_for()
+    fill(dlg, page, "Target amount (TWD)", "600000")
+    dlg.get_by_role("button", name="Save changes").click()
+    check("target updated", message(page, "Target updated"))
+    page.wait_for_timeout(600)
+    row = page.locator(".table-card .el-table__row").filter(has_text=tpe.strftime("%Y-%m")).first
+    check("amount 600,000, version 2", "600,000" in row.inner_text() and "2" in row.locator("td").nth(4).inner_text(), row.inner_text())
+    row.get_by_role("button", name="Deactivate").click()
+    check("target deactivated", message(page, "Target deactivated"))
+    page.wait_for_timeout(600)
+    page.locator(".table-card .el-table__row").filter(has_text=tpe.strftime("%Y-%m")).first.get_by_role("button", name="Reactivate").click()
+    check("target reactivated", message(page, "Target reactivated"))
+    snap(page, "targets")
+
+    nav(page, "Dashboard")
+    page.locator(".rdash").wait_for()
+    page.wait_for_timeout(1200)
+    kpi = page.locator(".kpi", has_text="In-Force Policies").locator(".val").inner_text()
+    check("Dashboard: In-Force Policies >= 1 (the Confirmed case from phase F)", kpi.isdigit() and int(kpi) >= 1, kpi)
+    check("trend chart drawn with current, prior and target lines", page.locator(".trend-svg polyline").count() == 3
+          and page.locator(".trend-point.target").count() == tpe.month)
+    check("reinsurer mix lists the case's reinsurers", "UI Re Alpha" in page.locator(".card", has_text="Top Reinsurers").inner_text())
+    fill_width = page.locator(".card", has_text="Top Reinsurers").locator(".mix-fill").first.bounding_box()["width"]
+    track_width = page.locator(".card", has_text="Top Reinsurers").locator(".mix-track").first.bounding_box()["width"]
+    check("VM fix: mix bars are filled (60% bar about 60% of the track)", 0.55 < fill_width / track_width < 0.65, (fill_width, track_width))
+    snap(page, "dashboard")
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -682,7 +736,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f}[PHASE](page)
+        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")
