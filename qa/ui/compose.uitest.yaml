@@ -1,0 +1,64 @@
+# 畫面測試專用、用完即丟的環境（scripts/run_ui_test.sh 會建立並在結束時連同 volume 刪除）。
+# 使用與正式相同的映像，但資料庫、文件 volume、密鑰、網路都是獨立的；不開放任何主機連接埠。
+name: ri-uitest
+
+services:
+  mysql:
+    image: mysql@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
+    container_name: ri-ut-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: ri_system
+      MYSQL_USER: ri_app
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      TZ: Asia/Taipei
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--transaction-isolation=READ-COMMITTED"]
+    volumes: [ut_mysql:/var/lib/mysql]
+    secrets: [mysql_root_password, mysql_app_password]
+    networks: [ut]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  backend:
+    image: ri-backend:local
+    container_name: ri-ut-backend
+    user: "1001:1001"
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: "nginx,localhost"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "http://nginx"
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      AUDIT_LOG_ENABLED: "true"
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: ri_system
+      MYSQL_USER: ri_app
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      RI_LOGIN_THROTTLE: "1000/min"
+      TZ: Asia/Taipei
+    volumes: [ut_docs:/data/documents]
+    secrets: [django_secret_key, mysql_app_password]
+    networks: [ut]
+    depends_on:
+      mysql: {condition: service_healthy}
+
+  nginx:
+    image: ri-frontend:local
+    container_name: ri-ut-nginx
+    networks: [ut]
+    depends_on: [backend]
+
+secrets:
+  mysql_root_password: {file: "${UT_SECRETS:?}/mysql_root_password"}
+  mysql_app_password: {file: "${UT_SECRETS:?}/mysql_app_password"}
+  django_secret_key: {file: "${UT_SECRETS:?}/django_secret_key"}
+
+volumes:
+  ut_mysql:
+  ut_docs:
+
+networks:
+  ut:
+    internal: true
