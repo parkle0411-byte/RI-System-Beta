@@ -1,183 +1,120 @@
 <script setup>
-import { computed, reactive, ref, onMounted } from 'vue'
+// 移植自 Alpha index.html 的 activeView === 'fxrates' 與 app.js 的 loadFxRates()／populateFxMonth()／openFxDialog()／saveFxRate()。
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api } from '../api'
+import { apiFetch } from '../api'
 import { can } from '../auth'
+import { FX_CURRENCIES, currentMonth } from '../alpha/constants'
+import { formatFxRate, jsonOrThrow, reportWriteError } from '../alpha/format'
+import { shell } from '../alpha/shell'
 
-const CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR']
+const fxLoading = ref(false)
+const fxSaving = ref(false)
+const fxDialogVisible = ref(false)
+const fxRates = ref([])
+const fxForm = reactive({ yearMonth: currentMonth(), existingMonth: false, rates: FX_CURRENCIES.map((currency) => ({ currency, rate: null, rowVersion: null, isLocked: false })) })
 
-const loading = ref(false)
-const saving = ref(false)
-const errorMsg = ref('')
-const rates = ref([])
-const dialogVisible = ref(false)
-
-const form = reactive({
-  yearMonth: '',
-  rates: CURRENCIES.map((currency) => ({ currency, rate: null, rowVersion: null, isLocked: false }))
-})
-
-const groupedMonths = computed(() => {
-  const months = [...new Set(rates.value.map((r) => r.yearMonth))]
-  return months.sort().reverse()
-})
-
-function rowsForMonth(yearMonth) {
-  const byCurrency = new Map(rates.value.filter((r) => r.yearMonth === yearMonth).map((r) => [r.currency, r]))
-  return CURRENCIES.map((currency) => byCurrency.get(currency)).filter(Boolean)
-}
-
-async function loadRates() {
-  loading.value = true
-  errorMsg.value = ''
+async function loadFxRates() {
+  fxLoading.value = true
+  shell.error = ''
   try {
-    const body = await api('/api/fx-rates')
-    // API 回傳格式與 Alpha 一致（駝峰、rate 為數字），可直接使用
-    rates.value = Array.isArray(body.rates) ? body.rates : []
+    const response = await apiFetch('/api/fx-rates', { headers: { Accept: 'application/json' } })
+    const body = await response.json()
+    if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
+    fxRates.value = Array.isArray(body.rates) ? body.rates : []
   } catch (err) {
-    errorMsg.value = err instanceof Error ? err.message : String(err)
+    shell.error = err instanceof Error ? err.message : String(err)
   } finally {
-    loading.value = false
+    fxLoading.value = false
   }
 }
 
-function currentMonth() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
-
-function populateForm(yearMonth) {
-  const existing = rowsForMonth(yearMonth)
-  const byCurrency = new Map(existing.map((r) => [r.currency, r]))
-  form.rates = CURRENCIES.map((currency) => {
-    const row = byCurrency.get(currency)
+function populateFxMonth(yearMonth) {
+  const existingRows = fxRates.value.filter((item) => item.yearMonth === yearMonth)
+  const byCurrency = new Map(existingRows.map((item) => [item.currency, item]))
+  fxForm.existingMonth = existingRows.length > 0
+  fxForm.rates = FX_CURRENCIES.map((currency) => {
+    const existing = byCurrency.get(currency)
     return {
       currency,
-      rate: row ? Number(row.rate) : null,
-      rowVersion: row ? row.rowVersion : null,
-      isLocked: Boolean(row?.isLocked)
+      rate: existing ? Number(existing.rate) : null,
+      rowVersion: existing ? Number(existing.rowVersion) : null,
+      isLocked: Boolean(existing?.isLocked)
     }
   })
 }
 
-function openDialog(yearMonth = null) {
-  form.yearMonth = yearMonth || currentMonth()
-  populateForm(form.yearMonth)
-  dialogVisible.value = true
+function openFxDialog(row = null) {
+  fxForm.yearMonth = row?.yearMonth || currentMonth()
+  populateFxMonth(fxForm.yearMonth)
+  fxDialogVisible.value = true
 }
 
-function onMonthChange(value) {
-  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || ''))) {
-    populateForm(value)
+function onFxMonthChange(yearMonth) {
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(String(yearMonth || ''))) {
+    populateFxMonth(yearMonth)
   }
 }
 
-async function saveRates() {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(form.yearMonth || ''))) {
-    ElMessage.error('請選擇有效的月份。')
+async function saveFxRate() {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(fxForm.yearMonth || ''))) {
+    ElMessage.error('Select a valid Performance month.')
     return
   }
-  for (const row of form.rates) {
+  for (const row of fxForm.rates) {
     const rate = Number(row.rate)
     if (!Number.isFinite(rate) || rate <= 0 || rate > 1000) {
-      ElMessage.error(`${row.currency} 匯率必須大於 0 且不超過 1000。`)
+      ElMessage.error(`${row.currency} Rate to TWD is required and must be no more than 1000.`)
       return
     }
   }
-  saving.value = true
+  fxSaving.value = true
+  shell.error = ''
   try {
-    await api('/api/fx-rates', {
+    await jsonOrThrow(await apiFetch('/api/fx-rates', {
       method: 'POST',
-      body: {
-        yearMonth: form.yearMonth,
-        rates: form.rates.map((r) => ({ currency: r.currency, rate: Number(r.rate), rowVersion: r.rowVersion }))
-      }
-    })
-    dialogVisible.value = false
-    ElMessage.success('已儲存本月匯率')
-    await loadRates()
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        yearMonth: fxForm.yearMonth,
+        rates: fxForm.rates.map((row) => ({ currency: row.currency, rate: Number(row.rate), rowVersion: row.rowVersion }))
+      })
+    }))
+    fxDialogVisible.value = false
+    ElMessage.success('Monthly FX rates saved')
+    await loadFxRates()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : String(err))
+    shell.error = err instanceof Error ? err.message : String(err)
+    reportWriteError(err, () => loadFxRates())
   } finally {
-    saving.value = false
+    fxSaving.value = false
   }
 }
 
-function fmtRate(value) {
-  return Number(value).toFixed(6)
-}
-
-onMounted(loadRates)
+onMounted(loadFxRates)
 </script>
 
 <template>
-  <el-card style="max-width: 960px; margin: 24px auto">
-    <template #header>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>FX Rates（每月 USD/EUR/JPY/GBP/HKD/MYR 對 TWD 匯率）</span>
-        <el-button v-if="can('fx.write')" type="primary" @click="openDialog()">新增／編輯月份</el-button>
-      </div>
-    </template>
-
-    <el-alert
-      v-if="errorMsg"
-      :title="'錯誤：' + errorMsg"
-      type="error"
-      show-icon
-      :closable="false"
-      style="margin-bottom: 16px"
-    />
-
-    <div v-loading="loading">
-      <div v-for="month in groupedMonths" :key="month" style="margin-bottom: 24px">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-          <strong>{{ month }}</strong>
-          <el-button v-if="can('fx.write')" size="small" @click="openDialog(month)">編輯</el-button>
-        </div>
-        <el-table :data="rowsForMonth(month)" border size="small">
-          <el-table-column prop="currency" label="幣別" width="100" />
-          <el-table-column label="Rate to TWD">
-            <template #default="{ row }">{{ fmtRate(row.rate) }}</template>
-          </el-table-column>
-          <el-table-column label="狀態" width="120">
-            <template #default="{ row }">
-              <el-tag v-if="row.isLocked" type="warning">已鎖定</el-tag>
-              <el-tag v-else type="success">可編輯</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-      <el-empty v-if="!loading && groupedMonths.length === 0" description="尚無匯率資料" />
-    </div>
-  </el-card>
-
-  <el-dialog v-model="dialogVisible" title="新增／編輯月份匯率" width="480px">
-    <el-form label-width="140px">
-      <el-form-item label="Performance Month">
-        <el-date-picker
-          v-model="form.yearMonth"
-          type="month"
-          value-format="YYYY-MM"
-          placeholder="選擇月份"
-          style="width: 100%"
-          @change="onMonthChange"
-        />
-      </el-form-item>
-      <el-form-item v-for="row in form.rates" :key="row.currency" :label="`${row.currency} Rate to TWD`">
-        <el-input-number
-          v-model="row.rate"
-          :precision="6"
-          :min="0.000001"
-          :max="1000"
-          :disabled="row.isLocked"
-          style="width: 100%"
-        />
-        <el-tag v-if="row.isLocked" type="warning" size="small" style="margin-left: 8px">已鎖定</el-tag>
-      </el-form-item>
+  <!-- Development presents FX Rates as one operational panel. -->
+  <section class="table-card" v-loading="fxLoading">
+    <div class="section-heading"><div><h2>FX Rates</h2><p>Official monthly rates to TWD for USD, EUR, JPY, GBP, HKD and MYR. TWD is always 1; closed months are locked.</p></div><div><el-button v-if="can('fx.write')" class="primary-button" @click="openFxDialog()">+ Set monthly rates</el-button><el-button class="secondary-button" :loading="fxLoading" @click="loadFxRates">Refresh</el-button></div></div>
+    <el-table :data="fxRates" class="case-table" row-key="id" empty-text="No monthly FX rates set yet.">
+      <el-table-column prop="yearMonth" label="Performance month" min-width="180"><template #default="{ row }"><span class="case-ref">{{ row.yearMonth }}</span></template></el-table-column>
+      <el-table-column prop="currency" label="Currency" width="130"></el-table-column>
+      <el-table-column label="Rate to TWD" min-width="180" align="right"><template #default="{ row }">{{ formatFxRate(row.rate) }}</template></el-table-column>
+      <el-table-column prop="rowVersion" label="Version" width="110"></el-table-column>
+      <el-table-column label="Status" width="130"><template #default="{ row }"><span class="status-badge" :class="row.isLocked ? 'status-archived' : 'status-posted'">{{ row.isLocked ? 'Locked' : 'Open' }}</span></template></el-table-column>
+      <el-table-column label="Action" width="120"><template #default="{ row }"><el-button v-if="can('fx.write')" text type="primary" :disabled="row.isLocked" @click="openFxDialog(row)">Edit month</el-button></template></el-table-column>
+    </el-table>
+  </section>
+  <el-dialog v-model="fxDialogVisible" class="master-dialog" width="min(680px, 94vw)" :close-on-click-modal="false">
+    <template #header><div class="review-heading"><span class="pending-badge">{{ fxForm.existingMonth ? 'Versioned monthly update' : 'New monthly rates' }}</span><h2>Performance month FX rates</h2><p>All six Rate to TWD values are required and saved together.</p></div></template>
+    <el-form label-position="top" @submit.prevent>
+      <el-form-item label="Performance month" required><el-date-picker v-model="fxForm.yearMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" style="width:100%" @change="onFxMonthChange"></el-date-picker></el-form-item>
+      <el-table :data="fxForm.rates" row-key="currency" class="case-table" size="small">
+        <el-table-column prop="currency" label="Currency" width="150"><template #default="{ row }"><strong>{{ row.currency }}</strong></template></el-table-column>
+        <el-table-column label="Rate to TWD" min-width="280"><template #default="{ row }"><el-input-number v-model="row.rate" :min="0.000001" :max="1000" :precision="6" :controls="false" :disabled="row.isLocked" style="width:100%"></el-input-number></template></el-table-column>
+      </el-table>
     </el-form>
-    <template #footer>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="saveRates">儲存</el-button>
-    </template>
+    <template #footer><div class="review-footer"><p>Order: USD, EUR, JPY, GBP, HKD, MYR. Blank rates cannot be saved.</p><div><el-button class="secondary-button" @click="fxDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="fxSaving" :disabled="fxForm.rates.some(row => row.isLocked)" @click="saveFxRate">Save monthly rates</el-button></div></div></template>
   </el-dialog>
 </template>

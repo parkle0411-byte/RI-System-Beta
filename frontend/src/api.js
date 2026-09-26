@@ -60,3 +60,19 @@ export async function api(url, { method = 'GET', body, quiet401 = false } = {}) 
   }
   return data
 }
+
+// Alpha 的畫面程式直接用 fetch() 並自己讀 response.ok／response.json()。
+// 為了讓移植的程式碼與 Alpha 逐行對得上，這裡提供同樣介面的 apiFetch()：
+// 回傳原本的 Response；另外補上 VM 需要的 CSRF、同源 cookie，以及 401／強制改密碼的通知。
+export async function apiFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase()
+  const headers = { ...(options.headers || {}) }
+  if (method !== 'GET' && method !== 'HEAD') headers['X-CSRFToken'] = await csrfToken()
+  const response = await fetch(url, { cache: 'no-store', ...options, method, headers, credentials: 'same-origin' })
+  if (response.status === 401) onUnauthorized()
+  if (response.status === 403) {
+    const body = await response.clone().json().catch(() => null)
+    if (body && body.error === 'PASSWORD_CHANGE_REQUIRED') onPasswordChangeRequired()
+  }
+  return response
+}

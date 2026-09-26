@@ -5,6 +5,7 @@
 #   scripts/run_qa.sh suites     只跑資料庫／API 測試組
 #   scripts/run_qa.sh parity     只跑「前後端密碼規則一致」
 #   scripts/run_qa.sh calc       只跑「案件計算：Alpha 的 JS 與 VM 的 Python 逐位比對」
+#   scripts/run_qa.sh totals     只跑「畫面上的案件合計（前端 JS）與後端 totals.py 一致」
 #
 # 所有測試組都在交易內執行、最後回滾，不會在資料庫留下任何測試資料，也不依賴真實人員或案件資料
 # （需要的人員由測試自己建立）。需要 ri-backend 容器正在執行。
@@ -55,12 +56,24 @@ run_calc() {
   else echo "  （尚未建立）"; fi
 }
 
+run_totals() {
+  echo "== 案件合計：前端畫面（caseCalculations.js）與後端（totals.py）是否一致 =="
+  res=$(docker exec ri-backend python -m qa.frontend_totals_vectors 3000 \
+    | docker run --rm -i --user "$(id -u):$(id -g)" -v "$PWD/frontend/src:/src:ro" -v "$PWD/backend/qa:/qa:ro" node:22-alpine node /qa/frontend_totals.mjs 2>&1)
+  total=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["total"] if d["bad"] == 0 else "BAD " + json.dumps(d, ensure_ascii=False)[:600])' "$res" 2>&1)
+  case "$total" in
+    BAD*|*Error*|*rror*) bad "前後端合計不一致（或執行失敗）: $total" ;;
+    *) ok "前端與後端對 ${total} 個案件的合計（十個欄位）完全一致" ;;
+  esac
+}
+
 case "$WHAT" in
   suites) run_suites ;;
   parity) run_parity ;;
   calc)   run_calc ;;
-  all)    run_suites; run_parity; run_calc ;;
-  *) echo "用法: $0 [all|suites|parity|calc]"; exit 2 ;;
+  totals) run_totals ;;
+  all)    run_suites; run_parity; run_totals; run_calc ;;
+  *) echo "用法: $0 [all|suites|parity|totals|calc]"; exit 2 ;;
 esac
 
 echo
