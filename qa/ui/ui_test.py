@@ -435,7 +435,14 @@ def phase_c(page):
     nav(page, "Account List")
     check("Case Viewer sees no other people's cases and no + New case", page.locator(".case-table .el-table__row").count() == 0
           and page.get_by_role("button", name="+ New case").count() == 0)
+    page.goto(BASE + "/system-status")
+    page.wait_for_timeout(800)
+    status = page.request.get(BASE + "/health/")
+    check("Case Viewer cannot open System status (page redirected, /health/ 403)", "/system-status" not in page.url
+          and page.locator(".el-descriptions").count() == 0 and status.status == 403 and message(page, "You do not have permission"), (page.url, status.status))
     logout(page)
+    status = page.request.get(BASE + "/health/")
+    check("anonymous /health/ -> 401", status.status == 401, status.status)
 
     login(page, "ui.newcomer")
     check("temporary password: forced change dialog, no navigation", page.get_by_text("Change your password first").is_visible() and page.locator(".nav-item").count() == 0)
@@ -728,6 +735,11 @@ def phase_g(page):
     track_width = page.locator(".card", has_text="Top Reinsurers").locator(".mix-track").first.bounding_box()["width"]
     check("VM fix: mix bars are filled (60% bar about 60% of the track)", 0.55 < fill_width / track_width < 0.65, (fill_width, track_width))
     snap(page, "dashboard")
+    page.goto(BASE + "/system-status")
+    page.locator(".el-descriptions").wait_for()
+    page.wait_for_timeout(800)
+    check("System Administrator can open System status (backend and database OK)", page.locator(".el-descriptions .el-tag", has_text="正常").count() == 3,
+          page.locator(".el-descriptions").inner_text())
     logout(page)
 
 

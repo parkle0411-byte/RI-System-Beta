@@ -15,6 +15,7 @@ import Production from '../views/Production.vue'
 import Dashboard from '../views/Dashboard.vue'
 import PendingView from '../views/PendingView.vue'
 import SystemStatus from '../views/SystemStatus.vue'
+import NoAccess from '../views/NoAccess.vue'
 
 // 左側選單與頁首文字：與 Alpha public/app.js 的 allNavigation／headers 相同（順序、名稱、權限、階段標籤）。
 // Alpha 用 activeView 切換畫面；VM 每一項是一個路由，方便重新整理與瀏覽器上一頁。
@@ -40,7 +41,8 @@ export const headers = {
   accounting: { kicker: 'Accounting', title: 'Accounting', subtitle: 'Statement of account, transactions and settlement', phase: 'Milestone 22' },
   fxrates: { kicker: 'Master data', title: 'FX Rates', subtitle: 'Official monthly USD to TWD rates', phase: 'Milestone 20' },
   audit: { kicker: 'Governance', title: 'Audit Log', subtitle: 'Append-only activity history with at least 10-year retention', phase: 'Read only' },
-  'system-status': { kicker: 'VM', title: 'System status', subtitle: 'Company VM health check' }
+  'system-status': { kicker: 'VM', title: 'System status', subtitle: 'Company VM health check' },
+  'no-access': { kicker: 'Access', title: 'No access', subtitle: 'No pages are available for your role' }
 }
 
 export function navAllowed(item) {
@@ -50,9 +52,11 @@ export function navAllowed(item) {
 const component = { cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
-  { path: '/', name: 'home', redirect: () => (allNavigation.find(navAllowed) || { path: '/system-status' }).path },
+  { path: '/', name: 'home', redirect: () => (allNavigation.find(navAllowed) || { path: can('foundation.read') ? '/system-status' : '/no-access' }).path },
   ...allNavigation.map((item) => ({ path: item.path, name: item.id, component: component[item.id] || PendingView, meta: { nav: item } })),
-  { path: '/system-status', name: 'system-status', component: SystemStatus },
+  // System status：只有 System Administrator（foundation.read；後端 /health/ 同樣檢查）
+  { path: '/system-status', name: 'system-status', component: SystemStatus, meta: { permission: 'foundation.read' } },
+  { path: '/no-access', name: 'no-access', component: NoAccess },
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]
 
@@ -66,7 +70,7 @@ router.beforeEach(async (to) => {
   if (!auth.principal) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
-  if (to.meta.nav && !navAllowed(to.meta.nav)) {
+  if ((to.meta.nav && !navAllowed(to.meta.nav)) || (to.meta.permission && !can(to.meta.permission))) {
     ElMessage.warning('You do not have permission to open this page.')
     return { path: '/' }
   }

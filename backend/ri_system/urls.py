@@ -15,11 +15,11 @@ from cases.workflow_views import AnnounceView, WorkflowView
 from personnel.views import PersonnelOptionsView, PersonnelView
 
 from .auth_views import AppContextView, ChangePasswordView, CsrfView, LoginView, LogoutView
-from .views import health
+from .views import HealthView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("health/", health, name="health"),
+    path("health/", HealthView.as_view(), name="health"),
     path("api/auth/csrf", CsrfView.as_view(), name="auth-csrf"),
     path("api/auth/login", LoginView.as_view(), name="auth-login"),
     path("api/auth/logout", LogoutView.as_view(), name="auth-logout"),

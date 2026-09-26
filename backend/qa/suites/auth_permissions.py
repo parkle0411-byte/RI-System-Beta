@@ -80,7 +80,7 @@ try:
         for url in ("/api/fx-rates", "/api/master-data", "/api/app-context"):
             r = c.get(url)
             check(f"anonymous GET {url} -> 401", r.status_code == 401 and code(r) == "AUTHENTICATION_REQUIRED", r.status_code)
-        check("anonymous /health/ stays public", c.get("/health/").status_code == 200)
+        check("anonymous /health/ -> 401 (System status is for System Administrators only)", c.get("/health/").status_code == 401)
 
         # ---- CSRF ----
         c = new_client(); csrf(c)
@@ -110,6 +110,9 @@ try:
             check(f"[{role}] POST master-data {'allowed' if mw else 'denied'}", expect(post(c, "/api/master-data", {"entityType": "zzz"}), mw, (400,)))
             put = c.put("/api/master-data", data=json.dumps({}), content_type="application/json", HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value)
             check(f"[{role}] PUT master-data {'allowed' if mw else 'denied'}", expect(put, mw, (400,)))
+            h = c.get("/health/")
+            check(f"[{role}] GET /health/ (System status) {'allowed' if role == 'admin' else 'denied'}",
+                  (h.status_code == 200 and h.json().get("database") == "ok") if role == "admin" else (h.status_code == 403 and code(h) == "PERMISSION_DENIED"), h.status_code)
             check(f"[{role}] DELETE master-data always denied", c.delete("/api/master-data", HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value).status_code in (403, 405))
 
             if role == "sales":
