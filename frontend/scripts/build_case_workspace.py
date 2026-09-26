@@ -30,16 +30,6 @@ cases = span(151, 196, "<template v-else-if=\"activeView === 'cases'\">", "</tem
 detail = span(217, 630, "<template v-else-if=\"activeView === 'case-detail'\">", "</template>")
 create = span(632, 864, "<template v-else-if=\"activeView === 'case-create'\">", "</template>")
 
-# Claim 分頁（第 502–555 行）與記錄理賠付款的對話框（第 579–588 行）：Claims 的後端尚未移植，
-# 拿掉之後 Claim 分頁會落到 Alpha 自己的 v-else（「will be converted … in a later milestone」）
-claims_first, claims_last = 502 - 217, 555 - 217
-assert detail[claims_first].strip().startswith("<template v-else-if=\"caseDetailTab === 'claims'")
-assert detail[claims_last + 1].strip().startswith("<template v-else-if=\"caseDetailTab === 'endorsements'")
-payment_first, payment_last = 579 - 217, 588 - 217
-assert detail[payment_first].strip().startswith('<el-dialog v-model="paymentDialogVisible"')
-assert detail[payment_last - 1].strip() == "</el-dialog>" and detail[payment_last].strip() == ""
-detail = detail[:claims_first] + detail[claims_last + 1:payment_first] + detail[payment_last + 1:]
-
 body = "\n".join(["<template>", "  <Teleport defer to=\"#page-header-actions\">"]
                  + [l.replace('v-else-if="activeView === \'case-create\'"', 'v-if="activeView === \'case-create\'"', 1) if i == 0 else l
                     for i, l in enumerate(header_actions)]
@@ -48,6 +38,11 @@ body = "\n".join(["<template>", "  <Teleport defer to=\"#page-header-actions\">"
                  + [""] + detail + create + ["</template>", ""])
 
 REPLACEMENTS = [
+    # 理賠：出險日與付款日期必填（VM 的決定，Alpha 可留空）
+    ("<p>Development-compatible loss details. Blank optional fields can be completed later through the reserve workflow.</p>",
+     "<p>Development-compatible loss details. Date of Loss is required; the Outstanding Reserve can be updated later.</p>", 1),
+    ('<el-form-item label="Date of Loss"><el-date-picker v-model="claimForm.dateOfLoss"', '<el-form-item label="Date of Loss" required><el-date-picker v-model="claimForm.dateOfLoss"', 1),
+    ('<el-form-item label="Payment date"><el-date-picker v-model="paymentForm.date"', '<el-form-item label="Payment date" required><el-date-picker v-model="paymentForm.date"', 1),
     # 文件上限：VM 10 MB（Alpha 5 MB）
     ("Supported: PDF, DOCX, PNG, JPG, EML and MSG. Maximum 5 MB per file.", "Supported: PDF, DOCX, PNG, JPG, EML and MSG. Maximum 10 MB per file.", 1),
     # VM 已啟用 Audit（Alpha 是暫停中），如實描述
@@ -83,6 +78,7 @@ casePreviewVisible, casePreview, openCasePreview, openPreviewFullCase, formatPol
 selectedCase, selectedPayload, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
 caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
 accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
+claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
 documentsLoading, documentsSaving, documentGenerating, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
 downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
 toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,

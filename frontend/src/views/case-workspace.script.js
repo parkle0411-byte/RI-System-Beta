@@ -7,7 +7,8 @@
 //   - startEditCase 允許 Reversed（Alpha 漏了，「Correct reversed case」按了沒反應）
 //   - 文件單檔上限 10 MB（Alpha 5 MB）
 //   - 從 Accounting 點 TW Ref 會帶 ?case=…&tab=soa 過來（Alpha 是同一頁切換）：載入後直接開該案件的 SOA 分頁
-//   - Claims、產生 Word／PDF 文件的後端尚未移植：Claim 分頁顯示 Alpha 自己的「later milestone」卡片；產生文件的按鈕停用
+//   - 理賠：出險日與付款日期必填（後端檢查，錯誤訊息照常顯示）
+//   - 產生 Word／PDF 文件的程式尚未移植：產生文件的按鈕停用
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -475,8 +476,90 @@ export function useCaseWorkspace() {
     selectedCase.value = body.case
   }
 
+  // ---- 理賠（Alpha 的 loadClaims／submitClaimAction／createClaim／updateClaimReserve／openClaimPayment／recordClaimPayment／claimTotalPaid）----
+  const claimsLoading = ref(false)
+  const claimsSaving = ref(false)
+  const claimsState = ref({ rootCaseUid: '', rootTwRef: '', rootStatus: '', rootRowVersion: null, currency: '', claims: [], splitSource: { reinsurers: [] }, actions: { canWrite: false } })
+  const claimForm = reactive({ lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '' })
+  const paymentDialogVisible = ref(false)
+  const activeClaimId = ref(null)
+  const paymentForm = reactive({ date: '', amount: null, note: '' })
+
+  async function loadClaims() {
+    if (!selectedCase.value?.caseUid) return
+    claimsLoading.value = true
+    try {
+      const response = await apiFetch('/api/claims?caseUid=' + encodeURIComponent(selectedCase.value.caseUid), { headers: { Accept: 'application/json' } })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
+      claimsState.value = body.claimsState
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : String(err))
+    } finally { claimsLoading.value = false }
+  }
+
+  async function submitClaimAction(action, extra = {}) {
+    claimsSaving.value = true
+    try {
+      const response = await apiFetch('/api/claims', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          action,
+          caseUid: selectedCase.value.caseUid,
+          rowVersion: claimsState.value.rootRowVersion,
+          ...extra
+        })
+      })
+      const body = await response.json()
+      if (!response.ok) {
+        const requestErr = new Error(body.message || body.error || ('HTTP ' + response.status))
+        requestErr.status = response.status
+        throw requestErr
+      }
+      claimsState.value = body.claimsState
+      await refreshSelectedCase()
+      return true
+    } catch (err) {
+      reportWriteError(err, () => loadClaims())
+      return false
+    } finally { claimsSaving.value = false }
+  }
+
+  async function createClaim() {
+    const saved = await submitClaimAction('create_claim', { claim: { ...claimForm } })
+    if (!saved) return
+    Object.assign(claimForm, { lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '' })
+    ElMessage.success('Claim added')
+  }
+
+  async function updateClaimReserve(claim) {
+    const saved = await submitClaimAction('update_reserve', { claimId: claim.id, outstandingReserve: claim.outstandingReserve })
+    if (saved) ElMessage.success('Outstanding reserve updated')
+  }
+
+  function openClaimPayment(claim) {
+    activeClaimId.value = claim.id
+    Object.assign(paymentForm, { date: '', amount: null, note: '' })
+    paymentDialogVisible.value = true
+  }
+
+  async function recordClaimPayment() {
+    // 理賠付款可以是負數（追償、自負額沖抵等），只擋 0 與無效輸入（同 Alpha）
+    if (!Number(paymentForm.amount)) return ElMessage.error('Enter a non-zero payment amount.')
+    const saved = await submitClaimAction('record_payment', { claimId: activeClaimId.value, payment: { ...paymentForm } })
+    if (!saved) return
+    paymentDialogVisible.value = false
+    ElMessage.success('Payment recorded and Claim Leg 1/2 transactions created')
+  }
+
+  function claimTotalPaid(claim) {
+    return (Array.isArray(claim?.payments) ? claim.payments : []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+  }
+
   function onCaseDetailTabChange(name) {
     if (name === 'documents') loadCaseDocuments()
+    if (name === 'claims') loadClaims()
     if (name === 'endorsements') loadCaseWorkflow()
   }
 
@@ -1123,6 +1206,7 @@ export function useCaseWorkspace() {
     selectedCase, selectedPayload, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
+    claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
     documentsLoading, documentsSaving, documentGenerating, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,

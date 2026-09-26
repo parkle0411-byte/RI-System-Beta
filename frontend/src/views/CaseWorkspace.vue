@@ -13,6 +13,7 @@ const {
   selectedCase, selectedPayload, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
   caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
   accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
+  claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
   documentsLoading, documentsSaving, documentGenerating, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
   downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
   toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
@@ -377,6 +378,60 @@ const {
                 </div>
               </template>
 
+              <template v-else-if="caseDetailTab === 'claims' && selectedCase">
+                <div class="overview-stack" v-loading="claimsLoading">
+                  <section class="overview-card">
+                    <div class="section-heading">
+                      <div><span class="pending-badge">Policy-period record</span><h2>Claims — {{ claimsState.rootTwRef || 'Draft' }}</h2><p>Claims are stored once on the root case and remain the same from every endorsement view.</p></div>
+                      <span class="status-badge" :class="'status-' + claimsState.rootStatus">{{ statusLabel(claimsState.rootStatus) }}</span>
+                    </div>
+                    <el-alert v-if="!claimsState.rootTwRef" title="This case has not been Announced yet. Claims can be recorded after a TW Reference is assigned." type="info" :closable="false" show-icon></el-alert>
+                    <dl v-else class="overview-kv">
+                      <dt>Root TW Reference</dt><dd>{{ claimsState.rootTwRef }}</dd>
+                      <dt>Currency</dt><dd>{{ claimsState.currency || '—' }}</dd>
+                      <dt>Current split source</dt><dd>{{ claimsState.splitSource?.twRef || claimsState.rootTwRef }} · {{ (claimsState.splitSource?.reinsurers || []).length }} reinsurer line(s)</dd>
+                    </dl>
+                  </section>
+
+                  <section v-if="claimsState.actions?.canWrite && can('cases.write')" class="overview-card">
+                    <div class="section-heading"><div><h2>Add claim</h2><p>Development-compatible loss details. Date of Loss is required; the Outstanding Reserve can be updated later.</p></div></div>
+                    <el-form label-position="top" class="form-grid">
+                      <el-form-item label="Claim / Loss No."><el-input v-model="claimForm.lossNo" maxlength="160"></el-input></el-form-item>
+                      <el-form-item label="Date of Loss" required><el-date-picker v-model="claimForm.dateOfLoss" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
+                      <el-form-item label="Outstanding Reserve"><el-input-number v-model="claimForm.outstandingReserve" :controls="false" style="width:100%"></el-input-number></el-form-item>
+                      <el-form-item label="Cause of Loss" class="full-width"><el-input v-model="claimForm.causeOfLoss" type="textarea" :rows="3" maxlength="2000"></el-input></el-form-item>
+                    </el-form>
+                    <el-button class="primary-button" :loading="claimsSaving" @click="createClaim">Add claim</el-button>
+                  </section>
+
+                  <section v-if="!(claimsState.claims || []).length && claimsState.rootTwRef" class="overview-card overview-empty">
+                    <h2>No claims recorded</h2><p>This policy period does not yet have a Claim record.</p>
+                  </section>
+
+                  <section v-for="claim in claimsState.claims || []" :key="'claim-' + claim.id" class="overview-card">
+                    <div class="section-heading">
+                      <div><span class="pending-badge">Claim #{{ claim.id }}</span><h2>{{ claim.lossNo || ('Claim #' + claim.id) }}</h2><p>{{ claim.dateOfLoss || 'Date of loss not recorded' }} · {{ claim.causeOfLoss || 'Cause of loss not recorded' }}</p></div>
+                      <el-button v-if="claimsState.actions?.canWrite && can('cases.write')" class="secondary-button" :disabled="claimsSaving" @click="openClaimPayment(claim)">Add payment</el-button>
+                    </div>
+                    <dl class="overview-kv" style="margin-bottom:18px;">
+                      <dt>Cumulative Loss Paid</dt><dd>{{ claimsState.currency || '—' }} {{ formatMoney(claimTotalPaid(claim)) }}</dd>
+                      <dt>Outstanding Reserve</dt>
+                      <dd>
+                        <el-input-number v-if="claimsState.actions?.canWrite && can('cases.write')" v-model="claim.outstandingReserve" :controls="false" :disabled="claimsSaving" @change="updateClaimReserve(claim)" style="width:220px"></el-input-number>
+                        <span v-else>{{ claimsState.currency || '—' }} {{ formatMoney(claim.outstandingReserve) }}</span>
+                      </dd>
+                    </dl>
+                    <div class="overview-table-wrap">
+                      <el-table :data="claim.payments || []" row-key="id" empty-text="No claim payments recorded.">
+                        <el-table-column prop="date" label="Payment date" min-width="140"><template #default="{ row }">{{ row.date || '—' }}</template></el-table-column>
+                        <el-table-column label="Amount" min-width="170" align="right"><template #default="{ row }">{{ claimsState.currency || '—' }} {{ formatMoney(row.amount) }}</template></el-table-column>
+                        <el-table-column prop="note" label="Note" min-width="260"><template #default="{ row }">{{ row.note || '—' }}</template></el-table-column>
+                      </el-table>
+                    </div>
+                  </section>
+                </div>
+              </template>
+
               <template v-else-if="caseDetailTab === 'endorsements' && selectedCase">
                 <section class="overview-card" v-loading="workflowLoading">
                   <div class="section-heading">
@@ -399,6 +454,16 @@ const {
                 <h2>{{ caseDetailTabLabel }}</h2><p>This case-detail tab will be converted from the development site in a later milestone.</p>
               </section>
             </div>
+
+            <el-dialog v-model="paymentDialogVisible" class="review-dialog" width="min(620px, 94vw)" :close-on-click-modal="false">
+              <template #header><div class="review-heading"><span class="pending-badge">Immediate accounting entry</span><h2>Record claim payment</h2><p>This creates Claim Leg 1/2 transactions immediately. Recorded payments are not deleted; use an offsetting payment to correct an error.</p></div></template>
+              <el-form label-position="top">
+                <el-form-item label="Payment date" required><el-date-picker v-model="paymentForm.date" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
+                <el-form-item label="Amount"><el-input-number v-model="paymentForm.amount" :controls="false" style="width:100%"></el-input-number><div class="document-help">A non-zero negative amount may be used as an offsetting correction.</div></el-form-item>
+                <el-form-item label="Note"><el-input v-model="paymentForm.note" maxlength="1000"></el-input></el-form-item>
+              </el-form>
+              <template #footer><el-button @click="paymentDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="claimsSaving" @click="recordClaimPayment">Record payment</el-button></template>
+            </el-dialog>
 
             <el-dialog v-model="accountingDialogVisible" class="review-dialog" width="min(620px, 94vw)" :close-on-click-modal="false">
               <template #header><div class="review-heading"><span class="pending-badge">Non-blocking record</span><h2>Record Accounting notification</h2><p>Select the Accounting staff member who was notified. This does not change case status.</p></div></template>

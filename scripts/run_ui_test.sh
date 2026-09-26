@@ -38,4 +38,5 @@ docker exec ri-ut-backend python manage.py shell -c "from cases.models import Ca
 run_phase B || STATUS=1
 run_phase C || STATUS=1
 run_phase D || STATUS=1
+run_phase E || STATUS=1
 exit $STATUS

@@ -4,6 +4,7 @@
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
+  python3 ui_test.py E   業務人員：Claim 分頁新增理賠、改準備金、記理賠付款（出險日、付款日期必填），SOA 出現理賠交易
   python3 ui_test.py D   （案件此時是 Announced）Finance Staff：Accounting 帳本、記付款、沖銷；管理員：從帳本開啟案件的 SOA 分頁
 """
 import re
@@ -275,10 +276,11 @@ def phase_a(page):
     page.wait_for_timeout(800)
     check("notification shown on the overview", "UI Finance" in page.locator(".overview-grid").inner_text())
 
-    # ---------------- Claim 分頁（後端尚未移植） ----------------
+    # ---------------- Claim 分頁（已 Announce：可以新增理賠；實際新增在階段 E） ----------------
     page.locator(".case-detail-tabs .el-tabs__item", has_text="Claim").click()
-    page.wait_for_timeout(300)
-    check("Claim tab falls back to Alpha's 'later milestone' card", page.get_by_text("will be converted from the development site in a later milestone").is_visible())
+    page.wait_for_timeout(600)
+    check("Claim tab loads: root TW Reference, Add claim form, no claims yet", page.get_by_text("Root TW Reference").is_visible()
+          and page.get_by_role("button", name="Add claim").is_visible() and page.get_by_text("No claims recorded").is_visible())
 
     # ---------------- 批單 ----------------
     page.locator(".case-detail-tabs .el-tabs__item", has_text="Endorsements").click()
@@ -525,6 +527,69 @@ def phase_d(page):
     logout(page)
 
 
+def phase_e(page):
+    login(page, "ui.sales")
+    open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Claim").click()
+    page.get_by_text("Root TW Reference").wait_for()
+    check("Claim tab: root TW Reference and split source shown", "TWPAR2603001" in page.locator(".overview-kv").first.inner_text()
+          and "2 reinsurer line(s)" in page.locator(".overview-kv").first.inner_text(), page.locator(".overview-kv").first.inner_text())
+    check("no claims yet", page.get_by_text("No claims recorded").is_visible())
+    add = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Add claim"))
+    check("VM: Date of Loss marked required, help text updated", item(add, page, "Date of Loss").locator(".is-required, .el-form-item__label").count() >= 1
+          and add.get_by_text("Date of Loss is required").is_visible())
+    fill(add, page, "Claim / Loss No.", "UI-LOSS-01")
+    add.get_by_role("button", name="Add claim").click()
+    check("Date of Loss missing -> error from the server", message(page, "Enter the Date of Loss"))
+    console_errors.clear()  # 上面故意送出不完整的資料，400 是預期的
+    date(add, page, "Date of Loss", "2026-05-01")
+    fill(add, page, "Outstanding Reserve", "5000")
+    fill(add, page, "Cause of Loss", "UI test fire")
+    add.get_by_role("button", name="Add claim").click()
+    check("claim added", message(page, "Claim added"))
+    page.wait_for_timeout(800)
+    card = page.locator(".overview-card").filter(has_text="UI-LOSS-01")
+    check("claim card: loss no., date, cause", card.count() == 1 and "2026-05-01 · UI test fire" in card.inner_text(), card.inner_text()[:200] if card.count() else "")
+    reserve = card.locator(".el-input-number input").first
+    page.wait_for_function("el => !el.disabled", arg=reserve.element_handle(), timeout=10000)
+    # Element Plus 的 el-input-number 只在建立時設定 aria-disabled（卡片是在儲存中建立的，會停在 "true"），
+    # 實際的 disabled 已是 false：用 force 略過 Playwright 對 aria-disabled 的判斷
+    reserve.fill("6000.555", force=True)
+    reserve.press("Tab")
+    check("reserve updated", message(page, "Outstanding reserve updated"))
+    page.wait_for_timeout(600)
+    check("reserve shown rounded to cents (VM)", card.locator(".el-input-number input").first.input_value() in ("6000.56", "6,000.56"), card.locator(".el-input-number input").first.input_value())
+
+    card.get_by_role("button", name="Add payment").click()
+    dlg = page.locator(".review-dialog").filter(has_text="Record claim payment")
+    dlg.wait_for()
+    fill(dlg, page, "Amount", "1000")
+    dlg.get_by_role("button", name="Record payment").click()
+    check("payment date missing -> error from the server (VM: required)", message(page, "Enter the payment date"))
+    console_errors.clear()  # 上面故意送出不完整的資料，400 是預期的
+    # 對話框裡不能按 Escape（會關掉整個對話框）：輸入後按 Enter，再點對話框標題收起日期選單
+    field = item(dlg, page, "Payment date").locator(".el-date-editor input").first
+    field.fill("2026-07-01")
+    field.press("Enter")
+    dlg.locator(".review-heading h2").click()
+    fill(dlg, page, "Note", "first payment")
+    snap(page, "claim-payment")
+    dlg.get_by_role("button", name="Record payment").click()
+    check("claim payment recorded", message(page, "Payment recorded and Claim Leg 1/2 transactions created"))
+    page.wait_for_timeout(800)
+    card = page.locator(".overview-card").filter(has_text="UI-LOSS-01")
+    text = card.inner_text()
+    check("payments table and Cumulative Loss Paid show 1,000.00", "1,000.00" in text and "first payment" in text and "2026-07-01" in text, text[:300])
+    snap(page, "claims")
+
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="SOA").click()
+    page.wait_for_timeout(600)
+    soa = page.locator(".overview-card").filter(has_text="Statement of Account").first.inner_text()
+    check("SOA lists the claim transactions numbered from the TW Ref (VM fix; Alpha: 'undefined-')",
+          "TWPAR2603001-CLM1-P1-R1-TX1" in soa and "undefined" not in soa, soa[:400])
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
@@ -532,7 +597,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d}[PHASE](page)
+        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")
