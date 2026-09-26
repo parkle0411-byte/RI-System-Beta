@@ -21,7 +21,7 @@ for f in accounting payment-terms case-draft signed-slip-reminders production-re
 done
 
 # 節錄檔同樣要與 MANIFEST.md 記錄的雜湊相同
-for f in api-excerpts case-documents-excerpts accounting-excerpts production-excerpts dashboard-excerpts; do
+for f in api-excerpts case-documents-excerpts accounting-excerpts production-excerpts dashboard-excerpts render-pdf-excerpts; do
   want=$(grep -o "excerpts/$f.js\` | \`[0-9a-f]*" backend/qa/alpha_js/MANIFEST.md | grep -o '[0-9a-f]\{64\}')
   got=$(sha256sum "backend/qa/alpha_js/excerpts/$f.js" | cut -d' ' -f1)
   [ "$want" = "$got" ] || { echo "  節錄檔 excerpts/$f.js 的雜湊與 MANIFEST.md 不符，請勿手動修改" >&2; exit 1; }
@@ -30,6 +30,16 @@ done
 # 前端的 Alpha 原樣副本（Production Report 的 Excel 產生程式）同樣不可改動
 [ "$(sha256sum frontend/src/alpha/production-xlsx.js | cut -d' ' -f1)" = "256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59" ] \
   || { echo "  frontend/src/alpha/production-xlsx.js 與 Alpha 的 public/production-xlsx.js 不同，請勿手動修改" >&2; exit 1; }
+# 產生 Word／PDF 的 Alpha 原樣副本（public/ 下同名檔案，v53）
+while read -r f want; do
+  [ "$(sha256sum "frontend/public/alpha-documents/$f" | cut -d' ' -f1)" = "$want" ] \
+    || { echo "  frontend/public/alpha-documents/$f 與 Alpha 的 public/$f 不同，請勿手動修改" >&2; exit 1; }
+done <<'HASHES'
+docx-generator.js 6726dda0f766ac4a6b4dbc084aa857a182f93cb5639c05d02b7afc9d23ebbbad
+docx-templates.js b06c99814f1b0b3ecd556bdd3fe921f135363ed50a506f9f5b91d0fb2e3a0ef7
+pdf-assets.js 45736bdb789036bdfdbe36d3e764992af79fd6b92ec1c8af2df040db0d5711fa
+pdf-generator.js f403fe41074f259066e8d192afa2adaa16828b59610dc9893b9841cdfbbb7d21
+HASHES
 
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/backend/qa/alpha_js:/alpha:ro" -v "$PWD/backend/qa/calc:/calc:ro" -v "$WORK:/data" node:22-alpine sh -c '

@@ -224,8 +224,8 @@ const {
                             <span>{{ selectedCase.twRef || 'DRAFT' }} · {{ selectedPayload.reinsuranceStructure || 'Property' }}</span>
                           </div>
                           <div class="generated-document-actions">
-                            <el-button class="primary-button" :loading="documentGenerating === 'cover-docx'" :disabled="true" @click="downloadGeneratedDocument('cover', 'docx')">Download Word (.docx)</el-button>
-                            <el-button class="secondary-button" :loading="documentGenerating === 'cover-pdf'" :disabled="true" @click="downloadGeneratedDocument('cover', 'pdf')">Download PDF</el-button>
+                            <el-button class="primary-button" :loading="documentGenerating === 'cover-docx'" :disabled="Boolean(documentGenerating)" @click="downloadGeneratedDocument('cover', 'docx')">Download Word (.docx)</el-button>
+                            <el-button class="secondary-button" :loading="documentGenerating === 'cover-pdf'" :disabled="Boolean(documentGenerating)" @click="downloadGeneratedDocument('cover', 'pdf')">Download PDF</el-button>
                           </div>
                         </article>
                         <article v-if="selectedPayload.parentTwRef" class="generated-document-card">
@@ -234,7 +234,7 @@ const {
                             <span>{{ selectedCase.twRef || 'DRAFT' }} · effective {{ selectedPayload.endoEffectiveDate || 'not set' }}</span>
                           </div>
                           <div class="generated-document-actions">
-                            <el-button class="primary-button" :loading="documentGenerating === 'endorsement-pdf'" :disabled="true" @click="downloadGeneratedDocument('endorsement', 'pdf')">Download PDF</el-button>
+                            <el-button class="primary-button" :loading="documentGenerating === 'endorsement-pdf'" :disabled="Boolean(documentGenerating)" @click="downloadGeneratedDocument('endorsement', 'pdf')">Download PDF</el-button>
                           </div>
                         </article>
                         <article v-if="!selectedPayload.parentTwRef && selectedCase.status !== 'draft'" class="generated-document-card">
@@ -243,13 +243,12 @@ const {
                             <span>{{ selectedCase.twRef }} · {{ selectedPayload.currency || '—' }}</span>
                           </div>
                           <div class="generated-document-actions">
-                            <el-button class="primary-button" :loading="documentGenerating === 'debit-docx'" :disabled="true" @click="downloadGeneratedDocument('debit', 'docx')">Download Word (.docx)</el-button>
-                            <el-button class="secondary-button" :loading="documentGenerating === 'debit-pdf'" :disabled="true" @click="downloadGeneratedDocument('debit', 'pdf')">Download PDF</el-button>
+                            <el-button class="primary-button" :loading="documentGenerating === 'debit-docx'" :disabled="Boolean(documentGenerating)" @click="downloadGeneratedDocument('debit', 'docx')">Download Word (.docx)</el-button>
+                            <el-button class="secondary-button" :loading="documentGenerating === 'debit-pdf'" :disabled="Boolean(documentGenerating)" @click="downloadGeneratedDocument('debit', 'pdf')">Download PDF</el-button>
                           </div>
                         </article>
                       </div>
                       <p class="document-help">{{ selectedPayload.parentTwRef ? 'Endorsement output follows Development behavior: PDF only.' : 'Cover Note is available while the case is Draft. Debit Note becomes available after Announce assigns the TW Reference.' }}</p>
-                      <el-alert type="info" :closable="false" show-icon title="Document generation is not available on the VM yet" description="The Word and PDF generators are migrated in a later step. Placement documents below can be uploaded and reviewed now."></el-alert>
                     </section>
 
                     <section class="overview-card">

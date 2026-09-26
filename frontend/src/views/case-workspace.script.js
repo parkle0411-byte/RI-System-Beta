@@ -13,6 +13,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '../api'
+import { generateDocx, generatePdf } from '../alpha/documents'
 import { can } from '../auth'
 import { RICaseCalculations } from '../alpha/caseCalculations'
 import {
@@ -115,6 +116,24 @@ export function useCaseWorkspace() {
       installments: installmentAllocationsFor(payload),
       lossRecordSummary: lossRecordSummaryFor(payload),
       clauseDetails: normalizeClauseList(payload.clauseDetails?.length ? payload.clauseDetails : UNIVERSAL_CLAUSES).sort(compareClauses)
+    }
+  })
+  const generatedDocumentCase = computed(() => {
+    const payload = selectedPayload.value || {}
+    const normalizedReinsured = String(payload.reinsured || '').trim().toLowerCase()
+    const reinsuredMaster = mdmRecords.value.find((row) =>
+      row.entityType === 'reinsured' && String(row.name || '').trim().toLowerCase() === normalizedReinsured
+    )
+    const aeName = String(payload.ae || '').trim().toLowerCase()
+    const aePerson = personnelRecords.value.find((row) => String(row.name || '').trim().toLowerCase() === aeName)
+    return {
+      ...payload,
+      caseUid: selectedCase.value?.caseUid || '',
+      twRef: selectedCase.value?.twRef || payload.twRef || '',
+      status: selectedCase.value?.status || payload.status || 'draft',
+      reinsuredAddress: payload.reinsuredAddress || reinsuredMaster?.payload?.address || '',
+      aeEmail: payload.aeEmail || aePerson?.email || '',
+      clauseDetails: selectedOverview.value.clauseDetails
     }
   })
   const selectedReinsurers = computed(() => {
@@ -351,9 +370,25 @@ export function useCaseWorkspace() {
     return response
   }
 
-  // VM：產生 Word／PDF 的程式尚未移植（按鈕停用；這裡只是保險）
-  function downloadGeneratedDocument() {
-    ElMessage.warning('Document generation is not available on the VM yet.')
+  // 同 Alpha downloadGeneratedDocument；產生程式與 VM 的 API 串接在 ../alpha/documents
+  async function downloadGeneratedDocument(kind, format) {
+    if (!selectedCase.value) return
+    if (kind === 'endorsement' && format !== 'pdf') return ElMessage.warning('Endorsement is generated as PDF only.')
+    if (kind === 'debit' && selectedCase.value.status === 'draft') {
+      return ElMessage.warning('Debit Note is available after the case is Announced.')
+    }
+    const key = `${kind}-${format}`
+    documentGenerating.value = key
+    try {
+      const documentCase = generatedDocumentCase.value
+      if (format === 'docx') await generateDocx(kind, documentCase)
+      else await generatePdf(kind, documentCase)
+      ElMessage.success(`${kind === 'cover' ? 'Cover Note' : kind === 'endorsement' ? 'Endorsement' : 'Debit Note'} ${format.toUpperCase()} saved.`)
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      documentGenerating.value = ''
+    }
   }
 
   async function loadCaseDocuments() {

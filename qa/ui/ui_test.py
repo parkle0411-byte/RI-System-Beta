@@ -2,6 +2,7 @@
 畫面測試（無頭 Chromium）。只在用完即丟的測試環境執行（scripts/run_ui_test.sh），資料全是合成的。
 
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
+  python3 ui_test.py H   （案件此時是 Announced，另有一張批單 Draft）業務人員：下載 Cover Note／Debit Note 的 Word 與 PDF、批單的 PDF，檢查檔案內容
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
   python3 ui_test.py G   管理員：業績目標（新增、修改、停用、重新啟用）；Dashboard 顯示案件、目標與趨勢
@@ -227,7 +228,7 @@ def phase_a(page):
     page.wait_for_timeout(800)
     docs = page.locator(".documents-grid")
     check("documents: not ready before any evidence", "Not ready to Announce" in docs.inner_text())
-    check("documents: generation buttons are disabled on the VM", page.locator(".generated-document-actions button").first.is_disabled())
+    check("documents: generation buttons are enabled", page.locator(".generated-document-actions button").first.is_enabled())
     upload = page.locator(".document-upload-card")
 
     def upload_doc(kind_label, reinsurer, filename, content):
@@ -729,14 +730,75 @@ def phase_g(page):
     logout(page)
 
 
+def phase_h(page):
+    import io
+    import zipfile
+    login(page, "ui.sales")
+    open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Cover & Debit Note").click()
+    page.wait_for_timeout(800)
+    cards = page.locator(".generated-document-card")
+    check("Announced case: Cover Note and Debit Note cards", cards.count() == 2 and "Cover Note" in cards.nth(0).inner_text() and "Debit Note" in cards.nth(1).inner_text())
+
+    def download(card, button, expect_message):
+        with page.expect_download(timeout=60000) as info:
+            page.locator(".generated-document-card").filter(has_text=card).get_by_role("button", name=button).click()
+        d = info.value
+        path = f"out/{d.suggested_filename}"
+        d.save_as(path)
+        ok = message(page, expect_message)
+        return d.suggested_filename, open(path, "rb").read(), ok
+
+    def docx_text(data):
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        return re.sub(r"<[^>]+>", "", xml)
+
+    name, data, ok = download("Cover Note", "Download Word (.docx)", "Cover Note DOCX saved.")
+    text = docx_text(data)
+    check("Cover Note Word: file name, success message", name == "CoverNote_TWPAR2603001.docx" and ok, name)
+    check("Cover Note Word: contains the TW Reference and the insured", "TWPAR2603001" in text and "UI Test Insured Ltd" in text, text[:300])
+    name, data, ok = download("Cover Note", "Download PDF", "Cover Note PDF saved.")
+    pages = len(re.findall(rb"/Type\s*/Page(?!s)", data))
+    check("Cover Note PDF: file name, real PDF rendered by the server, success message", name == "CoverNote_TWPAR2603001.pdf" and data.startswith(b"%PDF-") and pages >= 4 and ok, (name, data[:8], pages))
+    name, data, ok = download("Debit Note", "Download Word (.docx)", "Debit Note DOCX saved.")
+    text = docx_text(data)
+    check("Debit Note Word: file name and TW Reference", name == "DebitNote_TWPAR2603001.docx" and "TWPAR2603001" in text and ok, name)
+    name, data, ok = download("Debit Note", "Download PDF", "Debit Note PDF saved.")
+    check("Debit Note PDF: file name and a real PDF", name == "DebitNote_TWPAR2603001.pdf" and data.startswith(b"%PDF-") and ok, (name, data[:8]))
+    snap(page, "documents-generated")
+
+    # 批單 Draft（階段 A 建立）：只有 Endorsement PDF
+    # 批單不在案件列表裡：從根案件的流程（case-workflow）取批單鏈
+    chain = page.evaluate("""async () => {
+      const list = await (await fetch('/api/cases', {cache: 'no-store'})).json()
+      const root = (list.cases || []).find((r) => r.twRef === 'TWPAR2603001')
+      const wf = await (await fetch('/api/case-workflow?caseUid=' + root.caseUid, {cache: 'no-store'})).json()
+      return wf.workflow.chain
+    }""")
+    endo = next((r for r in chain if r.get("caseKind") == "endorsement" and r.get("status") == "draft"), None)
+    check("endorsement Draft found through the workflow API", endo is not None, [(r.get("caseKind"), r.get("status")) for r in chain])
+    if endo:
+        page.goto(f"{BASE}/cases?case={endo['caseUid']}")
+        page.locator(".case-detail-tabs").wait_for()
+        page.locator(".case-detail-tabs .el-tabs__item", has_text="Cover & Debit Note").click()
+        page.wait_for_timeout(800)
+        cards = page.locator(".generated-document-card")
+        check("endorsement: only the Endorsement card (PDF only)", cards.count() == 1 and "Endorsement" in cards.first.inner_text()
+              and cards.first.get_by_role("button").count() == 1)
+        name, data, ok = download("Endorsement", "Download PDF", "Endorsement PDF saved.")
+        check("Endorsement PDF: file name and a real PDF", name.startswith("Endorsement_") and name.endswith(".pdf") and data.startswith(b"%PDF-") and ok, name)
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 1440, "height": 1000})
+    page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
     page.set_default_timeout(15000)
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"A": phase_a, "H": phase_h, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

@@ -40,9 +40,24 @@ services:
       TZ: Asia/Taipei
     volumes: [ut_docs:/data/documents]
     secrets: [django_secret_key, mysql_app_password]
-    networks: [ut]
+    networks: [ut, ut_pdf]
     depends_on:
       mysql: {condition: service_healthy}
+
+  pdf:
+    # 與正式相同的映像與安全設定（見 compose.yaml 的 pdf 服務）
+    image: gotenberg/gotenberg:8.37.0@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
+    container_name: ri-ut-pdf
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+      - /home/gotenberg:size=64m,uid=1001,gid=1001,mode=0700
+    command: [gotenberg, --chromium-disable-javascript=true, "--chromium-allow-list=^file:///tmp/.*", --chromium-deny-public-ips=true,
+              --chromium-deny-private-ips=true, --chromium-max-concurrency=2, --api-timeout=40s, --api-body-limit=8MB,
+              --api-disable-download-from=true, --libreoffice-disable-routes=true, --pdfengines-disable-routes=true,
+              --webhook-disable=true, --prometheus-disable-collect=true, --log-level=warn]
+    networks: [ut_pdf]
 
   nginx:
     image: ri-frontend:local
@@ -61,4 +76,6 @@ volumes:
 
 networks:
   ut:
+    internal: true
+  ut_pdf:
     internal: true

@@ -47,11 +47,6 @@ REPLACEMENTS = [
     ("Supported: PDF, DOCX, PNG, JPG, EML and MSG. Maximum 5 MB per file.", "Supported: PDF, DOCX, PNG, JPG, EML and MSG. Maximum 10 MB per file.", 1),
     # VM 已啟用 Audit（Alpha 是暫停中），如實描述
     ("Announce assigns the TW Reference. Audit recording will begin after migration to the VM.", "Announce assigns the TW Reference and is recorded in the Audit Log.", 1),
-    # 產生 Word／PDF 的程式尚未移植：按鈕停用並說明
-    (':disabled="Boolean(documentGenerating)"', ':disabled="true"', 5),
-    ("<p class=\"document-help\">{{ selectedPayload.parentTwRef ? 'Endorsement output follows Development behavior: PDF only.' : 'Cover Note is available while the case is Draft. Debit Note becomes available after Announce assigns the TW Reference.' }}</p>",
-     "<p class=\"document-help\">{{ selectedPayload.parentTwRef ? 'Endorsement output follows Development behavior: PDF only.' : 'Cover Note is available while the case is Draft. Debit Note becomes available after Announce assigns the TW Reference.' }}</p>\n"
-     "                      <el-alert type=\"info\" :closable=\"false\" show-icon title=\"Document generation is not available on the VM yet\" description=\"The Word and PDF generators are migrated in a later step. Placement documents below can be uploaded and reviewed now.\"></el-alert>", 1),
 ]
 for old, new, count in REPLACEMENTS:
     found = body.count(old)

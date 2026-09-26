@@ -3,6 +3,7 @@
 # 用無頭 Chromium（Playwright）實際操作畫面，結束時整套刪除。正式的資料庫與容器完全不動。
 #
 #   scripts/run_ui_test.sh            執行（截圖放在 qa/ui/out/）
+#   PHASES="A H" scripts/run_ui_test.sh   只跑列出的階段（除錯用；階段之間有先後依賴，要從 A 開始）
 #   KEEP=1 scripts/run_ui_test.sh     測完先不刪環境（除錯用；之後手動 docker compose -p ri-uitest down -v）
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -28,11 +29,32 @@ docker exec -i ri-ut-backend python manage.py shell < qa/ui/seed.py 2>&1 | grep 
 
 rm -rf qa/ui/out && mkdir -p qa/ui/out
 run_phase() {
+  case " ${PHASES:-A H B C D E F G} " in *" $1 "*) ;; *) return 0 ;; esac
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 ui_test.py "$1"
 }
 STATUS=0
 run_phase A || STATUS=1
+run_phase H || STATUS=1
+# 階段 H 下載的 PDF：文字與字型（主機上的 poppler-utils 檢查）、每次產生都有 Audit
+check_pdf() {  # 檔名 預期文字…
+  local f="qa/ui/out/$1"; shift
+  [ -s "$f" ] || { echo "FAIL $f was not downloaded"; STATUS=1; return; }
+  local text; text=$(pdftotext -layout "$f" - 2>/dev/null)
+  for want in "$@"; do grep -qF "$want" <<<"$text" || { echo "FAIL $f does not contain '$want'"; STATUS=1; return; }; done
+  pdffonts "$f" | grep -q LiberationSans || { echo "FAIL $f does not use Liberation Sans"; STATUS=1; return; }
+  echo "PASS $f: text and fonts ($(pdfinfo "$f" | grep Pages | tr -s ' '))"
+}
+check_pdf CoverNote_TWPAR2603001.pdf "COVER NOTE" TWPAR2603001 "UI Test Insured Ltd" "SCHEDULE OF SECURITY"
+check_pdf DebitNote_TWPAR2603001.pdf "DEBIT NOTE" TWPAR2603001 "晶華保險經紀人股份有限公" "TPBKTWTP"   # 中文名稱在表格欄內換行
+pdffonts qa/ui/out/DebitNote_TWPAR2603001.pdf 2>/dev/null | grep -q NotoSansCJKtc && echo "PASS Debit Note: Chinese text uses Noto Sans CJK TC" || { echo "FAIL Debit Note Chinese font"; STATUS=1; }
+docker exec ri-ut-backend python manage.py shell -c "
+from audit.models import AuditLog
+q = AuditLog.objects.filter(action='generate_document')
+got = sorted((a.metadata['kind'], a.metadata['format']) for a in q)
+want = sorted([('cover','docx'),('cover','pdf'),('debit','docx'),('debit','pdf'),('endorsement','pdf')])
+print('PASS audit: one generate_document event per download' if got == want else f'FAIL audit events {got}')" > "$UT_SECRETS/audit.txt" 2>&1
+grep -E 'PASS|FAIL' "$UT_SECRETS/audit.txt"; grep -q '^PASS' "$UT_SECRETS/audit.txt" || STATUS=1
 # 畫面上要到 Production close 才會變成 Confirmed（尚未移植）：在測試環境直接把案件設成 Confirmed，才能測 Reverse／Renewal／修正
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
 run_phase B || STATUS=1

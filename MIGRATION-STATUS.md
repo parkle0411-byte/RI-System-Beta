@@ -11,6 +11,7 @@
 | 前端 | Vue 3.5.43 ＋ Element Plus 2.14.6 ＋ Vite 7（7.3.6），元件（SFC）加正式建置；JSZip 3.10.1（Production Report 的 Excel，與 Alpha 同版，2026-09-26 加入） | `frontend/package.json` 精確版本 ＋ `package-lock.json`，Dockerfile 用 `npm ci` |
 | 後端／管理 | Django 5.2.17 ＋ DRF 3.16.1 ＋ Gunicorn 23.0.0 ＋ mysqlclient 2.3.0 | `backend/requirements.txt` 精確版本 |
 | Web／反向代理 | Nginx 1.28（目前 1.28.3） | `nginx:1.28-alpine` |
+| 產生 PDF | Gotenberg 8.37.0（Chromium 152；字型 Liberation Sans 與 Noto Sans CJK，映像內建），2026-09-26 加入 | `compose.yaml` 固定標籤＋摘要（`sha256:f29984bd…`）；只在內部網路 `pdf`，沒有對外埠、連不到 MySQL 與網際網路 |
 | 資料庫 | MySQL 8.4.11 | `compose.yaml` 固定在目前使用中映像的摘要（`8.4.11` 標籤在 9/21 被重新打包過，MySQL 版本相同、底層不同，所以固定摘要而不是標籤） |
 
 前端因此**不沿用 Alpha 的無建置（UMD）前端**，畫面以 Vue 元件重寫；API 格式維持與 Alpha 一致，方便對照。
@@ -79,6 +80,11 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/production-report.js` | `669afb28d56692b9fbd0a842aa5f2a818eb9ffb5a2baa0915a4ed9ab0fd8271a` | `backend/production/views.py`（`ProductionReportView`）、`production/closing.py` | 完成（預覽、排除延後、產生版本、關帳：案件確認、Leg 1–3 交易、沖銷分錄、鎖匯率；含 Audit／Snapshot）。關帳整理案件的邏輯與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `production_api` 72 項；故意破壞：計算 11＋關帳 4 種由差異測試抓到、API 18 種由測試組抓到 |
 | `migrations/0016_create_production_report_lifecycle.sql` | `9fd6f3cc748e5a174715a09a289099be98cbfbf58c5ba6b8aa078e3cddcb5319` | `production/models.py`、`production/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；PostgreSQL 的部分唯一索引／COALESCE 索引改用 MySQL 函式索引；排除紀錄 `ri_runtime` 只能 SELECT／INSERT） |
 | `public/production-xlsx.js` | `256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59` | `frontend/src/alpha/production-xlsx.js`（**原樣**，`run_calc_diff.sh` 會核對雜湊） | 完成（JSZip 改由 npm 套件提供，同版 3.10.1） |
+| `public/docx-generator.js` | `6726dda0f766ac4a6b4dbc084aa857a182f93cb5639c05d02b7afc9d23ebbbad` | `frontend/public/alpha-documents/`（**原樣**，`run_calc_diff.sh` 核對雜湊；和 Alpha 一樣以一般 `<script>` 載入，不經 Vite 打包） | 完成：Word 在瀏覽器產生（同 Alpha） |
+| `public/docx-templates.js` | `b06c99814f1b0b3ecd556bdd3fe921f135363ed50a506f9f5b91d0fb2e3a0ef7` | 同上（原樣） | 完成 |
+| `public/pdf-generator.js` | `f403fe41074f259066e8d192afa2adaa16828b59610dc9893b9841cdfbbb7d21` | 同上（原樣）；`frontend/src/alpha/documents/index.js` 用它匯出的 `_qa` 版面函式組 markup，經 `apiFetch`（帶 CSRF）送出 | 完成 |
+| `public/pdf-assets.js` | `45736bdb789036bdfdbe36d3e764992af79fd6b92ec1c8af2df040db0d5711fa` | 同上（原樣） | 完成 |
+| `api/render-document-pdf.js` | `1741aaa47f3c478d9f101d6fd066d31386257b89e1ca499d9995e1b046b343d2` | `backend/cases/document_generation_views.py`、`document_markup.py`；PDF 由內部的 Gotenberg（Chromium）產生 | 完成（含 #19、#21）。markup 檢查與 Alpha 逐字一致（差異測試 `renderPdfRejectUnsafeMarkup`／`renderPdfMarkupStatus`，約 5 千組）；測試組 `document_generation`（40 項；7 種故意破壞抓到 6 種，另 1 種「拿掉邊界 0」經實測是等價的：HTML 的 `@page { margin: 0 }` 優先，輸出完全相同）；差異測試的 3 種故意破壞（Unicode 大小寫、Python 的 `\s`、以字元數算長度）都抓到；畫面測試階段 H 實際點按鈕下載 5 種文件，檢查 Word 內容、PDF 的文字與字型（Liberation Sans、Noto Sans CJK TC）與 Audit |
 | `api/dashboard.js` | `26002e5ca5fa431860e2cd7c677fbe4d52cbabb094de77c8d9c793625bb79561` | `backend/dashboard/views.py`（`DashboardView`）、`dashboard/calc.py` | 完成。計算的「Alpha 模式」與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`；9 種故意破壞全部抓到）；正式 API 用台北時間與 Production 規則（見下） |
 | `api/dashboard-targets.js` | `4ebdc50302e95ef86b7f8ccef630fd16952e5ff152044bfed1c6f7ca59a132e7` | `backend/dashboard/views.py`（`DashboardTargetsView`） | 完成（列表、新增、修改、停用／重新啟用；含 Snapshot／Audit）。測試組 `dashboard_api` 38 項；API 故意破壞 14 種抓到 12 種，另 2 種與原行為等效（重複期間由資料庫唯一限制擋下；金額進位 MySQL DECIMAL 本身就是四捨五入） |
 | `migrations/0011_create_personnel_accounts.sql` 的 `ri_dashboard_targets` | `e65f5d93…` | `dashboard/models.py`、`dashboard/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；`ri_runtime` 沒有 DELETE） |
@@ -111,7 +117,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 ## 尚未開始
 
 `api/payment-reminders.js`（#9，含 `0029`–`0031`）、`api/signed-slip-reminders.js`（#10，含 `0017`；它用的 `lib/signed-slip-reminders.js` 已完成）、
-`api/render-document-pdf.js`（#19、#21）、`api/data-reconciliation.js`、`api/foundation-status.js`、前端其餘部分：產生 Word／PDF（`docx-generator.js`、`docx-templates.js`、`pdf-generator.js`、`pdf-assets.js`）。Alpha 前端原檔的逐位元組副本在 `frontend/alpha-reference/`。
+`api/data-reconciliation.js`、`api/foundation-status.js`。Alpha 前端原檔的逐位元組副本在 `frontend/alpha-reference/`。
 
 不需要移植：`hatchable.toml`、`public/vendor/*`（前端改用 npm 套件，見「固定技術規格」）、`AGENTS.md`、`README.md`。
 
@@ -181,7 +187,12 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 「Correct reversed case」 | 按了沒反應（`startEditCase` 只允許 draft／posted，#7 的確認流程走不到） | 可以用：打開表單，存檔時跳出 #7 的確認，後端也獨立檢查 | 2026-09-25 你的決定（疑似 Alpha 錯誤）；**建議 Alpha 也修** |
 | 主檔 API 的 `payload` | 接受 JSON 字串或物件；`null` 是錯誤 | VM 先前的移植只接受物件、`null` 當成沒送；已修正成與 Alpha 相同（`master_payload_compat` 測試組） | 移植時漏掉（Alpha 自己的畫面就是送字串）|
 | Case Viewer 打開案件明細 | 呼叫需要 `cases.read.all` 的流程 API，跳出權限錯誤 | 沒有權限時不呼叫（不跳錯誤） | 同樣看不到流程資料，只是不顯示錯誤訊息 |
-| 產生 Cover Note／Debit Note／Endorsement（Word／PDF） | 可用 | 卡片照 Alpha，按鈕停用並說明尚未移植 | PDF 作法尚待決定 |
+| 產生 PDF 的引擎 | Hatchable 內建的無頭 Chromium（`browser.pdf`，A4、印背景） | 內部的 Gotenberg 8.37.0（Chromium 152）：關閉 JavaScript、只允許讀它自己的暫存 HTML、擋所有外部與內網網址；A4（8.27 × 11.7 英吋）、邊界 0、印背景 | 2026-09-26 你的決定。Arial 在 Linux 上以字寬相同的 Liberation Sans 呈現、中文用 Noto Sans CJK TC（你的決定）。**尚未與 Alpha 實際產生的 PDF 逐頁比對**（需要用你的瀏覽器對 Alpha 送一份合成資料的版面） |
+| 誰可以產生 PDF | 只要登入（沒有檢查 RI 權限） | 需要 `documents.read`（System Administrator、Sales、General Manager） | 2026-09-26 你的決定 |
+| 產生文件的 Audit | 不記錄 | PDF 與 Word 每次產生都寫一筆 `generate_document`（案件、種類、格式、操作者；不存文件內容）。Word 在瀏覽器產生，所以前端下載前先呼叫 `POST /api/document-generation-log` | 2026-09-26 你的決定 |
+| PDF 請求的 `kind`、`caseUid` | 只有 Debit Note 會帶；其他種類不需要 | 一律要帶，`kind` 只能是 cover／endorsement／debit，案件必須存在且看得到（400／404） | 為了寫 Audit；VM 的前端每次都會帶 |
+| Debit Note 的 Word | 只有前端擋（Draft 不能下載） | 伺服器也檢查（記錄 Word 的 API 對沒有 TW Ref 的案件回 409） | Alpha 的註解自己寫了這個缺口 |
+| PDF 的送出方式 | `pdf-generator.js` 的 `generate()` 直接 `fetch` | 用同一份檔案匯出的 `_qa` 版面函式組出相同的 markup，改由 `apiFetch` 送出（VM 需要 CSRF）；原檔不改 | |
 | Claim 分頁 | 可用 | 顯示 Alpha 自己的「will be converted … in a later milestone」卡片 | Claims API 尚未移植 |
 | SOA 分頁 | 讀 `payload.transactions` 顯示 | 相同（唯讀；交易要到 Production close 才會產生） | |
 | 畫面上的案件合計、分期收入 | `case-calculations.js`（不進位） | `src/alpha/caseCalculations.js`：用 Alpha `lib/accounting.js` 的逐步進位，與後端 `totals.py` 相同（`run_qa.sh totals` 比對 3,000 個案件） | 2026-09-25「統一用記帳算法」的決定 |
@@ -205,6 +216,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 畫面測試（無頭 Chromium） | `scripts/run_ui_test.sh`：另起用完即丟的測試環境（獨立資料庫、合成資料、隨機密鑰），跑完整套刪除；截圖在 `qa/ui/out/`（不進版控）。正式資料庫完全不動 |
 | 前端與後端的案件合計一致 | `scripts/run_qa.sh totals`（`all` 也會跑） |
 | 切換轉換演練（合成資料、兩套用完即丟的環境） | `qa/conversion/rehearse.sh`（`KEEP=1` 保留工作目錄；`REUSE_WORK=<目錄>` 重用上次環境 A 的匯出，只跑 B） |
+| PDF 服務 | `docker compose up -d pdf`；健康檢查 `docker exec ri-backend python -c "import urllib.request;print(urllib.request.urlopen('http://pdf:3000/health').status)"`。沒有資料、不用備份；產生失敗時看 `docker logs ri-pdf` |
 | 唯讀資料檢視 | 瀏覽器開 `/admin/`（System Administrator；主畫面上方有「資料檢視（唯讀）」連結）。要新增資料表或 model 時，在該 app 的 `admin.py` 用 `ReadOnlyModelAdmin` 註冊，其他寫法會被忽略 |
 | 備份 | `docker exec ri-mysql sh -c 'mysqldump -uroot -p"$(cat /run/secrets/mysql_root_password)" --single-transaction --routines --triggers ri_system' > backups/…sql`（`backups/` 不進版控） |
 
