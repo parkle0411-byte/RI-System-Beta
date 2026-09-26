@@ -6,6 +6,7 @@ from cases.accounting_views import AccountingView
 from cases.claims_views import ClaimsView
 from production.views import ProductionReportView
 from dashboard.views import DashboardTargetsView, DashboardView
+from cases.document_generation_views import DocumentGenerationLogView, RenderDocumentPdfView
 from cases.document_views import CaseDocumentsView
 from cases.recycle_views import DraftRecycleBinView
 from cases.views import CasesView
@@ -33,6 +34,8 @@ urlpatterns = [
     path("api/case-workflow", WorkflowView.as_view(), name="case-workflow"),
     path("api/accounting", AccountingView.as_view(), name="accounting"),
     path("api/claims", ClaimsView.as_view(), name="claims"),
+    path("api/render-document-pdf", RenderDocumentPdfView.as_view(), name="render-document-pdf"),
+    path("api/document-generation-log", DocumentGenerationLogView.as_view(), name="document-generation-log"),
     path("api/production-report", ProductionReportView.as_view(), name="production-report"),
     path("api/dashboard", DashboardView.as_view(), name="dashboard"),
     path("api/dashboard-targets", DashboardTargetsView.as_view(), name="dashboard-targets"),

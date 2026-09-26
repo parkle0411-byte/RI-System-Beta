@@ -66,3 +66,13 @@
 1. 對 Claude 說「檢查漂移」，它會比對 Alpha 目前的雜湊，告訴你哪些檔案變了。
 2. 重新取得新版並確認雜湊相同後，覆蓋這裡的檔案、更新上表與 `MIGRATION-STATUS.md`。
 3. 跑 `scripts/run_qa.sh calc`：不一致的地方就是 Python 版要同步修改的地方。
+
+### `excerpts/render-pdf-excerpts.js`
+
+由程式從 `api/render-document-pdf.js`（100 行，雜湊 `1741aaa47f3c478d9f101d6fd066d31386257b89e1ca499d9995e1b046b343d2`，先確認整檔雜湊相同）
+原樣切出第 6–20 行（`rejectUnsafeMarkup`）與第 23–32 行（handler 開頭的 markup 檢查，外面加測試用的外殼函式 `renderPdfMarkupStatus`），
+最後加一行 `export`（`rejectUnsafeMarkup` 以 `renderPdfRejectUnsafeMarkup` 的名稱匯出）。
+
+| 檔案 | SHA-256 |
+|---|---|
+| `excerpts/render-pdf-excerpts.js` | `8da173d97483b0565bb6d5068be28b2a02543996ba58e55892d06a838f330b88` |

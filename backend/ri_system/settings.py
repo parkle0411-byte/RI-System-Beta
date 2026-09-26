@@ -32,6 +32,10 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
 # Signed Slip 提醒信：VM 尚未設定寄信（SMTP 未決定），如實回報 false
 SIGNED_SLIP_OUTBOUND_ENABLED = os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false").lower() == "true"
 
+# 產生 PDF：內部的 Gotenberg（Chromium）服務，不對外開放（compose.yaml 的 pdf 服務）
+PDF_RENDERER_URL = os.getenv("RI_PDF_RENDERER_URL", "http://pdf:3000")
+PDF_RENDERER_TIMEOUT = int(os.getenv("RI_PDF_RENDERER_TIMEOUT", "45"))
+
 AUDIT_LOG_ENABLED = (
     os.getenv("AUDIT_LOG_ENABLED", "false").lower() == "true"
 )

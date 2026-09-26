@@ -68,10 +68,44 @@ services:
 
     networks:
       - backend
+      - pdf
 
     depends_on:
       mysql:
         condition: service_healthy
+
+  pdf:
+    # 產生 PDF（對應 Alpha 用的 Hatchable 無頭 Chromium）：Gotenberg 8.37.0（Chromium 152；內含 Liberation Sans 與 Noto CJK 字型），
+    # 固定在映像摘要。只在內部網路 pdf 上，沒有對外埠、連不到 MySQL 也連不到網際網路；只有 backend 會呼叫它。
+    image: gotenberg/gotenberg:8.37.0@sha256:f29984bd1e226bf1b93ba90af06000afa8b315853e99d27b9aaa41b93f15c769
+    container_name: ri-pdf
+    restart: unless-stopped
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+      - /home/gotenberg:size=64m,uid=1001,gid=1001,mode=0700
+    command:
+      - gotenberg
+      - --chromium-disable-javascript=true
+      # 只允許 Chromium 讀 Gotenberg 自己放在 /tmp 的 index.html（圖片都是內嵌的 data: URI）
+      - --chromium-allow-list=^file:///tmp/.*
+      - --chromium-deny-public-ips=true
+      - --chromium-deny-private-ips=true
+      - --chromium-max-concurrency=2
+      - --api-timeout=40s
+      - --api-body-limit=8MB
+      - --api-disable-download-from=true
+      - --libreoffice-disable-routes=true
+      - --pdfengines-disable-routes=true
+      - --webhook-disable=true
+      - --prometheus-disable-collect=true
+      - --log-level=warn
+    environment:
+      TZ: Asia/Taipei
+    mem_limit: 1g
+    networks:
+      - pdf
 
   nginx:
     build:
@@ -111,5 +145,7 @@ volumes:
 
 networks:
   backend:
+    internal: true
+  pdf:
     internal: true
   edge:

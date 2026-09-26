@@ -16,6 +16,7 @@ from cases import ledger
 from production import calc as prod
 from production import closing
 from dashboard import calc as dash
+from cases import document_markup as docgen
 from cases.calc import signed_slip as slip
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
@@ -69,7 +70,16 @@ FUNCTIONS = {
     "dashboardSummary": lambda a, now: dash.build_dashboard(a[0], a[1], a[2], _now(now)),
     "productionConfirmCase": lambda a, now: closing.confirm_case(*a),
     "accountingLedgerRows": lambda a, now: dict(zip(("rows", "warnings"), ledger.ledger_rows(a[0], now))),
+    "renderPdfRejectUnsafeMarkup": lambda a, now: docgen.reject_unsafe_markup(a[0]),
+    "renderPdfMarkupStatus": lambda a, now: _markup_status(a[0]),
 }
+
+
+def _markup_status(body):
+    """VM 回 {error: 代碼, message: 訊息}；Alpha 回 {error: 訊息}。比對狀態碼與訊息文字。"""
+    markup = body.get("markup") if isinstance(body, dict) else None
+    problem = docgen.markup_problem(markup)
+    return {"status": 200} if problem is None else {"status": problem[0], "body": {"error": problem[2]}}
 
 
 def _now(value):
