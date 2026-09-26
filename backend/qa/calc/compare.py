@@ -12,6 +12,7 @@ import sys
 from cases import draft
 from cases import workflow as wf
 from cases import documents as docs
+from cases import ledger
 from cases.calc import signed_slip as slip
 from cases.calc import accounting as acc
 from cases.calc import payment_terms as pt
@@ -59,6 +60,7 @@ FUNCTIONS = {
     "slipReminderDue": lambda a, now: slip.reminder_due(*(list(a) + [UNDEFINED] * (4 - len(a)))),
     "slipSignedSlipTracking": lambda a, now: slip.signed_slip_tracking(*a, now=now),
     "slipIsReservedTestEmail": lambda a, now: slip.is_reserved_test_email(*a),
+    "accountingLedgerRows": lambda a, now: dict(zip(("rows", "warnings"), ledger.ledger_rows(a[0], now))),
 }
 
 

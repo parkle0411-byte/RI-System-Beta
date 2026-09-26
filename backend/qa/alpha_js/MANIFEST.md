@@ -31,6 +31,15 @@
 |---|---|
 | `excerpts/case-documents-excerpts.js` | `c8d56984be7b2b775227e6bf8ba87a3a6f56b69ec5f5f870192050de3ac97877` |
 
+### `excerpts/accounting-excerpts.js`
+
+由程式從 `api/accounting.js`（209 行，雜湊 `ddd2cc0a643038a40de352e4d946d22c4d639aa1210cb0dd207ee3a16b16984a`，先確認整檔雜湊相同）
+原樣切出第 3–4 行（import）與第 37–85 行（`ledgerRows`），前面加說明、最後加一行 `export`（名稱改為 `accountingLedgerRows`）。
+
+| 檔案 | SHA-256 |
+|---|---|
+| `excerpts/accounting-excerpts.js` | `46509d7f4cbfe6144d184b36a289a38fd53e7d30598a8f4589ba4d9cd9b36a77` |
+
 ## Alpha 改了這些檔案時
 
 1. 對 Claude 說「檢查漂移」，它會比對 Alpha 目前的雜湊，告訴你哪些檔案變了。

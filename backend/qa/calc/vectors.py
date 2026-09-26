@@ -257,6 +257,8 @@ def build(count_each=1200):
     vectors.extend(workflow_vectors.build(count_each))
     from . import draft_vectors
     vectors.extend(draft_vectors.build(max(count_each // 2, 1)))
+    from . import accounting_vectors
+    vectors.extend(accounting_vectors.build(max(count_each // 2, 1)))
     return vectors
 
 

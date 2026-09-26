@@ -7,6 +7,7 @@ import * as caseDraft from './lib/case-draft.js'
 import * as apiExcerpts from './lib/api-excerpts.js'
 import * as signedSlip from './lib/signed-slip-reminders.js'
 import * as documentsExcerpts from './lib/case-documents-excerpts.js'
+import * as accountingExcerpts from './lib/accounting-excerpts.js'
 
 const fns = {
   stripFacilityTag: accounting.stripFacilityTag,
@@ -25,6 +26,7 @@ const fns = {
   validateAnnounceReady: caseDraft.validateAnnounceReady,
   ...apiExcerpts,
   ...documentsExcerpts,
+  ...accountingExcerpts,
   // lib/signed-slip-reminders.js（名稱加 slip 前綴，避免與 Announce 的同名函式衝突）
   slipReinsurerKey: signedSlip.reinsurerKey,
   slipRequiredReinsurers: signedSlip.requiredReinsurers,
