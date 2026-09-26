@@ -27,7 +27,8 @@ const {
   splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
   formatAmount, formatMoney, formatCurrency, saveReviewedDraft,
   addLossRecord, removeLossRecord, lossRowInvalid,
-  statusLabel, loadData, saveDraft
+  statusLabel, loadData, saveDraft,
+  caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel
 } = useCaseWorkspace()
 </script>
 
@@ -100,6 +101,7 @@ const {
                 <el-tab-pane label="SOA / Transactions" name="soa"></el-tab-pane>
                 <el-tab-pane label="Claim" name="claims"></el-tab-pane>
                 <el-tab-pane label="Endorsements" name="endorsements"></el-tab-pane>
+                <el-tab-pane label="Reminders" name="reminders"></el-tab-pane>
               </el-tabs>
 
               <template v-if="caseDetailTab === 'overview' && selectedCase">
@@ -447,6 +449,62 @@ const {
                   <el-empty v-else description="No endorsement chain available"></el-empty>
                   <el-alert v-if="caseWorkflow && !caseWorkflow.actions.canCreateEndorsement && caseWorkflow.latestCaseUid !== selectedCase.caseUid" class="case-readiness-alert" title="A newer endorsement exists. Open the latest row to continue the chain." type="info" :closable="false" show-icon></el-alert>
                 </section>
+              </template>
+
+              <template v-else-if="caseDetailTab === 'reminders' && selectedCase">
+                <div class="overview-stack" v-loading="remindersLoading">
+                  <section class="overview-card">
+                    <div class="section-heading">
+                      <div><span class="pending-badge">Automated reminders</span><h2>Reminders — {{ selectedCase.twRef || 'Draft' }}</h2><p>Signed Slip reminders run every day at 09:00 and payment reminders at 09:30 (Taiwan time) for Announced and Confirmed cases.</p></div>
+                      <el-button class="secondary-button" :loading="remindersLoading" @click="loadCaseReminders">Refresh</el-button>
+                    </div>
+                    <el-alert v-if="caseReminders && !caseReminders.emailEnabled" type="warning" :closable="false" show-icon title="Reminder e-mail is not enabled on the VM" description="Reminders are still generated on schedule and recorded as Suppressed; no e-mail is sent. The preview shows exactly what would be sent."></el-alert>
+                  </section>
+                  <section class="overview-card">
+                    <div class="section-heading"><div><h2>Signed Slip reminders</h2><p>Sent to the AE and the AE's supervisor while Reinsurer Signed Slips remain missing (from day 60, then every 7 days).</p></div></div>
+                    <div class="overview-table-wrap">
+                      <el-table :data="caseReminders ? caseReminders.signedSlip : []" row-key="id" empty-text="No Signed Slip reminders for this case.">
+                        <el-table-column prop="alertOn" label="Date" width="120"></el-table-column>
+                        <el-table-column label="Status" width="170"><template #default="{ row }"><el-tag :type="reminderStatusType(row.status)" effect="plain">{{ reminderStatusLabel(row.status) }}</el-tag></template></el-table-column>
+                        <el-table-column label="Missing Signed Slips" min-width="220"><template #default="{ row }">{{ (row.missingReinsurers || []).join(', ') || '—' }}</template></el-table-column>
+                        <el-table-column label="Recipients" min-width="260"><template #default="{ row }">{{ (row.recipients || []).join(', ') }}</template></el-table-column>
+                        <el-table-column label="" width="110" align="right"><template #default="{ row }"><el-button link type="primary" @click="openReminderPreview(row)">Preview</el-button></template></el-table-column>
+                      </el-table>
+                    </div>
+                  </section>
+                  <section class="overview-card">
+                    <div class="section-heading"><div><h2>Payment reminders</h2><p>Sent to the AE, the AE's supervisor and Finance: 7 days before the due date, on the due date, then weekly while overdue.</p></div></div>
+                    <div class="overview-table-wrap">
+                      <el-table :data="caseReminders ? caseReminders.payment : []" row-key="id" empty-text="No payment reminders for this case.">
+                        <el-table-column prop="alertDate" label="Date" width="120"></el-table-column>
+                        <el-table-column prop="alertLabel" label="Reminder" width="140"></el-table-column>
+                        <el-table-column label="Status" width="170"><template #default="{ row }"><el-tag :type="reminderStatusType(row.status)" effect="plain">{{ reminderStatusLabel(row.status) }}</el-tag></template></el-table-column>
+                        <el-table-column label="Recipients" min-width="300"><template #default="{ row }">{{ (row.recipients || []).join(', ') }}</template></el-table-column>
+                        <el-table-column label="" width="110" align="right"><template #default="{ row }"><el-button link type="primary" @click="openReminderPreview(row)">Preview</el-button></template></el-table-column>
+                      </el-table>
+                    </div>
+                  </section>
+                  <section class="overview-card">
+                    <div class="section-heading"><div><h2>Configuration errors</h2><p>A reminder was due but nothing was sent because contact details are incomplete (AE, supervisor or Finance e-mail). Fix them in Personnel &amp; Accounts.</p></div></div>
+                    <div class="overview-table-wrap">
+                      <el-table :data="caseReminders ? caseReminders.configurationErrors : []" empty-text="No configuration errors.">
+                        <el-table-column prop="alertDate" label="Date" width="120"></el-table-column>
+                        <el-table-column label="Reminder" width="160"><template #default="{ row }">{{ row.reminder === 'payment' ? 'Payment' + (row.alertKind ? ' · ' + paymentReminderLabel(row.alertKind) : '') : 'Signed Slip' }}</template></el-table-column>
+                        <el-table-column prop="error" label="Problem" min-width="360"></el-table-column>
+                      </el-table>
+                    </div>
+                  </section>
+                  <el-dialog v-model="reminderPreviewVisible" title="Reminder preview" width="760px" class="master-dialog">
+                    <template v-if="reminderPreview">
+                      <dl class="overview-kv" style="margin-bottom:12px;">
+                        <dt>Subject</dt><dd>{{ reminderPreview.subject || '—' }}</dd>
+                        <dt>Recipients</dt><dd>{{ (reminderPreview.recipients || []).join(', ') }}</dd>
+                        <dt>Status</dt><dd>{{ reminderStatusLabel(reminderPreview.status) }}<span v-if="reminderPreview.error || reminderPreview.errorMessage"> · {{ reminderPreview.error || reminderPreview.errorMessage }}</span></dd>
+                      </dl>
+                      <iframe class="reminder-preview-frame" sandbox="" :srcdoc="reminderPreview.bodyHtml || ''" title="E-mail preview" style="width:100%;height:360px;border:1px solid var(--border-subtle, #ddd);border-radius:8px;background:#fff;"></iframe>
+                    </template>
+                  </el-dialog>
+                </div>
               </template>
 
               <section v-else class="overview-card overview-empty">

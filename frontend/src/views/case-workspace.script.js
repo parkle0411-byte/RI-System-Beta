@@ -152,7 +152,7 @@ export function useCaseWorkspace() {
     return `Not ready to Announce. Missing ${needs.join('; ')}.`
   })
   const selectedAnnounceIssues = computed(() => collectPayloadAnnounceIssues(selectedPayload.value))
-  const caseDetailTabLabel = computed(() => ({ documents: 'Cover & Debit Note', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements' }[caseDetailTab.value] || 'Case detail'))
+  const caseDetailTabLabel = computed(() => ({ documents: 'Cover & Debit Note', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders' }[caseDetailTab.value] || 'Case detail'))
   function reconciliationRefFor(caseData, transaction) {
     const leg = String(transaction?.legType || '')
     const isClaim = leg.startsWith('Claim')
@@ -391,6 +391,36 @@ export function useCaseWorkspace() {
     }
   }
 
+  // VM：案件的提醒紀錄（Reminders 分頁；Alpha 沒有這個畫面）
+  const caseReminders = ref(null)
+  const remindersLoading = ref(false)
+  const reminderPreview = ref(null)
+  const reminderPreviewVisible = ref(false)
+  const REMINDER_STATUS = { sent: ['Sent', 'success'], simulated: ['Simulated (test address)', 'info'], suppressed: ['Suppressed (not sent)', 'warning'], failed: ['Failed', 'danger'], pending: ['Pending', 'info'] }
+  const reminderStatusLabel = (status) => (REMINDER_STATUS[status] || [status || '—'])[0]
+  const reminderStatusType = (status) => (REMINDER_STATUS[status] || [null, 'info'])[1]
+  const paymentReminderLabel = (kind) => ({ seven_days_before: '7 天後到期', due_today: '今日到期', weekly_overdue: '逾期每週提醒' }[kind] || kind)
+  function openReminderPreview(row) {
+    reminderPreview.value = row
+    reminderPreviewVisible.value = true
+  }
+  async function loadCaseReminders() {
+    const caseUid = selectedCase.value?.caseUid
+    if (!caseUid) return
+    if (caseReminders.value?.caseUid !== caseUid) caseReminders.value = null   // 換了案件就不顯示上一件的紀錄
+    remindersLoading.value = true
+    try {
+      const response = await apiFetch(`/api/case-reminders?caseUid=${encodeURIComponent(caseUid)}`, { headers: { Accept: 'application/json' } })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body.message || body.error || `Reminder request failed (HTTP ${response.status}).`)
+      if (selectedCase.value?.caseUid === caseUid) caseReminders.value = body
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      remindersLoading.value = false
+    }
+  }
+
   async function loadCaseDocuments() {
     if (!selectedCase.value?.caseUid) return
     documentsLoading.value = true
@@ -594,6 +624,7 @@ export function useCaseWorkspace() {
 
   function onCaseDetailTabChange(name) {
     if (name === 'documents') loadCaseDocuments()
+    if (name === 'reminders') loadCaseReminders()
     if (name === 'claims') loadClaims()
     if (name === 'endorsements') loadCaseWorkflow()
   }
@@ -1243,6 +1274,7 @@ export function useCaseWorkspace() {
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
     claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
     documentsLoading, documentsSaving, documentGenerating, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+    caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
     announceDialogVisible, announceConfirmed, announcing, openAnnounceReview, announceSelectedCase,

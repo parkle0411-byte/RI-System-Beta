@@ -29,7 +29,7 @@ docker exec -i ri-ut-backend python manage.py shell < qa/ui/seed.py 2>&1 | grep 
 
 rm -rf qa/ui/out && mkdir -p qa/ui/out
 run_phase() {
-  case " ${PHASES:-A H B C D E F G} " in *" $1 "*) ;; *) return 0 ;; esac
+  case " ${PHASES:-A H R B C D E F G} " in *" $1 "*) ;; *) return 0 ;; esac
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 ui_test.py "$1"
 }
@@ -45,6 +45,7 @@ check_pdf() {  # 檔名 預期文字…
   pdffonts "$f" | grep -q LiberationSans || { echo "FAIL $f does not use Liberation Sans"; STATUS=1; return; }
   echo "PASS $f: text and fonts ($(pdfinfo "$f" | grep Pages | tr -s ' '))"
 }
+case " ${PHASES:-A H R B C D E F G} " in *" H "*)
 check_pdf CoverNote_TWPAR2603001.pdf "COVER NOTE" TWPAR2603001 "UI Test Insured Ltd" "SCHEDULE OF SECURITY"
 check_pdf DebitNote_TWPAR2603001.pdf "DEBIT NOTE" TWPAR2603001 "晶華保險經紀人股份有限公" "TPBKTWTP"   # 中文名稱在表格欄內換行
 pdffonts qa/ui/out/DebitNote_TWPAR2603001.pdf 2>/dev/null | grep -q NotoSansCJKtc && echo "PASS Debit Note: Chinese text uses Noto Sans CJK TC" || { echo "FAIL Debit Note Chinese font"; STATUS=1; }
@@ -55,8 +56,22 @@ got = sorted((a.metadata['kind'], a.metadata['format']) for a in q)
 want = sorted([('cover','docx'),('cover','pdf'),('debit','docx'),('debit','pdf'),('endorsement','pdf')])
 print('PASS audit: one generate_document event per download' if got == want else f'FAIL audit events {got}')" > "$UT_SECRETS/audit.txt" 2>&1
 grep -E 'PASS|FAIL' "$UT_SECRETS/audit.txt"; grep -q '^PASS' "$UT_SECRETS/audit.txt" || STATUS=1
+esac
 # 畫面上要到 Production close 才會變成 Confirmed（尚未移植）：在測試環境直接把案件設成 Confirmed，才能測 Reverse／Renewal／修正
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
+# 提醒信（不寄信模式）：先在 AE 沒有人員資料時跑一次（設定錯誤），補上 AE／主管／Finance 的 e-mail 後再跑（Suppressed），階段 R 在畫面上檢查
+reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
+case " ${PHASES:-A H R B C D E F G} " in *" R "*)
+  reminders run_signed_slip_reminders >/dev/null
+  docker exec ri-ut-backend python manage.py shell -c "
+from personnel.models import Personnel
+Personnel.objects.create(name='UI AE One', department='reinsurance', role_code='sales', email='ui.ae@tw-insure.com', supervisor_name='UI Boss',
+                         supervisor_email='ui.boss@tw-insure.com', created_by='seed', updated_by='seed')
+Personnel.objects.filter(name='UI Finance').update(email='ui.fin@tw-insure.com'); print('reminder contacts seeded')" 2>&1 | grep seeded
+  echo "signed slip: $(reminders run_signed_slip_reminders)"
+  echo "payment:     $(reminders run_payment_reminders)"
+esac
+run_phase R || STATUS=1
 run_phase B || STATUS=1
 run_phase C || STATUS=1
 run_phase D || STATUS=1

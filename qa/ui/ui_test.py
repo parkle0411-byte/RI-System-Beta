@@ -3,6 +3,7 @@
 
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
   python3 ui_test.py H   （案件此時是 Announced，另有一張批單 Draft）業務人員：下載 Cover Note／Debit Note 的 Word 與 PDF、批單的 PDF，檢查檔案內容
+  python3 ui_test.py R   （執行腳本已跑過兩次提醒排程）業務人員：案件明細的 Reminders 分頁（Suppressed 紀錄、設定錯誤、信件預覽）
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
   python3 ui_test.py G   管理員：業績目標（新增、修改、停用、重新啟用）；Dashboard 顯示案件、目標與趨勢
@@ -791,6 +792,37 @@ def phase_h(page):
     logout(page)
 
 
+def phase_r(page):
+    login(page, "ui.sales")
+    open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Reminders").click()
+    page.wait_for_timeout(1200)
+    body = page.locator(".overview-stack").first.inner_text()
+    check("Reminders tab: e-mail not enabled notice", "Reminder e-mail is not enabled on the VM" in body)
+    slip = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Signed Slip reminders"))
+    rows = slip.locator(".el-table__row")
+    check("Signed Slip: one Suppressed reminder for the missing Facility reinsurer, to AE and supervisor",
+          rows.count() == 1 and "Suppressed (not sent)" in rows.first.inner_text() and "UI Re Beta (Facility)" in rows.first.inner_text()
+          and "ui.ae@tw-insure.com" in rows.first.inner_text() and "ui.boss@tw-insure.com" in rows.first.inner_text(), rows.first.inner_text() if rows.count() else "")
+    errors = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Configuration errors")).locator(".el-table__row")
+    check("Configuration errors: the first run (AE had no Personnel record) is listed",
+          errors.count() >= 1 and "AE does not match one active Personnel record." in errors.first.inner_text(), errors.count())
+    pay = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Payment reminders")).locator(".el-table__row")
+    check("Payment: reminders listed, Suppressed, Finance among the recipients", pay.count() >= 1 and "Suppressed (not sent)" in pay.first.inner_text()
+          and "ui.fin@tw-insure.com" in pay.first.inner_text(), pay.first.inner_text() if pay.count() else "no rows")
+    rows.first.get_by_role("button", name="Preview").click()
+    dlg = page.locator(".el-dialog").filter(has_text="Reminder preview")
+    dlg.wait_for()
+    check("preview: subject with the TW Reference", "[Signed Slip 逾期警示] TWPAR2603001" in dlg.inner_text(), dlg.inner_text()[:200])
+    frame = dlg.locator("iframe.reminder-preview-frame")
+    srcdoc = frame.get_attribute("srcdoc") or ""
+    check("preview: e-mail HTML in a sandboxed frame, link to the VM", frame.get_attribute("sandbox") == "" and "開啟 Reinsurance Department System" in srcdoc
+          and "<li>UI Re Beta (Facility)</li>" in srcdoc, srcdoc[:200])
+    snap(page, "reminders")
+    page.keyboard.press("Escape")
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
@@ -798,7 +830,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "H": phase_h, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"A": phase_a, "H": phase_h, "R": phase_r, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")
