@@ -90,20 +90,11 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0011_create_personnel_accounts.sql` 的 `ri_dashboard_targets` | `e65f5d93…` | `dashboard/models.py`、`dashboard/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；`ri_runtime` 沒有 DELETE） |
 | `api/draft-recycle-bin.js` | `0de8068d01da61ab036add0599639ed2f68bb9fa9057dd25f75db7673e9a7df8` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
 | `migrations/0005_create_draft_recycle_bin.sql`、`0019_lock_draft_recycle_policy.sql`、`0032_add_draft_recycle_bin_case_fk.sql` | `97cfe172…` / `eb607919…` / `b9bdfb0d…` | `cases/models.py`（`DraftRecycleBin`）、`cases/migrations/0003` | 完成（CHECK 禁止永久刪除、外鍵、索引；`ri_runtime` 沒有 DELETE） |
-| `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `72de4a046c42d0dc6acc3eae3773975f8bfea8aa675e639fc50c29efe8383e00` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（產生文件尚未移植，顯示 Alpha 的「Queued for migration」或「later milestone」卡片） |
+| `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `72de4a046c42d0dc6acc3eae3773975f8bfea8aa675e639fc50c29efe8383e00` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
 | `public/app.js`（上述畫面的邏輯） | `a2427dcb41711e94ddacee421a93b560075f414891a72b033ffaa858e2190427` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
 | `public/theme.css`、`public/overview.css`、`public/development-alignment.css` | `af2b57f0…` / `bceafbf2…` / `2da6fba1…` | `frontend/src/alpha/styles/`（原樣，載入順序同 Alpha） | 完成 |
+| `migrations/0002_create_cases.sql`、`0006_add_case_uid.sql`、`0007_expand_reinsurance_structures.sql`、`0009_add_announce_workflow.sql`、`0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `9e3a6164…` / `59ad607b…` / `8e4e3449…` / `cd7b0f75…` / `d7b2d9d8…` / `ceb171d9…` | `cases/models.py`（含 `ReferenceSequence`）、`cases/migrations` | 完成（由 cases／announce／workflow／accounting／claims／production 等 API 使用） |
 | `migrations/0008_create_case_documents.sql` | `bd0d2ee6e9fc68b2d75fc2093d1886654448743bf2ead2d2a693e742798b8fc1` | `cases/models.py`、`cases/migrations/0002` | 完成（上限改為 10 MB，見下） |
-
-## 只有資料表，尚無 API（Model only）
-
-| Alpha 檔案 | Alpha 雜湊（v53） | VM 位置 |
-|---|---|---|
-| `migrations/0002_create_cases.sql` | `9e3a6164f8676df6dc0ce6fe4d7e5f9f700bfecd82aa32532fa400ab36b4aa68` | `cases/models.py` |
-| `migrations/0006_add_case_uid.sql` | `59ad607b7e4c8f16854812ea7eb71ee332e831857228a837dece540f35ab31a5` | `cases/models.py` |
-| `migrations/0007_expand_reinsurance_structures.sql` | `8e4e344972e9c6c8b5e9313514e8d33cc28c87f771ad42eafab95cee4d2dfea2` | `cases/models.py` |
-| `migrations/0009_add_announce_workflow.sql` | `cd7b0f75dd953391fd500804ebdd48f53853cf7cb22d5cafbe9e1b9ae37deb4c` | `cases/models.py`（含 ReferenceSequence） |
-| `migrations/0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `d7b2d9d8…` / `ceb171d9…` | `cases/models.py` |
 
 ## 資料（不是程式碼）
 
@@ -187,14 +178,13 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 「Correct reversed case」 | 按了沒反應（`startEditCase` 只允許 draft／posted，#7 的確認流程走不到） | 可以用：打開表單，存檔時跳出 #7 的確認，後端也獨立檢查 | 2026-09-25 你的決定（疑似 Alpha 錯誤）；**建議 Alpha 也修** |
 | 主檔 API 的 `payload` | 接受 JSON 字串或物件；`null` 是錯誤 | VM 先前的移植只接受物件、`null` 當成沒送；已修正成與 Alpha 相同（`master_payload_compat` 測試組） | 移植時漏掉（Alpha 自己的畫面就是送字串）|
 | Case Viewer 打開案件明細 | 呼叫需要 `cases.read.all` 的流程 API，跳出權限錯誤 | 沒有權限時不呼叫（不跳錯誤） | 同樣看不到流程資料，只是不顯示錯誤訊息 |
-| 產生 PDF 的引擎 | Hatchable 內建的無頭 Chromium（`browser.pdf`，A4、印背景） | 內部的 Gotenberg 8.37.0（Chromium 152）：關閉 JavaScript、只允許讀它自己的暫存 HTML、擋所有外部與內網網址；A4（8.27 × 11.7 英吋）、邊界 0、印背景 | 2026-09-26 你的決定。Arial 在 Linux 上以字寬相同的 Liberation Sans 呈現、中文用 Noto Sans CJK TC（你的決定）。**尚未與 Alpha 實際產生的 PDF 逐頁比對**（需要用你的瀏覽器對 Alpha 送一份合成資料的版面） |
+| 產生 PDF 的引擎 | Hatchable 內建的無頭 Chromium（`browser.pdf`，A4、印背景） | 內部的 Gotenberg 8.37.0（Chromium 152）：關閉 JavaScript、只允許讀它自己的暫存 HTML、擋所有外部與內網網址；A4（8.27 × 11.7 英吋）、邊界 0、印背景 | 2026-09-26 你的決定。Arial 在 Linux 上以字寬相同的 Liberation Sans 呈現、中文用 Noto Sans CJK TC（你的決定）。**2026-09-26 已與 Alpha 實際輸出比對**（你同意後，用你的 Chrome 把一份合成案件的 Cover Note 版面送 Alpha 的 API；兩邊版面輸入雜湊相同）：Alpha 同樣是 Chromium 152（Skia/PDF m152）＋Liberation Sans；5 頁、A4 尺寸、圖片完全相同；**第 1–4 頁內容串流逐位元組相同**；第 5 頁只差在彎引號（’ “ ”）的字形編號（兩邊 Liberation Sans 版本不同，字寬相同、位置相同）與底線裁切框約 0.003 pt 的差距。另外 Alpha 的 PDF 有無障礙標籤（tagged PDF），VM 沒有 |
 | 誰可以產生 PDF | 只要登入（沒有檢查 RI 權限） | 需要 `documents.read`（System Administrator、Sales、General Manager） | 2026-09-26 你的決定 |
 | 產生文件的 Audit | 不記錄 | PDF 與 Word 每次產生都寫一筆 `generate_document`（案件、種類、格式、操作者；不存文件內容）。Word 在瀏覽器產生，所以前端下載前先呼叫 `POST /api/document-generation-log` | 2026-09-26 你的決定 |
 | PDF 請求的 `kind`、`caseUid` | 只有 Debit Note 會帶；其他種類不需要 | 一律要帶，`kind` 只能是 cover／endorsement／debit，案件必須存在且看得到（400／404） | 為了寫 Audit；VM 的前端每次都會帶 |
 | Debit Note 的 Word | 只有前端擋（Draft 不能下載） | 伺服器也檢查（記錄 Word 的 API 對沒有 TW Ref 的案件回 409） | Alpha 的註解自己寫了這個缺口 |
 | PDF 的送出方式 | `pdf-generator.js` 的 `generate()` 直接 `fetch` | 用同一份檔案匯出的 `_qa` 版面函式組出相同的 markup，改由 `apiFetch` 送出（VM 需要 CSRF）；原檔不改 | |
-| Claim 分頁 | 可用 | 顯示 Alpha 自己的「will be converted … in a later milestone」卡片 | Claims API 尚未移植 |
-| SOA 分頁 | 讀 `payload.transactions` 顯示 | 相同（唯讀；交易要到 Production close 才會產生） | |
+| SOA 分頁 | 讀 `payload.transactions` 顯示 | 相同（唯讀；保費交易在 Production 關帳時產生，理賠交易在記理賠付款時產生） | |
 | 畫面上的案件合計、分期收入 | `case-calculations.js`（不進位） | `src/alpha/caseCalculations.js`：用 Alpha `lib/accounting.js` 的逐步進位，與後端 `totals.py` 相同（`run_qa.sh totals` 比對 3,000 個案件） | 2026-09-25「統一用記帳算法」的決定 |
 | Announce 之後的「Record notification」按鈕 | Announce 後不重新載入流程狀態，要重新打開案件才出現 | 相同（照搬） | 只是不便，沒有錯誤；可以之後一起改 |
 | Personnel 停用時間 | 每次儲存都會覆寫 `deactivated_by/at` | 只在「在職 → 停用」那一刻記錄，之後編輯已停用的人不覆寫 | 保留真正的停用時間 |
