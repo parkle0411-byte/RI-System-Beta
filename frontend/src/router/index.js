@@ -4,6 +4,8 @@ import { auth, can, loadContext } from '../auth'
 import { NAV_ICONS } from '../alpha/constants'
 import { setHeader, shell } from '../alpha/shell'
 import Login from '../views/Login.vue'
+import ForgotPassword from '../views/ForgotPassword.vue'
+import ResetPassword from '../views/ResetPassword.vue'
 import CaseWorkspace from '../views/CaseWorkspace.vue'
 import RecycleBin from '../views/RecycleBin.vue'
 import FxRates from '../views/FxRates.vue'
@@ -52,6 +54,9 @@ export function navAllowed(item) {
 const component = { cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
+  // 忘記密碼（VM 專有；寄信啟用後登入頁才有入口）
+  { path: '/forgot-password', name: 'forgot-password', component: ForgotPassword, meta: { public: true } },
+  { path: '/reset-password', name: 'reset-password', component: ResetPassword, meta: { public: true } },
   { path: '/', name: 'home', redirect: () => (allNavigation.find(navAllowed) || { path: can('foundation.read') ? '/system-status' : '/no-access' }).path },
   ...allNavigation.map((item) => ({ path: item.path, name: item.id, component: component[item.id] || PendingView, meta: { nav: item } })),
   // System status：只有 System Administrator（foundation.read；後端 /health/ 同樣檢查）

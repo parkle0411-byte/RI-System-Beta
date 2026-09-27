@@ -1,7 +1,8 @@
 <script setup>
 // VM 專有（Alpha 的登入由 Hatchable 代管）。外觀沿用 Alpha 的樣式變數與按鈕。
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { api } from '../api'
 import { login } from '../auth'
 
 const router = useRouter()
@@ -10,6 +11,11 @@ const route = useRoute()
 const form = reactive({ username: '', password: '' })
 const loading = ref(false)
 const errorMsg = ref('')
+// 忘記密碼：寄信啟用後才顯示（SMTP 尚未決定時後端回 enabled: false）
+const resetEnabled = ref(false)
+onMounted(async () => {
+  try { resetEnabled.value = (await api('/api/auth/password-reset', { quiet401: true })).enabled === true } catch { resetEnabled.value = false }
+})
 
 const MESSAGES = {
   INVALID_CREDENTIALS: 'Incorrect username or password.',
@@ -58,6 +64,7 @@ async function submit() {
         <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
         <el-button class="primary-button" :loading="loading" style="width: 100%" @click="submit">Sign in</el-button>
       </el-form>
+      <p v-if="resetEnabled" class="forgot"><router-link to="/forgot-password">Forgot password?</router-link></p>
     </section>
   </div>
 </template>
@@ -66,4 +73,5 @@ async function submit() {
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--brand-navy); }
 .login-card { width: min(400px, 100%); padding: 28px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-page); }
 .login-card h2 { margin: 18px 0 16px; font-size: 18px; font-weight: 500; }
+.forgot { margin: 14px 0 0; text-align: center; font-size: 13px; }
 </style>

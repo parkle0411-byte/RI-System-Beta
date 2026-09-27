@@ -29,7 +29,7 @@ docker exec -i ri-ut-backend python manage.py shell < qa/ui/seed.py 2>&1 | grep 
 
 rm -rf qa/ui/out && mkdir -p qa/ui/out
 run_phase() {
-  case " ${PHASES:-A H R B C D E F G} " in *" $1 "*) ;; *) return 0 ;; esac
+  case " ${PHASES:-A H R B C D E F G P1 P2} " in *" $1 "*) ;; *) return 0 ;; esac
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 ui_test.py "$1"
 }
@@ -45,7 +45,7 @@ check_pdf() {  # 檔名 預期文字…
   pdffonts "$f" | grep -q LiberationSans || { echo "FAIL $f does not use Liberation Sans"; STATUS=1; return; }
   echo "PASS $f: text and fonts ($(pdfinfo "$f" | grep Pages | tr -s ' '))"
 }
-case " ${PHASES:-A H R B C D E F G} " in *" H "*)
+case " ${PHASES:-A H R B C D E F G P1 P2} " in *" H "*)
 check_pdf CoverNote_TWPAR2603001.pdf "COVER NOTE" TWPAR2603001 "UI Test Insured Ltd" "SCHEDULE OF SECURITY"
 check_pdf DebitNote_TWPAR2603001.pdf "DEBIT NOTE" TWPAR2603001 "晶華保險經紀人股份有限公" "TPBKTWTP"   # 中文名稱在表格欄內換行
 pdffonts qa/ui/out/DebitNote_TWPAR2603001.pdf 2>/dev/null | grep -q NotoSansCJKtc && echo "PASS Debit Note: Chinese text uses Noto Sans CJK TC" || { echo "FAIL Debit Note Chinese font"; STATUS=1; }
@@ -61,7 +61,7 @@ esac
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
 # 提醒信（不寄信模式）：先在 AE 沒有人員資料時跑一次（設定錯誤），補上 AE／主管／Finance 的 e-mail 後再跑（Suppressed），階段 R 在畫面上檢查
 reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
-case " ${PHASES:-A H R B C D E F G} " in *" R "*)
+case " ${PHASES:-A H R B C D E F G P1 P2} " in *" R "*)
   reminders run_signed_slip_reminders >/dev/null
   docker exec ri-ut-backend python manage.py shell -c "
 from personnel.models import Personnel
@@ -85,4 +85,22 @@ y, m = (t.year + 1, 1) if t.month == 12 else (t.year, t.month + 1)
 FxRate.objects.create(year_month=f'{y:04d}-{m:02d}', currency='USD', rate='31.2', created_by='seed', updated_by='seed'); print('next-month fx seeded')" 2>&1 | grep seeded
 run_phase F || STATUS=1
 run_phase G || STATUS=1
+# 忘記密碼（階段 P1／P2）：打開測試環境的寄信（寫成檔案），P1 在畫面申請，腳本從信件取出連結，P2 打開連結設定新密碼
+case " ${PHASES:-A H R B C D E F G P1 P2} " in *" P1 "*)
+  UT_EMAIL_ENABLED=true "${COMPOSE[@]}" up -d backend >/dev/null 2>&1
+  for i in $(seq 1 30); do docker exec ri-ut-backend python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/auth/password-reset')" >/dev/null 2>&1 && break; sleep 1; done
+  docker exec ri-ut-backend python manage.py shell -c "
+from personnel.models import Personnel
+Personnel.objects.filter(name='UI Sales').update(email='ui.sales@tw-insure.com'); print('reset e-mail seeded')" 2>&1 | grep seeded
+  run_phase P1 || STATUS=1
+  docker exec ri-ut-backend python -c "
+import email, glob, os, re
+files = sorted(glob.glob('/tmp/ri-mail/*'), key=os.path.getmtime)
+msg = email.message_from_bytes(open(files[-1], 'rb').read())
+text = next(p for p in msg.walk() if p.get_content_type() == 'text/plain').get_payload(decode=True).decode('utf-8')
+print(msg['To']); print(re.search(r'http://nginx/reset-password\\?uid=\\S+', text).group())" > "$UT_SECRETS/reset.txt" 2>&1
+  head -1 "$UT_SECRETS/reset.txt" | grep -q 'ui.sales@tw-insure.com' && echo "PASS reset e-mail sent to ui.sales@tw-insure.com" || { echo "FAIL reset e-mail: $(cat "$UT_SECRETS/reset.txt")"; STATUS=1; }
+  sed -n 2p "$UT_SECRETS/reset.txt" > qa/ui/out/reset-link.txt
+  run_phase P2 || STATUS=1
+esac
 exit $STATUS

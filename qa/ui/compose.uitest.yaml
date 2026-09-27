@@ -37,6 +37,12 @@ services:
       MYSQL_USER: ri_app
       MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
       RI_LOGIN_THROTTLE: "1000/min"
+      # 忘記密碼（階段 P）：腳本最後才用 UT_EMAIL_ENABLED=true 重建 backend；信件寫成檔案（容器內 /tmp/ri-mail），不會真的寄出
+      RI_EMAIL_ENABLED: "${UT_EMAIL_ENABLED:-false}"
+      RI_EMAIL_BACKEND: "django.core.mail.backends.filebased.EmailBackend"
+      RI_EMAIL_FILE_PATH: "/tmp/ri-mail"
+      RI_PUBLIC_BASE_URL: "http://nginx"
+      RI_PASSWORD_RESET_THROTTLE: "1000/min"
       TZ: Asia/Taipei
     volumes: [ut_docs:/data/documents]
     secrets: [django_secret_key, mysql_app_password]

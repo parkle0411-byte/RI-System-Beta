@@ -15,6 +15,7 @@ from cases.workflow_views import AnnounceView, WorkflowView
 from personnel.views import PersonnelOptionsView, PersonnelView
 
 from .auth_views import AppContextView, ChangePasswordView, CsrfView, LoginView, LogoutView
+from .password_reset import PasswordResetConfirmView, PasswordResetView
 from .views import HealthView
 
 urlpatterns = [
@@ -24,6 +25,8 @@ urlpatterns = [
     path("api/auth/login", LoginView.as_view(), name="auth-login"),
     path("api/auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("api/auth/change-password", ChangePasswordView.as_view(), name="auth-change-password"),
+    path("api/auth/password-reset", PasswordResetView.as_view(), name="auth-password-reset"),
+    path("api/auth/password-reset/confirm", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
     path("api/app-context", AppContextView.as_view(), name="app-context"),
     path("api/fx-rates", include("fxrates.urls")),
     path("api/master-data", include("masterdata.urls")),

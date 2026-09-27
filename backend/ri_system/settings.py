@@ -30,10 +30,16 @@ CASE_DOCUMENT_ROOT = os.getenv("RI_CASE_DOCUMENT_ROOT", "/data/documents")
 # 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
 DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
 # 提醒信（Signed Slip #10、付款 #9）：SMTP 尚未決定，VM 目前「不寄信」——提醒照常產生，記成 suppressed（reminders/runner.py）。
-# 決定 SMTP 後設定 RI_EMAIL_*，再把 RI_REMINDER_EMAIL_ENABLED 設為 true。文件 API 的 signedSlipReminder.outboundEnabled 也據此如實回報。
-REMINDER_EMAIL_ENABLED = os.getenv("RI_REMINDER_EMAIL_ENABLED", os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false")).lower() == "true"
-SIGNED_SLIP_OUTBOUND_ENABLED = REMINDER_EMAIL_ENABLED
-REMINDER_LINK_URL = os.getenv("RI_REMINDER_LINK_URL", "http://ri-dev.tw-insure.com")
+# 決定 SMTP 後設定 RI_EMAIL_*（伺服器），再把 RI_EMAIL_ENABLED 設為 true（提醒信與忘記密碼一起啟用）。文件 API 的 signedSlipReminder.outboundEnabled 也據此如實回報。
+# 寄信的總開關（提醒信與忘記密碼共用）：RI_EMAIL_ENABLED；舊名 RI_REMINDER_EMAIL_ENABLED、RI_SIGNED_SLIP_OUTBOUND_ENABLED 仍可用
+EMAIL_ENABLED = os.getenv("RI_EMAIL_ENABLED", os.getenv("RI_REMINDER_EMAIL_ENABLED", os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false"))).lower() == "true"
+REMINDER_EMAIL_ENABLED = EMAIL_ENABLED
+SIGNED_SLIP_OUTBOUND_ENABLED = EMAIL_ENABLED
+# 同事使用的網址（信件裡的連結：提醒信、重設密碼）
+PUBLIC_BASE_URL = os.getenv("RI_PUBLIC_BASE_URL", os.getenv("RI_REMINDER_LINK_URL", "http://ri-dev.tw-insure.com"))
+REMINDER_LINK_URL = os.getenv("RI_REMINDER_LINK_URL", PUBLIC_BASE_URL)
+# 忘記密碼的連結有效期（秒）
+PASSWORD_RESET_TIMEOUT = int(os.getenv("RI_PASSWORD_RESET_TIMEOUT", "3600"))
 REMINDER_LINK_TEXT = os.getenv("RI_REMINDER_LINK_TEXT", "開啟 Reinsurance Department System")
 REMINDER_MESSAGE_ID_DOMAIN = os.getenv("RI_REMINDER_MESSAGE_ID_DOMAIN", "ri-dev.tw-insure.com")
 EMAIL_BACKEND = os.getenv("RI_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
@@ -42,6 +48,7 @@ EMAIL_PORT = int(os.getenv("RI_EMAIL_PORT", "25"))
 EMAIL_USE_TLS = os.getenv("RI_EMAIL_USE_TLS", "false").lower() == "true"
 EMAIL_TIMEOUT = 30
 DEFAULT_FROM_EMAIL = os.getenv("RI_EMAIL_FROM", "ri-system@tw-insure.com")
+EMAIL_FILE_PATH = os.getenv("RI_EMAIL_FILE_PATH", "/tmp/ri-mail")   # 只有 filebased 後端（畫面測試）會用到
 
 # 產生 PDF：內部的 Gotenberg（Chromium）服務，不對外開放（compose.yaml 的 pdf 服務）
 PDF_RENDERER_URL = os.getenv("RI_PDF_RENDERER_URL", "http://pdf:3000")
@@ -145,7 +152,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "EXCEPTION_HANDLER": "ri_system.authz.ri_exception_handler",
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
-    "DEFAULT_THROTTLE_RATES": {"login": os.getenv("RI_LOGIN_THROTTLE", "10/min")},
+    "DEFAULT_THROTTLE_RATES": {"login": os.getenv("RI_LOGIN_THROTTLE", "10/min"),
+                               "password_reset": os.getenv("RI_PASSWORD_RESET_THROTTLE", "5/min")},
 }
 
 # 密碼規則（要告知同事的規則）：至少 8 個字元，且必須同時包含英文字母與數字。

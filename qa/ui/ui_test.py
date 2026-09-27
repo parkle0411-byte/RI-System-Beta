@@ -4,6 +4,8 @@
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
   python3 ui_test.py H   （案件此時是 Announced，另有一張批單 Draft）業務人員：下載 Cover Note／Debit Note 的 Word 與 PDF、批單的 PDF，檢查檔案內容
   python3 ui_test.py R   （執行腳本已跑過兩次提醒排程）業務人員：案件明細的 Reminders 分頁（Suppressed 紀錄、設定錯誤、信件預覽）
+  python3 ui_test.py P1  （腳本已打開寄信）登入頁的 Forgot password? → 申請重設連結
+  python3 ui_test.py P2  （腳本已從信件取出連結放在 out/reset-link.txt）打開連結 → 設定新密碼 → 用新密碼登入
   python3 ui_test.py B   （執行腳本已把案件設成 Confirmed）管理員：Renewal → Reverse → 修正 Reversed 案件；回收桶；MDM；FX；人員與帳號；Audit
   python3 ui_test.py C   Case Viewer 的權限範圍；強制改密碼
   python3 ui_test.py G   管理員：業績目標（新增、修改、停用、重新啟用）；Dashboard 顯示案件、目標與趨勢
@@ -443,6 +445,8 @@ def phase_c(page):
     logout(page)
     status = page.request.get(BASE + "/health/")
     check("anonymous /health/ -> 401", status.status == 401, status.status)
+    page.wait_for_timeout(800)
+    check("e-mail not enabled: the login page shows no 'Forgot password?' link", page.get_by_text("Forgot password?").count() == 0)
 
     login(page, "ui.newcomer")
     check("temporary password: forced change dialog, no navigation", page.get_by_text("Change your password first").is_visible() and page.locator(".nav-item").count() == 0)
@@ -841,6 +845,56 @@ def phase_r(page):
     logout(page)
 
 
+def phase_p1(page):
+    page.goto(BASE + "/login")
+    page.get_by_text("Forgot password?").wait_for(timeout=10000)
+    console_errors.clear()  # 登入前檢查登入狀態的 401 是預期的（同 login()）
+    check("e-mail enabled: 'Forgot password?' is shown on the login page", page.get_by_text("Forgot password?").is_visible())
+    page.get_by_text("Forgot password?").click()
+    page.wait_for_url(BASE + "/forgot-password")
+    page.get_by_label("Username or e-mail").fill("UI.Sales")
+    page.get_by_role("button", name="Send reset link").click()
+    check("request: generic confirmation shown", message_text(page, "If the account exists and has an e-mail address"))
+    snap(page, "forgot-password")
+
+
+def message_text(page, text):
+    try:
+        page.get_by_text(text).first.wait_for(timeout=10000)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def phase_p2(page):
+    link = open("out/reset-link.txt").read().strip()
+    check("reset link taken from the e-mail", link.startswith(BASE + "/reset-password?uid="), link[:80])
+    page.goto(link)
+    page.get_by_label("New password", exact=True).fill("short")
+    page.get_by_label("Confirm new password").fill("short")
+    page.get_by_role("button", name="Set new password").click()
+    check("weak password is refused before sending", message_text(page, "too short"))
+    page.get_by_label("New password", exact=True).fill("Ui-Test-Pass-9")
+    page.get_by_label("Confirm new password").fill("Ui-Test-Pass-9")
+    page.get_by_role("button", name="Set new password").click()
+    check("new password set", message_text(page, "Your password has been reset"))
+    snap(page, "reset-password")
+    page.goto(BASE + "/login")
+    page.get_by_label("Username").fill("ui.sales")
+    page.get_by_label("Password").fill("Ui-Test-Pass-9")
+    page.get_by_role("button", name="Sign in").click()
+    page.wait_for_selector(".app-shell", timeout=15000)
+    check("sign in with the new password", page.locator(".app-shell").is_visible())
+    console_errors.clear()
+    logout(page)
+    page.goto(link)
+    page.get_by_label("New password", exact=True).fill("Ui-Test-Pass-8")
+    page.get_by_label("Confirm new password").fill("Ui-Test-Pass-8")
+    page.get_by_role("button", name="Set new password").click()
+    check("the same link cannot be used again", message_text(page, "invalid or has expired"))
+    console_errors.clear()   # 400 回應在 console 會有一行網路錯誤，屬預期
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
@@ -848,7 +902,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "H": phase_h, "R": phase_r, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")
