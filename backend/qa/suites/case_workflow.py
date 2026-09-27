@@ -71,7 +71,7 @@ try:
 
         # ================= Announce =================
         c1 = create(sales)
-        check("announce: GM / viewer have no cases.announce -> 403", call(gm, "post", "/api/case-announce", {}).status_code == 403 and call(viewer, "post", "/api/case-announce", {}).status_code == 403)
+        check("announce: GM allowed like Reinsurance Staff (2026-09-27: validation, not 403); viewer 403", call(gm, "post", "/api/case-announce", {}).status_code != 403 and call(viewer, "post", "/api/case-announce", {}).status_code == 403)
         check("announce: anonymous -> 401, GET is not allowed (403/405)", call(new_client(), "post", "/api/case-announce", {}).status_code == 401 and call(sales, "get", "/api/case-announce").status_code in (403, 405))
         r = call(sales, "post", "/api/case-announce", {"rowVersion": 1, "confirmed": True}); check("no caseUid -> 400 case_uid_required", code(r) == "case_uid_required")
         for bad in (None, 0, "x", 1.5): check(f"rowVersion {bad!r} -> 400 row_version_required", code(call(sales, "post", "/api/case-announce", {"caseUid": str(c1.case_uid), "rowVersion": bad, "confirmed": True})) == "row_version_required")
@@ -141,7 +141,7 @@ try:
         r = call(sales, "post", "/api/case-workflow", {"action": "reverse_case"}); check("POST without caseUid -> 400", code(r) == "case_uid_required")
         r = call(sales, "post", "/api/case-workflow", {"action": "reverse_case", "caseUid": str(uuid.uuid4())}); check("POST unknown case -> 404", r.status_code == 404)
         r = call(sales, "post", "/api/case-workflow", {"action": "fly", "caseUid": str(c1.case_uid)}); check("unknown action -> 400 unsupported_action", code(r) == "unsupported_action")
-        check("GM cannot run workflow actions (no cases.write) -> 403", call(gm, "post", "/api/case-workflow", {"action": "reverse_case", "caseUid": str(c1.case_uid)}).status_code == 403)
+        check("GM can run workflow actions like Reinsurance Staff (2026-09-27): unsupported action 400, not 403", call(gm, "post", "/api/case-workflow", {"action": "zz_unknown", "caseUid": str(c1.case_uid)}).status_code == 400)
 
         # ================= Endorsement =================
         root = c1

@@ -73,8 +73,12 @@ try:
         fin, finm = account(fin_p, "fin"), account(finm_p, "finm")
 
         # ================= 權限 =================
-        for label, c in (("sales", sales), ("general manager", gm), ("viewer", viewer)):
-            check(f"{label}: no accounting.read -> GET and POST 403", call(c, "get", "/api/accounting").status_code == 403 and call(c, "post", "/api/accounting", {"action": "record_payment"}).status_code == 403)
+        for label, c in (("sales", sales), ("general manager", gm)):   # 2026-09-27：帳本唯讀
+            r = call(c, "get", "/api/accounting")
+            check(f"{label}: ledger read-only (200, canEdit false), record/reverse 403", r.status_code == 200 and r.json()["scope"]["canEdit"] is False
+                  and code(call(c, "post", "/api/accounting", {"action": "record_payment"})) == "permission_denied"
+                  and code(call(c, "post", "/api/accounting", {"action": "reverse_payment"})) == "permission_denied")
+        check("viewer: no accounting.read -> GET and POST 403", call(viewer, "get", "/api/accounting").status_code == 403 and call(viewer, "post", "/api/accounting", {"action": "record_payment"}).status_code == 403)
         check("anonymous -> 401", call(new_client(), "get", "/api/accounting").status_code == 401)
         for label, c in (("admin", admin), ("finance staff", fin), ("finance manager", finm)):
             r = call(c, "get", "/api/accounting")

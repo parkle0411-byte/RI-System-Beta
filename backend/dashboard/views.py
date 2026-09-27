@@ -79,7 +79,7 @@ class DashboardView(NoStoreMixin, APIView):
 
     def get(self, request):
         person = request.ri_principal
-        see_all = has_permission(person, "cases.read.all")
+        see_all = has_permission(person, "dashboard.read.all")   # VM：Finance 也看全部（Alpha 用 cases.read.all）
         cases = Case.objects.filter(recycled_at__isnull=True, is_archived=False).order_by("id")
         rows = [{"id": c.pk, "parent_case_id": c.parent_case_id, "status": c.status, "payload": c.payload,
                  "announced_at": _taipei_text(c.announced_at), "created_at": _taipei_text(c.created_at)}

@@ -138,7 +138,7 @@ def phase_a(page):
     # ---------------- 業務人員：新增草稿 ----------------
     login(page, "ui.sales")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("sales sees Dashboard, Account List, MDM, Production, FX", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Production Report", "FX Rates"], labels)
+    check("sales sees Dashboard, Account List, MDM, Production, Accounting (read-only, 2026-09-27), FX", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Production Report", "Accounting", "FX Rates"], labels)
     nav(page, "Account List")
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
@@ -465,7 +465,13 @@ def acc_row(page, party):
 def phase_d(page):
     login(page, "ui.finance")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("Finance Staff sees Production Report, Accounting, FX Rates", labels == ["Production Report", "Accounting", "FX Rates"], labels)
+    check("Finance Staff sees Dashboard, Production Report, Accounting, FX Rates (Dashboard added 2026-09-27; no Account List)",
+          labels == ["Dashboard", "Production Report", "Accounting", "FX Rates"], labels)
+    nav(page, "Dashboard")
+    page.locator(".rdash").wait_for()
+    page.wait_for_timeout(1000)
+    kpi = page.locator(".kpi", has_text="In-Force Policies").locator(".val").inner_text()
+    check("Finance Staff Dashboard shows all cases (the Announced case is counted)", kpi.isdigit() and int(kpi) >= 1, kpi)
     nav(page, "Accounting")
     page.locator(".table-card .el-table__row").first.wait_for()
     rows = page.locator(".table-card .el-table__row").filter(has_text="TWPAR2603001")

@@ -100,7 +100,7 @@ try:
             wok = role == "admin"
             check(f"[{role}] POST/PUT /api/personnel {'allowed (400 validation)' if wok else 'denied'}",
                   (w_post.status_code == 400 and w_put.status_code == 400) if wok else (w_post.status_code == 403 and w_put.status_code == 403), (w_post.status_code, w_put.status_code))
-            oo = role in {"admin", "sales"}
+            oo = role in {"admin", "sales", "general_manager"}   # personnel-options 用 cases.write；GM 2026-09-27 起可以寫案件
             check(f"[{role}] GET personnel-options {'allowed' if oo else 'denied'}", c.get("/api/personnel-options").status_code == (200 if oo else 403))
             acc = call(c, "post", "/api/personnel-accounts", {})
             check(f"[{role}] account API {'allowed (400 validation)' if wok else 'denied'}", acc.status_code == (400 if wok else 403), acc.status_code)

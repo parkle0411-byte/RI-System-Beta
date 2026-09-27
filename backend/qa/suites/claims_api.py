@@ -84,7 +84,7 @@ try:
             check(f"{label}: no cases.read.all -> GET 403, POST 403", claims(c, root).status_code == 403 and act(c, "create_claim", root).status_code == 403)
         r = claims(gm, root)
         check("general manager: GET 200 (cases.read.all), no-store", r.status_code == 200 and r["Cache-Control"] == "no-store, max-age=0")
-        check("general manager: POST 403 (no cases.write)", act(gm, "create_claim", root, claim={"dateOfLoss": "2026-05-01"}).status_code == 403)
+        check("general manager can write claims like Reinsurance Staff (2026-09-27): unsupported action 400, not 403", act(gm, "zz_unknown", root).status_code == 400)
 
         # ================= 讀取 =================
         r = call(sales, "get", "/api/claims"); check("GET without caseUid -> 400 case_uid_required", r.status_code == 400 and code(r) == "case_uid_required")

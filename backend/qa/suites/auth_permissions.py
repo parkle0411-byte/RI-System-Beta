@@ -110,6 +110,19 @@ try:
             check(f"[{role}] POST master-data {'allowed' if mw else 'denied'}", expect(post(c, "/api/master-data", {"entityType": "zzz"}), mw, (400,)))
             put = c.put("/api/master-data", data=json.dumps({}), content_type="application/json", HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value)
             check(f"[{role}] PUT master-data {'allowed' if mw else 'denied'}", expect(put, mw, (400,)))
+            # 2026-09-27 調整後的權限（刻意與 Alpha 不同）
+            check(f"[{role}] Audit Log {'allowed' if role == 'admin' else 'denied'}", c.get("/api/audit-log").status_code == (200 if role == "admin" else 403))
+            acc = c.get("/api/accounting")
+            check(f"[{role}] Accounting ledger {'readable' if role != 'viewer' else 'denied'}", acc.status_code == (403 if role == "viewer" else 200))
+            if acc.status_code == 200:
+                check(f"[{role}] Accounting write {'allowed' if role in ('admin', 'accounting', 'accounting_manager') else 'read-only'}",
+                      acc.json()["scope"]["canEdit"] is (role in ("admin", "accounting", "accounting_manager")))
+            check(f"[{role}] Dashboard readable", c.get("/api/dashboard").status_code == 200)
+            perms = set(c.get("/api/app-context").json()["principal"]["permissions"])
+            check(f"[{role}] dashboard.read.all {'yes' if role != 'viewer' else 'no'}; Account List {'yes' if role in ('admin', 'sales', 'general_manager') else 'no'}",
+                  ("dashboard.read.all" in perms) is (role != "viewer") and ("cases.read.all" in perms) is (role in ("admin", "sales", "general_manager")), sorted(perms))
+            check(f"[{role}] case writing {'allowed' if role in ('admin', 'sales', 'general_manager') else 'denied'}",
+                  ({"cases.write", "cases.announce", "documents.write"} <= perms) is (role in ("admin", "sales", "general_manager")))
             h = c.get("/health/")
             check(f"[{role}] GET /health/ (System status) {'allowed' if role == 'admin' else 'denied'}",
                   (h.status_code == 200 and h.json().get("database") == "ok") if role == "admin" else (h.status_code == 403 and code(h) == "PERMISSION_DENIED"), h.status_code)

@@ -81,7 +81,8 @@ try:
 
         # ================= 權限 =================
         check("anonymous -> 401", call(new_client(), "get", "/api/dashboard").status_code == 401)
-        check("finance staff has no dashboard.read -> 403", call(fin, "get", "/api/dashboard").status_code == 403)
+        check("finance staff can read the dashboard (2026-09-27) and sees the same totals as admin (all cases)", call(fin, "get", "/api/dashboard").status_code == 200
+              and call(fin, "get", "/api/dashboard").json() == call(admin, "get", "/api/dashboard").json())
         check("admin, sales, GM, viewer can read the dashboard", all(call(c, "get", "/api/dashboard").status_code == 200 for c in (admin, sales, gm, viewer)))
         check("targets: sales and finance cannot read (403); admin and GM can", call(sales, "get", T).status_code == 403 and call(fin, "get", T).status_code == 403
               and call(admin, "get", T).status_code == 200 and call(gm, "get", T).status_code == 200)

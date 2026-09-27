@@ -23,11 +23,16 @@ ROLE_LABELS = {
     "viewer": "Case Viewer",
 }
 
-# 與 Alpha lib/authorization.js 的 ROLE_PERMISSIONS 逐項相同。
-# 修改此表前必須先確認 Alpha 端已同步修改（權限矩陣以 Alpha 為準）。
+# 以 Alpha lib/authorization.js 的 ROLE_PERMISSIONS 為基礎，2026-09-27 依你的決定調整（刻意與 Alpha 不同，記在 MIGRATION-STATUS.md）：
+#   - General Manager：案件功能與 Reinsurance Staff 相同（新增／編輯、Announce、流程、文件、理賠），保留人員檢視與業績目標；不能看 Audit Log
+#   - Audit Log 只有 System Administrator
+#   - Finance Staff／Finance Manager：Dashboard 看全部案件（dashboard.read.all），但仍然不能開 Account List 與案件明細
+#   - Reinsurance Staff、General Manager：Accounting 帳本唯讀（accounting.read；記付款、沖銷要 accounting.write）
+# dashboard.read.all 是 VM 才有的權限：Dashboard 顯示全部案件（沒有它就只看自己負責或列在分績裡的案件）。
+# 修改此表時，同步更新 MIGRATION-STATUS.md 與 qa/suites/auth_permissions.py 的權限矩陣測試。
 ROLE_PERMISSIONS = {
     "admin": [
-        "dashboard.read", "cases.read.all", "cases.write", "cases.announce",
+        "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",
         "documents.read", "documents.write", "mdm.read", "mdm.write",
         "production.read", "fx.read", "fx.write", "personnel.read",
         "personnel.write", "accounts.manage", "targets.read", "targets.write",
@@ -35,20 +40,21 @@ ROLE_PERMISSIONS = {
         "recycle.read", "recycle.write",
     ],
     "sales": [
-        "dashboard.read", "cases.read.all", "cases.write", "cases.announce",
+        "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",
         "documents.read", "documents.write", "mdm.read", "mdm.write",
-        "production.read", "fx.read",
+        "production.read", "fx.read", "accounting.read",
     ],
     "accounting": [
-        "production.read", "fx.read", "accounting.read", "accounting.write",
+        "dashboard.read", "dashboard.read.all", "production.read", "fx.read", "accounting.read", "accounting.write",
     ],
     "accounting_manager": [
-        "production.read", "fx.read", "fx.write", "accounting.read", "accounting.write",
+        "dashboard.read", "dashboard.read.all", "production.read", "fx.read", "fx.write", "accounting.read", "accounting.write",
     ],
     "general_manager": [
-        "dashboard.read", "cases.read.all", "documents.read", "mdm.read", "mdm.write",
-        "production.read", "fx.read", "personnel.read", "targets.read",
-        "targets.write", "audit.read",
+        "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",
+        "documents.read", "documents.write", "mdm.read", "mdm.write",
+        "production.read", "fx.read", "accounting.read",
+        "personnel.read", "targets.read", "targets.write",
     ],
     "viewer": [
         "dashboard.read", "cases.read.own",

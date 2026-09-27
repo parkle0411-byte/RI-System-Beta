@@ -197,7 +197,7 @@ try:
         check("audit-log event keys match Alpha", list(body["events"][0]) == ["id", "entity_type", "entity_id", "action", "before_data", "after_data", "actor_id", "actor_name", "actor_role", "request_id", "source", "occurred_at", "retention_until", "metadata"], list(body["events"][0]))
         check("audit-log limit is capped at 250", len(admin.get("/api/audit-log?limit=99999").json()["events"]) <= 250)
         check("audit-log rejects non-GET", call(admin, "post", "/api/audit-log", {}).status_code in (403, 405))
-        for role, allowed in (("general_manager", True), ("accounting", False), ("viewer", False)):
+        for role, allowed in (("general_manager", False), ("accounting", False), ("viewer", False)):   # 2026-09-27：Audit Log 只給 System Administrator
             c2, _ = login_as(role, f"a_{role}")
             check(f"audit-log as {role}: {'allowed' if allowed else 'denied'}", c2.get("/api/audit-log").status_code == (200 if allowed else 403))
         check("audit-log as sales: denied", sales.get("/api/audit-log").status_code == 403)

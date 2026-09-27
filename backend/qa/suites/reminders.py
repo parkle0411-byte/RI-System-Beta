@@ -221,7 +221,7 @@ try:
               and any(e["reminder"] == "payment" and e["alertKind"] for e in errs) and all(e["error"] == "AE does not match one active Personnel record." for e in errs)
               and [e["at"] for e in errs] == sorted([e["at"] for e in errs], reverse=True), errs[:3])
         check("API: viewer cannot see a case that is not theirs -> 404", call(viewer, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 404)
-        check("API: finance (no dashboard.read) -> 403", call(fin, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 403)
+        check("API: finance (Dashboard only, no case access) -> 404 for a case they cannot open", call(fin, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 404)
         check("API: unknown case -> 404", call(sales, "get", "/api/case-reminders?caseUid=00000000-0000-4000-8000-000000000000").status_code == 404)
         raise Rollback()
 except Rollback:

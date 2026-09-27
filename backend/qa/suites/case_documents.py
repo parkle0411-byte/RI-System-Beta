@@ -72,7 +72,7 @@ try:
         check("anonymous -> 401", call(new_client(), "get", f"/api/case-documents?caseUid={uid}").status_code == 401)
         check("viewer (no documents.read) -> 403", listing(viewer).status_code == 403)
         check("accounting -> 403", listing(acct).status_code == 403 and upload(acct).status_code == 403)
-        check("General Manager may read but not upload", listing(gm).status_code == 200 and upload(gm).status_code == 403)
+        check("General Manager may read and upload like Reinsurance Staff (2026-09-27): validation 400, not 403", listing(gm).status_code == 200 and upload(gm, kind="bogus").status_code == 400)
         check("no caseUid -> 400 case_uid_required", code(call(sales, "get", "/api/case-documents")) == "case_uid_required" and code(upload(caseUid="")) == "case_uid_required")
         check("unknown / malformed case -> 404", code(listing(u=str(uuid.uuid4()))) == "case_not_found" and code(listing(u="nope")) == "case_not_found")
 
@@ -168,10 +168,10 @@ try:
         a = AuditLog.objects.filter(entity_type="case_document", entity_id=uid, action="select_document").first()
         check("audit select_document before/after", a and a.before_data == {"id": str(doc.pk), "isSelected": True} and a.after_data == {"id": str(doc.pk), "isSelected": False})
         r = call(sales, "put", "/api/case-documents", {"caseUid": uid, "fileId": str(doc.pk), "selected": "true"}); check("selected must be boolean true (the string stays unselected)", r.json()["file"]["is_selected"] is False)
-        check("select: unknown file -> 404, bad id -> 400, GM -> 403",
+        check("select: unknown file -> 404, bad id -> 400, GM allowed (2026-09-27) -> unknown file 404",
               code(call(sales, "put", "/api/case-documents", {"caseUid": uid, "fileId": str(uuid.uuid4()), "selected": True})) == "file_not_found"
               and code(call(sales, "put", "/api/case-documents", {"caseUid": uid, "fileId": "x", "selected": True})) == "invalid_file_id"
-              and call(gm, "put", "/api/case-documents", {"caseUid": uid, "fileId": str(doc.pk), "selected": True}).status_code == 403)
+              and code(call(gm, "put", "/api/case-documents", {"caseUid": uid, "fileId": str(uuid.uuid4()), "selected": True})) == "file_not_found")
 
         # 刪除：Draft 可以
         victim = CaseDocument.objects.get(filename="j.jpeg"); vpath = os.path.join(ROOT, victim.storage_key)
