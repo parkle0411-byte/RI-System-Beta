@@ -10,10 +10,10 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "alpha-reference" / "index.html"
 TARGET = ROOT / "src" / "views" / "CaseWorkspace.vue"
-EXPECTED_SHA256 = "feea43f80afceb5b4a75f1e532c762f6497576bbe1336f17f2868488a03d0ff7"
+EXPECTED_SHA256 = "e5e1bc75b357a08d367941f30c5ad7bd626a2f3ff84a183b07932a7035f47899"
 
 text = SOURCE.read_text(encoding="utf-8")
-assert hashlib.sha256(text.encode()).hexdigest() == EXPECTED_SHA256, "alpha-reference/index.html 與記錄的 Alpha v54 不同"
+assert hashlib.sha256(text.encode()).hexdigest() == EXPECTED_SHA256, "alpha-reference/index.html 與記錄的 Alpha v55 不同"
 lines = text.split("\n")
 
 
@@ -95,11 +95,6 @@ REMINDERS_TAB = """<template v-else-if="caseDetailTab === 'reminders' && selecte
 """
 
 REPLACEMENTS = [
-    # 理賠：出險日與付款日期必填（VM 的決定，Alpha 可留空）
-    ("<p>Development-compatible loss details. Blank optional fields can be completed later through the reserve workflow.</p>",
-     "<p>Development-compatible loss details. Date of Loss is required; the Outstanding Reserve can be updated later.</p>", 1),
-    ('<el-form-item label="Date of Loss"><el-date-picker v-model="claimForm.dateOfLoss"', '<el-form-item label="Date of Loss" required><el-date-picker v-model="claimForm.dateOfLoss"', 1),
-    ('<el-form-item label="Payment date"><el-date-picker v-model="paymentForm.date"', '<el-form-item label="Payment date" required><el-date-picker v-model="paymentForm.date"', 1),
     # 文件上限：VM 10 MB（Alpha 5 MB）
     ("Supported: PDF, DOCX, PNG, JPG, EML and MSG. Maximum 5 MB per file.", "Supported: PDF, DOCX, PNG, JPG, EML and MSG. Maximum 10 MB per file.", 1),
     # VM 已啟用 Audit（Alpha 是暫停中），如實描述
@@ -116,7 +111,7 @@ for old, new, count in REPLACEMENTS:
     body = body.replace(old, new)
 
 script = """<script setup>
-// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v54）；請勿直接修改模板，
+// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v55）；請勿直接修改模板，
 // 要改就改產生程式（或 Alpha 更新後重新產生）。邏輯在 case-workspace.script.js。
 import { useCaseWorkspace } from './case-workspace.script'
 
