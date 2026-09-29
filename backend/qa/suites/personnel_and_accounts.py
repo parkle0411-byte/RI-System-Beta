@@ -281,8 +281,8 @@ try:
         check("changing role while the account is active is allowed", r.status_code == 200)
 
         # 最後一位管理員
-        pl = Personnel.objects.filter(role_code="admin", account_status="active").exclude(pk=admin_p.pk).first()
-        if pl:
+        # 真實的管理員可能不只一位：全部停用（在回滾的交易裡），測試用的管理員才是最後一位
+        for pl in Personnel.objects.filter(role_code="admin", account_status="active").exclude(pk=admin_p.pk):
             accounts.disable_account(personnel_id=pl.pk, actor=CLI_ACTOR, source="cli")
         admin_p.refresh_from_db()
         r = call(admin, "put", "/api/personnel", {"id": admin_p.pk, "rowVersion": admin_p.row_version, "name": admin_p.name, "department": admin_p.department, "roleCode": "viewer", "isActive": True})

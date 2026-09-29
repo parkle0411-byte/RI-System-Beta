@@ -91,6 +91,9 @@ try:
         # ================= Dashboard：只看自己的案件（Case Viewer） =================
         now_tpe = timezone.now().astimezone(TAIPEI)
         ym = now_tpe.strftime("%Y-%m"); year = now_tpe.year
+        # VM 上可能已有真實的今年／本月目標（同一期間只能一筆）：在回滾的交易裡先移到不會用到的期間，測試結束一併還原
+        for per_type, key, spare in (("annual", str(year), "2199"), ("annual", str(year + 1), "2198"), ("monthly", ym, "2199-12")):
+            DashboardTarget.objects.filter(period_type=per_type, period_key=key).update(period_key=spare)
         month_start_tpe = now_tpe.replace(day=1, hour=0, minute=30, second=0, microsecond=0)   # 台北時間本月 1 日 00:30（UTC 是上個月）
         future = (now_tpe + timedelta(days=200)).strftime("%Y-%m-%d")
         def mk(status="posted", owner=view_p, **over):
