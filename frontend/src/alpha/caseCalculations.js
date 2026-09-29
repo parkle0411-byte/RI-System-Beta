@@ -1,6 +1,6 @@
 // 案件畫面的計算。來源：Alpha public/case-calculations.js（RICaseCalculations）。
 //
-// VM 刻意與 Alpha 不同（2026-09-25 的決定，見 MIGRATION-STATUS.md「案件合計」）：
+// 2026-09-25 的決定（見 MIGRATION-STATUS.md「案件合計」），2026-09-29 已同步回 Alpha v60：
 // 金額合計（totals）改用 Alpha lib/accounting.js 的逐步進位算法（每家再保人各項進位到分，合計再進位），
 // 與後端 cases/calc/totals.py 完全相同，所以列表、畫面、記帳三處的數字一致。
 // 非金額的合計（Order hereon、Sum Insured、Avg. Rate）仍照 case-calculations.js。

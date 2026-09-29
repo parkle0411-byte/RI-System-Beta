@@ -53,8 +53,8 @@ def resolve_personnel_splits(payload, allowed_historical_ids=()):
     檢查並補齊 Performance Split 的人員（personnelId 與名稱以 Personnel 記錄為準）。
     回傳 None 表示通過，否則回傳 {error, message}。會直接修改 payload["splitParties"]。
 
-    與 Alpha 的差別：只給名字（沒有 personnelId）而同名的人不只一位（不同部門可同名）時，
-    Alpha 取到哪一位取決於資料庫的回傳順序；VM 改為拒絕並要求以 ID 指定。
+    只給名字（沒有 personnelId）而同名的人不只一位（不同部門可同名）時拒絕並要求以 ID 指定
+    （原本是與 Alpha v53 的差異：Alpha 取到哪一位取決於資料庫的回傳順序；2026-09-29 已同步回 Alpha v60）。
     """
     parties = payload.get("splitParties")
     parties = parties if is_array(parties) else []
