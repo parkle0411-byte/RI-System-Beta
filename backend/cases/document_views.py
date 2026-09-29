@@ -11,7 +11,7 @@
   - 單檔上限 10 MB（Alpha 5 MB）。
   - Announce 之後不能刪除文件（只能取消勾選），檔案保留作為證據；Draft 仍可刪。
   - signedSlipReminder.outboundEnabled 如實回報（依設定，VM 尚未設定寄信 → false）。
-  - 資料庫有紀錄但檔案本體不見時，下載回 404 file_content_missing（Alpha 會是未處理的錯誤）。
+  - 資料庫有紀錄但檔案本體不見時，下載回 404 file_content_missing（原本是與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v62）。
 """
 import hashlib
 import logging

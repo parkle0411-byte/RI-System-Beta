@@ -11,7 +11,7 @@
   - 一次處理完當天全部項目（Alpha 受 Hatchable 限制每次 10 件、一分鐘後再接著跑），所以 moreWork 一律是 false。
   - 信件主旨與內文在佔位時就存進提醒紀錄；信件最後的連結指向 VM（settings.REMINDER_LINK_URL）。
   - 回傳多一個 suppressed 計數。
-  - 缺 Signed Slip 的再保人在信件與紀錄裡顯示案件上的原始名稱（Alpha 顯示比對用的小寫鍵值）。
+  - 缺 Signed Slip 的再保人在信件與紀錄裡顯示案件上的原始名稱（原本是與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v62）。
 """
 import logging
 from email.utils import make_msgid

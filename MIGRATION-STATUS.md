@@ -1,6 +1,6 @@
 # Alpha → VM 搬遷狀態
 
-- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v61（2026-09-29，82 個檔案）**
+- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v62（2026-09-29，82 個檔案）**
 - 2026-09-29 起你決定把 VM 的改動**同步回 Alpha**（登入／權限、資料表結構、Personnel & Accounts 資料除外），之後會先在 Alpha 開發新功能。每批部署後，下表的雜湊改成新版本，漂移檢查照舊。見下方「VM → Alpha 同步」。
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
@@ -60,7 +60,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 已移植
 
-| Alpha 檔案 | Alpha 雜湊（v61） | VM 位置 | 狀態 |
+| Alpha 檔案 | Alpha 雜湊（v62） | VM 位置 | 狀態 |
 |---|---|---|---|
 | `api/fx-rates.js` | `a2496a82375c9159944318edbef2e7365f1b55c8acd78a8a6f1b3b29138e2de3` | `backend/fxrates/` | 完成（含 Audit，見下） |
 | `migrations/0010_create_fx_rates.sql` | `0875485cf1049e3d6a39bc004decc950c9a547def9f6d82ceccd43204a965e4d` | `fxrates/models.py`、migrations | 完成 |
@@ -84,7 +84,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/cases.js` | `783fa8c63da6f37ed2d590977f572f8ff10f856ec8a217ff9f003e238afb5723` | `backend/cases/views.py`（`CasesView`）、`cases/resolve.py` | 完成（含 #7、#8；含 Snapshot／Audit）。以 `qa/suites/cases_api.py` 驗證，並已用 26 種故意破壞確認測試抓得到 |
 | `api/case-announce.js` | `e5221d95186f8219129a7c6543b1628d43a0811c76a40b055dbac25f2ef5ce62` | `backend/cases/workflow_views.py`（`AnnounceView`）、`cases/workflow.py` | 完成（Announce、TW Reference 流水號、批單編號；含 Snapshot／Audit）。純函式與 Alpha JS 差異測試逐位一致 |
 | `api/case-workflow.js` | `8e3193e135a891ada6c3b11355552c0a37b98b96ab0885943cdd50421eff90fb` | `backend/cases/workflow_views.py`（`WorkflowView`）、`cases/workflow.py` | 完成（狀態、Endorsement、Renewal、Reverse、通知會計）。資料整理邏輯與 Alpha JS 差異測試逐位一致 |
-| `api/case-documents.js` | `0db7421c95f10b83650cc3a006d96cd6a6747d77327c2219cee295e3b006ef77` | `backend/cases/document_views.py`（`CaseDocumentsView`）、`cases/documents.py`、`cases/storage.py` | 完成（上傳、列表、下載、勾選、刪除；含 #11、Audit）。純函式與 Alpha JS 逐位一致；測試組 `case_documents` 73 項 |
+| `api/case-documents.js` | `45b13fe76642d52a3ca61fbc873a429e32679c716626f3c70281e9d24a1ade05` | `backend/cases/document_views.py`（`CaseDocumentsView`）、`cases/documents.py`、`cases/storage.py` | 完成（上傳、列表、下載、勾選、刪除；含 #11、Audit）。純函式與 Alpha JS 逐位一致；測試組 `case_documents` 73 項 |
 | `lib/signed-slip-reminders.js` | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` | `backend/cases/calc/signed_slip.py` | 函式全部移植並與 Alpha JS 逐位一致（文件 API 用 `signedSlipTracking`，提醒排程用 `reminderDue`、`isReservedTestEmail`） |
 | `api/accounting.js` | `abddcf88795fddc4d04b32d291fa7dabc9e8e4733440630ef73d8a008090b3cc` | `backend/cases/accounting_views.py`（`AccountingView`）、`cases/ledger.py`（`ledger_rows`） | 完成（帳本、記付款、沖銷；含 Snapshot／Audit）。帳本 `ledgerRows` 與 Alpha JS 差異測試逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `accounting_api` 77 項；19 種故意破壞全部抓到（其中 3 種帳本的破壞由差異測試抓到） |
 | `api/claims.js` | `3444de68a9dade3b645a48084f631e5e32b105e261f4d5f2b66e2f4fe75862c9` | `backend/cases/claims_views.py`（`ClaimsView`） | 完成（讀取、新增理賠、改準備金、記理賠付款並產生 Claim Leg 1/2 交易；含 Snapshot／Audit）。交易由已與 Alpha 逐位一致的 `build_claim_payment_transactions` 產生；測試組 `claims_api` 67 項；21 種故意破壞全部抓到 |
@@ -107,7 +107,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `public/app.js`（上述畫面的邏輯） | `d91a6c969a156002567ea5d5317732f02dc767918ab7e71dfbc970ed5c83527c` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
 | `public/theme.css`、`public/overview.css`、`public/development-alignment.css` | `af2b57f0…` / `bceafbf2…` / `2da6fba1…` | `frontend/src/alpha/styles/`（原樣，載入順序同 Alpha） | 完成 |
 | `migrations/0002_create_cases.sql`、`0006_add_case_uid.sql`、`0007_expand_reinsurance_structures.sql`、`0009_add_announce_workflow.sql`、`0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `9e3a6164…` / `59ad607b…` / `8e4e3449…` / `cd7b0f75…` / `d7b2d9d8…` / `ceb171d9…` | `cases/models.py`（含 `ReferenceSequence`）、`cases/migrations` | 完成（由 cases／announce／workflow／accounting／claims／production 等 API 使用） |
-| `api/signed-slip-reminders.js` | `4bf1b2d5f60b44c6e3cf3c026b4196296e8265576e44b575eb7919a346368617` | `backend/reminders/`（`runner.run_signed_slip`、`messages.py`）、`manage.py run_signed_slip_reminders`（cron 每天台北 09:00） | 完成（#10，**不寄信模式**，見下）。收件人、信件內容與 Alpha JS 逐位一致（差異測試約 1.2 萬組，含金額四捨五入邊界）；測試組 `reminders`（45 項，8 種故意破壞都抓到）；畫面測試階段 R（案件明細 Reminders 分頁） |
+| `api/signed-slip-reminders.js` | `db0d055ca9fda0ccd5b169d676b8028d37fb8bd59a830944c9875f933f8cb086` | `backend/reminders/`（`runner.run_signed_slip`、`messages.py`）、`manage.py run_signed_slip_reminders`（cron 每天台北 09:00） | 完成（#10，**不寄信模式**，見下）。收件人、信件內容與 Alpha JS 逐位一致（差異測試約 1.2 萬組，含金額四捨五入邊界）；測試組 `reminders`（45 項，8 種故意破壞都抓到）；畫面測試階段 R（案件明細 Reminders 分頁） |
 | `api/payment-reminders.js` | `14d5c92bc56dd9e176d05216104599b2bd682a512a4ddc332ddd90ad84c0dced` | `backend/reminders/`（`runner.run_payment`、`messages.py`）、`manage.py run_payment_reminders`（cron 每天台北 09:30） | 完成（#9，**不寄信模式**）。收件人、到期判斷（`dueKind`）、信件內容（含金額格式）與 Alpha JS 逐位一致 |
 | `migrations/0017_create_signed_slip_alerts.sql`、`0029_create_payment_alerts.sql`、`0030_index_payment_alerts.sql` | `33364cb8…` / `4f06c0ef…` / `913f5bb3…` | `reminders/models.py`、`reminders/migrations/0001` | 完成（同樣的唯一限制與索引；狀態多 `suppressed`、多存信件主旨與內文；`ri_runtime` 沒有 DELETE） |
 | `migrations/0031_backfill_payment_schedule_state.sql` | `7e2bacb4…` | 不需要 | VM 的 `normalize_draft` 本來就設定 `paymentScheduleReviewRequired`，切換匯入的是 Alpha 已補過的資料 |
@@ -127,6 +127,9 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 5a | v59（2026-09-29） | 流程：TW Reference 流水號不截斷（`lpad` 改為 `greatest(最小位數, 實際位數)`；原本第 1000 號變成「…100」重複）、Reverse 遇到空交易項目回 409 `transactions_corrupt`、Reverse 與通知會計補 Snapshot（`case_reversed`、`accounting_notified`）、「Correct reversed case」能打開表單（後端原本就支援 `reverseCorrectionConfirmed`）；`api/case-announce.js`、`api/case-workflow.js`、`public/app.js` | 新舊編號 SQL 在臨時 PostgreSQL 實測（舊的 1000→100、E100→E10；新的與 VM `zfill` 相同）；修改後的 `case-workflow.js` 以模擬資料庫跑 Reverse（空項目 409 且不寫入、正常 Reverse 的 Snapshot）與通知會計；差異測試的節錄不受影響（檢查放在資料整理之前）；部署後兩個 API 找不到案件回 404 實測 |
 | 5b | v60（2026-09-29） | 案件合計統一用記帳的逐步進位：`api/cases.js` 的 `listFinancials` 改用 `lib/accounting.js` 的 `calcLegsForReinsurer`、`public/case-calculations.js` 的金額改成相同算法（非金額合計不變），合計再進位一次；Performance Split 只給名字而同名者不只一位時拒絕（`invalid_personnel_split`，要求以 ID 指定） | VM 的 3,000 個隨機案件：Alpha 新版畫面合計（10 欄）與列表合計都與 VM 完全相同，5,705 筆再保人明細與 Alpha 記帳算法逐筆相同；換回舊版時 1,480／1,599 個案件不同（測試有鑑別力）；Performance Split 四種情況與 VM 相同；部署後 GET 案件列表實測 |
 | 5c | v61（2026-09-29） | 回收桶：丟棄與還原補 Snapshot（`draft_recycled`、`draft_restored`，內容是更新後整列案件 `to_jsonb(c)`）；Personnel：停用者／時間只在「在職 → 停用」時記錄（之後編輯不覆寫、重新啟用清空）、Audit 的 before 改成與 after 相同的 11 個欄位；`api/draft-recycle-bin.js`、`api/personnel.js`（只改程式行為，不動人員資料） | 停用時間的 SQL 在臨時 PostgreSQL 跑「停用 → 停用中編輯 → 重新啟用 → 再停用」四步驟、回收桶 Snapshot 的 SQL 試跑；before 欄位與 VM 的 `personnel_state` 核對相同（Alpha 的 Audit 仍暫停）；部署後 GET 回收桶、PUT 不存在的人員回 404 實測 |
+| 6 | v62（2026-09-29） | 提醒信與提醒紀錄裡缺 Signed Slip 的再保人顯示案件上的原始名稱（`displayNames`）；文件 fileId 去掉「-」後不是 32 位十六進位就回 404（`canonicalFileId`，原本在 PostgreSQL 轉型出錯）；下載時檔案本體不見回 404 `file_content_missing`（只攔 Hatchable 的 `storage/get 404`，其他錯誤照常拋出）；`api/signed-slip-reminders.js`、`api/case-documents.js` | 兩個新函式與 VM 差異測試：fileId 3,000 組（400／404／UUID 各 622／697／1,681）、再保人名稱 2,000 組全部一致；以唯讀 `run_code` 確認 Hatchable 缺檔時拋 `storage/get 404`；部署後文件 API 實測 |
+
+**同步完成（2026-09-29）**：第 1～6 批都已部署（Alpha v54～v62）。**尚未決定**：VM 的「文件只有 Draft 能刪」（本表之外的業務規則）要不要同步回 Alpha。
 
 ## 資料（不是程式碼）
 
@@ -181,11 +184,11 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 提醒紀錄的內容 | 只存收件人與狀態 | 另存產生當下的信件主旨與內文（`subject`、`body_html`、`body_text`） | 2026-09-26 你的決定：案件明細預覽「當天會寄出的原文」 |
 | 查看提醒紀錄 | 沒有畫面（只有資料表與 Audit） | 案件明細新增「Reminders」分頁（`GET /api/case-reminders`，看得到案件的人就能看）：兩種提醒的紀錄、設定錯誤（來自 Audit）、信件預覽（沙箱 iframe）；兩張表也加進唯讀的 `/admin/` | 2026-09-26 你的決定：放在案件明細 |
 | 提醒信的連結 | 「開啟 RI System (Alpha)」→ ri-system-alpha.hatchable.site | 「開啟 Reinsurance Department System」→ `RI_REMINDER_LINK_URL`（`http://ri-dev.tw-insure.com`） | 2026-09-26 你的決定；其餘主旨與內文逐字同 Alpha |
-| Signed Slip 提醒裡缺文件的再保人名稱 | 顯示比對用的鍵值（去空白、全小寫，例如「ui re beta (facility)」） | 信件、提醒紀錄與 Reminders 分頁顯示案件上的原始名稱（「UI Re Beta (Facility)」）；判斷哪幾家缺文件的邏輯不變 | 2026-09-26 你的決定（疑似 Alpha 的小問題）；**建議 Alpha 也修** |
+| Signed Slip 提醒裡缺文件的再保人名稱（**已同步回 Alpha v62**，兩邊相同） | 顯示比對用的鍵值（去空白、全小寫，例如「ui re beta (facility)」） | 信件、提醒紀錄與 Reminders 分頁顯示案件上的原始名稱（「UI Re Beta (Facility)」）；判斷哪幾家缺文件的邏輯不變 | 2026-09-26 你的決定（疑似 Alpha 的小問題）；**建議 Alpha 也修** |
 | 提醒紀錄的 status 約束 | `ri_payment_alerts.status` 沒有 CHECK | 兩張表都有 CHECK（pending／sent／simulated／suppressed／failed） | |
-| 下載時檔案本體不見 | 未處理的錯誤 | 404 `file_content_missing`（並寫入錯誤日誌） | 不應該發生；發生時要能看出是資料遺失 |
+| 下載時檔案本體不見（**已同步回 Alpha v62**，兩邊相同） | 未處理的錯誤 | 404 `file_content_missing`（並寫入錯誤日誌） | 不應該發生；發生時要能看出是資料遺失 |
 | 檔名含落單的 UTF-16 代理字元（例如 JSON 裡的 `\ud83d`） | Node 寫進 PostgreSQL 時換成 U+FFFD | 同樣換成 U+FFFD 再存（MySQL 不接受落單代理字元） | 結果與 Alpha 相同 |
-| 文件 API 的 fileId 是 36 個「-」這類「格式對但不是 UUID」 | PostgreSQL 轉型失敗（未處理的錯誤） | 404 `file_not_found` | |
+| 文件 API 的 fileId 是 36 個「-」這類「格式對但不是 UUID」（**已同步回 Alpha v62**，兩邊相同） | PostgreSQL 轉型失敗（未處理的錯誤） | 404 `file_not_found` | |
 | Dashboard 占比長條（Mix by Class、Top Reinsurers）（**已同步回 Alpha v57**，兩邊相同） | 填色的 `<i class="mix-fill">` 是行內元素，`height:100%` 無效，長條沒有填色 | 在 `Dashboard.vue` 補 `display:block`（Alpha 的 CSS 檔原樣不動） | 2026-09-26 你的決定（畫面測試截圖發現）；**建議 Alpha 也修** |
 | Dashboard 的時間（**已同步回 Alpha v57**，兩邊相同） | 今天／本月／今年與 Announce 月都用 UTC（台北時間月初 8 小時內還是上個月） | 台北時間；目標設定的預設年份／月份也用台北時間 | 2026-09-26 你的決定 |
 | Dashboard 的每月佣金趨勢與再保人占比（**已同步回 Alpha v57**，兩邊相同） | 自己另一套算法：分期不先進位、批單用 Announce 月、只去掉「(Facility)」 | 用 Production Report 的規則（分期逐期進位、尾差在第一期；批單用建立月；去掉「(Facility)」與「[Facility]」），與 Production Report 數字一致 | 2026-09-26 你的決定；**建議 Alpha 也統一** |
