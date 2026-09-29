@@ -6,11 +6,12 @@ Dashboard 與業績目標 API - 對應 Hatchable Alpha 的 api/dashboard.js 與 
   POST /api/dashboard-targets   targets.write    新增目標（年度或月份，同一期間只能一筆）
   PUT  /api/dashboard-targets   targets.write    修改金額、停用／重新啟用（期間不能改）
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
-  - Dashboard 的「今天／本月／今年」與 Announce 月用台北時間（Alpha 是 UTC）。
+以下原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v57（兩邊行為相同，見 MIGRATION-STATUS.md）：
+  - Dashboard 的「今天／本月／今年」與 Announce 月用台北時間。
   - 每月佣金趨勢與再保人占比用 Production Report 的規則（calc.py 的 production_rules）。
-  - 目標 API 的 scope.dashboardConsumption 與 Audit metadata 的 dashboardConsumption 是 true（Dashboard 確實會用目標；Alpha 寫 false）。
-  - 新增目標時若同時有人新增同一期間：409 duplicate_target（Alpha 會是未處理的資料庫錯誤）。
+  - 目標 API 的 scope.dashboardConsumption 與 Audit metadata 的 dashboardConsumption 是 true。
+  - 新增目標時若同時有人新增同一期間：409 duplicate_target。
+仍然不同的：看全部案件用 VM 的 dashboard.read.all（權限，不同步）。
 """
 import re
 from datetime import timezone as dt_timezone

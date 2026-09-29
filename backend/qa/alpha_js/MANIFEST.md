@@ -1,6 +1,6 @@
 # Alpha 原始碼副本（差異測試用）
 
-這些檔案是 Hatchable「RI System (Alpha)」（`proj_FVUqiQUe3m0G`）**v53** 的原始碼（`lib/case-draft.js` 是 **v54**：2026-09-29 從 VM 同步回 Alpha 的 LMA3333 標題；其他檔案 v54 未變），**逐位元組相同**，
+這些檔案是 Hatchable「RI System (Alpha)」（`proj_FVUqiQUe3m0G`）**v53** 的原始碼（`lib/production-report.js` 是 **v57**：`installmentAllocations` 加上 export；`lib/case-draft.js` 是 **v54**：2026-09-29 從 VM 同步回 Alpha 的 LMA3333 標題；其他檔案 v54 未變），**逐位元組相同**，
 不可手動修改。差異測試（`scripts/run_qa.sh calc`）會拿它們當作「標準答案」，與 VM 的 Python 移植版比對。
 
 | 檔案 | 行數 | SHA-256（與 Alpha `list_files` 的雜湊相同） |
@@ -9,7 +9,7 @@
 | `lib/payment-terms.js` | 248 | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` |
 | `lib/case-draft.js` | 386 | `24d409bc954e4bbefc793de5bb5c3916034f8a700b45b33475ff8c1a542cb3a1` |
 | `lib/signed-slip-reminders.js` | 95 | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` |
-| `lib/production-report.js` | 211 | `4474c028d35fa1cb474a1188020eb7619e3df678b7e933e27ce2f9fcba48c3ba` |
+| `lib/production-report.js` | 212 | `7e6114e4d826fdd460888e228834d38174139a8fc1439c5a36352f40b41b5a73` |
 
 ## 節錄（`excerpts/api-excerpts.js`）
 
@@ -53,13 +53,13 @@
 
 ### `excerpts/dashboard-excerpts.js`
 
-由程式從 `api/dashboard.js`（206 行，雜湊 `26002e5ca5fa431860e2cd7c677fbe4d52cbabb094de77c8d9c793625bb79561`，先確認整檔雜湊相同）
-原樣切出第 8–81 行（輔助函式）與第 114–205 行（handler 在三個查詢之後的全部敘述），後者外面加上測試用的外殼函式 `dashboardSummary`
-（外殼提供查詢結果與 `res.json`），前面加 import。
+由程式從 `api/dashboard.js`（**v57**，雜湊 `496539893d6f1c20b4d160ede275ff93cc88e78172434338f48a72252ec764e6`，先確認整檔雜湊相同；2026-09-29 從 VM 同步回 Alpha：台北時間與 Production 規則）
+原樣切出輔助函式與 handler 在三個查詢之後的全部敘述（行號見節錄檔開頭），後者外面加上測試用的外殼函式 `dashboardSummary`
+（外殼提供查詢結果與 `res.json`），前面加 import（含 `lib/production-report.js` 的 `installmentAllocations`）。
 
 | 檔案 | SHA-256 |
 |---|---|
-| `excerpts/dashboard-excerpts.js` | `b5b6a3ef3baa10f576485ddd402c30121c3886ebd021af2a0d52d7e3785713df` |
+| `excerpts/dashboard-excerpts.js` | `45e21548f976a9b1d747bcbf58521c3c890c36d1e806402d61f14369b53f245c` |
 
 ## Alpha 改了這些檔案時
 

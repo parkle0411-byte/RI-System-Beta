@@ -30,6 +30,11 @@ def case_row(i, now_iso):
                           for d in (0, 0, 3, 35, 200, 370, 400) for h in (0, 7)] + [None, ""])
     row = {"id": i + 1, "parent_case_id": R.choice([None, None, None, 1, 2, 0]), "status": R.choice(["posted", "closed", "draft", "reversed", "posted"]),
            "announced_at": announced, "payload": p if R.random() > 0.03 else R.choice([None, {}])}
+    # Alpha v57 起 Dashboard 用 Production 規則：批單的業績月是建立月（台北時間）
+    row["created_at"] = R.choice([(now - timedelta(days=d, hours=h)).isoformat().replace("+00:00", "Z")
+                                  for d in (0, 3, 35, 400) for h in (0, 7, 17)] + [None])
+    if row["parent_case_id"] and isinstance(row["payload"], dict) and R.random() < 0.8:
+        row["payload"]["parentTwRef"] = "TWPAR2601001"
     return row
 
 

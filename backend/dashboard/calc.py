@@ -1,7 +1,8 @@
 """
 Dashboard 的計算 - 移植自 Alpha api/dashboard.js（v53，雜湊 26002e5c…）查詢之後的全部邏輯（純函式，不碰資料庫）。
 
-兩個開關（2026-09-26 你的決定；預設值就是 Alpha 的行為，差異測試用預設值與 Alpha 的 JavaScript 逐位比對）：
+兩個開關（2026-09-26 你的決定）。預設值是 Alpha v53 的行為；Alpha v57 起與 VM 的 API 相同（台北時間＋production_rules），
+差異測試也改用這個模式與 Alpha v57 的 JavaScript 逐位比對（qa/calc/compare.py 的 _dashboard_vm）：
   - tz：「今天／本月／今年」用哪個時區。Alpha 是 UTC；VM 的 API 傳台北時間。
     （Announce 月取的是傳入文字的前 7 個字，API 會傳台北時間的文字，同 Production Report。）
   - production_rules：每月佣金趨勢與再保人占比改用 Production Report 的規則（VM 的 API 用 True）：

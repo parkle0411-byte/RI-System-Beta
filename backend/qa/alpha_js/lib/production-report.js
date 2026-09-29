@@ -44,7 +44,8 @@ function totalIncome(caseData) {
   return (Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : [])
     .reduce((sum, reinsurer) => sum + reinsurerLegs(caseData, reinsurer).brokerage, 0);
 }
-function installmentAllocations(caseData) {
+// Exported so the Dashboard trend uses the same per-installment rounding as the Production Report.
+export function installmentAllocations(caseData) {
   const totalPremium = numberOrZero(caseData?.originalPremium);
   const income = totalIncome(caseData);
   if (!caseData?.installmentEnabled) return [{ id: 'FULL', performanceMonth: baseMonth(caseData), ratio: 1, income }];

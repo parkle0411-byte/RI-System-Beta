@@ -149,6 +149,6 @@ onMounted(loadDashboard)
 </template>
 
 <style>
-/* VM 修正：Alpha 的 .mix-fill 沒有 display:block，長條不會顯示（Alpha 的 CSS 檔保持原樣） */
+/* 占比長條需要 display:block 才有填色（Alpha v57 起在模板上加了同樣的修正；Alpha 的 CSS 檔保持原樣） */
 .rdash .mix-fill { display: block; }
 </style>

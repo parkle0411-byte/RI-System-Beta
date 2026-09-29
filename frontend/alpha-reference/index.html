@@ -136,12 +136,12 @@
               <div class="row2">
                 <section class="card">
                   <h3 style="margin-bottom:14px">Mix by Class of Business</h3>
-                  <div v-if="dashboard.classMix?.length" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" class="mix-row"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></div>
+                  <div v-if="dashboard.classMix?.length" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" class="mix-row"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" style="display:block" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></div>
                   <div v-else class="empty-note">No in-force premium yet.</div>
                 </section>
                 <section class="card">
                   <h3 style="margin-bottom:14px">Top Reinsurers by Ceded Premium</h3>
-                  <div v-if="dashboard.reinsurers?.length" class="mix-list"><div v-for="row in dashboard.reinsurers" :key="'reinsurer-' + row.name" class="mix-row"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></div>
+                  <div v-if="dashboard.reinsurers?.length" class="mix-list"><div v-for="row in dashboard.reinsurers" :key="'reinsurer-' + row.name" class="mix-row"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" style="display:block" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></div>
                   <div v-else class="empty-note">No in-force premium yet.</div>
                 </section>
               </div>
@@ -1026,7 +1026,7 @@
             </template>
 
             <template v-else>
-              <el-alert class="case-readiness-alert" type="info" :closable="false" show-icon title="Targets are stored now; Dashboard consumption follows later" description="Annual and monthly TWD targets are versioned. Audit recording will begin after migration to the VM."></el-alert>
+              <el-alert class="case-readiness-alert" type="info" :closable="false" show-icon title="Targets feed the Dashboard brokerage trend" description="Annual and monthly TWD targets are versioned. Audit recording will begin after migration to the VM."></el-alert>
               <section class="table-card" v-loading="targetLoading">
                 <div class="section-heading"><div><h2>Annual brokerage target settings</h2><p>Used by the Dashboard YTD Brokerage Trend chart. Deactivated settings remain in history.</p></div><div><el-button v-if="can('targets.write')" class="primary-button" @click="openTargetDialog(null, 'annual')">+ Add target</el-button><el-button v-if="can('targets.write')" class="secondary-button" @click="openTargetDialog(null, 'monthly')">+ Monthly target</el-button><el-button class="secondary-button" :loading="targetLoading" @click="loadDashboardTargets">Refresh</el-button></div></div>
                 <el-table :data="dashboardTargets" class="case-table" row-key="id" empty-text="No target settings yet.">

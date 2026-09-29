@@ -1,19 +1,43 @@
-// Alpha 原始碼的「節錄」（差異測試用）：來自 api/dashboard.js（v53，雜湊 26002e5ca5fa4318…）。
+// Alpha 原始碼的「節錄」（差異測試用）：來自 api/dashboard.js（v57，雜湊 496539893d6f1c20…）。
 // 這個檔案 import 了 'hatchable'，無法直接在 Node 執行，所以把不碰資料庫的部分原樣切出來：
-//   - 第 8–81 行：numberOrZero、stripFacility、month、buildRateLookup、reinsurerLegs、installmentIncome、topRows（逐字）
-//   - 第 114–205 行：handler 在三個查詢之後的全部敘述（逐字），外面加上測試用的外殼函式 dashboardSummary：
+//   - 第 9–92 行：numberOrZero、stripFacility、TAIPEI_PARTS、taipeiParts、taipeiText、month、buildRateLookup、reinsurerLegs、topRows（逐字）
+//   - 第 125–222 行：handler 在三個查詢之後的全部敘述（逐字），外面加上測試用的外殼函式 dashboardSummary：
 //     外殼提供 caseResult／targetResult／fxResult（查詢結果）與 res.json（直接回傳內容），這幾行是測試加的。
 // 這個檔案是由程式從「雜湊與 Alpha 相同」的原檔切出的（見 MANIFEST.md），不可手動修改。
 
 import { buildPaymentSchedule } from '../lib/payment-terms.js';
+import { installmentAllocations } from '../lib/production-report.js';
 
 function numberOrZero(value) {
   const number = Number(String(value ?? '').replace(/,/g, ''));
   return Number.isFinite(number) ? number : 0;
 }
 
+// Company-VM rules synced 2026-09-29: "today / this month / this year" and the Announce month use
+// Taipei time, and the monthly brokerage trend and reinsurer mix follow the Production Report rules
+// (per-installment rounding with the remainder on the first installment, Endorsements counted in
+// their creation month, and both "(Facility)" and "[Facility]" removed from reinsurer names).
 function stripFacility(value) {
-  return String(value || '').replace(/\s*\(Facility\)\s*$/i, '').trim();
+  return String(value || '').replace(/\s*[[(]Facility[\])]\s*$/i, '').trim();
+}
+
+const TAIPEI_PARTS = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+});
+
+function taipeiParts(value) {
+  const parts = Object.fromEntries(TAIPEI_PARTS.formatToParts(value).map((part) => [part.type, part.value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}:${parts.second}` };
+}
+
+// Timestamp -> Taipei local text ("YYYY-MM-DDTHH:MM:SS+08:00"); month() then reads the Taipei month.
+function taipeiText(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = taipeiParts(date);
+  return `${parts.date}T${parts.time}+08:00`;
 }
 
 function month(value) {
@@ -60,19 +84,6 @@ function reinsurerLegs(payload, reinsurer) {
   return { cedantPremium, brokerage: leg1 - leg2 };
 }
 
-function installmentIncome(payload) {
-  const reinsurers = Array.isArray(payload?.reinsurers) ? payload.reinsurers : [];
-  const income = reinsurers.reduce((sum, row) => sum + reinsurerLegs(payload, row).brokerage, 0);
-  const baseMonth = month(payload?.policyFrom) > month(payload?.announcedAt || payload?.postedAt)
-    ? month(payload?.policyFrom) : month(payload?.announcedAt || payload?.postedAt);
-  if (!payload?.installmentEnabled) return [{ performanceMonth: baseMonth, income }];
-  const totalPremium = numberOrZero(payload?.originalPremium);
-  return (Array.isArray(payload?.performanceInstallments) ? payload.performanceInstallments : []).map((row) => ({
-    performanceMonth: month(row?.performanceMonth),
-    income: income * (totalPremium === 0 ? numberOrZero(row?.ratio) / 100 : numberOrZero(row?.premium) / totalPremium)
-  }));
-}
-
 function topRows(source, limit) {
   const entries = Object.entries(source).sort((a, b) => b[1] - a[1]);
   const selected = entries.slice(0, limit);
@@ -86,16 +97,22 @@ export function dashboardSummary(caseRows, targetRows, fxRows) {
   const caseResult = { rows: caseRows }, targetResult = { rows: targetRows }, fxResult = { rows: fxRows };
   const res = { json: (body) => body };
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const year = now.getUTCFullYear();
-  const monthNumber = now.getUTCMonth() + 1;
+  const today = taipeiParts(now).date;
+  const year = Number(today.slice(0, 4));
+  const monthNumber = Number(today.slice(5, 7));
   const currentMonth = `${year}-${String(monthNumber).padStart(2, '0')}`;
   const caseRate = buildRateLookup(fxResult.rows, currentMonth);
   const live = (row) => row.status === 'posted' || row.status === 'closed';
-  const rows = caseResult.rows.map((row) => ({
-    ...row,
-    payload: { ...(row.payload || {}), announcedAt: row.announced_at || row.payload?.announcedAt }
-  }));
+  const rows = caseResult.rows.map((row) => {
+    const announcedAt = taipeiText(row.announced_at);
+    const createdAt = taipeiText(row.created_at);
+    return {
+      ...row,
+      announced_at: announcedAt,
+      created_at: createdAt,
+      payload: { ...(row.payload || {}), announcedAt: announcedAt || row.payload?.announcedAt, createdAt: createdAt || row.payload?.createdAt }
+    };
+  });
   const roots = rows.filter((row) => !row.parent_case_id);
   const activeEndorsements = rows.filter((row) => row.parent_case_id && live(row)
     && Array.isArray(row.payload?.endoTypes) && row.payload.endoTypes.length
@@ -147,7 +164,7 @@ export function dashboardSummary(caseRows, targetRows, fxRows) {
   }
   rows.filter(live).forEach((row) => {
     const rate = caseRate(row.payload);
-    installmentIncome(row.payload).forEach((entry) => {
+    installmentAllocations(row.payload).forEach((entry) => {
       if (Object.prototype.hasOwnProperty.call(monthly, entry.performanceMonth)) monthly[entry.performanceMonth] += entry.income * rate;
     });
   });

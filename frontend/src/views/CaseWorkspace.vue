@@ -1,5 +1,5 @@
 <script setup>
-// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v56）；請勿直接修改模板，
+// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v57）；請勿直接修改模板，
 // 要改就改產生程式（或 Alpha 更新後重新產生）。邏輯在 case-workspace.script.js。
 import { useCaseWorkspace } from './case-workspace.script'
 

@@ -68,7 +68,7 @@ FUNCTIONS = {
     "buildProductionPreview": lambda a, now: prod.build_production_preview(*a),
     "productionKeysForCase": lambda a, now: prod.production_keys_for_case(*a),
     "nextProductionMonth": lambda a, now: prod.next_production_month(*a),
-    "dashboardSummary": lambda a, now: dash.build_dashboard(a[0], a[1], a[2], _now(now)),
+    "dashboardSummary": lambda a, now: _dashboard_vm(a, now),
     "productionConfirmCase": lambda a, now: closing.confirm_case(*a),
     "accountingLedgerRows": lambda a, now: dict(zip(("rows", "warnings"), ledger.ledger_rows(a[0], now))),
     "renderPdfRejectUnsafeMarkup": lambda a, now: docgen.reject_unsafe_markup(a[0]),
@@ -85,6 +85,23 @@ FUNCTIONS = {
     "slipContactFor": lambda a, now: rem.contact_for(*a),
     "slipReminderMessage": lambda a, now: rem.reminder_message(*a),
 }
+
+
+def _dashboard_vm(a, now):
+    """VM 的 API 實際用的模式（台北時間＋Production 規則）；Alpha v57 起 Dashboard 也是這樣。
+    與 views.py 相同，先把時間戳記換成台北時間的文字再交給 build_dashboard。"""
+    from zoneinfo import ZoneInfo
+    tpe = ZoneInfo("Asia/Taipei")
+
+    def text(value):
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return _now(value).astimezone(tpe).isoformat()
+        except ValueError:
+            return None
+    rows = [{**r, "announced_at": text(r.get("announced_at")), "created_at": text(r.get("created_at"))} if isinstance(r, dict) else r for r in a[0]]
+    return dash.build_dashboard(rows, a[1], a[2], _now(now), tz=tpe, production_rules=True)
 
 
 def _markup_status(body):

@@ -113,6 +113,11 @@ function currentYear() {
   return new Date().toISOString().slice(0, 4);
 }
 
+// Dashboard target defaults use Taipei time (the Dashboard itself runs on Taipei time).
+function taipeiMonth() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+}
+
 function emptyDraft() {
   return {
     ownerPersonnelId: null, ownerPersonnelName: '', parentTwRef: '', endorsementSeq: null,
@@ -360,7 +365,7 @@ createApp({
     const targetDialogVisible = ref(false);
     const dashboardTargets = ref([]);
     const targetForm = reactive({
-      id: null, periodType: 'annual', periodKey: currentYear(),
+      id: null, periodType: 'annual', periodKey: taipeiMonth().slice(0, 4),
       amount: null, rowVersion: null, isActive: true
     });
     const masterTypes = [
@@ -2451,7 +2456,7 @@ createApp({
           }
         : {
             id: null, periodType,
-            periodKey: periodType === 'annual' ? currentYear() : currentMonth(),
+            periodKey: periodType === 'annual' ? taipeiMonth().slice(0, 4) : taipeiMonth(),
             amount: null, rowVersion: null, isActive: true
           });
       targetDialogVisible.value = true;
@@ -2459,7 +2464,7 @@ createApp({
 
     function onTargetTypeChange(value) {
       if (targetForm.id) return;
-      targetForm.periodKey = value === 'annual' ? currentYear() : currentMonth();
+      targetForm.periodKey = value === 'annual' ? taipeiMonth().slice(0, 4) : taipeiMonth();
     }
 
     async function saveDashboardTarget() {
