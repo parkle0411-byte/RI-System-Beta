@@ -727,7 +727,7 @@ const {
                 </el-collapse-item>
 
                 <el-collapse-item name="conditions" title="Reinsurance Conditions">
-                  <div class="repeat-heading"><div><h3>Clauses</h3><p>Universal clauses are always included. Fixed clauses are copied from the selected reinsurer; later MDM changes do not rewrite this saved case.</p></div></div>
+                  <div class="repeat-heading"><div><h3>Clauses</h3><p>Universal clauses are always included. Fixed clauses are copied from the selected Class and from the selected reinsurers' clauses that apply to that Class; later MDM changes do not rewrite this saved case.</p></div></div>
                   <div class="review-list">
                     <div v-for="clause in draft.clauseDetails" :key="'clause-' + clause.code">
                       <strong>{{ clause.code }}</strong>

@@ -63,30 +63,20 @@ def validate_payload(entity_type, supplied, fallback=None):
         value["abbreviation"] = abbreviation
     if entity_type == "reinsured":
         value["address"] = clean_text(supplied.get("address"), 1000)
+    if entity_type == "class":
+        # VM 才有：Class 自己的 Fixed Clause（不論選哪家再保人都帶入）。沒有條款時不寫這個 key，payload 維持與 Alpha 相同的 {}
+        fixed_clauses, err = _fixed_clauses(supplied, "A class", with_classes=False)
+        if err:
+            return None, err
+        if fixed_clauses:
+            value["fixedClauses"] = fixed_clauses
+        return value, None
     if entity_type != "reinsurer":
         return value, None
 
-    fixed_clauses_in = supplied.get("fixedClauses", [])
-    if fixed_clauses_in is not None and not isinstance(fixed_clauses_in, list):
-        return None, "Fixed clauses must be a list."
-    fixed_clauses_in = fixed_clauses_in or []
-    if len(fixed_clauses_in) > 100:
-        return None, "A reinsurer cannot contain more than 100 fixed clauses."
-
-    seen = set()
-    fixed_clauses = []
-    for row in fixed_clauses_in:
-        row = row or {}
-        code = normalize_clause_code(row.get("code"))
-        title = clean_text(row.get("title"), 300)
-        if not code or not title:
-            return None, "Every fixed clause requires both a code and full name."
-        if code in UNIVERSAL_CLAUSE_CODES:
-            return None, f"{code} is universal and must not be added to a reinsurer."
-        if code in seen:
-            return None, f"Fixed clause {code} is duplicated."
-        seen.add(code)
-        fixed_clauses.append({"code": code, "title": title})
+    fixed_clauses, err = _fixed_clauses(supplied, "A reinsurer", with_classes=True)
+    if err:
+        return None, err
 
     ratings_in = supplied.get("ratings", [])
     if ratings_in is not None and not isinstance(ratings_in, list):
@@ -117,6 +107,51 @@ def validate_payload(entity_type, supplied, fallback=None):
     value["fixedClauses"] = fixed_clauses
     value["ratings"] = ratings
     return value, None
+
+
+def _fixed_clauses(supplied, owner, with_classes):
+    """
+    Fixed Clause 清單的共用檢查（再保人沿用 Alpha 的規則）。
+    VM 才有（2026-09-29 決定）：再保人的條款可以加 classIds（Class 主檔的 id 清單）只適用那些 Class；
+    沒有 classIds 代表 All classes（與 Alpha 的格式完全相同）。
+    """
+    fixed_clauses_in = supplied.get("fixedClauses", [])
+    if fixed_clauses_in is not None and not isinstance(fixed_clauses_in, list):
+        return None, "Fixed clauses must be a list."
+    fixed_clauses_in = fixed_clauses_in or []
+    if len(fixed_clauses_in) > 100:
+        return None, f"{owner} cannot contain more than 100 fixed clauses."
+
+    seen = set()
+    fixed_clauses = []
+    requested_class_ids = set()
+    for row in fixed_clauses_in:
+        row = row if isinstance(row, dict) else {}
+        code = normalize_clause_code(row.get("code"))
+        title = clean_text(row.get("title"), 300)
+        if not code or not title:
+            return None, "Every fixed clause requires both a code and full name."
+        if code in UNIVERSAL_CLAUSE_CODES:
+            return None, f"{code} is universal and must not be added to {owner[0].lower() + owner[1:]}."
+        if code in seen:
+            return None, f"Fixed clause {code} is duplicated."
+        seen.add(code)
+        clause = {"code": code, "title": title}
+        class_ids = row.get("classIds")
+        if with_classes and class_ids is not None:
+            if not isinstance(class_ids, list) or not class_ids:
+                return None, f"Fixed clause {code} must apply to All classes or to at least one Class."
+            if len(class_ids) > 100 or any(isinstance(i, bool) or not isinstance(i, int) or i < 1 for i in class_ids):
+                return None, f"Fixed clause {code} has an invalid Class."
+            clause["classIds"] = sorted(set(class_ids))
+            requested_class_ids.update(class_ids)
+        fixed_clauses.append(clause)
+
+    if requested_class_ids:
+        known = set(MasterRecord.objects.filter(entity_type="class", id__in=requested_class_ids).values_list("id", flat=True))
+        if requested_class_ids - known:
+            return None, "A fixed clause refers to a Class that does not exist."
+    return fixed_clauses, None
 
 
 def serialize_record(record):

@@ -895,6 +895,72 @@ def phase_p2(page):
     console_errors.clear()   # 400 回應在 console 會有一行網路錯誤，屬預期
 
 
+def phase_k(page):
+    """VM 才有（2026-09-29）：Fixed Clause 依 Class。MDM 設定 Class 條款與再保人條款的適用 Class，案件表單依 Class 帶入。"""
+    login(page, "ui.admin")
+    nav(page, "Reinsurance MDM")
+    dlg = page.locator(".master-dialog")
+    page.locator(".mdm-tab", has_text="Classes").click()
+    page.get_by_role("button", name="+ Add Class").click()
+    dlg.wait_for()
+    fill(dlg, page, "Code", "UMC")
+    fill(dlg, page, "Name", "UI Marine Cargo")
+    pick(dlg, page, "Clause", "NMA2918")
+    dlg.get_by_role("button", name="+ Add fixed clause").click()
+    dlg.locator(".el-dialog__footer button", has_text="Add record").click()
+    check("class with its own fixed clause added", message(page, "Class added"))
+    page.wait_for_timeout(500)
+    row = page.locator(".el-table__row", has_text="UI Marine Cargo")
+    check("class row shows 1 fixed clause", re.search(r"\b1\b", row.inner_text()) is not None, row.inner_text())
+
+    page.locator(".mdm-tab", has_text="Reinsurers").click()
+    page.locator(".el-table__row", has_text="UI Re Alpha").get_by_role("button", name="Edit").click()
+    dlg.wait_for()
+    old_scope = dlg.get_by_label("Applies to LMA5390").locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' el-select ')][1]").inner_text()
+    check("existing clause without class scope shows All classes", "All classes" in old_scope, old_scope)
+    pick(dlg, page, "Clause", "LPO9999")
+    dlg.get_by_role("button", name="+ Add fixed clause").click()
+    new_scope = dlg.get_by_label("Applies to LPO9999").locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' el-select ')][1]").inner_text()
+    check("a newly added reinsurer clause defaults to Property", "Property" in new_scope and "All classes" not in new_scope, new_scope)
+    snap(page, "mdm-reinsurer-applies-to")
+    dlg.locator(".el-dialog__footer button", has_text="Save changes").click()
+    check("reinsurer saved with a class-scoped clause", message(page, "Reinsurer updated"))
+    page.wait_for_timeout(500)
+    page.locator(".mdm-tab", has_text="Clauses").click()
+    page.wait_for_timeout(300)
+    used = page.locator(".el-table__row", has_text="LPO9999").inner_text()
+    check("Clauses tab: Used by shows the reinsurer with its class scope", "URA (Property)" in used, used)
+    used = page.locator(".el-table__row", has_text="NMA2918").inner_text()
+    check("Clauses tab: Used by shows the class", "Class: UI Marine Cargo" in used, used)
+    snap(page, "mdm-class-clauses")
+    logout(page)
+
+    login(page, "ui.sales")
+    nav(page, "Account List")
+    page.get_by_role("button", name="+ New case").click()
+    page.locator(".case-form").wait_for()
+    page.wait_for_timeout(800)
+    risk = section(page, "Risk Details")
+    security = section(page, "Schedule of Security")
+    def conditions():
+        page.wait_for_timeout(300)
+        return section(page, "Reinsurance Conditions").inner_text()
+    pick(risk, page, "Class", "Property")
+    pick(security.locator(".repeat-card").nth(0), page, "Reinsurer", "UI Re Alpha")
+    text = conditions()
+    check("Property case: all-class and Property-only reinsurer clauses, no Marine class clause",
+          all(c in text for c in ("LMA3333", "INTERMEDIARY", "LMA5390", "LPO9999")) and "NMA2918" not in text, text[:400])
+    pick(risk, page, "Class", "UI Marine Cargo")
+    text = conditions()
+    check("changing Class re-applies clauses: Marine class clause in, Property-only clause out",
+          all(c in text for c in ("LMA3333", "LMA5390", "NMA2918")) and "LPO9999" not in text, text[:400])
+    pick(security.locator(".repeat-card").nth(0), page, "Reinsurer", "UI Re Beta (Facility)")
+    text = conditions()
+    check("all-Facility case still gets the class clause", "NMA2918" in text and "LMA5390" not in text and "LMA3333" in text, text[:400])
+    snap(page, "case-class-clauses")
+    logout(page)
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
@@ -902,7 +968,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B": phase_b, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

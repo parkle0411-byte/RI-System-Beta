@@ -109,6 +109,9 @@ REPLACEMENTS = [
      '<el-tab-pane label="Endorsements" name="endorsements"></el-tab-pane>\n'
      '                <el-tab-pane label="Reminders" name="reminders"></el-tab-pane>', 1),
     ('<section v-else class="overview-card overview-empty">', REMINDERS_TAB + '\n              <section v-else class="overview-card overview-empty">', 1),
+    # Fixed Clause 依 Class（2026-09-29 你的決定）：條款也來自 Class，再保人條款依適用 Class 帶入
+    ("Universal clauses are always included. Fixed clauses are copied from the selected reinsurer; later MDM changes do not rewrite this saved case.",
+     "Universal clauses are always included. Fixed clauses are copied from the selected Class and from the selected reinsurers' clauses that apply to that Class; later MDM changes do not rewrite this saved case.", 1),
 ]
 for old, new, count in REPLACEMENTS:
     found = body.count(old)

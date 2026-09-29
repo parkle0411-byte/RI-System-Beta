@@ -788,13 +788,20 @@ export function useCaseWorkspace() {
     const record = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === name)
     if (record) draft.classCode = record.code || ''
     else if (!name) draft.classCode = ''
+    syncCaseClauses()
   }
 
   function syncCaseClauses() {
     const details = UNIVERSAL_CLAUSES.map((row) => ({ ...row }))
+    // VM 才有（2026-09-29 決定）：Class 自己的 Fixed Clause，以及再保人條款的適用 Class（沒有 classIds = All classes）
+    const classRecord = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === draft.classOfBusiness)
+    const classId = classRecord ? Number(classRecord.id) : null
+    const appliesToCaseClass = (row) => !Array.isArray(row?.classIds) || (classId !== null && row.classIds.map(Number).includes(classId))
+    normalizeClauseList(classRecord?.payload?.fixedClauses).forEach((row) => details.push(row))
     draft.reinsurers.forEach((line) => {
       const master = mdmRecords.value.find((row) => row.entityType === 'reinsurer' && row.name === line.name)
-      normalizeClauseList(master?.payload?.fixedClauses).forEach((row) => details.push(row))
+      const fixed = Array.isArray(master?.payload?.fixedClauses) ? master.payload.fixedClauses : []
+      normalizeClauseList(fixed.filter(appliesToCaseClass)).forEach((row) => details.push(row))
     })
     normalizeClauseList(draft.manualClauses).forEach((row) => details.push(row))
     const unique = normalizeClauseList(details).sort(compareClauses)
