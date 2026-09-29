@@ -87,19 +87,6 @@ FUNCTIONS = {
 }
 
 
-# 刻意與 Alpha 不同、已記在 MIGRATION-STATUS.md 的地方：先把 Alpha 的結果換成 VM 的決定，其他部分照常逐位比對
-ALPHA_LMA3333_TITLE = "Reinsurers Liability Clause"   # Alpha lib/case-draft.js 的 UNIVERSAL_CLAUSES
-
-
-def vm_divergence(name, expected):
-    if name == "normalizeDraft" and isinstance(expected, dict) and "ok" in expected:
-        details = ((expected["ok"] or {}).get("value") or {}).get("clauseDetails")
-        for row in details if isinstance(details, list) else []:
-            if isinstance(row, dict) and row.get("code") == "LMA3333" and row.get("title") == ALPHA_LMA3333_TITLE:
-                row["title"] = draft.LMA3333_TITLE   # 2026-09-29：LMA3333 的標題含代碼
-    return expected
-
-
 def _markup_status(body):
     """VM 回 {error: 代碼, message: 訊息}；Alpha 回 {error: 訊息}。比對狀態碼與訊息文字。"""
     markup = body.get("markup") if isinstance(body, dict) else None
@@ -172,7 +159,6 @@ def main():
     stats, samples = {}, {}
     for index, (vec, expected) in enumerate(zip(vectors, js)):
         name = vec["fn"]
-        expected = vm_divergence(name, expected)
         try:
             value = FUNCTIONS[name](vec["args"], vec.get("now"))
             actual = {"undef": True} if value is UNDEFINED else {"ok": to_json_value(value)}

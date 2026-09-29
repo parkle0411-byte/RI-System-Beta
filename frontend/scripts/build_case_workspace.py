@@ -10,10 +10,10 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "alpha-reference" / "index.html"
 TARGET = ROOT / "src" / "views" / "CaseWorkspace.vue"
-EXPECTED_SHA256 = "72de4a046c42d0dc6acc3eae3773975f8bfea8aa675e639fc50c29efe8383e00"
+EXPECTED_SHA256 = "feea43f80afceb5b4a75f1e532c762f6497576bbe1336f17f2868488a03d0ff7"
 
 text = SOURCE.read_text(encoding="utf-8")
-assert hashlib.sha256(text.encode()).hexdigest() == EXPECTED_SHA256, "alpha-reference/index.html 與記錄的 Alpha v53 不同"
+assert hashlib.sha256(text.encode()).hexdigest() == EXPECTED_SHA256, "alpha-reference/index.html 與記錄的 Alpha v54 不同"
 lines = text.split("\n")
 
 
@@ -109,9 +109,6 @@ REPLACEMENTS = [
      '<el-tab-pane label="Endorsements" name="endorsements"></el-tab-pane>\n'
      '                <el-tab-pane label="Reminders" name="reminders"></el-tab-pane>', 1),
     ('<section v-else class="overview-card overview-empty">', REMINDERS_TAB + '\n              <section v-else class="overview-card overview-empty">', 1),
-    # Fixed Clause 依 Class（2026-09-29 你的決定）：條款也來自 Class，再保人條款依適用 Class 帶入
-    ("Universal clauses are always included. Fixed clauses are copied from the selected reinsurer; later MDM changes do not rewrite this saved case.",
-     "Universal clauses are always included. Fixed clauses are copied from the selected Class and from the selected reinsurers' clauses that apply to that Class; later MDM changes do not rewrite this saved case.", 1),
 ]
 for old, new, count in REPLACEMENTS:
     found = body.count(old)
@@ -119,7 +116,7 @@ for old, new, count in REPLACEMENTS:
     body = body.replace(old, new)
 
 script = """<script setup>
-// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v53）；請勿直接修改模板，
+// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v54）；請勿直接修改模板，
 // 要改就改產生程式（或 Alpha 更新後重新產生）。邏輯在 case-workspace.script.js。
 import { useCaseWorkspace } from './case-workspace.script'
 

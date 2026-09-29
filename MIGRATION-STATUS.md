@@ -1,6 +1,7 @@
 # Alpha → VM 搬遷狀態
 
-- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v53（2026-09-25，81 個檔案）**
+- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v54（2026-09-29，82 個檔案）**
+- 2026-09-29 起你決定把 VM 的改動**同步回 Alpha**（登入／權限、資料表結構、Personnel & Accounts 資料除外），之後會先在 Alpha 開發新功能。每批部署後，下表的雜湊改成新版本，漂移檢查照舊。見下方「VM → Alpha 同步」。
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
 
@@ -59,19 +60,20 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 已移植
 
-| Alpha 檔案 | Alpha 雜湊（v53） | VM 位置 | 狀態 |
+| Alpha 檔案 | Alpha 雜湊（v54） | VM 位置 | 狀態 |
 |---|---|---|---|
 | `api/fx-rates.js` | `a2496a82375c9159944318edbef2e7365f1b55c8acd78a8a6f1b3b29138e2de3` | `backend/fxrates/` | 完成（含 Audit，見下） |
 | `migrations/0010_create_fx_rates.sql` | `0875485cf1049e3d6a39bc004decc950c9a547def9f6d82ceccd43204a965e4d` | `fxrates/models.py`、migrations | 完成 |
-| `api/master-data.js` | `52604668228e90ded3a1815f65f1e2435fef0b73c6a75adb6401fdbc3f8eb4c7` | `backend/masterdata/views.py` | 完成（含 #18） |
+| `api/master-data.js` | `0993fb9df0419e1bdd1491cabd61627621967814f6df7719e873de09ece9288d` | `backend/masterdata/views.py` | 完成（含 #18） |
 | `migrations/0001_create_master_records.sql` | `f8dde66dc346c860cbeaa436770c7dbc8af190db2b125c18ffcb732df1e7b393` | `masterdata/models.py` | 完成 |
 | `lib/accounting.js` | `e0acc3c8091b843d89aaa7c52dea5a7aba3be15499d8919b3c61b94fb471ac02` | `backend/cases/calc/accounting.py`（＋`jsnum.py`） | 完成，**逐位一致**（含 #3）：Alpha 的 JavaScript 與 Python 對 9 萬 7 千組輸入完全相同 |
 | `lib/payment-terms.js` | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` | `backend/cases/calc/payment_terms.py` | 完成，**逐位一致** |
-| `lib/case-draft.js` | `42983151fe3b0ec514abbcad750357ef71d2e2dd7086a9a4d009cd8d54bdd338` | `backend/cases/draft.py`（`normalize_draft`、`validate_announce_ready`） | 完成，**逐位一致**：錯誤訊息（含英文原文與出現的**順序**）、整理後的內容都相同；11 萬 3 千組輸入完全一致 |
+| `lib/case-draft.js` | `24d409bc954e4bbefc793de5bb5c3916034f8a700b45b33475ff8c1a542cb3a1` | `backend/cases/draft.py`（`normalize_draft`、`validate_announce_ready`） | 完成，**逐位一致**：錯誤訊息（含英文原文與出現的**順序**）、整理後的內容都相同；11 萬 3 千組輸入完全一致 |
 | `api/personnel.js` | `b8c98af9a6ca3a8acd3c5fa28933588df5b25e10c44d7bd859c217a1a5a3742e` | `backend/personnel/views.py`（`PersonnelView`） | 完成（含 #14、#15，含 Audit／Snapshot） |
 | `api/personnel-options.js` | `98e355b36501883a3bf0c11bd8f7ec42ddc779ef742cae021c9719facc0112ad` | `backend/personnel/views.py`（`PersonnelOptionsView`） | 完成 |
 | `migrations/0011_create_personnel_accounts.sql`、`0012_add_internal_account_fields.sql`、`0013_add_personnel_auth_user_index.sql` | `e65f5d93…` / `5d0ce5cf…` / `e029be6d…` | `personnel/models.py`（姓名欄位放寬到 160，同 Alpha） | 完成 |
 | `migrations/0033_add_master_records_ci_unique_indexes.sql` | `24f40ef637d6a4213ca6c59864c6012ed4fd8075b3e7ad704228e237c7338884` | `masterdata/migrations/0002` | 完成（MySQL 的 ai_ci 排序規則已不分大小寫） |
+| `migrations/0034_scope_fixed_clauses_by_class.sql`（v54 新增，由 VM 同步回 Alpha） | `7fe60bcc5e3611ac6d2b98b0524d93f332c118da23279f127829efb6df962013` | VM 已由 CLI 做過同樣的資料更新（2026-09-29） | 不需要移植（只改資料） |
 | `lib/authorization.js` | `86a63b152e9e6eace0be0817bfc87647c142e101e27f1106b815b71489457954` | `backend/ri_system/authz.py` | 完成（含 #13 的取捨，見下） |
 | `api/app-context.js` | `952e70d6bd75625b4b3830227c7ec3bec8b9da697e3e9e3540076edf418ec991` | `ri_system/auth_views.py` `AppContextView` | 完成 |
 | `lib/audit.js` | `3389da373c0a399204352bbb48ab6f8f6963d070c4b5da4116a81119dc6c2492` | `backend/audit/services.py` | 完成 |
@@ -100,8 +102,8 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0011_create_personnel_accounts.sql` 的 `ri_dashboard_targets` | `e65f5d93…` | `dashboard/models.py`、`dashboard/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；`ri_runtime` 沒有 DELETE） |
 | `api/draft-recycle-bin.js` | `0de8068d01da61ab036add0599639ed2f68bb9fa9057dd25f75db7673e9a7df8` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
 | `migrations/0005_create_draft_recycle_bin.sql`、`0019_lock_draft_recycle_policy.sql`、`0032_add_draft_recycle_bin_case_fk.sql` | `97cfe172…` / `eb607919…` / `b9bdfb0d…` | `cases/models.py`（`DraftRecycleBin`）、`cases/migrations/0003` | 完成（CHECK 禁止永久刪除、外鍵、索引；`ri_runtime` 沒有 DELETE） |
-| `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `72de4a046c42d0dc6acc3eae3773975f8bfea8aa675e639fc50c29efe8383e00` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
-| `public/app.js`（上述畫面的邏輯） | `a2427dcb41711e94ddacee421a93b560075f414891a72b033ffaa858e2190427` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
+| `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `feea43f80afceb5b4a75f1e532c762f6497576bbe1336f17f2868488a03d0ff7` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
+| `public/app.js`（上述畫面的邏輯） | `c8e7061b7fe44b1eb0ee790496cf2d16f258092a9e03aa4646775001c03ba0f1` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
 | `public/theme.css`、`public/overview.css`、`public/development-alignment.css` | `af2b57f0…` / `bceafbf2…` / `2da6fba1…` | `frontend/src/alpha/styles/`（原樣，載入順序同 Alpha） | 完成 |
 | `migrations/0002_create_cases.sql`、`0006_add_case_uid.sql`、`0007_expand_reinsurance_structures.sql`、`0009_add_announce_workflow.sql`、`0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `9e3a6164…` / `59ad607b…` / `8e4e3449…` / `cd7b0f75…` / `d7b2d9d8…` / `ceb171d9…` | `cases/models.py`（含 `ReferenceSequence`）、`cases/migrations` | 完成（由 cases／announce／workflow／accounting／claims／production 等 API 使用） |
 | `api/signed-slip-reminders.js` | `4bf1b2d5f60b44c6e3cf3c026b4196296e8265576e44b575eb7919a346368617` | `backend/reminders/`（`runner.run_signed_slip`、`messages.py`）、`manage.py run_signed_slip_reminders`（cron 每天台北 09:00） | 完成（#10，**不寄信模式**，見下）。收件人、信件內容與 Alpha JS 逐位一致（差異測試約 1.2 萬組，含金額四捨五入邊界）；測試組 `reminders`（45 項，8 種故意破壞都抓到）；畫面測試階段 R（案件明細 Reminders 分頁） |
@@ -109,6 +111,14 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0017_create_signed_slip_alerts.sql`、`0029_create_payment_alerts.sql`、`0030_index_payment_alerts.sql` | `33364cb8…` / `4f06c0ef…` / `913f5bb3…` | `reminders/models.py`、`reminders/migrations/0001` | 完成（同樣的唯一限制與索引；狀態多 `suppressed`、多存信件主旨與內文；`ri_runtime` 沒有 DELETE） |
 | `migrations/0031_backfill_payment_schedule_state.sql` | `7e2bacb4…` | 不需要 | VM 的 `normalize_draft` 本來就設定 `paymentScheduleReviewRequired`，切換匯入的是 Alpha 已補過的資料 |
 | `migrations/0008_create_case_documents.sql` | `bd0d2ee6e9fc68b2d75fc2093d1886654448743bf2ead2d2a693e742798b8fc1` | `cases/models.py`、`cases/migrations/0002` | 完成（上限改為 10 MB，見下） |
+
+## VM → Alpha 同步
+
+2026-09-29 你的決定：把 VM 的改動同步回 Alpha，範圍是新功能與業務規則、Alpha 的 bug 修正、畫面文字、主檔資料；不含登入／權限、資料表結構（不寫 DDL）、Personnel & Accounts 的資料。分批進行：先寫入 Alpha 檔案並驗證，給你看過、你同意才部署，部署後實測並更新上表的雜湊。
+
+| 批次 | Alpha 版本 | 內容 | 驗證 |
+|---|---|---|---|
+| 1 | v54（2026-09-29） | Fixed Clause 依 Class、LMA3333 標題；`api/master-data.js`、`lib/case-draft.js`、`public/app.js`、`public/index.html`、`migrations/0034`（只改資料：58 條 → Property、LMA3333 主檔標題，含 Snapshot；Alpha 的 Audit 仍暫停） | 新 `case-draft.js` 與 VM 差異測試 69,272 組全部一致（不需任何替換）；新 `masterPayload` 與 VM 的 `validate_payload` 4,000 組隨機輸入全部一致（過程中把 VM 對齊 Alpha：`fixedClauses`／`ratings` 為 null 時回錯誤、Class id 84.0 視為整數 84）；migration 在臨時 PostgreSQL 試跑兩次（第二次無變動）；部署後以唯讀 SQL、`run_function` 確認資料與 API，畫面由你實測 |
 
 ## 資料（不是程式碼）
 
@@ -173,8 +183,8 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | Dashboard 的每月佣金趨勢與再保人占比 | 自己另一套算法：分期不先進位、批單用 Announce 月、只去掉「(Facility)」 | 用 Production Report 的規則（分期逐期進位、尾差在第一期；批單用建立月；去掉「(Facility)」與「[Facility]」），與 Production Report 數字一致 | 2026-09-26 你的決定；**建議 Alpha 也統一** |
 | 目標設定頁的說明文字 | 「Dashboard consumption follows later」「Audit recording is paused until VM migration」 | 「Targets feed the Dashboard brokerage trend」「every change is recorded in the Audit Log」；API 的 `scope.dashboardConsumption` 與 Audit metadata 也改為 true | 2026-09-26 你的決定（VM 的實際情況） |
 | 同時新增同一期間的目標 | 未處理的資料庫錯誤 | 409 `duplicate_target` | |
-| Fixed Clause 依 Class | 只有再保人有 Fixed Clause，案件帶入所選再保人的全部條款，與 Class 無關 | 再保人的每條 Fixed Clause 可指定適用 Class（payload `fixedClauses[].classIds`＝Class 主檔 id；沒有這個鍵＝All classes，格式與 Alpha 相同；MDM 新增條款時預設 Property）；Class 主檔也可以有自己的 `fixedClauses`（沒有條款時 payload 維持 `{}`）。案件條款＝Universal＋該 Class 的條款＋各再保人適用該 Class 的條款＋手動；全部是 Facility 的案件也帶入 Class 條款；Draft 改 Class 時會重新帶入（Alpha 改 Class 不會觸發）；已存檔的案件不會被改寫。MDM Clauses 分頁的 Used by 會列出 Class 與適用範圍。測試組 `fixed_clause_classes`（28 項；8 種故意破壞全部抓到）、畫面測試階段 K。既有資料：2026-09-29 依你的決定，5 家啟用中再保人的 58 條全部改為只適用 Property（CLI 執行，每家各一筆 Snapshot 與 `update_master` Audit，`source = maintenance`）；停用中的測試再保人 Munich 未改 | 2026-09-29 你的決定：目前的 Fixed Clause 只用於 Property，Universal 不變 |
-| Universal 條款 LMA3333 的標題 | `Reinsurers Liability Clause` | `LMA3333 Reinsurers Liability Clause`（`cases/draft.py` 的 `LMA3333_TITLE`、`frontend/src/alpha/constants.js`、Clause 主檔 id 93 以 CLI 更新並留 Snapshot／Audit）。文件的 Reinsurance Conditions 只印條款標題（Word／PDF 產生檔與 Alpha 相同，未修改），所以文件上會印出「• LMA3333 Reinsurers Liability Clause」。差異測試：`qa/calc/compare.py` 的 `vm_divergence` 先把 Alpha 結果的舊標題換成新標題再比對；關掉這個對應時 normalizeDraft 有 2,992 組只差在這個標題。畫面測試階段 H 檢查 Cover Note PDF 印出新標題 | 2026-09-29 你的決定 |
+| Fixed Clause 依 Class（**已同步回 Alpha v54**，兩邊相同） | v53：只有再保人有 Fixed Clause，案件帶入所選再保人的全部條款，與 Class 無關 | 再保人的每條 Fixed Clause 可指定適用 Class（payload `fixedClauses[].classIds`＝Class 主檔 id；沒有這個鍵＝All classes，格式與 Alpha 相同；MDM 新增條款時預設 Property）；Class 主檔也可以有自己的 `fixedClauses`（沒有條款時 payload 維持 `{}`）。案件條款＝Universal＋該 Class 的條款＋各再保人適用該 Class 的條款＋手動；全部是 Facility 的案件也帶入 Class 條款；Draft 改 Class 時會重新帶入（Alpha 改 Class 不會觸發）；已存檔的案件不會被改寫。MDM Clauses 分頁的 Used by 會列出 Class 與適用範圍。測試組 `fixed_clause_classes`（28 項；8 種故意破壞全部抓到）、畫面測試階段 K。既有資料：2026-09-29 依你的決定，5 家啟用中再保人的 58 條全部改為只適用 Property（CLI 執行，每家各一筆 Snapshot 與 `update_master` Audit，`source = maintenance`）；停用中的測試再保人 Munich 未改 | 2026-09-29 你的決定：目前的 Fixed Clause 只用於 Property，Universal 不變 |
+| Universal 條款 LMA3333 的標題（**已同步回 Alpha v54**，兩邊相同） | v53：`Reinsurers Liability Clause` | `LMA3333 Reinsurers Liability Clause`（`cases/draft.py` 的 `LMA3333_TITLE`、`frontend/src/alpha/constants.js`、Clause 主檔 id 93 以 CLI 更新並留 Snapshot／Audit）。文件的 Reinsurance Conditions 只印條款標題（Word／PDF 產生檔與 Alpha 相同，未修改），所以文件上會印出「• LMA3333 Reinsurers Liability Clause」。差異測試：`qa/calc/compare.py` 的 `vm_divergence` 先把 Alpha 結果的舊標題換成新標題再比對；關掉這個對應時 normalizeDraft 有 2,992 組只差在這個標題。畫面測試階段 H 檢查 Cover Note PDF 印出新標題 | 2026-09-29 你的決定 |
 | 業績月份（Announce 月／批單建立月） | 取時間的 UTC 文字前 7 個字：台北時間每月 1 日早上 8 點前 Announce 的案件算上個月 | 先換成台北時間再取月份（calc 本身不變，只改傳入的文字）；Production 畫面的預設月份也用台北時間的上個月 | 2026-09-26 你的決定（先在 Alpha 以唯讀 `SELECT now()` 確認 Hatchable 回傳 UTC 文字）；**建議 Alpha 也改** |
 | Production 的 Audit | 只有關帳寫 Audit | 排除（`exclude_production_row`）、產生版本（`generate_production_report`）也寫；關帳時每個案件補寫 Snapshot（`production_case_confirmed`），被鎖定的匯率寫 Snapshot（`fx_rate_locked`）與 Audit（`lock_fx_rate`） | 依「所有新增與修改都要有 Audit」、「row_version 增加就寫 Snapshot」 |
 | 關帳的並行控制 | 事後以「除以零」檢查報表與每個案件的版本 | 先鎖報表與案件列，再檢查版本與狀態；有變動就 409 `close_conflict`，什麼都不寫 | 行為相同 |
@@ -273,5 +283,5 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 ## 切換前的待辦
 
 - **切換匯入的案件仍是舊的 LMA3333 標題**（2026-09-29）：Alpha 案件的 `clauseDetails` 存的是 `Reinsurers Liability Clause`，匯入後產生文件會印舊標題，直到案件重新存檔。切換時要決定：匯入時一併換成新標題（屬於改寫匯入資料，要記在批次報告），或維持原樣。先問你。
-- **主檔比對會因 Fixed Clause 依 Class 而不一致**（2026-09-29）：`import_alpha_cutover` 規定主檔內容有任何差異就整批停止；VM 的再保人條款多了 `classIds`、Class 可能多了 `fixedClauses`、Clause 主檔 LMA3333 的標題改成含代碼，與 Alpha 不同。切換前要決定：比對時忽略這些 VM 才有的差異（保留 VM 的設定），或先把 Alpha 的主檔改成與 VM 相同。先問你。
+- **轉換程式要換掉條款裡的 Class id**（2026-09-29，同步回 Alpha 時發現）：再保人條款的 `payload.fixedClauses[].classIds` 存的是 Class 主檔的 id，Alpha 的 Property 是 45、VM 是 92。`backend/conversion/remap.py` 目前沒有這個位置：主檔用名稱比對時會因 id 不同而判定內容不一致（整批停止），Alpha 新建的再保人匯入後也會指向錯的 Class。要在 remap.py 與獨立檢查 integrity.py 加上這個位置（Class id 依對照表換成 VM 的 id），並用合成資料演練與故意破壞驗證。LMA3333 標題、Class 的 `fixedClauses` 兩邊已相同（v54），不再造成差異。
 - **清空測試資料**（2026-09-25 你的決定）：在 VM 上點畫面建立的測試案件（名稱用 ZZ 或 UI 開頭）、文件、回收桶、TW Reference 流水號，要在正式匯入前用一支有記錄、需要 root 執行的腳本清掉（Audit 保留）。執行前先備份並問你。

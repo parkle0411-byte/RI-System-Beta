@@ -14,7 +14,8 @@ const STRUCTURE_SUFFIX = {
 
 const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss', TREATY: 'Treaty' };
 const UNIVERSAL_CLAUSES = [
-  { code: 'LMA3333', title: 'Reinsurers Liability Clause' },
+  // The title carries the code so generated documents print "LMA3333 ..." (owner decision 2026-09-29).
+  { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },
   { code: 'INTERMEDIARY', title: 'Intermediary Clause (TW Insurance Brokers Ltd.)' }
 ];
 const FX_CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR'];
@@ -1319,12 +1320,55 @@ createApp({
       return isUniversalClauseCode(code) ? 'Universal' : 'Standard';
     }
 
+    // Fixed clauses by Class (owner decision 2026-09-29): reinsurer clauses carry classIds
+    // (no classIds = All classes; new clauses default to Property) and a Class may carry its own clauses.
+    const ALL_CLASSES = '*';
+    function classNameById(id) {
+      return mdmRecords.value.find((row) => row.entityType === 'class' && Number(row.id) === Number(id))?.name || `Class #${id}`;
+    }
+    function appliesToLabel(classIds) {
+      return Array.isArray(classIds) ? classIds.map(classNameById).join(', ') : 'All classes';
+    }
     function clauseUsedByReinsurers(code) {
       const normalized = String(code || '').toUpperCase();
+      const users = [];
+      mdmRecords.value.forEach((row) => {
+        if (!['reinsurer', 'class'].includes(row.entityType) || !Array.isArray(row.payload?.fixedClauses)) return;
+        const clause = row.payload.fixedClauses.find((c) => String(c.code || '').toUpperCase() === normalized);
+        if (!clause) return;
+        if (row.entityType === 'class') users.push(`Class: ${row.name}`);
+        else users.push((row.payload?.abbreviation || row.name) + (Array.isArray(clause.classIds) ? ` (${appliesToLabel(clause.classIds)})` : ''));
+      });
+      return users.sort((a, b) => a.localeCompare(b));
+    }
+    function classScopeOptions(selected) {
+      const ids = new Set((selected || []).filter((v) => v !== ALL_CLASSES).map(Number));
       return mdmRecords.value
-        .filter((row) => row.entityType === 'reinsurer' && Array.isArray(row.payload?.fixedClauses) && row.payload.fixedClauses.some((c) => String(c.code || '').toUpperCase() === normalized))
-        .map((row) => row.payload?.abbreviation || row.name)
-        .sort((a, b) => a.localeCompare(b));
+        .filter((row) => row.entityType === 'class' && (row.isActive || ids.has(Number(row.id))))
+        .map((row) => ({ value: Number(row.id), label: row.isActive ? row.name : `${row.name} (inactive)` }));
+    }
+    function defaultClauseScope() {
+      const property = mdmRecords.value.find((row) => row.entityType === 'class' && row.isActive && row.name === 'Property');
+      return property ? [Number(property.id)] : [ALL_CLASSES];
+    }
+    function onClauseScopeChange(clause, value) {
+      const last = value[value.length - 1];
+      clause.appliesTo = last === ALL_CLASSES ? [ALL_CLASSES] : value.filter((v) => v !== ALL_CLASSES);
+    }
+    function formClausesFromPayload(type, rows) {
+      const source = Array.isArray(rows) ? rows : [];
+      return normalizeClauseList(source).map((clause) => {
+        if (type !== 'reinsurer') return clause;
+        const original = source.find((row) => normalizeClauseCode(row?.code) === clause.code);
+        return { ...clause, appliesTo: Array.isArray(original?.classIds) ? original.classIds.map(Number) : [ALL_CLASSES] };
+      });
+    }
+    function payloadClausesFromForm(type) {
+      return normalizeClauseList(mdmForm.fixedClauses).map((clause) => {
+        if (type !== 'reinsurer') return clause;
+        const scope = mdmForm.fixedClauses.find((row) => row.code === clause.code)?.appliesTo || [];
+        return scope.includes(ALL_CLASSES) ? clause : { ...clause, classIds: scope.map(Number) };
+      });
     }
 
     function availableClauseOptions() {
@@ -1380,13 +1424,20 @@ createApp({
       const record = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === name);
       if (record) draft.classCode = record.code || '';
       else if (!name) draft.classCode = '';
+      syncCaseClauses();
     }
 
     function syncCaseClauses() {
       const details = UNIVERSAL_CLAUSES.map((row) => ({ ...row }));
+      // The Class's own fixed clauses, then each reinsurer's clauses that apply to the case Class.
+      const classRecord = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === draft.classOfBusiness);
+      const classId = classRecord ? Number(classRecord.id) : null;
+      const appliesToCaseClass = (row) => !Array.isArray(row?.classIds) || (classId !== null && row.classIds.map(Number).includes(classId));
+      normalizeClauseList(classRecord?.payload?.fixedClauses).forEach((row) => details.push(row));
       draft.reinsurers.forEach((line) => {
         const master = mdmRecords.value.find((row) => row.entityType === 'reinsurer' && row.name === line.name);
-        normalizeClauseList(master?.payload?.fixedClauses).forEach((row) => details.push(row));
+        const fixed = Array.isArray(master?.payload?.fixedClauses) ? master.payload.fixedClauses : [];
+        normalizeClauseList(fixed.filter(appliesToCaseClass)).forEach((row) => details.push(row));
       });
       normalizeClauseList(draft.manualClauses).forEach((row) => details.push(row));
       const unique = normalizeClauseList(details).sort(compareClauses);
@@ -1455,7 +1506,7 @@ createApp({
         ? {
             entityType: row.entityType, code: row.code || '', name: row.name || '',
             abbreviation: row.payload?.abbreviation || '', address: row.payload?.address || '',
-            fixedClauses: normalizeClauseList(row.payload?.fixedClauses), ratings: normalizeRatingList(row.payload?.ratings)
+            fixedClauses: formClausesFromPayload(row.entityType, row.payload?.fixedClauses), ratings: normalizeRatingList(row.payload?.ratings)
           }
         : { entityType: activeMdmType.value, code: '', name: '', abbreviation: '', address: '', fixedClauses: [], ratings: [] });
       Object.assign(mdmClauseDraft, { code: '', title: '' });
@@ -1467,8 +1518,8 @@ createApp({
       const clause = normalizeClauseList([mdmClauseDraft])[0];
       if (!clause) return ElementPlus.ElMessage.error('Enter both Clause code and Clause name');
       if (UNIVERSAL_CLAUSES.some((row) => row.code === clause.code)) return ElementPlus.ElMessage.error(`${clause.code} is included in every case`);
-      if (mdmForm.fixedClauses.some((row) => row.code === clause.code)) return ElementPlus.ElMessage.error('This Clause code already exists for the reinsurer');
-      mdmForm.fixedClauses.push(clause);
+      if (mdmForm.fixedClauses.some((row) => row.code === clause.code)) return ElementPlus.ElMessage.error(`This Clause code already exists for the ${mdmForm.entityType === 'class' ? 'class' : 'reinsurer'}`);
+      mdmForm.fixedClauses.push(mdmForm.entityType === 'reinsurer' ? { ...clause, appliesTo: defaultClauseScope() } : clause);
       mdmForm.fixedClauses.sort(compareClauses);
       Object.assign(mdmClauseDraft, { code: '', title: '' });
     }
@@ -1486,8 +1537,12 @@ createApp({
       if (['reinsurer', 'reinsured', 'foreign_broker'].includes(type)) payload.abbreviation = String(mdmForm.abbreviation || '').trim();
       if (type === 'reinsured') payload.address = String(mdmForm.address || '').trim();
       if (type === 'reinsurer') {
-        payload.fixedClauses = normalizeClauseList(mdmForm.fixedClauses);
+        payload.fixedClauses = payloadClausesFromForm(type);
         payload.ratings = normalizeRatingList(mdmForm.ratings);
+      }
+      if (type === 'class') {
+        const clauses = payloadClausesFromForm(type);
+        if (clauses.length) payload.fixedClauses = clauses;
       }
       return payload;
     }
@@ -1499,6 +1554,11 @@ createApp({
       }
       if (mdmForm.entityType === 'clause' && !String(mdmForm.code || '').trim()) {
         ElementPlus.ElMessage.error('Clause code is required');
+        return;
+      }
+      const unscoped = mdmForm.entityType === 'reinsurer' ? mdmForm.fixedClauses.find((row) => !row.appliesTo?.length) : null;
+      if (unscoped) {
+        ElementPlus.ElMessage.error(`Select All classes or at least one Class for ${unscoped.code}`);
         return;
       }
       mdmSaving.value = true; error.value = '';
@@ -2544,6 +2604,7 @@ createApp({
       masterTypes, activeMdmType, mdmRecords, mdmCounts, filteredMasterRecords, mdmLoading, mdmSaving,
       mdmDialogVisible, mdmForm, mdmClauseDraft, mdmRatingDraft, editingMasterId, masterTypeLabel, loadMasterData, openMasterDialog, saveMasterRecord, toggleMasterStatus, addMdmFixedClause, removeMdmFixedClause, addMdmRating, removeMdmRating,
       isUniversalClauseCode, clauseSourceType, clauseUsedByReinsurers, availableClauseOptions, onMdmClauseDraftSelect,
+      ALL_CLASSES, classScopeOptions, onClauseScopeChange,
       masterOptions, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected,
       caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel,
       reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,

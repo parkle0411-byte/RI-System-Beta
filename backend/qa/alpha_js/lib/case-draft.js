@@ -5,7 +5,8 @@ const STRUCTURE_SUFFIX = {
   TREATY: 'Reinsurance Treaty'
 };
 const UNIVERSAL_CLAUSES = [
-  { code: 'LMA3333', title: 'Reinsurers Liability Clause' },
+  // The title carries the code so generated documents print "LMA3333 ..." (owner decision 2026-09-29).
+  { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },
   { code: 'INTERMEDIARY', title: 'Intermediary Clause (TW Insurance Brokers Ltd.)' }
 ];
 

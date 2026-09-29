@@ -792,7 +792,7 @@
                 </el-collapse-item>
 
                 <el-collapse-item name="conditions" title="Reinsurance Conditions">
-                  <div class="repeat-heading"><div><h3>Clauses</h3><p>Universal clauses are always included. Fixed clauses are copied from the selected reinsurer; later MDM changes do not rewrite this saved case.</p></div></div>
+                  <div class="repeat-heading"><div><h3>Clauses</h3><p>Universal clauses are always included. Fixed clauses are copied from the selected Class and from the selected reinsurers' clauses that apply to that Class; later MDM changes do not rewrite this saved case.</p></div></div>
                   <div class="review-list">
                     <div v-for="clause in draft.clauseDetails" :key="'clause-' + clause.code">
                       <strong>{{ clause.code }}</strong>
@@ -1115,7 +1115,7 @@
                 <el-table-column v-if="activeMdmType === 'clause'" label="Used by" min-width="220"><template #default="{ row }">{{ isUniversalClauseCode(row.code) ? 'Every case' : (clauseUsedByReinsurers(row.code).join(', ') || '—') }}</template></el-table-column>
                 <el-table-column label="Status" width="120"><template #default="{ row }"><span class="status-badge" :class="row.isActive ? 'status-posted' : 'status-archived'">{{ row.isActive ? 'Active' : 'Inactive' }}</span></template></el-table-column>
                 <el-table-column v-if="activeMdmType === 'reinsurer'" label="Ratings" width="100"><template #default="{ row }">{{ row.payload?.ratings?.length || 0 }}</template></el-table-column>
-                <el-table-column v-if="activeMdmType === 'reinsurer'" label="Fixed clauses" width="130"><template #default="{ row }">{{ row.payload?.fixedClauses?.length || 0 }}</template></el-table-column>
+                <el-table-column v-if="['reinsurer','class'].includes(activeMdmType)" label="Fixed clauses" width="130"><template #default="{ row }">{{ row.payload?.fixedClauses?.length || 0 }}</template></el-table-column>
                 <el-table-column v-if="can('mdm.write')" label="Action" width="220"><template #default="{ row }"><span v-if="activeMdmType === 'clause' && isUniversalClauseCode(row.code)" class="pending-badge">System-managed</span><template v-else><el-button text type="primary" @click="openMasterDialog(row)">Edit</el-button><el-button text :type="row.isActive ? 'danger' : 'success'" :loading="mdmSaving" @click="toggleMasterStatus(row)">{{ row.isActive ? 'Deactivate' : 'Reactivate' }}</el-button></template></template></el-table-column>
               </el-table>
             </section>
@@ -1146,9 +1146,11 @@
                     <el-form-item label="Checked at"><el-date-picker v-model="mdmRatingDraft.checkedAt" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
                     <el-form-item label=" "><el-button class="secondary-button" @click="addMdmRating">+ Add rating</el-button></el-form-item>
                   </div>
-                  <div class="repeat-heading"><div><h3>Fixed clauses</h3><p>Applied to future new case snapshots. Picked from the Clause master list; Universal clauses (LMA3333, INTERMEDIARY) are always included and cannot be added here.</p></div></div>
+                </template>
+                <template v-if="['reinsurer','class'].includes(mdmForm.entityType)">
+                  <div class="repeat-heading"><div><h3>Fixed clauses</h3><p v-if="mdmForm.entityType === 'reinsurer'">Applied to future new case snapshots whose Class is listed under Applies to. Picked from the Clause master list; Universal clauses (LMA3333, INTERMEDIARY) are always included and cannot be added here.</p><p v-else>Applied to future new case snapshots of this Class, whichever reinsurers are selected. Picked from the Clause master list; Universal clauses (LMA3333, INTERMEDIARY) are always included and cannot be added here.</p></div></div>
                   <div class="review-list">
-                    <div v-for="(clause,index) in mdmForm.fixedClauses" :key="'mdm-clause-' + clause.code"><strong>{{ clause.code }}</strong><span>{{ clause.title }}</span><el-button text type="danger" @click="removeMdmFixedClause(index)">Remove</el-button></div>
+                    <div v-for="(clause,index) in mdmForm.fixedClauses" :key="'mdm-clause-' + clause.code"><strong>{{ clause.code }}</strong><span>{{ clause.title }}<template v-if="mdmForm.entityType === 'reinsurer'"><br><el-select :model-value="clause.appliesTo" multiple collapse-tags collapse-tags-tooltip size="small" placeholder="Applies to" :aria-label="'Applies to ' + clause.code" style="width:100%;max-width:360px;margin-top:6px" @update:model-value="onClauseScopeChange(clause, $event)"><el-option label="All classes" :value="ALL_CLASSES"></el-option><el-option v-for="item in classScopeOptions(clause.appliesTo)" :key="item.value" :label="item.label" :value="item.value"></el-option></el-select></template></span><el-button text type="danger" @click="removeMdmFixedClause(index)">Remove</el-button></div>
                   </div>
                   <div class="form-grid cols-3" style="margin-top:16px;">
                     <el-form-item label="Clause"><el-select v-model="mdmClauseDraft.code" filterable placeholder="Select from Clause master" @change="onMdmClauseDraftSelect" style="width:100%"><el-option v-for="item in availableClauseOptions()" :key="item.code" :label="item.code + ' — ' + item.title" :value="item.code"></el-option></el-select><small v-if="!availableClauseOptions().length">No available clauses. Add one under the Clause tab first.</small></el-form-item>
