@@ -1,6 +1,6 @@
 # Alpha → VM 搬遷狀態
 
-- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v57（2026-09-29，82 個檔案）**
+- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v58（2026-09-29，82 個檔案）**
 - 2026-09-29 起你決定把 VM 的改動**同步回 Alpha**（登入／權限、資料表結構、Personnel & Accounts 資料除外），之後會先在 Alpha 開發新功能。每批部署後，下表的雜湊改成新版本，漂移檢查照舊。見下方「VM → Alpha 同步」。
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
@@ -60,7 +60,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 已移植
 
-| Alpha 檔案 | Alpha 雜湊（v57） | VM 位置 | 狀態 |
+| Alpha 檔案 | Alpha 雜湊（v58） | VM 位置 | 狀態 |
 |---|---|---|---|
 | `api/fx-rates.js` | `a2496a82375c9159944318edbef2e7365f1b55c8acd78a8a6f1b3b29138e2de3` | `backend/fxrates/` | 完成（含 Audit，見下） |
 | `migrations/0010_create_fx_rates.sql` | `0875485cf1049e3d6a39bc004decc950c9a547def9f6d82ceccd43204a965e4d` | `fxrates/models.py`、migrations | 完成 |
@@ -89,7 +89,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/accounting.js` | `abddcf88795fddc4d04b32d291fa7dabc9e8e4733440630ef73d8a008090b3cc` | `backend/cases/accounting_views.py`（`AccountingView`）、`cases/ledger.py`（`ledger_rows`） | 完成（帳本、記付款、沖銷；含 Snapshot／Audit）。帳本 `ledgerRows` 與 Alpha JS 差異測試逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `accounting_api` 77 項；19 種故意破壞全部抓到（其中 3 種帳本的破壞由差異測試抓到） |
 | `api/claims.js` | `3444de68a9dade3b645a48084f631e5e32b105e261f4d5f2b66e2f4fe75862c9` | `backend/cases/claims_views.py`（`ClaimsView`） | 完成（讀取、新增理賠、改準備金、記理賠付款並產生 Claim Leg 1/2 交易；含 Snapshot／Audit）。交易由已與 Alpha 逐位一致的 `build_claim_payment_transactions` 產生；測試組 `claims_api` 67 項；21 種故意破壞全部抓到 |
 | `lib/production-report.js` | `7e6114e4d826fdd460888e228834d38174139a8fc1439c5a36352f40b41b5a73` | `backend/production/calc.py` | 完成，**逐位一致**（預覽、key、簽章、下個月；差異測試約 1,000 組，含情境一致的案件、排除、延後、分績、分期） |
-| `api/production-report.js` | `669afb28d56692b9fbd0a842aa5f2a818eb9ffb5a2baa0915a4ed9ab0fd8271a` | `backend/production/views.py`（`ProductionReportView`）、`production/closing.py` | 完成（預覽、排除延後、產生版本、關帳：案件確認、Leg 1–3 交易、沖銷分錄、鎖匯率；含 Audit／Snapshot）。關帳整理案件的邏輯與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `production_api` 72 項；故意破壞：計算 11＋關帳 4 種由差異測試抓到、API 18 種由測試組抓到 |
+| `api/production-report.js` | `d7561b8b9319bcc0abd59d87cd82413c462ae1d06bc6c69f43f8d7ae0702ba08` | `backend/production/views.py`（`ProductionReportView`）、`production/closing.py` | 完成（預覽、排除延後、產生版本、關帳：案件確認、Leg 1–3 交易、沖銷分錄、鎖匯率；含 Audit／Snapshot）。關帳整理案件的邏輯與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `production_api` 72 項；故意破壞：計算 11＋關帳 4 種由差異測試抓到、API 18 種由測試組抓到 |
 | `migrations/0016_create_production_report_lifecycle.sql` | `9fd6f3cc748e5a174715a09a289099be98cbfbf58c5ba6b8aa078e3cddcb5319` | `production/models.py`、`production/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；PostgreSQL 的部分唯一索引／COALESCE 索引改用 MySQL 函式索引；排除紀錄 `ri_runtime` 只能 SELECT／INSERT） |
 | `public/production-xlsx.js` | `256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59` | `frontend/src/alpha/production-xlsx.js`（**原樣**，`run_calc_diff.sh` 會核對雜湊） | 完成（JSZip 改由 npm 套件提供，同版 3.10.1） |
 | `public/docx-generator.js` | `6726dda0f766ac4a6b4dbc084aa857a182f93cb5639c05d02b7afc9d23ebbbad` | `frontend/public/alpha-documents/`（**原樣**，`run_calc_diff.sh` 核對雜湊；和 Alpha 一樣以一般 `<script>` 載入，不經 Vite 打包） | 完成：Word 在瀏覽器產生（同 Alpha） |
@@ -103,7 +103,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/draft-recycle-bin.js` | `0de8068d01da61ab036add0599639ed2f68bb9fa9057dd25f75db7673e9a7df8` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
 | `migrations/0005_create_draft_recycle_bin.sql`、`0019_lock_draft_recycle_policy.sql`、`0032_add_draft_recycle_bin_case_fk.sql` | `97cfe172…` / `eb607919…` / `b9bdfb0d…` | `cases/models.py`（`DraftRecycleBin`）、`cases/migrations/0003` | 完成（CHECK 禁止永久刪除、外鍵、索引；`ri_runtime` 沒有 DELETE） |
 | `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `9f9cc0706be112e98922db08392133d1c7394e97eb380bd5c4f8bb919218c190` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
-| `public/app.js`（上述畫面的邏輯） | `0bd095bd0c3d31ae6666d76241f8776654ea98f94101e278a692aa40d11d3a7e` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
+| `public/app.js`（上述畫面的邏輯） | `d2fbdf455112f5a3f4bc0ceb3222b4807ebe20e03786d5bc5c4b139b67094d05` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
 | `public/theme.css`、`public/overview.css`、`public/development-alignment.css` | `af2b57f0…` / `bceafbf2…` / `2da6fba1…` | `frontend/src/alpha/styles/`（原樣，載入順序同 Alpha） | 完成 |
 | `migrations/0002_create_cases.sql`、`0006_add_case_uid.sql`、`0007_expand_reinsurance_structures.sql`、`0009_add_announce_workflow.sql`、`0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `9e3a6164…` / `59ad607b…` / `8e4e3449…` / `cd7b0f75…` / `d7b2d9d8…` / `ceb171d9…` | `cases/models.py`（含 `ReferenceSequence`）、`cases/migrations` | 完成（由 cases／announce／workflow／accounting／claims／production 等 API 使用） |
 | `api/signed-slip-reminders.js` | `4bf1b2d5f60b44c6e3cf3c026b4196296e8265576e44b575eb7919a346368617` | `backend/reminders/`（`runner.run_signed_slip`、`messages.py`）、`manage.py run_signed_slip_reminders`（cron 每天台北 09:00） | 完成（#10，**不寄信模式**，見下）。收件人、信件內容與 Alpha JS 逐位一致（差異測試約 1.2 萬組，含金額四捨五入邊界）；測試組 `reminders`（45 項，8 種故意破壞都抓到）；畫面測試階段 R（案件明細 Reminders 分頁） |
@@ -122,6 +122,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 2 | v55（2026-09-29） | 理賠：出險日與付款日期必須是真實日期、準備金看不懂或為負回 400、準備金與付款金額進位到分、交易編號用根案件 TW Ref、每次寫入補 Snapshot；`api/claims.js`、`public/index.html`（兩個日期必填標示與說明文字） | 三個新檢查函式與 VM 差異測試 3,000 組全部一致（年份 1–99 以 `setUTCFullYear` 避開 `Date.UTC` 的 1900 位移）；修改後的 Alpha `claims.js` 以模擬資料庫與 Alpha 真的 `lib/accounting.js` 跑 10 個步驟，回應、最終理賠與交易、版本號與 VM 完全相同；部署後 GET／POST 找不到案件回 404（Alpha 目前沒有案件，寫入流程待有案件時實測）；VM 的案件模板改由 v55 產生、內容不變（原本 3 處替換已移除） |
 | 3 | v56（2026-09-29） | 記帳：帳本讀全部案件、記付款／沖銷只接受 Announced／Confirmed（409 `accounting_status_locked`）、付款與沖銷日期必須是真實日期（沖銷沒給日期用台北今天）、非物件的 paymentEntries／transactions 略過、記付款／沖銷補 Snapshot；畫面的付款／沖銷日期預設台北今天、「Partial payment」只在部分付款時顯示；`api/accounting.js`、`public/app.js`、`public/index.html` | 帳本差異測試改以 Alpha v56 的節錄為基準（`qa/alpha_js/excerpts/accounting-excerpts.js`，多切 `isObject`），600 組全部一致，並加入非物件 paymentEntries 的向量（226 組；其中 50 組兩邊都因向量裡其他無效日期拋錯，拿掉非物件項目後仍拋錯，與本批無關）；修改後的 Alpha `accounting.js` 以模擬資料庫跑 11 個步驟（含 Draft、重複沖銷、夾 null、無日期沖銷），回應、付款紀錄、版本號、Snapshot 與 VM 完全相同；部署後 GET 帳本、POST 錯誤日期／無日期實測 |
 | 4a | v57（2026-09-29） | Dashboard：今天／本月／今年與 Announce 月用台北時間、每月佣金趨勢與再保人占比用 Production 規則（`lib/production-report.js` 的 `installmentAllocations` 加 export 共用）、占比長條 `display:block`；業績目標：`dashboardConsumption` true、同時新增同一期間回 409、預設年月用台北時間、頁面標題（Audit 那句保留 Alpha 原文，因 Alpha 的 Audit 仍暫停）；`api/dashboard.js`、`api/dashboard-targets.js`、`lib/production-report.js`、`public/app.js`、`public/index.html`。VM 的 `dashboard.read.all`（Finance 看全部）屬權限，不同步 | Dashboard 差異測試改以 Alpha v57 節錄對 VM API 實際模式（台北＋Production 規則，`compare.py` 的 `_dashboard_vm`），600 組全部一致；向量加入批單建立時間與跨台北／UTC 月界的時間；換回 v56 節錄時 306 組不一致（確認測試有鑑別力）；部署後 GET Dashboard／目標、重複期間 POST 回 409 實測 |
+| 4b | v58（2026-09-29） | Production Report：業績月份用台北時間（Announce／建立時間先換成台北時間文字）、Production 畫面預設台北的上個月、關帳時待沖銷又有空交易項目回 409 `transactions_corrupt`、關帳的每個案件（`production_case_confirmed`）與鎖定的匯率（`fx_rate_locked`）寫 Snapshot；`api/production-report.js`、`public/app.js`。VM 額外的 Audit（排除、產生版本、案件、匯率鎖定）未同步（Alpha 的 Audit 暫停） | 關帳整理的差異測試改以 Alpha v58 節錄（外殼的 `res.json` 會拋錯，讓 409 與 VM 的例外一樣算出錯），600 組全部一致；原本沒有「待沖銷＋空交易」的向量，已補上（6 組兩邊擋下、12 組不會走到沖銷、52 組非物件項目照常處理）；匯率鎖定＋Snapshot 的 SQL 在臨時 PostgreSQL 試跑（只鎖未鎖的、第二次無變動）；部署後 GET 預覽實測 |
 
 ## 資料（不是程式碼）
 
@@ -188,10 +189,10 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 同時新增同一期間的目標（**已同步回 Alpha v57**，兩邊相同） | 未處理的資料庫錯誤 | 409 `duplicate_target` | |
 | Fixed Clause 依 Class（**已同步回 Alpha v54**，兩邊相同） | v53：只有再保人有 Fixed Clause，案件帶入所選再保人的全部條款，與 Class 無關 | 再保人的每條 Fixed Clause 可指定適用 Class（payload `fixedClauses[].classIds`＝Class 主檔 id；沒有這個鍵＝All classes，格式與 Alpha 相同；MDM 新增條款時預設 Property）；Class 主檔也可以有自己的 `fixedClauses`（沒有條款時 payload 維持 `{}`）。案件條款＝Universal＋該 Class 的條款＋各再保人適用該 Class 的條款＋手動；全部是 Facility 的案件也帶入 Class 條款；Draft 改 Class 時會重新帶入（Alpha 改 Class 不會觸發）；已存檔的案件不會被改寫。MDM Clauses 分頁的 Used by 會列出 Class 與適用範圍。測試組 `fixed_clause_classes`（28 項；8 種故意破壞全部抓到）、畫面測試階段 K。既有資料：2026-09-29 依你的決定，5 家啟用中再保人的 58 條全部改為只適用 Property（CLI 執行，每家各一筆 Snapshot 與 `update_master` Audit，`source = maintenance`）；停用中的測試再保人 Munich 未改 | 2026-09-29 你的決定：目前的 Fixed Clause 只用於 Property，Universal 不變 |
 | Universal 條款 LMA3333 的標題（**已同步回 Alpha v54**，兩邊相同） | v53：`Reinsurers Liability Clause` | `LMA3333 Reinsurers Liability Clause`（`cases/draft.py` 的 `LMA3333_TITLE`、`frontend/src/alpha/constants.js`、Clause 主檔 id 93 以 CLI 更新並留 Snapshot／Audit）。文件的 Reinsurance Conditions 只印條款標題（Word／PDF 產生檔與 Alpha 相同，未修改），所以文件上會印出「• LMA3333 Reinsurers Liability Clause」。差異測試：`qa/calc/compare.py` 的 `vm_divergence` 先把 Alpha 結果的舊標題換成新標題再比對；關掉這個對應時 normalizeDraft 有 2,992 組只差在這個標題。畫面測試階段 H 檢查 Cover Note PDF 印出新標題 | 2026-09-29 你的決定 |
-| 業績月份（Announce 月／批單建立月） | 取時間的 UTC 文字前 7 個字：台北時間每月 1 日早上 8 點前 Announce 的案件算上個月 | 先換成台北時間再取月份（calc 本身不變，只改傳入的文字）；Production 畫面的預設月份也用台北時間的上個月 | 2026-09-26 你的決定（先在 Alpha 以唯讀 `SELECT now()` 確認 Hatchable 回傳 UTC 文字）；**建議 Alpha 也改** |
-| Production 的 Audit | 只有關帳寫 Audit | 排除（`exclude_production_row`）、產生版本（`generate_production_report`）也寫；關帳時每個案件補寫 Snapshot（`production_case_confirmed`），被鎖定的匯率寫 Snapshot（`fx_rate_locked`）與 Audit（`lock_fx_rate`） | 依「所有新增與修改都要有 Audit」、「row_version 增加就寫 Snapshot」 |
+| 業績月份（Announce 月／批單建立月）（**已同步回 Alpha v58**，兩邊相同） | 取時間的 UTC 文字前 7 個字：台北時間每月 1 日早上 8 點前 Announce 的案件算上個月 | 先換成台北時間再取月份（calc 本身不變，只改傳入的文字）；Production 畫面的預設月份也用台北時間的上個月 | 2026-09-26 你的決定（先在 Alpha 以唯讀 `SELECT now()` 確認 Hatchable 回傳 UTC 文字）；**建議 Alpha 也改** |
+| Production 的 Audit（**關帳的案件與匯率 Snapshot 已同步回 Alpha v58**；額外的 Audit 事件未同步，因 Alpha 的 Audit 仍暫停） | 只有關帳寫 Audit | 排除（`exclude_production_row`）、產生版本（`generate_production_report`）也寫；關帳時每個案件補寫 Snapshot（`production_case_confirmed`），被鎖定的匯率寫 Snapshot（`fx_rate_locked`）與 Audit（`lock_fx_rate`） | 依「所有新增與修改都要有 Audit」、「row_version 增加就寫 Snapshot」 |
 | 關帳的並行控制 | 事後以「除以零」檢查報表與每個案件的版本 | 先鎖報表與案件列，再檢查版本與狀態；有變動就 409 `close_conflict`，什麼都不寫 | 行為相同 |
-| 關帳時 transactions 裡有 null | 拋 TypeError（未處理的錯誤） | 409 `transactions_corrupt`，什麼都不寫 | 同 Reverse 的決定 |
+| 關帳時 transactions 裡有 null（**已同步回 Alpha v58**，兩邊相同） | 拋 TypeError（未處理的錯誤） | 409 `transactions_corrupt`，什麼都不寫 | 同 Reverse 的決定 |
 | 預覽的案件順序 | PostgreSQL `ORDER BY announced_at`（空值排最後） | 明確指定空值排最後（MySQL 預設排最前） | 結果相同 |
 | Production 排除紀錄 | 程式不修改、不刪除 | 資料庫層也禁止：`ri_runtime` 只有 SELECT／INSERT | 排除會改變業績歸屬，保留完整紀錄 |
 | 理賠交易編號（**已同步回 Alpha v55**，兩邊相同） | `${rootCase.twRef}-CLM…`，但傳入的是 payload，沒有 `twRef`，編號開頭是 `undefined`（例如 `undefined-CLM1-P1-R1-TX1`），會出現在 SOA 與 Accounting | 用根案件的 TW Ref（`TWPAR2603001-CLM1-P1-R1-TX1`）；共用的 `build_claim_payment_transactions` 不變，只在呼叫時補上 `twRef` | 2026-09-26 你的決定；**建議 Alpha 也修** |

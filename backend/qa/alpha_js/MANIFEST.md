@@ -43,13 +43,13 @@
 
 ### `excerpts/production-excerpts.js`
 
-由程式從 `api/production-report.js`（355 行，雜湊 `669afb28d56692b9fbd0a842aa5f2a818eb9ffb5a2baa0915a4ed9ab0fd8271a`，先確認整檔雜湊相同）
-原樣切出 closeReport() 的第 241–288 行（整理一個案件：確認 key、沖銷分錄、保費交易），外面加上測試用的外殼函式 `productionConfirmCase`
-（外殼的宣告、`closedCases` 的初值與 `return` 是測試加的），前面加 import。
+由程式從 `api/production-report.js`（**v58**，雜湊 `d7561b8b9319bcc0abd59d87cd82413c462ae1d06bc6c69f43f8d7ae0702ba08`，先確認整檔雜湊相同；2026-09-29 從 VM 同步回 Alpha）
+原樣切出 closeReport() 的第 259–309 行（整理一個案件：確認 key、交易有空項目時回 409、沖銷分錄、保費交易），外面加上測試用的外殼函式 `productionConfirmCase`
+（外殼的宣告、`res`（`json` 會拋錯，讓 409 與 VM 的 TransactionsCorrupt 一樣算「出錯」）、`closedCases` 的初值與 `return` 是測試加的），前面加 import。
 
 | 檔案 | SHA-256 |
 |---|---|
-| `excerpts/production-excerpts.js` | `ecfaed1cd3835b6537ad3b399bf8fab1a5b2c661cd52c7e1dbbb40640cd05640` |
+| `excerpts/production-excerpts.js` | `8c3648277a0089079f52e26dbbadfaa7e8b220aa8d5166896209ca6f5475b447` |
 
 ### `excerpts/dashboard-excerpts.js`
 

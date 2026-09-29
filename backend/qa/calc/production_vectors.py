@@ -158,6 +158,9 @@ def build_close(count):
         p = src["payload"]
         if R.random() < 0.6:
             p["transactions"] = [old_transaction(i) for i in range(R.choice([0, 1, 3, 6]))]
+            if R.random() < 0.2:
+                # 交易裡有空項目：需要沖銷時兩邊都要擋下（Alpha v58 回 409、VM 拋 TransactionsCorrupt）；不需要沖銷時照常處理
+                p["transactions"].insert(R.randint(0, len(p["transactions"])), R.choice([None, None, 5, "x"]))
         for key, choices in (("pendingReversalOffset", [True, True, False, None, MISSING, 1]), ("reversalCycle", [0, 1, 2, "2", None, MISSING, 3]),
                              ("confirmedProductionKeys", [MISSING, [], ["x"], [5, "5"], None])):
             v = R.choice(choices)

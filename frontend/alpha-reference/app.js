@@ -100,9 +100,10 @@ function clientKey() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// The Production Report opens on the previous month in Taipei time (performance months are Taipei months).
 function previousMonth() {
-  const date = new Date();
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+  const [year, month] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit' }).format(new Date()).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
 }
 
 function currentMonth() {
