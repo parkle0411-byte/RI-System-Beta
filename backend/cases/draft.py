@@ -23,8 +23,10 @@ STRUCTURE_SUFFIX = {
     "XOL": "Excess of Loss Facultative Reinsurance",
     "TREATY": "Reinsurance Treaty",
 }
+# VM 與 Alpha 不同（2026-09-29 你的決定）：LMA3333 的標題含代碼，文件上才會印出「LMA3333 …」
+LMA3333_TITLE = "LMA3333 Reinsurers Liability Clause"
 UNIVERSAL_CLAUSES = [
-    {"code": "LMA3333", "title": "Reinsurers Liability Clause"},
+    {"code": "LMA3333", "title": LMA3333_TITLE},
     {"code": "INTERMEDIARY", "title": "Intermediary Clause (TW Insurance Brokers Ltd.)"},
 ]
 

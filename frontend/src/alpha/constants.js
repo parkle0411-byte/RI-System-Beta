@@ -13,7 +13,8 @@ export const STRUCTURE_SUFFIX = {
 
 export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss', TREATY: 'Treaty' };
 export const UNIVERSAL_CLAUSES = [
-  { code: 'LMA3333', title: 'Reinsurers Liability Clause' },
+  // VM 與 Alpha 不同（2026-09-29）：標題含代碼，文件上印出「LMA3333 …」
+  { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },
   { code: 'INTERMEDIARY', title: 'Intermediary Clause (TW Insurance Brokers Ltd.)' }
 ];
 export const FX_CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR'];

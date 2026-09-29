@@ -46,7 +46,7 @@ check_pdf() {  # 檔名 預期文字…
   echo "PASS $f: text and fonts ($(pdfinfo "$f" | grep Pages | tr -s ' '))"
 }
 case " ${PHASES:-A H R B K C D E F G P1 P2} " in *" H "*)
-check_pdf CoverNote_TWPAR2603001.pdf "COVER NOTE" TWPAR2603001 "UI Test Insured Ltd" "SCHEDULE OF SECURITY"
+check_pdf CoverNote_TWPAR2603001.pdf "COVER NOTE" TWPAR2603001 "UI Test Insured Ltd" "SCHEDULE OF SECURITY" "• LMA3333 Reinsurers Liability Clause"
 check_pdf DebitNote_TWPAR2603001.pdf "DEBIT NOTE" TWPAR2603001 "晶華保險經紀人股份有限公" "TPBKTWTP"   # 中文名稱在表格欄內換行
 pdffonts qa/ui/out/DebitNote_TWPAR2603001.pdf 2>/dev/null | grep -q NotoSansCJKtc && echo "PASS Debit Note: Chinese text uses Noto Sans CJK TC" || { echo "FAIL Debit Note Chinese font"; STATUS=1; }
 docker exec ri-ut-backend python manage.py shell -c "

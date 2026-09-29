@@ -32,7 +32,7 @@ def master(entity_type, name, code=None, **payload):
                                        created_by="seed", updated_by="seed")
 
 
-for code, title in (("LMA3333", "Reinsurers Liability Clause"), ("INTERMEDIARY", "Intermediary Clause (TW Insurance Brokers Ltd.)"),
+for code, title in (("LMA3333", "LMA3333 Reinsurers Liability Clause"), ("INTERMEDIARY", "Intermediary Clause (TW Insurance Brokers Ltd.)"),
                     ("LMA5390", "Test Clause Alpha"), ("NMA2918", "Test Clause Beta")):
     master("clause", title, code)
 master("ae", "UI AE One")
