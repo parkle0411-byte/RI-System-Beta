@@ -5,9 +5,9 @@
   GET  /api/case-workflow    cases.read.all  這個案件的流程狀態（案件鏈、可執行的動作、會計人員）
   POST /api/case-workflow    cases.write     action = create_endorsement | create_renewal | reverse_case | notify_accounting
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
-  - Reverse 與「通知會計」補寫 Snapshot（Alpha 只寫 Audit，Snapshot 的版本號會有缺口）。
-  - TW Reference 的流水號不截斷（Alpha 的 lpad 超過 999 會被截斷而重複）。
+Reverse 與「通知會計」補寫 Snapshot、TW Reference 的流水號不截斷、Reverse 遇到空交易項目回 409：
+原本是與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v59（兩邊相同，見 MIGRATION-STATUS.md）。
+仍然與 Alpha 不同：
   - 同一個案件鏈的所有動作都先鎖住「根案件」那一列（Alpha 用 PostgreSQL 的 advisory lock 與事後檢查），
     所以檢查與寫入在同一個鎖之內，同時送出的兩個請求會依序處理。
 """

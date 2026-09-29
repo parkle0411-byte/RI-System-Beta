@@ -893,7 +893,7 @@ export function useCaseWorkspace() {
   }
 
   async function startEditCase(row) {
-    // VM 修正：Alpha 這裡只允許 draft／posted，Reversed 案件的「Correct reversed case」因此沒有反應（#7 的確認流程走不到）
+    // 允許 reversed，「Correct reversed case」才走得到 #7 的確認（原本是 VM 的修正，2026-09-29 已同步回 Alpha v59）
     if (!row?.caseUid || !['draft', 'posted', 'reversed'].includes(row.status)) return
     loading.value = true; shell.error = ''
     try {

@@ -13,7 +13,7 @@
 
 ## 節錄（`excerpts/api-excerpts.js`）
 
-`api/case-announce.js`（`af6d6ed9…`）與 `api/case-workflow.js`（`a74a399b…`）import 了 `hatchable`，無法在 Node 直接執行，
+`api/case-announce.js`（v53 `af6d6ed9…`；v59 只改了 TW Ref 的 SQL）與 `api/case-workflow.js`（v53 `a74a399b…`；v59 在 Reverse 的資料整理「之前」加了空項目檢查、補了 Snapshot 敘述，節錄的敘述不變）import 了 `hatchable`，無法在 Node 直接執行，
 所以把其中不碰資料庫的函式節錄到這個檔案：`reinsurerKey`、`requiredReinsurers`、`coverageFor`、`sameIds`、`referencePrefix`、`shiftYear`、`resetSharedPayload`
 與 `case-workflow.js` 裡 `createEndorsement`／`createRenewal`／`reverseCase`／`notifyAccounting` 的資料整理敘述（外面加了測試用的外殼函式）。
 `shiftYear`、`resetSharedPayload` 已與還原出的 Alpha 檔案逐字比對相同；包裝函式內的每一行敘述也都在 Alpha 檔案內（只有外殼的變數定義與 `return` 是測試加的）。

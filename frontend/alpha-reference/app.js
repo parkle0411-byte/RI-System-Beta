@@ -1658,7 +1658,9 @@ createApp({
     }
 
     async function startEditCase(row) {
-      if (!row?.caseUid || !['draft', 'posted'].includes(row.status)) return;
+      // Reversed cases open too, so "Correct reversed case" reaches the #7 confirmation on save
+      // (synced from the company VM 2026-09-29; the API already accepts and checks that correction).
+      if (!row?.caseUid || !['draft', 'posted', 'reversed'].includes(row.status)) return;
       loading.value = true; error.value = '';
       try {
         if (!mdmRecords.value.length) await loadMasterData();
