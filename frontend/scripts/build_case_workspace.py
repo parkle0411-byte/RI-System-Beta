@@ -10,10 +10,10 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "alpha-reference" / "index.html"
 TARGET = ROOT / "src" / "views" / "CaseWorkspace.vue"
-EXPECTED_SHA256 = "e5e1bc75b357a08d367941f30c5ad7bd626a2f3ff84a183b07932a7035f47899"
+EXPECTED_SHA256 = "c8830a9c8284f070457dcfb7b1bd30a41d459d6f99528ebcf0528e4e9524d56b"
 
 text = SOURCE.read_text(encoding="utf-8")
-assert hashlib.sha256(text.encode()).hexdigest() == EXPECTED_SHA256, "alpha-reference/index.html 與記錄的 Alpha v55 不同"
+assert hashlib.sha256(text.encode()).hexdigest() == EXPECTED_SHA256, "alpha-reference/index.html 與記錄的 Alpha v56 不同"
 lines = text.split("\n")
 
 
@@ -111,7 +111,7 @@ for old, new, count in REPLACEMENTS:
     body = body.replace(old, new)
 
 script = """<script setup>
-// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v55）；請勿直接修改模板，
+// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v56）；請勿直接修改模板，
 // 要改就改產生程式（或 Alpha 更新後重新產生）。邏輯在 case-workspace.script.js。
 import { useCaseWorkspace } from './case-workspace.script'
 

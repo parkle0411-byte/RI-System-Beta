@@ -1,10 +1,14 @@
-// Alpha 原始碼的「節錄」（差異測試用）：來自 api/accounting.js（v53，雜湊 ddd2cc0a643038a4…）。
+// Alpha 原始碼的「節錄」（差異測試用）：來自 api/accounting.js（v56，雜湊 abddcf88795fddc4…）。
 // 這個檔案 import 了 'hatchable'，無法直接在 Node 執行，所以把其中不碰資料庫的部分原樣切出來：
-// 第 3–4 行（import reconciliationRefFor、buildPaymentSchedule）、第 37–85 行（ledgerRows）。
+// 第 3–4 行（import reconciliationRefFor、buildPaymentSchedule）、第 21–23 行（isObject）、第 63–111 行（ledgerRows）。
 // 這個檔案是由程式從「雜湊與 Alpha 相同」的原檔切出的（見 MANIFEST.md），不可手動修改。
 
 import { reconciliationRefFor } from "../lib/accounting.js";
-import { buildPaymentSchedule } from "../lib/payment-terms.js";
+import { buildPaymentSchedule, taipeiDate } from "../lib/payment-terms.js";
+
+function isObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 function ledgerRows(cases) {
   const rows = [];
@@ -29,11 +33,11 @@ function ledgerRows(cases) {
       partial: item.partial, settlement: item.status === "settled" ? "settled" : "open",
       reviewRequired: item.status === "pending_review",
       entries: (Array.isArray(caseData.payload?.paymentEntries) ? caseData.payload.paymentEntries : [])
-        .filter((entry) => entry.scheduleKey === item.scheduleKey)
+        .filter((entry) => isObject(entry) && entry.scheduleKey === item.scheduleKey)
     }));
 
     const claims = (Array.isArray(caseData.payload?.transactions) ? caseData.payload.transactions : [])
-      .filter((transaction) => transaction?.source === "claim");
+      .filter((transaction) => isObject(transaction) && transaction.source === "claim");
     claims.forEach((transaction) => rows.push({
       key: caseData.caseUid + ":" + transaction.txNo,
       caseUid: caseData.caseUid, caseRowVersion: caseData.rowVersion,

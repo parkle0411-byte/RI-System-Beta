@@ -4,13 +4,13 @@
   GET  /api/accounting   accounting.read   整合帳本：已 Announce／Confirmed 案件的保費付款排程（依期別與付款對象拆開）＋理賠交易
   POST /api/accounting   accounting.read   action = record_payment | reverse_payment（兩者都另外需要 accounting.write）
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
-  - 帳本讀取全部案件（Alpha 只讀前 1000 件，其餘直接不顯示）。
-  - 記付款、沖銷只接受 Announced／Confirmed 的案件（Alpha 的 API 對 Draft 也照收；畫面本來就只列這兩種）。
-  - 付款日期必須是真實存在的日期（Alpha 記付款只看格式、沖銷完全不檢查）；沖銷沒給日期時預設台北的今天（Alpha 用 UTC）。
-  - 補寫 Snapshot（Alpha 只寫 Audit，版本號會有缺口）。
-  - 先鎖案件列，再檢查、寫入（Alpha 是事後以「除以零」檢查版本）。
-  - paymentEntries／transactions 裡若有不是物件的項目就略過（Alpha 會整個帳本拋錯）；正常流程不會寫出這種資料。
+以下原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v56（兩邊行為相同，見 MIGRATION-STATUS.md）：
+  - 帳本讀取全部案件（v53 只讀前 1000 件）。
+  - 記付款、沖銷只接受 Announced／Confirmed 的案件。
+  - 付款日期必須是真實存在的日期；沖銷沒給日期時預設台北的今天。
+  - 每次記付款、沖銷補寫 Snapshot。
+  - paymentEntries／transactions 裡若有不是物件的項目就略過；正常流程不會寫出這種資料。
+仍然不同的只有並行控制的寫法：VM 先鎖案件列再檢查、寫入；Alpha 是事後以「除以零」檢查版本（結果相同）。
 """
 import re
 import uuid

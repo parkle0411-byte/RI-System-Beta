@@ -280,7 +280,9 @@ createApp({
     const accountingFilters = reactive({ ref: '', reinsurer: '', currency: '', from: '', to: '', leg: '', settlement: '' });
     const accountingPaymentDialogVisible = ref(false);
     const accountingPaymentRow = ref(null);
-    const schedulePaymentForm = reactive({ paymentDate: new Date().toISOString().slice(0, 10), amount: null, note: '' });
+    // Payment dates default to today in Taipei (toISOString() is UTC, the previous day before 08:00 in Taiwan).
+    const taipeiToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const schedulePaymentForm = reactive({ paymentDate: taipeiToday(), amount: null, note: '' });
     const claimsLoading = ref(false);
     const claimsSaving = ref(false);
     const claimsState = ref({ rootCaseUid: '', rootTwRef: '', rootStatus: '', rootRowVersion: null, currency: '', claims: [], splitSource: { reinsurers: [] }, actions: { canWrite: false } });
@@ -977,7 +979,7 @@ createApp({
       if (!row || row.source !== 'premium' || row.reviewRequired) return;
       if (Number(row.outstanding || 0) <= 0 && Number(row.paid || 0) <= 0) return;
       accountingPaymentRow.value = row;
-      schedulePaymentForm.paymentDate = new Date().toISOString().slice(0, 10);
+      schedulePaymentForm.paymentDate = taipeiToday();
       schedulePaymentForm.amount = Number(row.outstanding || 0);
       schedulePaymentForm.note = '';
       accountingPaymentDialogVisible.value = true;
@@ -1028,7 +1030,7 @@ createApp({
           method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({
             action: 'reverse_payment', caseUid: row.caseUid, rowVersion: row.caseRowVersion,
-            entryId: entry.id, paymentDate: new Date().toISOString().slice(0, 10),
+            entryId: entry.id, paymentDate: taipeiToday(),
             note: 'Correction reversal'
           })
         });

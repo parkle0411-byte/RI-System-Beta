@@ -4,10 +4,9 @@
 //
 // 與 Alpha 不同的地方（都記在 MIGRATION-STATUS.md）：
 //   - fetch() → apiFetch()（補上 CSRF 與同源 cookie）
-//   - 預設付款日期用台北的今天（Alpha 用 UTC，台灣早上 8 點前會變成前一天）
 //   - 「開啟案件」導向 /cases?case=…&tab=soa（Alpha 在同一頁切換畫面）
-//   - 「Partial payment」只在真的部分付款時顯示（Alpha 的 v-if 只套到 <br>，每一列都會顯示這行字）
 //   - Alpha 的 settleSelectedTransactions() 呼叫不存在的 API 動作，畫面上也沒有入口，不移植
+// 預設付款日期用台北的今天、「Partial payment」只在部分付款時顯示：原本也是差異，2026-09-29 已同步回 Alpha v56。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

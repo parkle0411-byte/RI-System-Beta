@@ -961,7 +961,7 @@
                   <el-table-column label="Scheduled" min-width="100" align="right"><template #default="{ row }">{{ formatMoney(row.amount) }}</template></el-table-column>
                   <el-table-column label="Paid" min-width="95" align="right"><template #default="{ row }">{{ formatMoney(row.paid) }}</template></el-table-column>
                   <el-table-column label="Outstanding" min-width="110" align="right"><template #default="{ row }"><strong>{{ row.currency }} {{ formatMoney(row.outstanding) }}</strong></template></el-table-column>
-                  <el-table-column label="Status" min-width="120"><template #default="{ row }"><el-tag :type="paymentStatusType(row.paymentStatus)" effect="plain">{{ paymentStatusLabel(row.paymentStatus) }}</el-tag><br v-if="row.partial"><small>Partial payment</small></template></el-table-column>
+                  <el-table-column label="Status" min-width="120"><template #default="{ row }"><el-tag :type="paymentStatusType(row.paymentStatus)" effect="plain">{{ paymentStatusLabel(row.paymentStatus) }}</el-tag><template v-if="row.partial"><br><small>Partial payment</small></template></template></el-table-column>
                   <el-table-column v-if="accountingScope.canEdit" label="Action" min-width="110"><template #default="{ row }"><el-button v-if="row.source === 'premium' && !row.reviewRequired && (Number(row.outstanding || 0) > 0 || Number(row.paid || 0) > 0)" text :type="Number(row.outstanding || 0) > 0 ? 'primary' : 'default'" @click="openSchedulePayment(row)">{{ Number(row.outstanding || 0) > 0 ? 'Record payment' : 'View / reverse' }}</el-button></template></el-table-column>
                 </el-table>
               </section>

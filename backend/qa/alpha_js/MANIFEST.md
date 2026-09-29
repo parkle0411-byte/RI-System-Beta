@@ -34,12 +34,12 @@
 
 ### `excerpts/accounting-excerpts.js`
 
-由程式從 `api/accounting.js`（209 行，雜湊 `ddd2cc0a643038a40de352e4d946d22c4d639aa1210cb0dd207ee3a16b16984a`，先確認整檔雜湊相同）
-原樣切出第 3–4 行（import）與第 37–85 行（`ledgerRows`），前面加說明、最後加一行 `export`（名稱改為 `accountingLedgerRows`）。
+由程式從 `api/accounting.js`（**v56**，雜湊 `abddcf88795fddc4d04b32d291fa7dabc9e8e4733440630ef73d8a008090b3cc`，先確認整檔雜湊相同；2026-09-29 從 VM 同步回 Alpha 的記帳規則）
+原樣切出第 3–4 行（import）、第 21–23 行（`isObject`）與第 63–111 行（`ledgerRows`），前面加說明、最後加一行 `export`（名稱改為 `accountingLedgerRows`）。
 
 | 檔案 | SHA-256 |
 |---|---|
-| `excerpts/accounting-excerpts.js` | `46509d7f4cbfe6144d184b36a289a38fd53e7d30598a8f4589ba4d9cd9b36a77` |
+| `excerpts/accounting-excerpts.js` | `89568faeaa49a79a5a11261d51284c70b2e0e2c3f03e14565c96b0f9bf334a51` |
 
 ### `excerpts/production-excerpts.js`
 

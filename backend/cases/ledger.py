@@ -1,8 +1,7 @@
 """
 記帳帳本的純函式 - 對應 Alpha api/accounting.js 的 ledgerRows（不碰資料庫，差異測試直接呼叫）。
 
-與 Alpha 的差異：paymentEntries／transactions 裡不是物件的項目一律略過；
-Alpha 對 transactions 也是略過（transaction?.source），但 paymentEntries 裡有 null 時整個帳本會拋錯。
+paymentEntries／transactions 裡不是物件的項目一律略過（Alpha v56 起相同；v53 遇到 paymentEntries 裡的 null 會整個帳本拋錯）。
 """
 from .calc.accounting import reconciliation_ref_for
 from .calc.jsnum import get, is_array, js_locale_key, js_or, js_to_number, js_to_string

@@ -30,6 +30,10 @@ def ledger_case(now, index):
         if R.random() < 0.15:
             tx.append(R.choice([None, "claim", 5, [], {"source": "claim"}]))  # transaction?.source：非物件一律略過
         payload["transactions"] = tx if R.random() > 0.05 else R.choice([None, "x", {}, 5])
+    if R.random() < 0.15:
+        # paymentEntries 裡不是物件的項目：兩邊都略過（Alpha v56 起與 VM 相同，原本 Alpha 整個帳本拋錯）
+        entries = payload.get("paymentEntries") if isinstance(payload.get("paymentEntries"), list) else []
+        payload["paymentEntries"] = entries + [R.choice([None, "x", 5, [], [{"scheduleKey": "I1:cedant"}]])]
     c = {
         "caseUid": f"00000000-0000-4000-8000-{index:012d}", "rowVersion": R.choice([1, 2, 3, 7]),
         "twRef": R.choice(TW_REFS), "status": R.choice(["posted", "closed"]),
