@@ -6,6 +6,7 @@ TODO: 尚未實作 ri_entity_snapshots / ri_audit_log 寫入，
 之後要做成共用模組再補上（對應 Alpha 目前也暫停 audit log 寫入的狀態）。
 """
 import json
+import math
 import re
 
 from django.db import IntegrityError, transaction
@@ -79,9 +80,8 @@ def validate_payload(entity_type, supplied, fallback=None):
         return None, err
 
     ratings_in = supplied.get("ratings", [])
-    if ratings_in is not None and not isinstance(ratings_in, list):
+    if not isinstance(ratings_in, list):
         return None, "Ratings must be a list."
-    ratings_in = ratings_in or []
     if len(ratings_in) > 50:
         return None, "A reinsurer cannot contain more than 50 ratings."
 
@@ -109,16 +109,23 @@ def validate_payload(entity_type, supplied, fallback=None):
     return value, None
 
 
+def _is_positive_integer(value):
+    """JavaScript 的 Number.isInteger(value) && value >= 1（布林值不算數字；NaN、Infinity 不是整數）"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value) and value == int(value) and value >= 1
+
+
 def _fixed_clauses(supplied, owner, with_classes):
     """
     Fixed Clause 清單的共用檢查（再保人沿用 Alpha 的規則）。
     VM 才有（2026-09-29 決定）：再保人的條款可以加 classIds（Class 主檔的 id 清單）只適用那些 Class；
     沒有 classIds 代表 All classes（與 Alpha 的格式完全相同）。
     """
+    # 與 Alpha 相同：沒有這個 key 才當成空清單；null 也是「不是清單」
     fixed_clauses_in = supplied.get("fixedClauses", [])
-    if fixed_clauses_in is not None and not isinstance(fixed_clauses_in, list):
+    if not isinstance(fixed_clauses_in, list):
         return None, "Fixed clauses must be a list."
-    fixed_clauses_in = fixed_clauses_in or []
     if len(fixed_clauses_in) > 100:
         return None, f"{owner} cannot contain more than 100 fixed clauses."
 
@@ -141,8 +148,10 @@ def _fixed_clauses(supplied, owner, with_classes):
         if with_classes and class_ids is not None:
             if not isinstance(class_ids, list) or not class_ids:
                 return None, f"Fixed clause {code} must apply to All classes or to at least one Class."
-            if len(class_ids) > 100 or any(isinstance(i, bool) or not isinstance(i, int) or i < 1 for i in class_ids):
+            # JavaScript 的數字沒有整數／小數之分：84.0 就是 84（與 Alpha 相同）
+            if len(class_ids) > 100 or not all(_is_positive_integer(i) for i in class_ids):
                 return None, f"Fixed clause {code} has an invalid Class."
+            class_ids = [int(i) for i in class_ids]
             clause["classIds"] = sorted(set(class_ids))
             requested_class_ids.update(class_ids)
         fixed_clauses.append(clause)

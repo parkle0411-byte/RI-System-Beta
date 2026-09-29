@@ -68,6 +68,16 @@ try:
         ):
             r = call(c, "post", {"entityType": "reinsurer", "name": f"ZZ FCC bad {label}", "payload": {"fixedClauses": [{"code": "X", "title": "T", "classIds": bad}]}})
             check(f"classIds {label} -> 400", r.status_code == 400 and msg(r) == expected, (r.status_code, r.content[:200]))
+        for label, body, expected in (
+            ("fixedClauses null on a reinsurer", {"fixedClauses": None}, "Fixed clauses must be a list."),
+            ("ratings null on a reinsurer", {"ratings": None}, "Ratings must be a list."),
+        ):
+            r = call(c, "post", {"entityType": "reinsurer", "name": f"ZZ FCC {label}", "payload": body})
+            check(f"{label} -> 400 (same as Alpha: null is not a list)", r.status_code == 400 and msg(r) == expected, r.content[:200])
+        r = call(c, "post", {"entityType": "class", "name": "ZZ FCC null class clauses", "payload": {"fixedClauses": None}})
+        check("fixedClauses null on a class -> 400", r.status_code == 400 and msg(r) == "Fixed clauses must be a list.", r.content[:200])
+        r = call(c, "post", {"entityType": "reinsurer", "name": "ZZ FCC float id", "payload": json.dumps({"fixedClauses": [{"code": "X", "title": "T", "classIds": [float(prop["id"])]}]})})   # JSON 文字是 "92.0"
+        check("classIds 84.0 counts as the integer 84 (JavaScript numbers, same as Alpha)", r.status_code == 201 and r.json()["record"]["payload"]["fixedClauses"][0]["classIds"] == [prop["id"]], r.content[:200])
         r = call(c, "post", {"entityType": "reinsurer", "name": "ZZ FCC universal", "payload": {"fixedClauses": [{"code": "INTERMEDIARY", "title": "T"}]}})
         check("universal clause on a reinsurer -> Alpha's message unchanged", r.status_code == 400 and msg(r) == "INTERMEDIARY is universal and must not be added to a reinsurer.", r.content[:200])
         r = call(c, "post", {"entityType": "reinsurer", "name": "ZZ FCC many", "payload": {"fixedClauses": [{"code": f"C{i}", "title": "T"} for i in range(101)]}})
