@@ -1,6 +1,6 @@
 # Alpha → VM 搬遷狀態
 
-- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v60（2026-09-29，82 個檔案）**
+- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v61（2026-09-29，82 個檔案）**
 - 2026-09-29 起你決定把 VM 的改動**同步回 Alpha**（登入／權限、資料表結構、Personnel & Accounts 資料除外），之後會先在 Alpha 開發新功能。每批部署後，下表的雜湊改成新版本，漂移檢查照舊。見下方「VM → Alpha 同步」。
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
@@ -60,7 +60,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 已移植
 
-| Alpha 檔案 | Alpha 雜湊（v60） | VM 位置 | 狀態 |
+| Alpha 檔案 | Alpha 雜湊（v61） | VM 位置 | 狀態 |
 |---|---|---|---|
 | `api/fx-rates.js` | `a2496a82375c9159944318edbef2e7365f1b55c8acd78a8a6f1b3b29138e2de3` | `backend/fxrates/` | 完成（含 Audit，見下） |
 | `migrations/0010_create_fx_rates.sql` | `0875485cf1049e3d6a39bc004decc950c9a547def9f6d82ceccd43204a965e4d` | `fxrates/models.py`、migrations | 完成 |
@@ -69,7 +69,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `lib/accounting.js` | `e0acc3c8091b843d89aaa7c52dea5a7aba3be15499d8919b3c61b94fb471ac02` | `backend/cases/calc/accounting.py`（＋`jsnum.py`） | 完成，**逐位一致**（含 #3）：Alpha 的 JavaScript 與 Python 對 9 萬 7 千組輸入完全相同 |
 | `lib/payment-terms.js` | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` | `backend/cases/calc/payment_terms.py` | 完成，**逐位一致** |
 | `lib/case-draft.js` | `24d409bc954e4bbefc793de5bb5c3916034f8a700b45b33475ff8c1a542cb3a1` | `backend/cases/draft.py`（`normalize_draft`、`validate_announce_ready`） | 完成，**逐位一致**：錯誤訊息（含英文原文與出現的**順序**）、整理後的內容都相同；11 萬 3 千組輸入完全一致 |
-| `api/personnel.js` | `b8c98af9a6ca3a8acd3c5fa28933588df5b25e10c44d7bd859c217a1a5a3742e` | `backend/personnel/views.py`（`PersonnelView`） | 完成（含 #14、#15，含 Audit／Snapshot） |
+| `api/personnel.js` | `f05dbd98a6de4c726efd3ef26f2db08a55d5b49812ce68526bcc8e49548f29c5` | `backend/personnel/views.py`（`PersonnelView`） | 完成（含 #14、#15，含 Audit／Snapshot） |
 | `api/personnel-options.js` | `98e355b36501883a3bf0c11bd8f7ec42ddc779ef742cae021c9719facc0112ad` | `backend/personnel/views.py`（`PersonnelOptionsView`） | 完成 |
 | `migrations/0011_create_personnel_accounts.sql`、`0012_add_internal_account_fields.sql`、`0013_add_personnel_auth_user_index.sql` | `e65f5d93…` / `5d0ce5cf…` / `e029be6d…` | `personnel/models.py`（姓名欄位放寬到 160，同 Alpha） | 完成 |
 | `migrations/0033_add_master_records_ci_unique_indexes.sql` | `24f40ef637d6a4213ca6c59864c6012ed4fd8075b3e7ad704228e237c7338884` | `masterdata/migrations/0002` | 完成（MySQL 的 ai_ci 排序規則已不分大小寫） |
@@ -101,7 +101,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `api/dashboard.js` | `496539893d6f1c20b4d160ede275ff93cc88e78172434338f48a72252ec764e6` | `backend/dashboard/views.py`（`DashboardView`）、`dashboard/calc.py` | 完成。計算的「Alpha 模式」與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`；9 種故意破壞全部抓到）；正式 API 用台北時間與 Production 規則（見下） |
 | `api/dashboard-targets.js` | `e53c69a6b18041de0cdee0f68b86bdb74643a719a8f98fe38cd7518e79b28005` | `backend/dashboard/views.py`（`DashboardTargetsView`） | 完成（列表、新增、修改、停用／重新啟用；含 Snapshot／Audit）。測試組 `dashboard_api` 38 項；API 故意破壞 14 種抓到 12 種，另 2 種與原行為等效（重複期間由資料庫唯一限制擋下；金額進位 MySQL DECIMAL 本身就是四捨五入） |
 | `migrations/0011_create_personnel_accounts.sql` 的 `ri_dashboard_targets` | `e65f5d93…` | `dashboard/models.py`、`dashboard/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；`ri_runtime` 沒有 DELETE） |
-| `api/draft-recycle-bin.js` | `0de8068d01da61ab036add0599639ed2f68bb9fa9057dd25f75db7673e9a7df8` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
+| `api/draft-recycle-bin.js` | `dc536779b7866648987eea2180884c4cd39c91144957cfcf5e30a2240cae8753` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
 | `migrations/0005_create_draft_recycle_bin.sql`、`0019_lock_draft_recycle_policy.sql`、`0032_add_draft_recycle_bin_case_fk.sql` | `97cfe172…` / `eb607919…` / `b9bdfb0d…` | `cases/models.py`（`DraftRecycleBin`）、`cases/migrations/0003` | 完成（CHECK 禁止永久刪除、外鍵、索引；`ri_runtime` 沒有 DELETE） |
 | `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `9f9cc0706be112e98922db08392133d1c7394e97eb380bd5c4f8bb919218c190` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
 | `public/app.js`（上述畫面的邏輯） | `d91a6c969a156002567ea5d5317732f02dc767918ab7e71dfbc970ed5c83527c` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
@@ -126,6 +126,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 4b | v58（2026-09-29） | Production Report：業績月份用台北時間（Announce／建立時間先換成台北時間文字）、Production 畫面預設台北的上個月、關帳時待沖銷又有空交易項目回 409 `transactions_corrupt`、關帳的每個案件（`production_case_confirmed`）與鎖定的匯率（`fx_rate_locked`）寫 Snapshot；`api/production-report.js`、`public/app.js`。VM 額外的 Audit（排除、產生版本、案件、匯率鎖定）未同步（Alpha 的 Audit 暫停） | 關帳整理的差異測試改以 Alpha v58 節錄（外殼的 `res.json` 會拋錯，讓 409 與 VM 的例外一樣算出錯），600 組全部一致；原本沒有「待沖銷＋空交易」的向量，已補上（6 組兩邊擋下、12 組不會走到沖銷、52 組非物件項目照常處理）；匯率鎖定＋Snapshot 的 SQL 在臨時 PostgreSQL 試跑（只鎖未鎖的、第二次無變動）；部署後 GET 預覽實測 |
 | 5a | v59（2026-09-29） | 流程：TW Reference 流水號不截斷（`lpad` 改為 `greatest(最小位數, 實際位數)`；原本第 1000 號變成「…100」重複）、Reverse 遇到空交易項目回 409 `transactions_corrupt`、Reverse 與通知會計補 Snapshot（`case_reversed`、`accounting_notified`）、「Correct reversed case」能打開表單（後端原本就支援 `reverseCorrectionConfirmed`）；`api/case-announce.js`、`api/case-workflow.js`、`public/app.js` | 新舊編號 SQL 在臨時 PostgreSQL 實測（舊的 1000→100、E100→E10；新的與 VM `zfill` 相同）；修改後的 `case-workflow.js` 以模擬資料庫跑 Reverse（空項目 409 且不寫入、正常 Reverse 的 Snapshot）與通知會計；差異測試的節錄不受影響（檢查放在資料整理之前）；部署後兩個 API 找不到案件回 404 實測 |
 | 5b | v60（2026-09-29） | 案件合計統一用記帳的逐步進位：`api/cases.js` 的 `listFinancials` 改用 `lib/accounting.js` 的 `calcLegsForReinsurer`、`public/case-calculations.js` 的金額改成相同算法（非金額合計不變），合計再進位一次；Performance Split 只給名字而同名者不只一位時拒絕（`invalid_personnel_split`，要求以 ID 指定） | VM 的 3,000 個隨機案件：Alpha 新版畫面合計（10 欄）與列表合計都與 VM 完全相同，5,705 筆再保人明細與 Alpha 記帳算法逐筆相同；換回舊版時 1,480／1,599 個案件不同（測試有鑑別力）；Performance Split 四種情況與 VM 相同；部署後 GET 案件列表實測 |
+| 5c | v61（2026-09-29） | 回收桶：丟棄與還原補 Snapshot（`draft_recycled`、`draft_restored`，內容是更新後整列案件 `to_jsonb(c)`）；Personnel：停用者／時間只在「在職 → 停用」時記錄（之後編輯不覆寫、重新啟用清空）、Audit 的 before 改成與 after 相同的 11 個欄位；`api/draft-recycle-bin.js`、`api/personnel.js`（只改程式行為，不動人員資料） | 停用時間的 SQL 在臨時 PostgreSQL 跑「停用 → 停用中編輯 → 重新啟用 → 再停用」四步驟、回收桶 Snapshot 的 SQL 試跑；before 欄位與 VM 的 `personnel_state` 核對相同（Alpha 的 Audit 仍暫停）；部署後 GET 回收桶、PUT 不存在的人員回 404 實測 |
 
 ## 資料（不是程式碼）
 
@@ -212,7 +213,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | Accounting 點 TW Ref 開啟案件 | 同一頁切換到案件的 SOA 分頁 | 導向 `/cases?case=…&tab=soa`，載入後開 SOA 分頁 | VM 每個畫面是一個路由 |
 | Accounting 的 `settle` 動作（標記理賠交易已結清） | 前端有 `settleSelectedTransactions()`，但 API 不支援、畫面也沒有入口 | 不移植 | 無法執行的死碼 |
 | 文件頁與 Announce 的再保人名稱比對 | 文件頁（與 Signed Slip 提醒）**不**去掉「(Facility)」，Announce 會去掉 | 同 Alpha（照搬） | 兩處規則不同但實務上一致：上傳時只能選案件上的原名。只有同一案件同時有「X」與「X (Facility)」時兩邊的「需要幾家」才會不同。**建議 Alpha 統一** |
-| 丟進回收桶、還原的 Snapshot | 只寫 Audit（`row_version` 加 1 卻沒有 Snapshot） | 補寫 Snapshot（`draft_recycled`、`draft_restored`） | 比照 2026-09-25 你對 Reverse／通知會計的決定（每個版本都要有 Snapshot）；建議 Alpha 也補 |
+| 丟進回收桶、還原的 Snapshot（**已同步回 Alpha v61**，兩邊相同） | 只寫 Audit（`row_version` 加 1 卻沒有 Snapshot） | 補寫 Snapshot（`draft_recycled`、`draft_restored`） | 比照 2026-09-25 你對 Reverse／通知會計的決定（每個版本都要有 Snapshot）；建議 Alpha 也補 |
 | 回收桶的並行控制 | 事後「除以零」檢查 | 先鎖案件列（還原時也鎖回收桶那一列），檢查與寫入在同一個鎖內 | MySQL 沒有對應寫法；結果相同 |
 | 畫面外觀與語言 | Hatchable 上的單一 HTML＋UMD | 同樣的模板、文字（英文）與 CSS，拆成 Vue 元件並正式建置；左側每一項是一個網址（重新整理、上一頁可用） | 2026-09-25 你的決定：全部照 Alpha 英文、盡量一模一樣 |
 | VM 專有的畫面元素 | 無（登入由 Hatchable 代管） | 英文的登入頁、頁首的 Change password／Log out、System Administrator 的 Data viewer（`/admin/`）連結、強制改密碼對話框；Personnel 頁多了登入帳號欄與帳號動作、可重新啟用人員（Alpha 顯示「VM migration only」） | 2026-09-25 你的決定：用英文、與外框一致 |
@@ -229,8 +230,8 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | SOA 分頁 | 讀 `payload.transactions` 顯示 | 相同（唯讀；保費交易在 Production 關帳時產生，理賠交易在記理賠付款時產生） | |
 | 畫面上的案件合計、分期收入（**已同步回 Alpha v60**，兩邊相同） | `case-calculations.js`（不進位） | `src/alpha/caseCalculations.js`：用 Alpha `lib/accounting.js` 的逐步進位，與後端 `totals.py` 相同（`run_qa.sh totals` 比對 3,000 個案件） | 2026-09-25「統一用記帳算法」的決定 |
 | Announce 之後的「Record notification」按鈕 | Announce 後不重新載入流程狀態，要重新打開案件才出現 | 相同（照搬） | 只是不便，沒有錯誤；可以之後一起改 |
-| Personnel 停用時間 | 每次儲存都會覆寫 `deactivated_by/at` | 只在「在職 → 停用」那一刻記錄，之後編輯已停用的人不覆寫 | 保留真正的停用時間 |
-| Personnel Audit 的 before 內容 | `before_data` 用列表格式（含 `accountBound`、`updatedAt`），`after_data` 用另一種格式 | before 與 after 都用同一種格式（`personnel_state`） | Alpha 兩邊格式不一致，比對差異時不方便 |
+| Personnel 停用時間（**已同步回 Alpha v61**，兩邊相同） | 每次儲存都會覆寫 `deactivated_by/at` | 只在「在職 → 停用」那一刻記錄，之後編輯已停用的人不覆寫 | 保留真正的停用時間 |
+| Personnel Audit 的 before 內容（**已同步回 Alpha v61**，兩邊相同） | `before_data` 用列表格式（含 `accountBound`、`updatedAt`），`after_data` 用另一種格式 | before 與 after 都用同一種格式（`personnel_state`） | Alpha 兩邊格式不一致，比對差異時不方便 |
 | Personnel GET 的 `scope` | `authentication: company_vm_deferred`、`credentialsEnabled: false` | 如實回報：`django_session`、`credentialsEnabled: true`、`rolesEnforced: true` | VM 已啟用登入 |
 | Personnel 列表欄位 | 無登入帳號名稱 | `accountUsername`（僅 `accounts.manage` 看得到） | 管理員畫面需要 |
 | 停用中帳號換 Email | 解除綁定，可重新邀請 | 解除綁定，可為新 Email 重新建立帳號；舊的 Django 帳號保持停用（`ri_runtime` 沒有 DELETE 權限，也不該刪，稽核仍能對應） | |

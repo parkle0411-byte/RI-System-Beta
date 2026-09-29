@@ -5,7 +5,7 @@ Draft 回收桶 API - 對應 Hatchable Alpha 的 api/draft-recycle-bin.js。
   POST /api/draft-recycle-bin    recycle.write  action = recycle {caseUid, rowVersion} | restore {recycleId}
 
 規則（與 Alpha 相同）：只有 Draft 能丟進回收桶；5 年內可以還原；永久刪除一律禁止（沒有這個動作）。
-與 Alpha 的差異（記在 MIGRATION-STATUS.md）：丟棄與還原都補寫 Snapshot（Alpha 只寫 Audit）。
+丟棄與還原都補寫 Snapshot（原本是與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v61，兩邊相同）。
 """
 import uuid
 from datetime import date, datetime
