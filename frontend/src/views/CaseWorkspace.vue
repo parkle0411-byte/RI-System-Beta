@@ -1,5 +1,5 @@
 <script setup>
-// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v57）；請勿直接修改模板，
+// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v63）；請勿直接修改模板，
 // 要改就改產生程式（或 Alpha 更新後重新產生）。邏輯在 case-workspace.script.js。
 import { useCaseWorkspace } from './case-workspace.script'
 
@@ -362,7 +362,7 @@ const {
                       <dt>Transactions</dt><dd>{{ selectedCaseTransactions.length }}</dd>
                     </dl>
                     <div class="overview-table-wrap">
-                      <el-table :data="selectedCaseTransactions" row-key="key" empty-text="Transactions are generated when all Production rows for this case are confirmed through a closed monthly report.">
+                      <el-table :data="selectedCaseTransactions" row-key="key" empty-text="Transactions are generated once a closed monthly Production report confirms the case. For a case with premium installments, each installment's transactions are generated when that installment is confirmed.">
                         <el-table-column prop="txNo" label="Transaction no." min-width="210">
                           <template #default="{ row }"><strong>{{ row.txNo }}</strong><el-tag v-if="row.reversed" size="small" type="danger" effect="plain" style="margin-left:6px;">Reversed</el-tag><el-tag v-if="row.isReversalEntry" size="small" type="warning" effect="plain" style="margin-left:6px;">Reversal entry</el-tag></template>
                         </el-table-column>

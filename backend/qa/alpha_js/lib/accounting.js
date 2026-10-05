@@ -32,11 +32,16 @@ export function calcLegsForReinsurer(caseData, reinsurer) {
   return { cp: caseCp, ri: caseRi, tax: caseTax, leg1, reinsurerCp, reinsurerRi, reinsurerTax, leg2, leg3, brokerage: leg3 };
 }
 
-export function buildPremiumTransactions(caseData) {
+// installment（可省略）：每期關帳只產生「該期」的交易，形狀 { id, label, number, amounts: [{ leg1, leg2, leg3 }（依再保人順序）] }，
+// 由 lib/payment-terms.js 的 premiumInstallmentPlan 提供；沒給就是整個案件全額（沒有分期的案件）。
+export function buildPremiumTransactions(caseData, installment = null) {
   const transactions = [];
   const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : [];
   reinsurers.forEach((reinsurer, reinsurerIdx) => {
-    const legs = calcLegsForReinsurer(caseData, reinsurer);
+    const legs = installment ? installment.amounts[reinsurerIdx] : calcLegsForReinsurer(caseData, reinsurer);
+    const installmentTag = installment ? `-I${installment.number}` : '';
+    const installmentNote = installment ? ` · Installment ${installment.label}` : '';
+    const installmentFields = installment ? { installmentId: installment.id, installmentLabel: installment.label } : {};
     const reinsurerLabel = stripFacilityTag(reinsurer?.name) || `Reinsurer ${reinsurerIdx + 1}`;
     const settlementLabel = String(reinsurer?.foreignBroker || '').trim() || reinsurerLabel;
     const base = [
@@ -50,28 +55,30 @@ export function buildPremiumTransactions(caseData) {
         const suffix = partyIdx === 0 ? 'a' : 'b';
         const pct = numberOrZero(party?.pct);
         base.forEach((leg, legIdx) => transactions.push({
-          txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-TX${legIdx + 1}${suffix}`,
+          txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-TX${legIdx + 1}${suffix}${installmentTag}`,
           legType: `${leg.legType}${suffix}`,
-          label: `${leg.label} (${party?.name || 'Unassigned'}, ${pct}%)`,
+          label: `${leg.label} (${party?.name || 'Unassigned'}, ${pct}%)${installmentNote}`,
           amount: money(leg.amount * pct / 100),
           splitParty: party?.name || `Party ${suffix.toUpperCase()}`,
           reinsurer: settlementLabel,
           viaForeignBroker: settlementLabel !== reinsurerLabel,
           settlement: 'open',
-          reinsurerIdx
+          reinsurerIdx,
+          ...installmentFields
         }));
       });
     } else {
       base.forEach((leg, legIdx) => transactions.push({
-        txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-TX${legIdx + 1}`,
+        txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-TX${legIdx + 1}${installmentTag}`,
         legType: leg.legType,
-        label: leg.label,
+        label: `${leg.label}${installmentNote}`,
         amount: leg.amount,
         splitParty: null,
         reinsurer: settlementLabel,
         viaForeignBroker: settlementLabel !== reinsurerLabel,
         settlement: 'open',
-        reinsurerIdx
+        reinsurerIdx,
+        ...installmentFields
       }));
     }
   });

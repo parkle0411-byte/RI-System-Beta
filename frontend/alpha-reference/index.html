@@ -482,7 +482,7 @@
                       <dt>Transactions</dt><dd>{{ selectedCaseTransactions.length }}</dd>
                     </dl>
                     <div class="overview-table-wrap">
-                      <el-table :data="selectedCaseTransactions" row-key="key" empty-text="Transactions are generated when all Production rows for this case are confirmed through a closed monthly report.">
+                      <el-table :data="selectedCaseTransactions" row-key="key" empty-text="Transactions are generated once a closed monthly Production report confirms the case. For a case with premium installments, each installment's transactions are generated when that installment is confirmed.">
                         <el-table-column prop="txNo" label="Transaction no." min-width="210">
                           <template #default="{ row }"><strong>{{ row.txNo }}</strong><el-tag v-if="row.reversed" size="small" type="danger" effect="plain" style="margin-left:6px;">Reversed</el-tag><el-tag v-if="row.isReversalEntry" size="small" type="warning" effect="plain" style="margin-left:6px;">Reversal entry</el-tag></template>
                         </el-table-column>

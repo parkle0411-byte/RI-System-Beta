@@ -1,15 +1,15 @@
 # Alpha 原始碼副本（差異測試用）
 
-這些檔案是 Hatchable「RI System (Alpha)」（`proj_FVUqiQUe3m0G`）**v53** 的原始碼（`lib/production-report.js` 是 **v57**：`installmentAllocations` 加上 export；`lib/case-draft.js` 是 **v54**：2026-09-29 從 VM 同步回 Alpha 的 LMA3333 標題；其他檔案 v54 未變），**逐位元組相同**，
+這些檔案是 Hatchable「RI System (Alpha)」（`proj_FVUqiQUe3m0G`）**v53** 的原始碼（`lib/production-report.js`、`lib/accounting.js`、`lib/payment-terms.js` 是 **v63**：分期案件每期關帳就產生該期的保費交易（`productionKeyGroupsForCase`、`premiumInstallmentPlan`、`buildPremiumTransactions` 的 installment 參數）；`lib/case-draft.js` 是 **v54**：2026-09-29 從 VM 同步回 Alpha 的 LMA3333 標題；其他檔案 v54 未變），**逐位元組相同**，
 不可手動修改。差異測試（`scripts/run_qa.sh calc`）會拿它們當作「標準答案」，與 VM 的 Python 移植版比對。
 
 | 檔案 | 行數 | SHA-256（與 Alpha `list_files` 的雜湊相同） |
 |---|---|---|
-| `lib/accounting.js` | 135 | `e0acc3c8091b843d89aaa7c52dea5a7aba3be15499d8919b3c61b94fb471ac02` |
-| `lib/payment-terms.js` | 248 | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` |
+| `lib/accounting.js` | 135 | `6449ed2677be5f35de1c5e69a29248e8cd9275d57ea441816a91dcb3d41f2778` |
+| `lib/payment-terms.js` | 248 | `50d6ad382f09238e960f783f6d7f7c64242bad09adb1d6cd28d205caaa129fee` |
 | `lib/case-draft.js` | 386 | `24d409bc954e4bbefc793de5bb5c3916034f8a700b45b33475ff8c1a542cb3a1` |
 | `lib/signed-slip-reminders.js` | 95 | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` |
-| `lib/production-report.js` | 212 | `7e6114e4d826fdd460888e228834d38174139a8fc1439c5a36352f40b41b5a73` |
+| `lib/production-report.js` | 212 | `789e38dfb9974adcf71b3a9cf7302d1c458858fafb5ec41106d504f5bb5bfcb3` |
 
 ## 節錄（`excerpts/api-excerpts.js`）
 
@@ -43,13 +43,13 @@
 
 ### `excerpts/production-excerpts.js`
 
-由程式從 `api/production-report.js`（**v58**，雜湊 `d7561b8b9319bcc0abd59d87cd82413c462ae1d06bc6c69f43f8d7ae0702ba08`，先確認整檔雜湊相同；2026-09-29 從 VM 同步回 Alpha）
-原樣切出 closeReport() 的第 259–309 行（整理一個案件：確認 key、交易有空項目時回 409、沖銷分錄、保費交易），外面加上測試用的外殼函式 `productionConfirmCase`
+由程式從 `api/production-report.js`（**v63**，雜湊 `ad033c0da163ba9fc2f30bfb0915793f361352b1c72de69e0cc6896219b417b2`，先確認整檔雜湊相同；2026-09-29 從 VM 同步回 Alpha）
+原樣切出 closeReport() 的第 261–333 行（整理一個案件：確認 key、判斷這次要產生哪些保費交易（沒有分期＝整案一次；有分期＝每期確認就產生該期）、交易有空項目時回 409、沖銷分錄、保費交易），外面加上測試用的外殼函式 `productionConfirmCase`
 （外殼的宣告、`res`（`json` 會拋錯，讓 409 與 VM 的 TransactionsCorrupt 一樣算「出錯」）、`closedCases` 的初值與 `return` 是測試加的），前面加 import。
 
 | 檔案 | SHA-256 |
 |---|---|
-| `excerpts/production-excerpts.js` | `8c3648277a0089079f52e26dbbadfaa7e8b220aa8d5166896209ca6f5475b447` |
+| `excerpts/production-excerpts.js` | `dae5f56a36d7cbd47a21a782eaf8ed372ba8387b9b4b2428b351ce4924a94665` |
 
 ### `excerpts/dashboard-excerpts.js`
 

@@ -80,6 +80,27 @@ export function paymentInstallments(caseData) {
   }];
 }
 
+// 每期關帳產生的保費交易：每個再保人的 Leg 1／2 依分期權重拆到各期（與付款排程同一個 allocate，
+// 所以 SoA 的 Leg 2 與 Accounting 的各期應付金額相同），Leg 3 = 該期 Leg 1 - Leg 2。沒有分期回傳空陣列。
+export function premiumInstallmentPlan(caseData) {
+  if (caseData?.installmentEnabled !== true) return [];
+  const installments = paymentInstallments(caseData);
+  const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : [];
+  const legs = reinsurers.map((reinsurer) => calcLegsForReinsurer(caseData, reinsurer));
+  const leg1s = legs.map((row) => allocate(row.leg1, installments));
+  const leg2s = legs.map((row) => allocate(row.leg2, installments));
+  return installments.map((row, index) => ({
+    id: row.id,
+    label: row.label,
+    number: index + 1,
+    amounts: legs.map((_, reinsurerIdx) => ({
+      leg1: leg1s[reinsurerIdx][index],
+      leg2: leg2s[reinsurerIdx][index],
+      leg3: money(leg1s[reinsurerIdx][index] - leg2s[reinsurerIdx][index])
+    }))
+  }));
+}
+
 function resolvedTerms(caseData, installment, reinsurer, reinsurerIndex) {
   const key = "r" + (reinsurerIndex + 1);
   const map = installment?.reinsurerPaymentTerms && typeof installment.reinsurerPaymentTerms === "object"
@@ -217,6 +238,9 @@ export function deriveLedgerSettlement(caseData, transaction) {
   }
   const legType = String(transaction?.legType || '');
   const schedule = buildPaymentSchedule(caseData);
+  // 每期關帳產生的交易帶有 installmentId：只看該期的排程項目（舊的全額交易沒有，維持看全部）
+  const installmentId = transaction?.installmentId;
+  const forInstallment = (item) => !installmentId || item.installmentId === installmentId;
   const summarize = (items) => {
     if (!items.length) return 'not_tracked';
     const outstanding = items.reduce((sum, item) => sum + item.outstanding, 0);
@@ -226,13 +250,13 @@ export function deriveLedgerSettlement(caseData, transaction) {
     return 'open';
   };
   if (legType.startsWith('Leg 1')) {
-    return summarize(schedule.items.filter((item) => item.partyType === 'cedant'));
+    return summarize(schedule.items.filter((item) => item.partyType === 'cedant' && forInstallment(item)));
   }
   if (legType.startsWith('Leg 2')) {
     const reinsurerIdx = Number.isInteger(transaction?.reinsurerIdx) ? transaction.reinsurerIdx : -1;
     if (reinsurerIdx < 0) return 'not_tracked';
     const key = 'r' + (reinsurerIdx + 1);
-    return summarize(schedule.items.filter((item) => item.partyType === 'reinsurer' && item.partyKey === key));
+    return summarize(schedule.items.filter((item) => item.partyType === 'reinsurer' && item.partyKey === key && forInstallment(item)));
   }
   return 'not_tracked';
 }

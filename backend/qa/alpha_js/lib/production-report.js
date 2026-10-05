@@ -119,12 +119,13 @@ function confirmed(caseData, key) {
   return Array.isArray(caseData.confirmedProductionKeys) && caseData.confirmedProductionKeys.includes(key);
 }
 
-export function productionKeysForCase(source) {
+// 依分期分組的 Production key（與 installmentAllocations 同順序；沒有收入的期別 keys 是空陣列）
+export function productionKeyGroupsForCase(source) {
   const caseData = normalizeSource(source);
-  const keys = [];
   const reinsurers = Array.isArray(caseData.reinsurers) ? caseData.reinsurers : [];
-  installmentAllocations(caseData).forEach((installment) => {
-    if (installment.income === 0) return;
+  return installmentAllocations(caseData).map((installment) => {
+    const keys = [];
+    if (installment.income === 0) return { id: installment.id, keys };
     const key = `${caseData.id}:${installment.id}`;
     const rawIncomes = reinsurers.map((reinsurer) => reinsurerLegs(caseData, reinsurer).brokerage * installment.ratio);
     const incomeTail = installment.income - rawIncomes.reduce((sum, value) => sum + value, 0);
@@ -132,8 +133,12 @@ export function productionKeysForCase(source) {
       const sourceIncome = rawIncomes[index] + (index === 0 ? incomeTail : 0);
       if (sourceIncome !== 0) keys.push(`${key}:R${index}`);
     });
+    return { id: installment.id, keys };
   });
-  return keys;
+}
+
+export function productionKeysForCase(source) {
+  return productionKeyGroupsForCase(source).flatMap((group) => group.keys);
 }
 
 export function productionSourceSignature(rows) {

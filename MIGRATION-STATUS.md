@@ -1,6 +1,6 @@
 # Alpha → VM 搬遷狀態
 
-- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v62（2026-09-29，82 個檔案）**
+- 來源：Hatchable「RI System (Alpha)」`proj_FVUqiQUe3m0G`，**記錄基準：v63（2026-10-05，82 個檔案）**
 - 2026-09-29 起你決定把 VM 的改動**同步回 Alpha**（登入／權限、資料表結構、Personnel & Accounts 資料除外），之後會先在 Alpha 開發新功能。每批部署後，下表的雜湊改成新版本，漂移檢查照舊。見下方「VM → Alpha 同步」。
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
@@ -60,14 +60,14 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 
 ## 已移植
 
-| Alpha 檔案 | Alpha 雜湊（v62） | VM 位置 | 狀態 |
+| Alpha 檔案 | Alpha 雜湊（v63） | VM 位置 | 狀態 |
 |---|---|---|---|
 | `api/fx-rates.js` | `a2496a82375c9159944318edbef2e7365f1b55c8acd78a8a6f1b3b29138e2de3` | `backend/fxrates/` | 完成（含 Audit，見下） |
 | `migrations/0010_create_fx_rates.sql` | `0875485cf1049e3d6a39bc004decc950c9a547def9f6d82ceccd43204a965e4d` | `fxrates/models.py`、migrations | 完成 |
 | `api/master-data.js` | `0993fb9df0419e1bdd1491cabd61627621967814f6df7719e873de09ece9288d` | `backend/masterdata/views.py` | 完成（含 #18） |
 | `migrations/0001_create_master_records.sql` | `f8dde66dc346c860cbeaa436770c7dbc8af190db2b125c18ffcb732df1e7b393` | `masterdata/models.py` | 完成 |
-| `lib/accounting.js` | `e0acc3c8091b843d89aaa7c52dea5a7aba3be15499d8919b3c61b94fb471ac02` | `backend/cases/calc/accounting.py`（＋`jsnum.py`） | 完成，**逐位一致**（含 #3）：Alpha 的 JavaScript 與 Python 對 9 萬 7 千組輸入完全相同 |
-| `lib/payment-terms.js` | `eaaeb93887d057255cc3a2b4ee7fdaf42c3a7dcfbd8aba6561a0e03c1213b248` | `backend/cases/calc/payment_terms.py` | 完成，**逐位一致** |
+| `lib/accounting.js` | `6449ed2677be5f35de1c5e69a29248e8cd9275d57ea441816a91dcb3d41f2778` | `backend/cases/calc/accounting.py`（＋`jsnum.py`） | 完成，**逐位一致**（含 #3）：Alpha 的 JavaScript 與 Python 對 9 萬 7 千組輸入完全相同 |
+| `lib/payment-terms.js` | `50d6ad382f09238e960f783f6d7f7c64242bad09adb1d6cd28d205caaa129fee` | `backend/cases/calc/payment_terms.py` | 完成，**逐位一致** |
 | `lib/case-draft.js` | `24d409bc954e4bbefc793de5bb5c3916034f8a700b45b33475ff8c1a542cb3a1` | `backend/cases/draft.py`（`normalize_draft`、`validate_announce_ready`） | 完成，**逐位一致**：錯誤訊息（含英文原文與出現的**順序**）、整理後的內容都相同；11 萬 3 千組輸入完全一致 |
 | `api/personnel.js` | `f05dbd98a6de4c726efd3ef26f2db08a55d5b49812ce68526bcc8e49548f29c5` | `backend/personnel/views.py`（`PersonnelView`） | 完成（含 #14、#15，含 Audit／Snapshot） |
 | `api/personnel-options.js` | `98e355b36501883a3bf0c11bd8f7ec42ddc779ef742cae021c9719facc0112ad` | `backend/personnel/views.py`（`PersonnelOptionsView`） | 完成 |
@@ -88,8 +88,8 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `lib/signed-slip-reminders.js` | `37e712193f694afa6973914f650f9cab79045bff3fa397c0e39176bf18d508a9` | `backend/cases/calc/signed_slip.py` | 函式全部移植並與 Alpha JS 逐位一致（文件 API 用 `signedSlipTracking`，提醒排程用 `reminderDue`、`isReservedTestEmail`） |
 | `api/accounting.js` | `abddcf88795fddc4d04b32d291fa7dabc9e8e4733440630ef73d8a008090b3cc` | `backend/cases/accounting_views.py`（`AccountingView`）、`cases/ledger.py`（`ledger_rows`） | 完成（帳本、記付款、沖銷；含 Snapshot／Audit）。帳本 `ledgerRows` 與 Alpha JS 差異測試逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `accounting_api` 77 項；19 種故意破壞全部抓到（其中 3 種帳本的破壞由差異測試抓到） |
 | `api/claims.js` | `3444de68a9dade3b645a48084f631e5e32b105e261f4d5f2b66e2f4fe75862c9` | `backend/cases/claims_views.py`（`ClaimsView`） | 完成（讀取、新增理賠、改準備金、記理賠付款並產生 Claim Leg 1/2 交易；含 Snapshot／Audit）。交易由已與 Alpha 逐位一致的 `build_claim_payment_transactions` 產生；測試組 `claims_api` 67 項；21 種故意破壞全部抓到 |
-| `lib/production-report.js` | `7e6114e4d826fdd460888e228834d38174139a8fc1439c5a36352f40b41b5a73` | `backend/production/calc.py` | 完成，**逐位一致**（預覽、key、簽章、下個月；差異測試約 1,000 組，含情境一致的案件、排除、延後、分績、分期） |
-| `api/production-report.js` | `d7561b8b9319bcc0abd59d87cd82413c462ae1d06bc6c69f43f8d7ae0702ba08` | `backend/production/views.py`（`ProductionReportView`）、`production/closing.py` | 完成（預覽、排除延後、產生版本、關帳：案件確認、Leg 1–3 交易、沖銷分錄、鎖匯率；含 Audit／Snapshot）。關帳整理案件的邏輯與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `production_api` 72 項；故意破壞：計算 11＋關帳 4 種由差異測試抓到、API 18 種由測試組抓到 |
+| `lib/production-report.js` | `789e38dfb9974adcf71b3a9cf7302d1c458858fafb5ec41106d504f5bb5bfcb3` | `backend/production/calc.py` | 完成，**逐位一致**（預覽、key、簽章、下個月；差異測試約 1,000 組，含情境一致的案件、排除、延後、分績、分期） |
+| `api/production-report.js` | `ad033c0da163ba9fc2f30bfb0915793f361352b1c72de69e0cc6896219b417b2` | `backend/production/views.py`（`ProductionReportView`）、`production/closing.py` | 完成（預覽、排除延後、產生版本、關帳：案件確認、Leg 1–3 交易、沖銷分錄、鎖匯率；含 Audit／Snapshot）。關帳整理案件的邏輯與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `production_api` 72 項；故意破壞：計算 11＋關帳 4 種由差異測試抓到、API 18 種由測試組抓到 |
 | `migrations/0016_create_production_report_lifecycle.sql` | `9fd6f3cc748e5a174715a09a289099be98cbfbf58c5ba6b8aa078e3cddcb5319` | `production/models.py`、`production/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；PostgreSQL 的部分唯一索引／COALESCE 索引改用 MySQL 函式索引；排除紀錄 `ri_runtime` 只能 SELECT／INSERT） |
 | `public/production-xlsx.js` | `256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59` | `frontend/src/alpha/production-xlsx.js`（**原樣**，`run_calc_diff.sh` 會核對雜湊） | 完成（JSZip 改由 npm 套件提供，同版 3.10.1） |
 | `public/case-calculations.js` | `fd7036a492db60afaf2091d9f556001cb71f9f104bc6aa403eab0a5951920632` | `frontend/src/alpha/caseCalculations.js` | 完成（v60 起金額與記帳算法相同，兩邊一致；`run_qa.sh totals` 比對 VM 前端與後端） |
@@ -103,7 +103,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `migrations/0011_create_personnel_accounts.sql` 的 `ri_dashboard_targets` | `e65f5d93…` | `dashboard/models.py`、`dashboard/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；`ri_runtime` 沒有 DELETE） |
 | `api/draft-recycle-bin.js` | `dc536779b7866648987eea2180884c4cd39c91144957cfcf5e30a2240cae8753` | `backend/cases/recycle_views.py`（`DraftRecycleBinView`） | 完成（列表、丟進回收桶、還原；5 年期限；永久刪除一律禁止）。測試組 `recycle_bin` 50 項 |
 | `migrations/0005_create_draft_recycle_bin.sql`、`0019_lock_draft_recycle_policy.sql`、`0032_add_draft_recycle_bin_case_fk.sql` | `97cfe172…` / `eb607919…` / `b9bdfb0d…` | `cases/models.py`（`DraftRecycleBin`）、`cases/migrations/0003` | 完成（CHECK 禁止永久刪除、外鍵、索引；`ri_runtime` 沒有 DELETE） |
-| `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `9f9cc0706be112e98922db08392133d1c7394e97eb380bd5c4f8bb919218c190` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
+| `public/index.html`（外框、Dashboard、Account List、案件明細（含 Claim 分頁）、新增／編輯表單、回收桶、MDM、Personnel（含目標設定）、FX、Audit、Accounting、Production Report） | `c1872c843dca201e51340042807ce6563c77caf43f675d7e823d77371cbb385d` | `frontend/src/App.vue`、`src/views/*.vue`；案件工作區的模板由 `frontend/scripts/build_case_workspace.py` 按行號切自原檔 | 完成（9 個左側選單的畫面全部可用，沒有「Queued for migration」頁面；Alpha 隱藏未上選單的 Data reconciliation 畫面未移植） |
 | `public/app.js`（上述畫面的邏輯） | `d91a6c969a156002567ea5d5317732f02dc767918ab7e71dfbc970ed5c83527c` | `frontend/src/views/case-workspace.script.js`、各 view、`src/alpha/constants.js`、`src/alpha/format.js` | 完成（逐函式移植，名稱相同） |
 | `public/theme.css`、`public/overview.css`、`public/development-alignment.css` | `af2b57f0…` / `bceafbf2…` / `2da6fba1…` | `frontend/src/alpha/styles/`（原樣，載入順序同 Alpha） | 完成 |
 | `migrations/0002_create_cases.sql`、`0006_add_case_uid.sql`、`0007_expand_reinsurance_structures.sql`、`0009_add_announce_workflow.sql`、`0014_add_case_owner.sql`、`0015_add_case_owner_index.sql` | `9e3a6164…` / `59ad607b…` / `8e4e3449…` / `cd7b0f75…` / `d7b2d9d8…` / `ceb171d9…` | `cases/models.py`（含 `ReferenceSequence`）、`cases/migrations` | 完成（由 cases／announce／workflow／accounting／claims／production 等 API 使用） |
@@ -128,8 +128,9 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 5b | v60（2026-09-29） | 案件合計統一用記帳的逐步進位：`api/cases.js` 的 `listFinancials` 改用 `lib/accounting.js` 的 `calcLegsForReinsurer`、`public/case-calculations.js` 的金額改成相同算法（非金額合計不變），合計再進位一次；Performance Split 只給名字而同名者不只一位時拒絕（`invalid_personnel_split`，要求以 ID 指定） | VM 的 3,000 個隨機案件：Alpha 新版畫面合計（10 欄）與列表合計都與 VM 完全相同，5,705 筆再保人明細與 Alpha 記帳算法逐筆相同；換回舊版時 1,480／1,599 個案件不同（測試有鑑別力）；Performance Split 四種情況與 VM 相同；部署後 GET 案件列表實測 |
 | 5c | v61（2026-09-29） | 回收桶：丟棄與還原補 Snapshot（`draft_recycled`、`draft_restored`，內容是更新後整列案件 `to_jsonb(c)`）；Personnel：停用者／時間只在「在職 → 停用」時記錄（之後編輯不覆寫、重新啟用清空）、Audit 的 before 改成與 after 相同的 11 個欄位；`api/draft-recycle-bin.js`、`api/personnel.js`（只改程式行為，不動人員資料） | 停用時間的 SQL 在臨時 PostgreSQL 跑「停用 → 停用中編輯 → 重新啟用 → 再停用」四步驟、回收桶 Snapshot 的 SQL 試跑；before 欄位與 VM 的 `personnel_state` 核對相同（Alpha 的 Audit 仍暫停）；部署後 GET 回收桶、PUT 不存在的人員回 404 實測 |
 | 6 | v62（2026-09-29） | 提醒信與提醒紀錄裡缺 Signed Slip 的再保人顯示案件上的原始名稱（`displayNames`）；文件 fileId 去掉「-」後不是 32 位十六進位就回 404（`canonicalFileId`，原本在 PostgreSQL 轉型出錯）；下載時檔案本體不見回 404 `file_content_missing`（只攔 Hatchable 的 `storage/get 404`，其他錯誤照常拋出）；`api/signed-slip-reminders.js`、`api/case-documents.js` | 兩個新函式與 VM 差異測試：fileId 3,000 組（400／404／UUID 各 622／697／1,681）、再保人名稱 2,000 組全部一致；以唯讀 `run_code` 確認 Hatchable 缺檔時拋 `storage/get 404`；部署後文件 API 實測 |
+| 7 | v63（2026-10-05；VM 先於 2026-09-29 部署） | 分期案件每關一期 Production 月報，就產生「該期」的保費交易（SoA／Transactions）：該期所有 Production key 都確認才產生、每期只產生一次；金額是每個再保人的 Leg 1／2 依分期權重拆開（與付款排程同一個 `allocate`，所以 SoA 的 Leg 2 與 Accounting 各期應付金額相同，最後一期拿尾差），Leg 3 = 該期 Leg 1 − Leg 2；編號加 `-I{n}`（例如 `TW…-R1-TX1a-I1`，有 Reverse 週期再加 `-C{n}`）、文字加「· Installment {月份}」、交易帶 `installmentId`／`installmentLabel`；SoA 的結清狀態只看該期的付款排程項目；沒有分期的案件、舊的整案全額交易（沒有 `installmentId`）維持原樣不重複產生；`confirmedCases`（畫面「fully Confirmed」件數）仍是「這次變成全部確認」的案件數；SoA 空表格的提示文字；`lib/accounting.js`、`lib/payment-terms.js`、`lib/production-report.js`、`api/production-report.js`、`public/index.html` | Alpha 新版 JavaScript 與 VM 的 Python 差異測試約 18 萬組全部一致（含新函式 `premiumInstallmentPlan`、`buildPremiumTransactions` 的分期參數、`deriveLedgerSettlement` 的 `installmentId`、`productionConfirmCase` 以「期」為單位確認的情境；其中 266／600 組產生了分期交易、110 組仍是部分確認）；`production_api` 測試組 82 項、新測試組 `backfill_installment_transactions` 9 項；故意破壞（回到舊規則、結清狀態不分期、重複產生、金額不拆）都被抓到；畫面測試全部階段（178 項）通過；部署後 `list_files` 核對 5 個檔案雜湊與預期相同（Alpha 目前沒有案件，關帳路徑用上述差異測試與模擬資料驗證） |
 
-**同步完成（2026-09-29）**：第 1～6 批都已部署（Alpha v54～v62）。**尚未決定**：VM 的「文件只有 Draft 能刪」（本表之外的業務規則）要不要同步回 Alpha。
+**同步完成**：第 1～7 批都已部署（Alpha v54～v63；第 7 批是 2026-09-29 同事測試 VM 發現分期案件的 SoA 是空的而追加）。**尚未決定**：VM 的「文件只有 Draft 能刪」（本表之外的業務規則）要不要同步回 Alpha。
 
 ## 資料（不是程式碼）
 
@@ -180,6 +181,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 刪除案件文件 | 任何狀態都能實體刪除（連同檔案） | **只有 Draft 能刪**；Announce 之後回 409 `document_delete_locked`，只能取消勾選，檔案保留作為證據 | 2026-09-25 你的決定 |
 | `signedSlipReminder.outboundEnabled` | 固定 `true` | 依設定 `RI_REMINDER_EMAIL_ENABLED`（舊名 `RI_SIGNED_SLIP_OUTBOUND_ENABLED` 仍可用），預設 `false`（VM 尚未設定寄信） | 2026-09-25 你的決定：如實回報 |
 | 提醒信的寄送 | Hatchable `email.send` | **不寄信模式**（SMTP 未決定）：提醒照常產生、佔位、防重複，但記成 `suppressed`（VM 才有的狀態，算「已提醒」，與 `sent`／`simulated` 相同），並寫 Audit `suppress_signed_slip_reminder`／`suppress_payment_reminder`。收件人有測試網域時仍先記 `simulated`（同 Alpha）。之後設定 `RI_EMAIL_*` 並把 `RI_REMINDER_EMAIL_ENABLED` 設為 true 就會真的寄（Django SMTP；已用測試郵件後端驗證寄出、失敗、重試）。測試期間的提醒不會補寄 | 2026-09-26 你的決定 |
+| 分期案件的保費交易何時產生（**已同步回 Alpha v63**，兩邊相同） | 所有期別的 Production key 都確認、案件變 Confirmed 時，一次產生整個案件全額的 Leg 1–3；中間幾期關帳後 SoA 一直是空的 | 每一期的所有 key 都確認就產生該期交易（依該期比例，每期一次）；案件仍要全部期別確認才變 Confirmed | 2026-09-29 你的決定（同事測試：Announced、關了 9 月月報、SoA 沒東西，但 Claim 付款會立刻出現）。既有案件以 `manage.py backfill_installment_transactions`（預設 dry-run，`--apply` 才寫入）補上；`TWPF2609001` 的 9 月那期已於 2026-09-29 補上（備份 `backups/ri_system_before_installment_tx_20260929_164440.sql`） |
 | 提醒排程 | Hatchable scheduler（UTC 01:00／01:30），每次最多 10 件，一分鐘後接著跑 | 主機 cron 台北 09:00／09:30（`scripts/install_reminder_cron.sh`），一次處理完，`moreWork` 一律 false；結果附加到 `logs/reminders.log` | Hatchable 的限制在 VM 不存在 |
 | 提醒紀錄的內容 | 只存收件人與狀態 | 另存產生當下的信件主旨與內文（`subject`、`body_html`、`body_text`） | 2026-09-26 你的決定：案件明細預覽「當天會寄出的原文」 |
 | 查看提醒紀錄 | 沒有畫面（只有資料表與 Audit） | 案件明細新增「Reminders」分頁（`GET /api/case-reminders`，看得到案件的人就能看）：兩種提醒的紀錄、設定錯誤（來自 Audit）、信件預覽（沙箱 iframe）；兩張表也加進唯讀的 `/admin/` | 2026-09-26 你的決定：放在案件明細 |
@@ -246,6 +248,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | 套用 migration（之後一定要重新授權） | `scripts/migrate.sh` |
 | **一鍵執行全部驗證**（每次改動後都要跑） | `scripts/run_qa.sh`（可加參數 `suites`／`parity`／`calc` 只跑一部分） |
 | 只重新套用資料庫權限與 Audit trigger | `scripts/db_harden.sh` |
+| 補上分期案件已確認期別缺少的保費交易（先 dry-run，備份後再 `--apply`） | `docker exec ri-backend python manage.py backfill_installment_transactions [--apply]` |
 | 以維護者身分執行 manage.py（需要 DDL 或 DELETE 時） | `scripts/manage_as_owner.sh <指令>` |
 | 建立／停用／重新啟用／重設帳號 | `docker exec ri-backend python manage.py create_ri_account\|disable_ri_account\|enable_ri_account\|reset_ri_password --personnel-id N …` |
 | 備份案件文件（volume） | `docker exec ri-backend tar czf - -C /data/documents . > backups/case-documents-$(date +%Y%m%d-%H%M%S).tar.gz && chmod 600 backups/case-documents-*.tar.gz`（與 MySQL 備份同時做，兩者才對得起來） |
