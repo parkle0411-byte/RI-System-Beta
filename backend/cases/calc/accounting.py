@@ -48,12 +48,18 @@ def calc_legs_for_reinsurer(case_data, reinsurer):
     }
 
 
-def build_premium_transactions(case_data):
+def build_premium_transactions(case_data, installment=None):
+    """installment（可省略）：每期關帳只產生「該期」的交易，形狀 {id, label, number, amounts: [{leg1, leg2, leg3}]}，
+    由 payment_terms.premium_installment_plan 提供；沒給就是整個案件全額（沒有分期的案件）。"""
+    installment = None if is_nullish(installment) else installment
     transactions = []
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
     for reinsurer_idx, reinsurer in enumerate(reinsurers):
-        legs = calc_legs_for_reinsurer(case_data, reinsurer)
+        legs = installment["amounts"][reinsurer_idx] if installment else calc_legs_for_reinsurer(case_data, reinsurer)
+        tag = f"-I{js_num_str(installment['number'])}" if installment else ""
+        note = f" · Installment {installment['label']}" if installment else ""
+        extra = {"installmentId": installment["id"], "installmentLabel": installment["label"]} if installment else {}
         reinsurer_label = js_or(strip_facility_tag(get(reinsurer, "name")), f"Reinsurer {reinsurer_idx + 1}")
         settlement_label = js_or(js_trim(js_to_string(js_or(get(reinsurer, "foreignBroker"), ""))), reinsurer_label)
         base = [
@@ -72,28 +78,30 @@ def build_premium_transactions(case_data):
                 for leg_idx, leg in enumerate(base):
                     party_name = get(party, "name")
                     transactions.append({
-                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-TX{leg_idx + 1}{suffix}",
+                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-TX{leg_idx + 1}{suffix}{tag}",
                         "legType": f"{leg['legType']}{suffix}",
-                        "label": f"{leg['label']} ({js_to_string(js_or(party_name, 'Unassigned'))}, {js_num_str(pct)}%)",
+                        "label": f"{leg['label']} ({js_to_string(js_or(party_name, 'Unassigned'))}, {js_num_str(pct)}%){note}",
                         "amount": money(leg["amount"] * pct / 100),
                         "splitParty": js_or(party_name, f"Party {suffix.upper()}"),
                         "reinsurer": settlement_label,
                         "viaForeignBroker": via,
                         "settlement": "open",
                         "reinsurerIdx": reinsurer_idx,
+                        **extra,
                     })
         else:
             for leg_idx, leg in enumerate(base):
                 transactions.append({
-                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-TX{leg_idx + 1}",
+                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-TX{leg_idx + 1}{tag}",
                     "legType": leg["legType"],
-                    "label": leg["label"],
+                    "label": f"{leg['label']}{note}",
                     "amount": leg["amount"],
                     "splitParty": None,
                     "reinsurer": settlement_label,
                     "viaForeignBroker": via,
                     "settlement": "open",
                     "reinsurerIdx": reinsurer_idx,
+                    **extra,
                 })
     return transactions
 

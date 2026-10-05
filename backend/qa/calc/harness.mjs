@@ -18,6 +18,7 @@ const fns = {
   stripFacilityTag: accounting.stripFacilityTag,
   calcLegsForReinsurer: accounting.calcLegsForReinsurer,
   buildPremiumTransactions: accounting.buildPremiumTransactions,
+  premiumInstallmentPlan: paymentTerms.premiumInstallmentPlan,
   buildClaimPaymentTransactions: accounting.buildClaimPaymentTransactions,
   reconciliationRefFor: accounting.reconciliationRefFor,
   addCalendarDays: paymentTerms.addCalendarDays,

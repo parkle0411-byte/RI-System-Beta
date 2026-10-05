@@ -141,6 +141,7 @@ def build(count_each=1200):
 def old_transaction(i):
     t = {"txNo": R.choice([f"TWPAR2603001-R1-TX{i}", f"TX{i}", "", 7, None]), "amount": R.choice([1000, -250.5, 0, "12.5", None, "abc"]),
          "legType": R.choice(["Leg 1", "Leg 2", "Leg 3"]), "settlement": R.choice(["open", "settled"])}
+    maybe_omit(t, "installmentId", R.choice([MISSING] * 4 + ["I1", "I2", "I3", "inst", "", None, 1]))
     for key, choices in (("reversed", [True, True, False, "true", None, MISSING]), ("isReversalEntry", [True, False, MISSING, MISSING]),
                          ("reversalOffsetApplied", [True, False, MISSING, MISSING, MISSING]), ("source", ["claim", MISSING, MISSING])):
         maybe_omit(t, key, R.choice(choices))
@@ -167,8 +168,16 @@ def build_close(count):
             if v is not MISSING:
                 p[key] = v
         keys = keys_for(src)[1][:-2]  # 實際的 key
-        pick = R.choice(["all", "all", "some", "none", "extra"])
-        chosen = keys if pick == "all" else (R.sample(keys, max(len(keys) - 1, 0)) if pick == "some" else ([] if pick == "none" else keys + ["999:X:R0"]))
+        pick = R.choice(["all", "all", "some", "none", "extra", "installments", "installments"])
+        if pick == "installments":
+            # 以「期」為單位確認：挑幾期，把該期的 key 全部放進報表列（每期關帳產生該期的交易）
+            groups = {}
+            for k in keys:
+                groups.setdefault(k.rsplit(":", 1)[0], []).append(k)
+            picked = [g for g in groups if R.random() < 0.5]
+            chosen = [k for g in picked for k in groups[g]]
+        else:
+            chosen = keys if pick == "all" else (R.sample(keys, max(len(keys) - 1, 0)) if pick == "some" else ([] if pick == "none" else keys + ["999:X:R0"]))
         rows = [{"reinsurerKey": k} for k in chosen] + ([{"reinsurerKey": R.choice([5, None])}] if R.random() < 0.1 else [])
         vectors.append({"fn": "productionConfirmCase", "args": [src, rows]})
     return vectors

@@ -136,6 +136,25 @@ def payment_installments(case_data):
     }]
 
 
+def premium_installment_plan(case_data):
+    """每期關帳產生的保費交易：每個再保人的 Leg 1／2 依分期權重拆到各期（與付款排程同一個 allocate，
+    所以 SoA 的 Leg 2 與 Accounting 的各期應付金額相同），Leg 3 = 該期 Leg 1 - Leg 2。沒有分期回傳空陣列。"""
+    if get(case_data, "installmentEnabled") is not True:
+        return []
+    installments = payment_installments(case_data)
+    reinsurers = get(case_data, "reinsurers")
+    reinsurers = reinsurers if is_array(reinsurers) else []
+    legs = [calc_legs_for_reinsurer(case_data, r) for r in reinsurers]
+    leg1s = [allocate(row["leg1"], installments) for row in legs]
+    leg2s = [allocate(row["leg2"], installments) for row in legs]
+    return [{
+        "id": row["id"], "label": row["label"], "number": index + 1,
+        "amounts": [{
+            "leg1": leg1s[r][index], "leg2": leg2s[r][index], "leg3": money(leg1s[r][index] - leg2s[r][index]),
+        } for r in range(len(legs))],
+    } for index, row in enumerate(installments)]
+
+
 def _resolved_terms(case_data, installment, reinsurer, reinsurer_index):
     key = "r" + str(reinsurer_index + 1)
     raw = get(installment, "reinsurerPaymentTerms")
@@ -287,6 +306,11 @@ def derive_ledger_settlement(case_data, transaction, now=None):
         return "settled" if get(transaction, "settlement") == "settled" else "open"
     leg_type = js_to_string(js_or(get(transaction, "legType"), ""))
     schedule = build_payment_schedule(case_data, now)
+    # 每期關帳產生的交易帶有 installmentId：只看該期的排程項目（舊的全額交易沒有，維持看全部）
+    installment_id = get(transaction, "installmentId")
+
+    def for_installment(item):
+        return not js_truthy(installment_id) or item["installmentId"] == installment_id
 
     def summarize(items):
         if not items:
@@ -304,14 +328,14 @@ def derive_ledger_settlement(case_data, transaction, now=None):
         return "open"
 
     if leg_type.startswith("Leg 1"):
-        return summarize([i for i in schedule["items"] if i["partyType"] == "cedant"])
+        return summarize([i for i in schedule["items"] if i["partyType"] == "cedant" and for_installment(i)])
     if leg_type.startswith("Leg 2"):
         idx = get(transaction, "reinsurerIdx")
         reinsurer_idx = int(idx) if js_is_integer(idx) else -1
         if reinsurer_idx < 0:
             return "not_tracked"
         key = "r" + str(reinsurer_idx + 1)
-        return summarize([i for i in schedule["items"] if i["partyType"] == "reinsurer" and i["partyKey"] == key])
+        return summarize([i for i in schedule["items"] if i["partyType"] == "reinsurer" and i["partyKey"] == key and for_installment(i)])
     return "not_tracked"
 
 

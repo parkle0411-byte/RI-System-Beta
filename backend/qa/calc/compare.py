@@ -27,6 +27,7 @@ FUNCTIONS = {
     "stripFacilityTag": lambda a, now: acc.strip_facility_tag(*a),
     "calcLegsForReinsurer": lambda a, now: acc.calc_legs_for_reinsurer(*a),
     "buildPremiumTransactions": lambda a, now: acc.build_premium_transactions(*a),
+    "premiumInstallmentPlan": lambda a, now: pt.premium_installment_plan(*a),
     "buildClaimPaymentTransactions": lambda a, now: acc.build_claim_payment_transactions(*a),
     "reconciliationRefFor": lambda a, now: acc.reconciliation_ref_for(*a),
     "addCalendarDays": lambda a, now: pt.add_calendar_days(*a),

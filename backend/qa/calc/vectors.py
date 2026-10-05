@@ -198,7 +198,18 @@ def transaction():
     maybe_omit(d, "reinsurerIdx", R.choice([0, 1, 2, 3, 5, -1, None, MISSING, 1.5, "1", 2.0, 99]))
     maybe_omit(d, "source", R.choice(["claim", "claim", None, MISSING, "premium", "Claim"]))
     maybe_omit(d, "settlement", R.choice(["settled", "open", None, MISSING, "SETTLED"]))
+    # 每期關帳產生的交易帶有 installmentId（缺少 = 舊的全額交易，看全部期別）
+    maybe_omit(d, "installmentId", R.choice([MISSING] * 3 + ["I1", "I2", "I3", "I4", "inst-0", "installment-1", "installment-2", "case-effective-date", "", None, 5, "zzz"]))
     return {k: v for k, v in d.items() if v is not MISSING}
+
+
+def installment_entry(reinsurer_count):
+    """每期關帳的交易批次（lib/payment-terms.js premiumInstallmentPlan 的一項）：形狀相同的合成輸入。"""
+    def amount():
+        return R.choice([1000, 250.5, 0, 333.33, 99999.99, -12.5, 1e6])
+    entry = {"id": R.choice(["I1", "I2", "inst-0"]), "label": R.choice(["2026-09", "2026-12", "Installment 3"]), "number": R.choice([1, 2, 3])}
+    entry["amounts"] = [{"leg1": amount(), "leg2": amount(), "leg3": amount()} for _ in range(reinsurer_count)]
+    return entry
 
 
 def claim_and_payment():
@@ -219,6 +230,13 @@ def build(count_each=1200):
         add({"fn": "calcLegsForReinsurer", "args": [case_data(), reinsurer()]})
     for _ in range(count_each * 2):
         add({"fn": "buildPremiumTransactions", "args": [R.choice([case_data()] * 12 + [None, {}, "x", []])]})
+    for _ in range(count_each):   # 每期關帳：只產生「該期」的交易（含分績、外國經紀人）
+        one = case_data()
+        count = len(one["reinsurers"]) if isinstance(one.get("reinsurers"), list) else 0
+        add({"fn": "buildPremiumTransactions", "args": [one, installment_entry(count)]})
+    for _ in range(count_each * 2):   # 每期比例（與付款排程同一個 allocate）
+        now = R.choice(NOW_POINTS)
+        add({"fn": "premiumInstallmentPlan", "args": [coherent_case(now) if R.random() < 0.5 else case_data(schedule=True)]})
     for _ in range(count_each):
         root = case_data()
         split = R.choice([root, case_data(), root, None, {}])

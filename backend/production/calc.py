@@ -224,19 +224,25 @@ def _income_split(case_data, reinsurers, installment):
     return raw, installment["income"] - total
 
 
-def production_keys_for_case(source):
+def production_key_groups_for_case(source):
+    """依分期分組的 Production key（與 installment_allocations 同順序；沒有收入的期別 keys 是空串列）。"""
     case_data = normalize_source(source)
-    keys = []
+    groups = []
     reinsurers = _reinsurers(case_data)
     for installment in installment_allocations(case_data):
-        if installment["income"] == 0:
-            continue
-        key = f"{js_num_str(case_data['id'])}:{installment['id']}"
-        raw, tail = _income_split(case_data, reinsurers, installment)
-        for index in range(len(reinsurers)):
-            if raw[index] + (tail if index == 0 else 0) != 0:
-                keys.append(f"{key}:R{index}")
-    return keys
+        keys = []
+        if installment["income"] != 0:
+            key = f"{js_num_str(case_data['id'])}:{installment['id']}"
+            raw, tail = _income_split(case_data, reinsurers, installment)
+            for index in range(len(reinsurers)):
+                if raw[index] + (tail if index == 0 else 0) != 0:
+                    keys.append(f"{key}:R{index}")
+        groups.append({"id": installment["id"], "keys": keys})
+    return groups
+
+
+def production_keys_for_case(source):
+    return [key for group in production_key_groups_for_case(source) for key in group["keys"]]
 
 
 def production_source_signature(rows):

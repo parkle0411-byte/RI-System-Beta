@@ -220,6 +220,17 @@ try:
               and not c2.payload.get("transactions"), (c2.status, c2.payload.get("productionPartiallyConfirmed")))
         c3.refresh_from_db()
         check("c3: June installment still open -> stays Announced, partial", c3.status == "posted" and c3.payload["productionPartiallyConfirmed"] is True)
+        # 分期案件每關一期就產生「該期」的交易（2026-09-29 起）：原本要等所有期別都關帳，SoA 一直是空的
+        t3 = c3.payload.get("transactions", [])
+        leg = lambda rows, name, r: [t for t in rows if t["legType"] == name and t["reinsurerIdx"] == r]
+        check("c3: May installment closed -> only I1 transactions: 2 reinsurers x Leg 1-3, numbered ...-I1 with installmentId",
+              len(t3) == 6 and all(t["installmentId"] == "I1" and t["installmentLabel"] == M1 and t["txNo"].endswith("-I1") for t in t3)
+              and sorted(t["txNo"] for t in t3) == sorted(f"{c3.tw_ref}-R{r}-TX{n}-I1" for r in (1, 2) for n in (1, 2, 3)), [t["txNo"] for t in t3])
+        check("c3: I1 amounts = 60% of each leg (600/1000): A 324 / 205.2 / 118.8, B 216 / 91.2 / 124.8",
+              [leg(t3, n, r)[0]["amount"] for r in (0, 1) for n in ("Leg 1", "Leg 2", "Leg 3")] == [324, 205.2, 118.8, 216, 91.2, 124.8],
+              [(t["txNo"], t["amount"]) for t in t3])
+        check("c3: transaction label names the installment", all(t["label"].endswith(f" · Installment {M1}") for t in t3), t3[0]["label"])
+        check("c3: audit says not fully closed while the transactions exist", audit(c3.case_uid, "production_case_confirmed").first().metadata["productionClosed"] is False)
         c4.refresh_from_db(); t4 = c4.payload["transactions"]
         rvs = [t for t in t4 if "-RVS" in t["txNo"]]
         check("c4 (Reversed): closed; one -RVS1 offset for the not-yet-offset entry only", c4.status == "closed" and [t["txNo"] for t in rvs] == ["ZZ-OLD-R1-TX1-RVS1"]
@@ -240,6 +251,37 @@ try:
               status="closed", close_token=uuid.uuid4(), closed_by="t", closed_at=timezone.now())))
         jm2 = get(finm, M2).json()
         check("June preview: c3's I2 and the deferred c2 rows", {r["installmentId"] for r in mine(jm2["rows"], c3)} == {"I2"} and len(mine(jm2["rows"], c2)) == 2)
+
+        # ================= 六月關帳：分期案件的第 2 期也產生交易，全部確認後才變 Confirmed =================
+        fx(M2, "USD", "32")
+        jm2 = get(finm, M2).json()
+        rep6 = post(finm, "generate", M2, sourceSignature=jm2["sourceSignature"]).json()["report"]
+        r = post(finm, "close", M2, reportUid=rep6["reportUid"], rowVersion=1, sourceSignature=jm2["sourceSignature"])
+        check("June close -> 200; confirmedCases counts cases that became fully Confirmed (c3 via its 2nd installment, c2, c6)", r.status_code == 200
+              and r.json().get("confirmedCases", 0) >= 3, r.content[:300])
+        c3.refresh_from_db(); t3 = c3.payload["transactions"]
+        check("c3: now Confirmed (closed); 12 transactions, I1 rows untouched and 6 new I2 rows numbered ...-I2",
+              c3.status == "closed" and c3.payload["productionPartiallyConfirmed"] is False and len(t3) == 12
+              and [t["installmentId"] for t in t3] == ["I1"] * 6 + ["I2"] * 6 and all(t["txNo"].endswith("-I2") for t in t3[6:]), [t["txNo"] for t in t3])
+        check("c3: I2 amounts = the rest (216 / 136.8 / 79.2 and 144 / 60.8 / 83.2); I1 + I2 = the full legs",
+              [leg(t3[6:], n, r)[0]["amount"] for r in (0, 1) for n in ("Leg 1", "Leg 2", "Leg 3")] == [216, 136.8, 79.2, 144, 60.8, 83.2]
+              and all(money(leg(t3[:6], n, r)[0]["amount"] + leg(t3[6:], n, r)[0]["amount"]) == full
+                      for r, n, full in ((0, "Leg 1", 540), (0, "Leg 2", 342), (0, "Leg 3", 198), (1, "Leg 1", 360), (1, "Leg 2", 152), (1, "Leg 3", 208))),
+              [(t["txNo"], t["amount"]) for t in t3[6:]])
+        # 再關一次同一個案件的同一期不會重複（沒有 I1／I2 以外的列）
+        check("c3: every installment has exactly one live set of transactions", len({t["txNo"] for t in t3}) == 12)
+        c2.refresh_from_db(); c6.refresh_from_db()
+        check("c2 (not installments): all keys confirmed in June -> closed with full-amount transactions (no installmentId)",
+              c2.status == "closed" and len(c2.payload["transactions"]) >= 6 and all("installmentId" not in t for t in c2.payload["transactions"]), c2.status)
+
+        # SoA 的狀態欄：帶 installmentId 的交易只看該期的付款排程項目
+        Case.objects.filter(pk=c3.pk).update(payload={**c3.payload, "paymentEntries": [
+            {"scheduleKey": "I1:cedant", "amount": 540, "entryType": "payment", "paidAt": "2031-06-01"}]})
+        got = call(sales, "get", f"/api/cases?caseUid={c3.case_uid}").json()["case"]["payload"]["transactions"]
+        st = lambda inst, name, r: [t["paymentScheduleSettlement"] for t in got if t["installmentId"] == inst and t["legType"] == name and t["reinsurerIdx"] == r][0]
+        check("SoA settlement per installment: Leg 1 of I1 settled (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 not tracked",
+              st("I1", "Leg 1", 0) == "settled" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "not_tracked",
+              [(t["txNo"], t["paymentScheduleSettlement"]) for t in got])
 
         # ================= 關帳衝突：產生之後案件被改（簽章不變） =================
         c7 = at(make_case(sales, "posted", policyFrom="2031-07-01", policyTo="2032-07-01", currency="TWD"), EARLY)
