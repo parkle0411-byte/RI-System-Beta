@@ -26,6 +26,9 @@ def rows(c):c.refresh_from_db();return transaction_details(c.payload)
 def no(c,leg):return next(t['txNo'] for t in c.payload['transactions'] if t['legType']==leg)
 def alloc(c,leg,value):c.refresh_from_db();return {'caseUid':str(c.case_uid),'txNo':no(c,leg),'rowVersion':c.row_version,'amount':value}
 def post(c,body):return c.post('/api/accounting',data=json.dumps(body),content_type='application/json')
+def settle(c,case,leg):
+    # 2026-10-14：不再自動結清，餘額歸零後由會計人工確認
+    case.refresh_from_db();return post(c,{'action':'confirm_facility_settlement','caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no(case,leg),'note':'QA reconciled'})
 def pay(c,allocations,total=None,**over):return post(c,{'action':'record_transaction_payments','paymentDate':'2026-10-07','amount':total if total is not None else sum(a['amount'] for a in allocations),'allocations':allocations,**over})
 def reverse(c,bid,cases,**over):
     versions=[]
@@ -41,7 +44,8 @@ try:
     check('same counterparty across cases records one remittance',result.status_code==200)
     bid=result.json()['batchId'];ra,rb=rows(a),rows(b)
     check('manual partial allocation is isolated per transaction',ra[no(a,'Leg 1')]['paid']==200 and rb[no(b,'Leg 1')]['paid']==300 and ra[no(a,'Leg 2')]['paid']==0)
-    check('T3 is derived and cannot be recorded independently',ra[no(a,'Leg 3')]['settlement']=='partial' and not ra[no(a,'Leg 3')]['canRecord'])
+    # 2026-10-14：不再自動結清；餘額歸零後為 pending_confirmation，須會計人工確認
+    check('T3 is derived and cannot be recorded independently',ra[no(a,'Leg 3')]['settlement']=='open' and not ra[no(a,'Leg 3')]['canRecord'])
     response=fin.get('/api/accounting').json();batch=next(x for x in response['cashBatches'] if x['batchId']==bid)
     check('batch history retains all allocations and bank reference',len(batch['allocations'])==2 and batch['amount']==500 and batch['reference']=='BANK-001')
     for label,allocations,total,error in [
@@ -71,9 +75,11 @@ try:
     check('repeated reversal rejected',reverse(fin,bid,[a,b]).status_code==409)
     check('immutable original transactions preserved',a.payload['transactions']==original)
     check('T1 full collection recorded',pay(fin,[alloc(a,'Leg 1',1000)]).status_code==200)
-    check('T3 waits for T2',rows(a)[no(a,'Leg 3')]['settlement']=='partial')
-    full=pay(fin,[alloc(a,'Leg 2',800)]);check('T2 actual payment settles brokerage automatically',full.status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='settled' and rows(a)[no(a,'Leg 3')]['paid']==200)
-    check('T3 reopens after underlying cash reversal',reverse(fin,full.json()['batchId'],[a]).status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='partial')
+    check('T3 waits for T2',rows(a)[no(a,'Leg 3')]['settlement']=='open')
+    full=pay(fin,[alloc(a,'Leg 2',800)]);check('T2 actual payment alone does not settle brokerage',full.status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='open')
+    check('cleared T1 and T2 settle only by manual confirmation',rows(a)[no(a,'Leg 2')]['settlement']=='pending_confirmation' and settle(fin,a,'Leg 1').status_code==200 and settle(fin,a,'Leg 2').status_code==200)
+    check('brokerage settles after T1 and T2 confirmation plus its own confirmation',settle(fin,a,'Leg 3').status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='settled' and rows(a)[no(a,'Leg 3')]['paid']==200)
+    check('T3 reopens after underlying cash reversal',reverse(fin,full.json()['batchId'],[a]).status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='open' and rows(a)[no(a,'Leg 2')]['settlement']=='open')
     refund=make('QA-REFUND',parentTwRef='ROOT',originalPremium=-1000,reinsurers=[{'name':'QA RI','sharePct':100,'premium':-800,'riCommPct':0,'taxPct':0}])
     check('refund T1 pays Cedant and T2 receives RI recovery',rows(refund)[no(refund,'Leg 1')]['paymentDirection']=='payable' and rows(refund)[no(refund,'Leg 2')]['paymentDirection']=='receivable')
     check('partial refund preserves signed cash and balance',pay(fin,[alloc(refund,'Leg 1',123.45)]).status_code==200 and rows(refund)[no(refund,'Leg 1')]['paid']==-123.45 and rows(refund)[no(refund,'Leg 1')]['outstanding']==-876.55)
@@ -81,7 +87,7 @@ try:
     check('claim obligation creates no actual cash',all(d['paid']==0 for d in rows(claim).values()))
     check('claim Cedant leg resolves actual counterparty',rows(claim)['QA-CLAIM-C1-T2']['partyName']=='QA Cedant')
     check('claim RI receipt recorded independently',pay(fin,[alloc(claim,'Claim Leg 1',100)]).status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['paid']==0)
-    check('claim Cedant payment settles independently',pay(fin,[alloc(claim,'Claim Leg 2',100)]).status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['settlement']=='settled')
+    check('claim Cedant payment settles independently',pay(fin,[alloc(claim,'Claim Leg 2',100)]).status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['settlement']=='pending_confirmation' and settle(fin,claim,'Claim Leg 2').status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['settlement']=='settled')
     multi=make('QA-MULTI',reinsurers=[{'name':'RI A','sharePct':60,'premium':800,'riCommPct':0,'taxPct':0},{'name':'RI B','sharePct':40,'premium':800,'riCommPct':0,'taxPct':0}])
     check('multi RI single T1 allocation does not settle other T1',pay(fin,[alloc(multi,'Leg 1',600)]).status_code==200 and list(rows(multi).values())[3]['paid']==0)
     legacy_key=next(iter(rows(multi).values()))['cashParts'][0]['scheduleKey']
@@ -112,7 +118,7 @@ try:
     plan=premium_installment_plan(inst.payload)
     inst.payload['transactions']=build_premium_transactions(inst.payload,plan[0]);inst.status='posted';inst.save()
     check('only generated installment transactions appear',len([r for r in fin.get('/api/accounting').json()['transactionRows'] if r['caseUid']==str(inst.case_uid)])==3)
-    check('generated installment can collect its own balance',pay(fin,[alloc(inst,'Leg 1',400)]).status_code==200 and rows(inst)[no(inst,'Leg 1')]['settlement']=='settled')
+    check('generated installment can collect its own balance',pay(fin,[alloc(inst,'Leg 1',400)]).status_code==200 and rows(inst)[no(inst,'Leg 1')]['settlement']=='pending_confirmation')
     raise Rollback()
 except Rollback:pass
 print(f'{len(checks)}/{len(checks)} passed; database changes rolled back')

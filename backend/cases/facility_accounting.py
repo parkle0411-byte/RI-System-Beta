@@ -1,4 +1,9 @@
-"""Facility settlement is an accountant action, separate from cash balance calculation."""
+"""Settlement is an accountant action, separate from cash balance calculation.
+
+2026-10-14 owner decision: no automatic settlement. Every premium leg (T1/T2/T3), every claim
+transaction and every payment-schedule entry is settled only by an explicit accountant
+confirmation, for all cases (not only Facility). Names keep the original "facility" wording.
+"""
 import copy
 import hashlib
 import json
@@ -14,19 +19,18 @@ def facility_indices(payload):
             if re.search(r'\(Facility\)\s*$', str(row.get('name') or ''), re.I)}
 
 
+def manual_case(payload):
+    """2026-10-14 owner decision: settlement is always manual, for every case."""
+    return True
+
+
 def schedule_scope(payload, item):
-    indices = facility_indices(payload)
-    if not indices:
-        return False
-    if item.get('partyType') == 'cedant':
-        return True
-    return item.get('partyKey') in {'r' + str(i + 1) for i in indices}
+    return manual_case(payload)
 
 
 def tx_scope(payload, tx):
-    return (tx.get('source') != 'claim' and not str(tx.get('legType') or '').startswith('Claim ')
-            and str(tx.get('legType') or '').startswith('Leg ')
-            and tx.get('reinsurerIdx') in facility_indices(payload))
+    leg = str(tx.get('legType') or '')
+    return manual_case(payload) and (leg.startswith('Leg ') or leg.startswith('Claim Leg '))
 
 
 def signature(facts):
@@ -139,6 +143,9 @@ def settlement_action(view, request, body):
         return _error(409, 'version_conflict', 'This case changed. Refresh Accounting and try again.')
     payload = case_payload(case)
     no, schedule_key = body.get('txNo'), body.get('scheduleKey')
+    # 2026-10-14：非文字的編號（陣列、數字…）回 400，不讓查表時出錯
+    if any(value is not None and not isinstance(value, str) for value in (no, schedule_key)):
+        return _error(400, 'invalid_settlement_target', 'Select one transaction or schedule entry.')
     if bool(no) == bool(schedule_key):
         return _error(400, 'invalid_settlement_target', 'Select one transaction or schedule entry.')
     if no:
@@ -150,7 +157,7 @@ def settlement_action(view, request, body):
         key = 'schedule:' + str(schedule_key)
         fingerprint = schedule_signature(payload, detail) if detail else None
     if not detail or not detail.get('manualSettlementRequired'):
-        return _error(400, 'facility_scope_required', 'Select a current Facility premium entry.')
+        return _error(400, 'facility_scope_required', 'Select a current premium, claim or schedule entry.')
     confirm = body['action'] == 'confirm_facility_settlement'
     if confirm and not detail.get('canConfirmSettlement'):
         return _error(400, 'settlement_not_ready', 'Clear the balance first; brokerage requires manually settled T1 and T2.')

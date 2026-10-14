@@ -110,9 +110,27 @@ try:
         ordinary = fixture('Ordinary RI')
         for item in build_payment_schedule(ordinary)['items']:
             ordinary['paymentEntries'].append({'id': item['scheduleKey'], 'entryType': 'payment', 'scheduleKey': item['scheduleKey'], 'amount': item['amount'], 'paymentDate': '2026-04-20'})
-        check('ordinary non-Facility automatic cash and brokerage settlement is preserved', all(d['settlement'] == 'settled' and not d.get('manualSettlementRequired') for d in transaction_details(ordinary).values()))
+        # 2026-10-14 owner decision: no automatic settlement for any case.
+        check('ordinary non-Facility cases also wait for manual settlement', all(d['manualSettlementRequired'] and d['settlement'] in ('pending_confirmation', 'open') for d in transaction_details(ordinary).values())
+              and transaction_details(ordinary)['M-R1-T1']['settlement'] == 'pending_confirmation')
         ordinary_case = make('ZZ-MANUAL-ORDINARY', ordinary)
-        check('manual Facility API rejects ordinary entries', settle(finance, ordinary_case, 'M-R1-T1').status_code == 400)
+        check('ordinary entries are confirmed through the same manual action', settle(finance, ordinary_case, 'M-R1-T1').status_code == 200
+              and transaction_details(Case.objects.get(pk=ordinary_case.pk).payload)['M-R1-T1']['settlement'] == 'settled')
+        # 2026-10-14 owner decision: one Facility reinsurer makes every party and leg of the case manual.
+        mixed = fixture()
+        mixed['reinsurers'] = [{**mixed['reinsurers'][0], 'sharePct': 50, 'premium': 450},
+                               {'name': 'Ordinary RI', 'sharePct': 50, 'premium': 450, 'riCommPct': 0, 'taxPct': 0}]
+        mixed['transactions'] = [{**t, 'amount': t['amount'] / 2} for t in mixed['transactions']] + [
+            {'txNo': 'M-R2-T' + str(i), 'legType': 'Leg ' + str(i), 'amount': v, 'reinsurerIdx': 1, 'reinsurer': 'Ordinary RI',
+             'partyName': 'Manual Cedant' if i == 1 else 'Ordinary RI'} for i, v in [(1, 500), (2, 450), (3, 50)]]
+        for item in build_payment_schedule(mixed)['items']:
+            mixed['paymentEntries'].append({'id': 'mx-' + item['scheduleKey'], 'entryType': 'payment', 'scheduleKey': item['scheduleKey'], 'amount': item['amount'], 'paymentDate': '2026-04-20'})
+        mixed_details = transaction_details(mixed)
+        check('mixed case: ordinary reinsurer legs also wait for manual settlement',
+              mixed_details['M-R2-T1']['settlement'] == 'pending_confirmation'
+              and all(mixed_details[no]['manualSettlementRequired'] for no in ('M-R2-T1', 'M-R2-T2', 'M-R2-T3')))
+        check('mixed case: every schedule party waits for manual settlement',
+              all(i['settlement'] == 'pending_confirmation' for i in build_payment_schedule(mixed)['items']))
         swiss = make('ZZ-MANUAL-SWISS', fixture(SWISS_NAME))
         check('Swiss cash receipt is manually recorded', pay(finance, swiss, ckey, 1000).status_code == 200)
         check('Swiss zero receipt requires an accountant action', not build_payment_schedule(swiss.payload)['items'][0]['collectionConfirmed'])

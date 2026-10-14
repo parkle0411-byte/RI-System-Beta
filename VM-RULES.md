@@ -492,3 +492,10 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - 全 Facility 改成混合再保人時，只清空沒有有效 Location 的 Sum Insured；已指到存在 Location 的保留（舊資料原本記在 Location 1 時，原規則會一直清空導致無法 Announce）。前後端一致。
 - 刪除 Location 不會讓 Sum Insured 變成零筆；System Reference 單一損壞中繼資料只略過並提示；nginx /static、/assets 補回 nosniff 與 X-Frame-Options；刪除未使用的 PDF 產生器腳本（pdf-generator.js、vm-pdf-generator.js、pdf-assets.js），退役 PDF 端點仍回 410。
 - 測試：8 個過時測試組依 10/08–10/13 規則更新（純 AUW 主編號、Sum Insured 位置、Loss Record 必填、閒置 Session、Audit 空表）。獨立環境（ri_runtime＋db_harden、每組全新資料庫）49 組全部通過；密碼規則與前後端合計一致性通過。無 migration、無正式資料改寫。
+
+### 2026-10-14：取消所有自動結清（一律由會計人工確認）
+- 使用者決定：系統不應有自動結清功能，目前一律人工處理。所有案件（不再只限 Facility）的保費 T1／T2／T3、理賠交易（Claim Leg 1／2），以及付款排程的每一列，餘額歸零後顯示 Awaiting confirmation（`pending_confirmation`），須由會計在 Accounting 按 Confirm settlement 並填寫對帳參考或理由才變成 Settled。
+- 經紀費 T3 仍須先人工確認對應的 T1 與 T2，再確認 T3；確認不產生任何匯款紀錄。任何收付款、沖回或費用調整改變餘額後，原確認失效，須重新確認。
+- 收付款、沖回、費用／短收、抵減一律由會計手動登錄（原本即如此）；「自動」只曾指狀態，現已取消。
+- Facility 結清 API 收到非文字的交易或排程編號回 400，不再造成伺服器錯誤。
+- 測試：facility_manual、accounting_unified、accounting_transactions、production_api、endorsement_refunds 依新規則更新（含一般案件、理賠、經紀費的人工流程）。

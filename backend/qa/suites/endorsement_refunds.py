@@ -116,7 +116,7 @@ check('refund API accepts a positive cash magnitude',pay(cedant,100).status_code
 child.refresh_from_db();entry=child.payload['paymentEntries'][-1]
 check('refund entry stores signed amount and explicit direction',entry['amount']==-100 and entry['paymentDirection']=='payable')
 cedant=next(r for r in rows(child) if r['partyType']=='cedant')
-check('partial refund reduces signed outstanding balance',cedant['paid']==-100 and cedant['outstanding']==-790 and cedant['settlement']=='open' and cedant['partial'])
+check('partial refund reduces signed outstanding balance',cedant['paid']==-100 and cedant['outstanding']==-790 and cedant['settlement']=='partial' and cedant['partial'])
 txrows=[r for r in call('get','/api/accounting').json()['transactionRows'] if r['caseUid']==str(child.case_uid)]
 check('SoA T1 reflects partial refund settlement',next(r for r in txrows if r['legType']=='Leg 1')['settlement']=='partial')
 stale=child.row_version
@@ -124,7 +124,8 @@ check('remaining refund settles',pay(cedant,790).status_code==200)
 check('stale refund writes are rejected',pay(ri,100,version=stale).status_code==409)
 check('reinsurer recovery also records signed amount',pay(ri,752).status_code==200)
 ledger=rows(child)
-check('full refund and recovery both settle to zero',all(r['outstanding']==0 and r['paymentStatus']=='settled' for r in ledger))
+# 2026-10-14：餘額歸零後等待會計人工確認
+check('full refund and recovery both settle to zero',all(r['outstanding']==0 and r['paymentStatus']=='pending_confirmation' for r in ledger))
 child.refresh_from_db()
 r=call('post','/api/accounting',{'action':'reverse_payment','caseUid':str(child.case_uid),'rowVersion':child.row_version,'entryId':entry['id']})
 check('mistaken cash payment can be reversed independently',r.status_code==200)

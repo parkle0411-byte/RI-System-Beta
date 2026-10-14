@@ -279,8 +279,9 @@ try:
             {"scheduleKey": "I1:cedant", "amount": 540, "entryType": "payment", "paidAt": "2031-06-01"}]})
         got = call(sales, "get", f"/api/cases?caseUid={c3.case_uid}").json()["case"]["payload"]["transactions"]
         st = lambda inst, name, r: [t["paymentScheduleSettlement"] for t in got if t["installmentId"] == inst and t["legType"] == name and t["reinsurerIdx"] == r][0]
-        check("SoA settlement per installment: Leg 1 of I1 settled (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 partial until Leg 2 is paid",
-              st("I1", "Leg 1", 0) == "settled" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "partial",
+        # 2026-10-14：不再自動結清；餘額歸零後為 pending_confirmation，須會計人工確認
+        check("SoA settlement per installment: Leg 1 of I1 awaits confirmation (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 open until T1 and T2 are confirmed",
+              st("I1", "Leg 1", 0) == "pending_confirmation" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "open",
               [(t["txNo"], t["paymentScheduleSettlement"]) for t in got])
 
         # ================= 關帳衝突：產生之後案件被改（簽章不變） =================

@@ -93,9 +93,10 @@ try:
         check('SoA number and reference are separate from transaction number', all(row['statementNo'] == 'SOA-001' for row in rows) and by_tx['TW-QA-R1-TX1-I1']['reconciliationRef'] == 'SOA-001')
         check('reinsurer-facing legs use the settlement reference', by_tx['TW-QA-R1-TX2-I1']['reconciliationRef'] == 'RI-777' and by_tx['TW-QA-CLM1-TX1']['reconciliationRef'] == 'RI-777')
         check('cedant-facing claims use the SoA reference; Leg 3 has none', by_tx['TW-QA-CLM1-TX2']['reconciliationRef'] == 'SOA-001' and by_tx['TW-QA-R1-TX3-I1']['reconciliationRef'] == '')
-        check('settlement follows payments for the corresponding installment, not stale transaction flags', by_tx['TW-QA-R1-TX1-I1']['settlement'] == 'settled' and by_tx['TW-QA-R1-TX1-I2']['settlement'] == 'open')
-        check('partial premium cash and automatic brokerage settlement', by_tx['TW-QA-R1-TX2-I1']['settlement'] == 'partial' and by_tx['TW-QA-R1-TX3-I1']['settlement'] == 'partial')
-        check('negative claim amounts and claim settlement are preserved', by_tx['TW-QA-CLM1-TX1']['amount'] == -50 and by_tx['TW-QA-CLM1-TX1']['settlement'] == 'settled' and by_tx['TW-QA-CLM1-TX2']['settlement'] == 'open')
+        # 2026-10-14：不再自動結清；餘額歸零後為 pending_confirmation，須會計人工確認
+        check('settlement follows payments for the corresponding installment, not stale transaction flags', by_tx['TW-QA-R1-TX1-I1']['settlement'] == 'pending_confirmation' and by_tx['TW-QA-R1-TX1-I2']['settlement'] == 'open')
+        check('partial premium cash; brokerage waits for manually settled T1 and T2', by_tx['TW-QA-R1-TX2-I1']['settlement'] == 'partial' and by_tx['TW-QA-R1-TX3-I1']['settlement'] == 'open')
+        check('negative claim amounts and claim settlement are preserved', by_tx['TW-QA-CLM1-TX1']['amount'] == -50 and by_tx['TW-QA-CLM1-TX1']['settlement'] == 'pending_confirmation' and by_tx['TW-QA-CLM1-TX2']['settlement'] == 'open')
         check('reversal entry retains its number, flag and signed amount', by_tx['TW-QA-R1-TX1-I1-REV']['isReversalEntry'] and by_tx['TW-QA-R1-TX1-I1-REV']['amount'] == -450)
         check('reversed case history remains visible for reconciliation', any(row['caseUid'] == str(reversed_case.case_uid) and row.get('reversed') for row in body['transactionRows']))
         excluded_uids = {str(case.case_uid) for case in excluded + [no_transactions]}
