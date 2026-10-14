@@ -5,6 +5,7 @@ an atomic metadata write publishes each complete upload to the shared list.
 Release manuals are versioned with the application image.
 """
 import hashlib
+import logging
 import fcntl
 import re
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ from cases import storage
 from cases.documents import content_disposition, safe_filename, storable_text
 from .authz import NoStoreMixin, RIPermission, AuthError, object_body
 
+log = logging.getLogger(__name__)
 MAX_BYTES = 10 * 1024 * 1024
 MANUALS = {
     'mdm': 'MDM_主檔管理說明.docx',
@@ -127,16 +129,25 @@ class SystemReferenceView(NoStoreMixin, APIView):
             response['Content-Disposition'] = content_disposition(row['filename'])
             return response
         directory = storage.path_for('system-reference')
-        rows = []
+        rows, unreadable = [], 0
         if directory.exists():
             for path in directory.glob('*.json'):
                 if not path.name.startswith('manual-'):
-                    rows.append({**json.loads(path.read_text(encoding='utf-8')), 'kind': 'template'})
-        rows.sort(key=lambda row: (row['uploaded_at'], row['id']), reverse=True)
+                    # 2026-10-14：單一損壞的中繼資料只略過該檔，不讓整個清單失敗
+                    try:
+                        row = json.loads(path.read_text(encoding='utf-8'))
+                        if not isinstance(row, dict) or not row.get('id') or not row.get('uploaded_at') or not row.get('filename'):
+                            raise ValueError('incomplete metadata')
+                    except (ValueError, OSError, UnicodeDecodeError):
+                        log.warning('System Reference metadata %s is unreadable; skipped', path.name)
+                        unreadable += 1
+                        continue
+                    rows.append({**row, 'kind': 'template'})
+        rows.sort(key=lambda row: (str(row['uploaded_at']), str(row['id'])), reverse=True)
         manuals = [read_row('manual-' + key, key) for key in MANUALS]
         trash = [row for row in rows + manuals if row.get('deleted_at')]
-        trash.sort(key=lambda row: row['deleted_at'], reverse=True)
-        return Response({'files': [row for row in rows if not row.get('deleted_at')],
+        trash.sort(key=lambda row: str(row['deleted_at']), reverse=True)
+        return Response({'unreadable': unreadable, 'files': [row for row in rows if not row.get('deleted_at')],
                          'manuals': [row for row in manuals if not row.get('deleted_at')], 'trash': trash})
 
     def patch(self, request):

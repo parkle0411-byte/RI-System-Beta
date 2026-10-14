@@ -7,6 +7,7 @@ import { can } from '../auth'
 const files = ref([])
 const manuals = ref([])
 const trash = ref([])
+const unreadable = ref(0)
 const managing = ref(false)
 const loading = ref(false)
 const saving = ref(false)
@@ -20,6 +21,7 @@ async function load() {
     files.value = data.files
     manuals.value = data.manuals
     trash.value = data.trash || []
+    unreadable.value = Number(data.unreadable) || 0
   } catch (error) { ElMessage.error(error.message) }
   finally { loading.value = false }
 }
@@ -100,6 +102,7 @@ onMounted(load)
 
 <template>
   <div v-loading="loading" class="reference-page">
+    <el-alert v-if="unreadable" type="warning" :closable="false" show-icon :title="`${unreadable} document template record(s) could not be read and are not listed.`" />
     <section class="reference-card">
       <h2>System Guides</h2>
       <p>Download system guides for master data management, database structure and AUW Facility accounting.</p>

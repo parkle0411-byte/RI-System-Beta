@@ -44,7 +44,15 @@ ready = dict(reinsuranceStructure='QS', ae=person.name, currency='TWD', classOfB
     originalConditions='As original', occupation='Office', construction='Concrete',
     sumInsured=[{'category':'Building', 'amount':1000000}], lossAdvisedDate='2042-12-01', lossRecordYears=5,
     originalPremium=10000, paymentTermsDays=30, riCommPct=17, taxPct=1, manualTwRef='TW43SM010001')
+_ref_seq = [0]
+def _unique_ref(raw):
+    # 2026-10-08 起 AUW 手填 Ref 不可與其他案件重複；同一份範本重複建案時各給一組編號
+    if raw.get('manualTwRef') == 'TW43SM010001':
+        _ref_seq[0] += 1
+        raw = {**raw, 'manualTwRef': 'TW43SM010001-' + str(_ref_seq[0])}
+    return raw
 def create(raw):
+    raw = _unique_ref(raw)
     response = call('post', '/api/cases', {'case':raw})
     assert response.status_code == 201, response.content
     return Case.objects.get(case_uid=response.json()['case']['caseUid'])
@@ -116,7 +124,7 @@ check('payment schedule uses the custom AUW net premium', next(item for item in 
 response = announce(row)
 row.refresh_from_db()
 check('real Announce preserves custom deductions and both references', response.status_code==200 and row.status=='posted'
-    and row.payload['reinsurers'][0]['riCommPct']==12.5 and row.payload['manualTwRef']=='TW43SM010001' and bool(row.tw_ref))
+    and row.payload['reinsurers'][0]['riCommPct']==12.5 and row.payload['manualTwRef'].startswith('TW43SM010001') and bool(row.tw_ref))
 # Put this isolated fixture in its own production month and exercise real closing.
 row.announced_at = datetime(2043, 1, 10, 4, tzinfo=dt_timezone.utc)
 row.save(update_fields=['announced_at'])

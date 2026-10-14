@@ -320,6 +320,9 @@ class CasesView(NoStoreMixin, APIView):
             for key in ("twRefSource", "previousTwRefs"):
                 if key in stored:
                     payload[key] = stored[key]
+            # 2026-10-14：「新案 Cedant 天數以案件為準」一旦記錄就由伺服器保留，不依賴前端是否回傳
+            if stored.get("cedantTermsBasis") == "case":
+                payload["cedantTermsBasis"] = "case"
             if current.status in ("posted", "reversed") and requires_manual_tw_ref(payload) and not payload.get("manualTwRef"):
                 message = "TW Ref. (for AUW) is required for an Announced case with 0609 AUW (Facility)."
                 return _error(400, "validation_failed", message, errors=[message])

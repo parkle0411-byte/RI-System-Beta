@@ -16,6 +16,7 @@ const router=useRouter()
 const loading=ref(false), saving=ref(false), rows=ref([]), batches=ref([]), currencies=ref([]), canEdit=ref(false), selected=ref([])
 const filters=reactive({reference:'',party:'',currency:'',leg:'',settlement:'',source:'',from:'',to:''})
 const swissRows=ref([])
+const dataWarnings=ref([])
 const entryActions=ref(null)
 const paymentVisible=ref(false), historyRow=ref(null), batchVisible=ref(false), activeBatch=ref(null)
 const payment=reactive({date:today(),amount:null,reference:'',note:'',allocations:[]})
@@ -38,7 +39,7 @@ const hasEntryActions=row=>row.schedules?.some(item=>feeAllowed(item)||offsetAll
 function toggle(row,value){selected.value=value?[...selected.value,row]:selected.value.filter(r=>r.key!==row.key)}
 async function load(){
  loading.value=true;shell.error=''
- try{const response=await apiFetch('/api/accounting');const body=await response.json();if(!response.ok)throw new Error(body.message||body.error);swissRows.value=body.swissRows||[];rows.value=accountingRows(body);batches.value=body.cashBatches||[];currencies.value=[...new Set([...(body.currencies||[]),...rows.value.map(row=>row.currency).filter(Boolean)])].sort();canEdit.value=!!body.scope?.canEdit;selected.value=[]
+ try{const response=await apiFetch('/api/accounting');const body=await response.json();if(!response.ok)throw new Error(body.message||body.error);swissRows.value=body.swissRows||[];dataWarnings.value=(body.warnings||[]).filter(w=>w.dataError);rows.value=accountingRows(body);batches.value=body.cashBatches||[];currencies.value=[...new Set([...(body.currencies||[]),...rows.value.map(row=>row.currency).filter(Boolean)])].sort();canEdit.value=!!body.scope?.canEdit;selected.value=[]
  if(historyRow.value)historyRow.value=rows.value.find(r=>r.key===historyRow.value.key)||null
  if(activeBatch.value)activeBatch.value=batches.value.find(b=>b.batchId===activeBatch.value.batchId)||null
  }catch(err){shell.error=err.message;ElMessage.error(err.message)}finally{loading.value=false}
@@ -76,6 +77,7 @@ onMounted(load)
 </script>
 <template>
 <div class="overview-stack">
+<el-alert v-if="dataWarnings.length" type="error" :closable="false" show-icon title="Some cases could not be read and are not shown" :description="dataWarnings.map(w=>(w.twRef||w.caseUid)).join(', ')+'. Contact the System Administrator.'" />
 <section class="table-card">
  <div class="section-heading"><div><h2>Accounting · SoA / Transactions</h2><p>Transactions, announced premium entries, due dates and cash balances in one list. Facility receipts, reversals, clearance and offsets are entered manually by Accounting; a zero balance still requires settlement confirmation.</p></div><el-button :loading="loading" @click="load">Refresh</el-button></div>
  <div class="form-grid cols-3">

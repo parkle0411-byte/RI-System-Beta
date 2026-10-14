@@ -20,6 +20,9 @@ def check(name, condition):
 
 def invoke(view, method, path, user, body=None):
     request = getattr(factory, method)(path, body or {}, format="json")
+    # Real requests pass SessionMiddleware; the idle-session state (2026-10-13) reads request.session.
+    from django.contrib.sessions.backends.db import SessionStore
+    request.session = SessionStore()
     force_authenticate(request, user=user)
     return view.as_view()(request)
 

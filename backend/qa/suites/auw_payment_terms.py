@@ -158,8 +158,10 @@ check('posted Cedant terms remain locked', response.status_code==409 and respons
 changed = copy.deepcopy(case.payload)
 changed.pop('cedantTermsBasis')
 response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion':case.row_version, 'case':changed})
-check('posted cases cannot silently switch back to the old Cedant rule', response.status_code==409
-    and response.json()['error']=='payment_terms_locked')
+# 2026-10-14：伺服器自己保留「新案算法」旗標；漏傳旗標的存檔不會改回舊算法，也不必被擋下
+case.refresh_from_db()
+check('posted cases cannot silently switch back to the old Cedant rule', response.status_code==200
+      and case.payload.get('cedantTermsBasis')=='case')
 for amount in [2500, 4500]:
     case.refresh_from_db()
     response = call('post', '/api/accounting', {'action':'record_payment', 'caseUid':str(case.case_uid),

@@ -13,6 +13,7 @@
   - paymentEntries／transactions 裡若有不是物件的項目就略過；正常流程不會寫出這種資料。
 仍然不同的只有並行控制的寫法：VM 先鎖案件列再檢查、寫入；Alpha 是事後以「除以零」檢查版本（結果相同）。
 """
+import logging
 import re
 import uuid
 from datetime import date, datetime, timezone as dt_timezone
@@ -26,7 +27,7 @@ from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
 from .calc.jsnum import (
-    UNDEFINED, get, is_array, js_is_finite, js_or, js_truthy, js_slice, js_to_number, js_to_string, js_trim, json_roundtrip, money,
+    UNDEFINED, get, is_array, js_is_finite, js_locale_key, js_or, js_truthy, js_slice, js_to_number, js_to_string, js_trim, json_roundtrip, money,
 )
 from .calc.payment_terms import build_payment_schedule, taipei_date
 from .ledger import _objects, ledger_rows
@@ -37,6 +38,7 @@ from .transaction_payments import record_transaction_payments, reverse_batch_pay
 from .calc.swiss_facility import applies as swiss_applies, DISPLAY_FIELDS, reset_after_changes, payment_error, case_payload
 from .swiss_accounting import swiss_action
 
+log = logging.getLogger(__name__)
 LEDGER_STATUSES = ("posted", "closed")
 _DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
@@ -94,17 +96,31 @@ class AccountingView(NoStoreMixin, APIView):
 
     def get(self, request):
         cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").order_by("tw_ref", "id")
-        case_views = [_case_view(c) for c in cases]
-        rows, warnings = ledger_rows([c for c in case_views if c["status"] in LEDGER_STATUSES])
-        transactions = transaction_rows(case_views)
-        swiss_rows = []
-        for c in case_views:
-            if c["status"] not in LEDGER_STATUSES or not swiss_applies(c["payload"]):
+        # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
+        case_views, rows, warnings, transactions, swiss_rows = [], [], [], [], []
+        for case in cases:
+            try:
+                c = _case_view(case)
+                case_rows, case_warnings = ledger_rows([c]) if c["status"] in LEDGER_STATUSES else ([], [])
+                case_transactions = transaction_rows([c])
+                case_swiss = []
+                if c["status"] in LEDGER_STATUSES and swiss_applies(c["payload"]):
+                    for item in build_payment_schedule(c["payload"])["items"]:
+                        case_swiss.append({**item, "key": c["caseUid"] + ":" + item["scheduleKey"], "caseUid": c["caseUid"],
+                                           "caseRowVersion": c["rowVersion"], "twRef": c["twRef"], "rootCaseUid": c["rootCaseUid"],
+                                           "entries": [e for e in _objects(c["payload"].get("paymentEntries")) if e.get("scheduleKey") == item["scheduleKey"]]})
+            except Exception:  # noqa: BLE001 - 單一案件資料損壞不能讓整個 Accounting 失敗
+                log.exception("Accounting could not read case %s", case.case_uid)
+                warnings.append({"caseUid": str(case.case_uid), "twRef": case.tw_ref or "", "dataError": True,
+                                 "issues": ["This case's accounting data could not be read and is not shown. Contact the System Administrator."]})
                 continue
-            for item in build_payment_schedule(c["payload"])["items"]:
-                swiss_rows.append({**item, "key": c["caseUid"] + ":" + item["scheduleKey"], "caseUid": c["caseUid"],
-                                   "caseRowVersion": c["rowVersion"], "twRef": c["twRef"], "rootCaseUid": c["rootCaseUid"],
-                                   "entries": [e for e in _objects(c["payload"].get("paymentEntries")) if e.get("scheduleKey") == item["scheduleKey"]]})
+            case_views.append(c)
+            rows.extend(case_rows)
+            warnings.extend(case_warnings)
+            transactions.extend(case_transactions)
+            swiss_rows.extend(case_swiss)
+        # 與 ledger_rows 相同的排序（twRef，再依到期日；穩定排序）
+        rows.sort(key=lambda r: (js_locale_key(r["twRef"]), js_locale_key(_text(r.get("dueDate")))))
         currencies = []
         for row in [*rows, *transactions]:  # Include currencies in historical transactions.
             if js_truthy(row["currency"]) and row["currency"] not in currencies:

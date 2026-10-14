@@ -43,7 +43,15 @@ ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusine
     limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete',
     sumInsured=[{'category':'Building','amount':1000000}],lossAdvisedDate='2044-12-01',lossRecordYears=5,
     originalPremium=10000,paymentTermsDays=90,riCommPct=17,taxPct=1,manualTwRef='TW45SM010001')
+_ref_seq = [0]
+def _unique_ref(raw):
+    # 2026-10-08 起 AUW 手填 Ref 不可與其他案件重複；同一份範本重複建案時各給一組編號
+    if raw.get('manualTwRef') == 'TW45SM010001':
+        _ref_seq[0] += 1
+        raw = {**raw, 'manualTwRef': 'TW45SM010001-' + str(_ref_seq[0])}
+    return raw
 def create(raw):
+    raw = _unique_ref(raw)
     response=call('post','/api/cases',{'case':raw})
     assert response.status_code==201,response.content
     return Case.objects.get(case_uid=response.json()['case']['caseUid'])
@@ -112,10 +120,11 @@ check('legacy wrong Howden blocks direct Announce before allocating a TW ref',re
     and list(ReferenceSequence.objects.values())==sequence)
 
 # Workflow-created drafts also require the new reference before they exist.
-root=create(ready);root.status='closed';root.tw_ref='TWABR4501001'
-root.payload['transactions']=build_premium_transactions({**root.payload,'twRef':root.tw_ref})
-root.save()
-for action in ['create_endorsement','create_renewal']:
+# 續保只能從最新的已確認案件建立（之後加入的規則），所以兩個動作各用一張獨立的原保單
+for number, action in enumerate(['create_endorsement','create_renewal'], 1):
+    root=create(ready);root.status='closed';root.tw_ref=f'TWABR459900{number}'
+    root.payload['transactions']=build_premium_transactions({**root.payload,'twRef':root.tw_ref})
+    root.save()
     for value in [None,' ','A'*161,'ABC\nDEF',123]:
         count=Case.objects.count()
         response=workflow(root,action,**({} if value is None else {'manualTwRef':value}))

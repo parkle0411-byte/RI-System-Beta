@@ -89,7 +89,14 @@ def prepare_transition(previous, incoming):
     old_rows, new_rows = previous.get("sumInsured"), incoming.get("sumInsured")
     if all_facility(previous) == all_facility(incoming) or not isinstance(new_rows, list) or new_rows != old_rows:
         return incoming
-    rows = merge_facility_items(new_rows) if all_facility(incoming) else [{**row, "locationIndex": None} if isinstance(row, dict) else row for row in new_rows]
+    if all_facility(incoming):
+        rows = merge_facility_items(new_rows)
+    else:
+        # 2026-10-14：全 Facility 改成混合時，只清空沒有有效 Location 的項目；已指到存在的 Location 就保留
+        # （舊資料預設記在 Location 1，若一律清空，使用者重新選回 Location 1 會被視為「沒變」而再次清空，永遠無法 Announce）
+        count = len(get(incoming, "situations")) if is_array(get(incoming, "situations")) else 0
+        rows = [row if not isinstance(row, dict) or location_index(row, count) is not None else {**row, "locationIndex": None}
+                for row in new_rows]
     return {**incoming, "sumInsured": rows}
 
 

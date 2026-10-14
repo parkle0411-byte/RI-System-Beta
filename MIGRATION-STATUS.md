@@ -607,3 +607,15 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 - 已 Announce 尚未 Production close 的 Swiss 項目在同一清單顯示，清楚標示 Awaiting Production close，沿用原 schedule payment／confirmation API；正式交易生成後以 cashParts 對應排程，避免重複列出及重複加總。原歷史反向交易及理賠不遮蔽現行保費排程。
 - 12 項資料整合檢查、16 項 Chromium 流程與前端建置通過，涵蓋無資料、已上帳／未上帳、保費／退費、收齊／取消、手續費、清單修訂、抵減、整筆合併匯款、人工結清、其他 Facility 與唯讀。測試採合成資料，無正式業務寫入。
 - 僅更新前端並重建 nginx；所有後端計算、75／90 天、Swiss 歸期及延期、月底截止及手動結清規則保留。後端／MySQL（及存在的 PDF）容器、業務資料指紋與設定保持。已備份來源與舊映像，可回復。
+
+
+## 2026-10-14：全面除錯修正（依使用者逐項確認）
+- 除錯不再與 Hatchable Alpha 比對：刪除 Alpha JS 差異測試（alpha_js、compare.py、harness.mjs、run_calc_diff.sh、check_production_xlsx.py），run_qa.sh 不再有 calc 步驟；前端合計一致性檢查保留。
+- Swiss 同案同期抵減：Cedant 退費須所有再保人退款確認收齊後才可抵減（refund_collection_required），與現金退費相同。
+- Performance Split 兩方合計 100% 時，b 方金額 = 該 Leg 總額 − a 方，Leg 1 交易合計與付款排程一致（原本可能差 1–3 分錢而停在 Partial）。
+- Swiss 收齊證據維持 10/13 規則：可驗證的歷史交易結清時間可承接並保留來源（撤回當日另一 session 改為一律手動確認的修改）。
+- 新案「Cedant 天數以案件為準」標記（cedantTermsBasis）由伺服器保留，存檔漏傳不會改回舊算法。
+- Accounting 逐案計算：單一案件資料無法解讀時只略過該案並顯示警告，其餘照常顯示。
+- 全 Facility 改成混合再保人時，只清空沒有有效 Location 的 Sum Insured；已指到存在 Location 的保留（舊資料原本記在 Location 1 時，原規則會一直清空導致無法 Announce）。前後端一致。
+- 刪除 Location 不會讓 Sum Insured 變成零筆；System Reference 單一損壞中繼資料只略過並提示；nginx /static、/assets 補回 nosniff 與 X-Frame-Options；刪除未使用的 PDF 產生器腳本（pdf-generator.js、vm-pdf-generator.js、pdf-assets.js），退役 PDF 端點仍回 410。
+- 測試：8 個過時測試組依 10/08–10/13 規則更新（純 AUW 主編號、Sum Insured 位置、Loss Record 必填、閒置 Session、Audit 空表）。獨立環境（ri_runtime＋db_harden、每組全新資料庫）49 組全部通過；密碼規則與前後端合計一致性通過。無 migration、無正式資料改寫。

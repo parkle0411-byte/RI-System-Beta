@@ -128,7 +128,9 @@ try:
             if item['partyType'] == 'cedant':
                 legacy['paymentEntries'].append({'id': 'old', 'entryType': 'payment', 'scheduleKey': item['scheduleKey'], 'amount': 1000, 'paymentDate': '2026-04-01'})
         legacy['transactions'][0].update(settlement='settled', settledAt='2026-04-01T01:00:00Z')
-        check('legacy transaction status no longer auto-confirms Swiss collection', not build_payment_schedule(legacy)['items'][0]['collectionConfirmed'])
+        # 2026-10-14 owner decision: keep the 10/13 rule; a verifiable historical settlement timestamp carries over with its source.
+        carried = build_payment_schedule(legacy)['items'][0]
+        check('legacy settled transaction carries over as Swiss collection evidence with its source', carried['collectionConfirmed'] and carried['collectionConfirmedAt'] == '2026-04-01' and carried['collectionConfirmationSource'].startswith('historical transaction reconciliation'))
         before = copy.deepcopy(case.payload)
         for _ in range(3): transaction_details(case.payload); build_payment_schedule(case.payload)
         check('reading balances never writes confirmation or cash', case.payload == before)

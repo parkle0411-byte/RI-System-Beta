@@ -110,6 +110,8 @@ schedule=build_payment_schedule(endo.payload)
 check('AUW endorsement schedule retains fixed 120-day month-end rule',not schedule['issues'] and next(x for x in schedule['items'] if x['partyType']=='reinsurer')['paymentRule']=='auw_month_end_120')
 r=workflow(long,'create_endorsement','TW44SM-LONG-ENDO');assert r.status_code==201,r.content
 child=Case.objects.get(case_uid=r.json()['case']['caseUid']);p=copy.deepcopy(child.payload);p.update(endoEffectiveDate='2044-06-01',endoTypes=['premium'],endoText='Mixed premium',originalPremium=1000);p['reinsurers']=[{**ready['reinsurers'][0],'sharePct':50,'premium':800},{**normal['reinsurers'][0],'sharePct':50,'premium':800}]
+# 2026-10-13 Sum Insured 位置規則：由全 Facility 改成混合時，原項目要重新分配到 Location（畫面也會提示）
+p['sumInsured']=[{**item,'locationIndex':0} for item in p['sumInsured']]
 assert edit(child,p).status_code==200;evidence(child,'offer');evidence(child,'signed',['QA Identity Ordinary',AUW]);r=announce(child);child.refresh_from_db()
 check('mixed endorsement of a long manual root gets an automatic E reference without truncation',r.status_code==200 and child.tw_ref==long_ref+'-E01' and child.payload['parentTwRef']==long_ref)
 long.status='closed';long.save()

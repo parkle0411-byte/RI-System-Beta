@@ -118,7 +118,8 @@ export function useCaseWorkspace() {
     if (!draft.reinsurers.some(row => String(row.name || '').trim())) return
     const facility = allSumInsuredFacility(draft)
     if (sumInsuredFacilityMode !== null && facility !== sumInsuredFacilityMode) {
-      draft.sumInsured = facility ? mergeFacilitySumItems(draft.sumInsured) : draft.sumInsured.map(row => ({ ...row, locationIndex: null }))
+      // 2026-10-14：改成混合時保留已指到有效 Location 的項目，只清空沒有有效 Location 的（與後端 prepare_transition 一致）
+      draft.sumInsured = facility ? mergeFacilitySumItems(draft.sumInsured) : draft.sumInsured.map(row => sumLocationIndex(row, draft.situations.length) === null ? { ...row, locationIndex: null } : row)
       ElMessage.info(facility ? 'Matching Sum Insured items have been combined into Facility totals.' : 'Allocate the existing Sum Insured items to Locations before Review & Announce.')
     }
     sumInsuredFacilityMode = facility
@@ -980,6 +981,10 @@ export function useCaseWorkspace() {
       })
     }
     draft.situations.splice(index, 1)
+    // 2026-10-14：刪除 Location 不可讓 Sum Insured 變成零筆；留一筆空白項目給第 1 個 Location 填寫
+    if (!draft.sumInsured.length) {
+      draft.sumInsured.push({ clientKey: clientKey(), category: '', amount: null, locationIndex: allFacilityReinsurers.value ? null : 0 })
+    }
   }
   function addReinsurer() { draft.reinsurers.push({ clientKey: clientKey(), name: '', sharePct: null, premium: null, riCommPct: null, taxPct: 1, paymentTermsDays: null, foreignBroker: '', settlementRef: '' }) }
   function removeReinsurer(index) { if (draft.reinsurers.length > 1) { draft.reinsurers.splice(index, 1); syncCaseClauses(); syncSumInsuredMode() } }

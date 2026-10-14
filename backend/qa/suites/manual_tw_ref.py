@@ -79,7 +79,10 @@ check('target Announce rejects missing manual reference before allocating auto r
 for value in [123, {}, [], 'A'*161, 'ABC\nDEF', 'ABC\x00DEF']:
     response=call('post','/api/cases',{'case':{**ready,'manualTwRef':value}})
     check('invalid manual reference rejected: '+repr(value)[:35],response.status_code==400 and response.json()['error']=='validation_failed')
-row = create({**ready,'manualTwRef':'  000609/TW-ABC-39  '})
+# 2026-10-08 起「純 AUW」以手填 Ref 當主編號（另見 auw_reference_only）；
+# 這裡測的是「自動編號＋另一組手填 Ref」並存，所以用 AUW 與一般再保人混合的案件
+row = create({**ready,'manualTwRef':'  000609/TW-ABC-39  ',
+              'reinsurers':[{**normal_payload['reinsurers'][0],'sharePct':50},{**ready['reinsurers'][0],'sharePct':50}]})
 check('reference saves as trimmed text and preserves leading zeros and punctuation',row.payload['manualTwRef']=='000609/TW-ABC-39')
 loaded=call('get','/api/cases?caseUid='+str(row.case_uid)).json()['case']
 check('reload returns the saved manual reference and automatic reference is still unassigned',loaded['payload']['manualTwRef']=='000609/TW-ABC-39' and loaded['twRef'] is None)
@@ -104,8 +107,8 @@ row.refresh_from_db();row.payload['transactions']=build_premium_transactions({**
 accounting=call('get','/api/accounting').json()
 payments=[item for item in accounting['rows'] if item['caseUid']==str(row.case_uid)]
 tx=[item for item in accounting['transactionRows'] if item['caseUid']==str(row.case_uid)]
-check('Accounting payment schedule exposes both references',len(payments)==2 and all(item['manualTwRef']=='000609/TW-EDIT-39' and item['twRef']==row.tw_ref for item in payments))
-check('Accounting SoA exposes both references without replacing transaction numbers',len(tx)==3 and all(item['manualTwRef']=='000609/TW-EDIT-39' and item['txNo'].startswith(row.tw_ref) for item in tx))
+check('Accounting payment schedule exposes both references',len(payments)==3 and all(item['manualTwRef']=='000609/TW-EDIT-39' and item['twRef']==row.tw_ref for item in payments))
+check('Accounting SoA exposes both references without replacing transaction numbers',len(tx)==6 and all(item['manualTwRef']=='000609/TW-EDIT-39' and item['txNo'].startswith(row.tw_ref) for item in tx))
 check('new endorsement and renewal drafts require their own manual reference',build_endorsement_payload(row.payload,row.tw_ref,0)['manualTwRef']==''
     and build_renewal_payload(row.payload,row.tw_ref)['manualTwRef']=='')
 mixed=copy.deepcopy(ready);mixed['reinsurers']=[{**normal_payload['reinsurers'][0],'sharePct':50},{**ready['reinsurers'][0],'sharePct':50}]

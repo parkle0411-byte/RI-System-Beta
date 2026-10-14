@@ -79,6 +79,7 @@ def login_as(role, username):
 
 
 # ============ A. 資料庫層（交易外執行：DDL 即使被拒也會隱式提交，不能放在測試交易裡）============
+audit_rows_before = AuditLog.objects.count()
 with connection.cursor() as c:
     c.execute("SELECT CURRENT_USER()"); who = c.fetchone()[0]
 check("backend connects as ri_runtime", who.startswith("ri_runtime@"), who)
@@ -99,7 +100,8 @@ expect_db_error("audit row with neither before nor after rejected (CHECK)",
                 "INSERT INTO ri_audit_log (entity_type, entity_id, action, actor_id, source, occurred_at, retention_until, metadata) "
                 "VALUES ('t','1','a','x','application', NOW(6), DATE_ADD(NOW(6), INTERVAL 21 YEAR), JSON_OBJECT())")
 n = AuditLog.objects.count()
-check("audit table still has all rows after the attempts", n >= 104, n)
+# 2026-10-14：不再假設表內已有 104 筆以上（2026-10-05 起正式環境已清空並暫停記錄）；改為「嘗試前後筆數不變」
+check("audit table still has all rows after the attempts", n == audit_rows_before, (audit_rows_before, n))
 
 
 
@@ -107,6 +109,10 @@ try:
     with transaction.atomic():
         # ============ C. 應用層防護 ============
         first = AuditLog.objects.order_by("id").first()
+        if first is None:  # 空表時先在本交易內建立一筆（最後回滾），才能測試既有列的保護
+            from audit.services import record_audit
+            record_audit(entity_type="qa", entity_id="1", action="qa_seed", actor=None, after={"seed": True})
+            first = AuditLog.objects.order_by("id").first()
         for label, fn in {
             "queryset.update": lambda: AuditLog.objects.update(actor_name="x"),
             "queryset.delete": lambda: AuditLog.objects.all().delete(),

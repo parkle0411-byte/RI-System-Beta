@@ -40,7 +40,7 @@ try:
         admin_p, sales_p, gm_p = person("admin", "admin"), person("sales", "reinsurance"), person("general_manager", "reinsurance")
         admin, sales, gm = account(admin_p, "admin"), account(sales_p, "sales"), account(gm_p, "gm")
         def new_case(insured="ZZ RB Insured"):
-            r = call(sales, "post", "/api/cases", {"case": {"originalInsured": insured, "currency": "USD"}}); assert r.status_code == 201, r.content
+            r = call(sales, "post", "/api/cases", {"case": {"originalInsured": insured, "currency": "USD", "lossAdvisedDate": "2026-01-01", "lossRecordYears": 3}}); assert r.status_code == 201, r.content
             return Case.objects.get(case_uid=r.json()["case"]["caseUid"])
         def recycle(case, c=admin, **over):
             body = {"action": "recycle", "caseUid": str(case.case_uid), "rowVersion": Case.objects.get(pk=case.pk).row_version}
