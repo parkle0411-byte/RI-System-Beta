@@ -36,24 +36,13 @@ run_phase() {
 STATUS=0
 run_phase A || STATUS=1
 run_phase H || STATUS=1
-# 階段 H 下載的 PDF：文字與字型（主機上的 poppler-utils 檢查）、每次產生都有 Audit
-check_pdf() {  # 檔名 預期文字…
-  local f="qa/ui/out/$1"; shift
-  [ -s "$f" ] || { echo "FAIL $f was not downloaded"; STATUS=1; return; }
-  local text; text=$(pdftotext -layout "$f" - 2>/dev/null)
-  for want in "$@"; do grep -qF "$want" <<<"$text" || { echo "FAIL $f does not contain '$want'"; STATUS=1; return; }; done
-  pdffonts "$f" | grep -q LiberationSans || { echo "FAIL $f does not use Liberation Sans"; STATUS=1; return; }
-  echo "PASS $f: text and fonts ($(pdfinfo "$f" | grep Pages | tr -s ' '))"
-}
+# 階段 H：每次 Word 下載都記錄 Audit，PDF 引擎已退役。
 case " ${PHASES:-A H R B K C D E F G P1 P2} " in *" H "*)
-check_pdf CoverNote_TWPAR2603001.pdf "COVER NOTE" TWPAR2603001 "UI Test Insured Ltd" "SCHEDULE OF SECURITY" "• LMA3333 Reinsurers Liability Clause"
-check_pdf DebitNote_TWPAR2603001.pdf "DEBIT NOTE" TWPAR2603001 "晶華保險經紀人股份有限公" "TPBKTWTP"   # 中文名稱在表格欄內換行
-pdffonts qa/ui/out/DebitNote_TWPAR2603001.pdf 2>/dev/null | grep -q NotoSansCJKtc && echo "PASS Debit Note: Chinese text uses Noto Sans CJK TC" || { echo "FAIL Debit Note Chinese font"; STATUS=1; }
 docker exec ri-ut-backend python manage.py shell -c "
 from audit.models import AuditLog
 q = AuditLog.objects.filter(action='generate_document')
 got = sorted((a.metadata['kind'], a.metadata['format']) for a in q)
-want = sorted([('cover','docx'),('cover','pdf'),('debit','docx'),('debit','pdf'),('endorsement','pdf')])
+want = sorted([('cover','docx'),('debit','docx'),('endorsement','docx')])
 print('PASS audit: one generate_document event per download' if got == want else f'FAIL audit events {got}')" > "$UT_SECRETS/audit.txt" 2>&1
 grep -E 'PASS|FAIL' "$UT_SECRETS/audit.txt"; grep -q '^PASS' "$UT_SECRETS/audit.txt" || STATUS=1
 esac

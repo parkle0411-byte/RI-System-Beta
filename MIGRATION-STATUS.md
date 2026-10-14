@@ -5,6 +5,12 @@
 - 目標：本專案（Django + MySQL + Vue，Docker Compose）
 - 原則：Alpha 是唯一的正式規格來源，VM 只移植、不自行改規格。刻意不同的地方一律寫在下面「刻意與 Alpha 不同」。
 
+## Audit 暫停（2026-10-05，最新決定）
+
+業主要求 VM Audit 功能先關閉，直至另行通知。已於同日備份後清除當時的 264 筆 Audit（備份 `backups/ri_system_before_audit_clear_20261005_142025.sql`）。
+本次以 `compose.yaml` 的 `AUDIT_LOG_PAUSED=true` 暫停 `record_audit`，保持 `AUDIT_LOG_ENABLED=true`，讓業務寫入與 Entity Snapshot 照常；Audit 表的不可修改／刪除 trigger 與權限不變。畫面與 API 如實回報暫停。
+只有業主另行要求才重新啟用：將 `AUDIT_LOG_PAUSED` 改為 false 並重建 backend 容器；不補寫暫停期間事件。下方歷史紀錄「Audit 全面啟用」由本段最新決定取代。
+
 ## 固定技術規格（VM）
 
 | Layer | Stack |
@@ -91,7 +97,7 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 | `lib/production-report.js` | `789e38dfb9974adcf71b3a9cf7302d1c458858fafb5ec41106d504f5bb5bfcb3` | `backend/production/calc.py` | 完成，**逐位一致**（預覽、key、簽章、下個月；差異測試約 1,000 組，含情境一致的案件、排除、延後、分績、分期） |
 | `api/production-report.js` | `ad033c0da163ba9fc2f30bfb0915793f361352b1c72de69e0cc6896219b417b2` | `backend/production/views.py`（`ProductionReportView`）、`production/closing.py` | 完成（預覽、排除延後、產生版本、關帳：案件確認、Leg 1–3 交易、沖銷分錄、鎖匯率；含 Audit／Snapshot）。關帳整理案件的邏輯與 Alpha JS 逐位一致（600 組，節錄見 `qa/alpha_js/MANIFEST.md`）；測試組 `production_api` 72 項；故意破壞：計算 11＋關帳 4 種由差異測試抓到、API 18 種由測試組抓到 |
 | `migrations/0016_create_production_report_lifecycle.sql` | `9fd6f3cc748e5a174715a09a289099be98cbfbf58c5ba6b8aa078e3cddcb5319` | `production/models.py`、`production/migrations/0001` | 完成（同樣的 CHECK 與唯一限制；PostgreSQL 的部分唯一索引／COALESCE 索引改用 MySQL 函式索引；排除紀錄 `ri_runtime` 只能 SELECT／INSERT） |
-| `public/production-xlsx.js` | `256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59` | `frontend/src/alpha/production-xlsx.js`（**原樣**，`run_calc_diff.sh` 會核對雜湊） | 完成（JSZip 改由 npm 套件提供，同版 3.10.1） |
+| `public/production-xlsx.js` | `256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59` | `frontend/alpha-reference/production-xlsx.js`（**原樣**，雜湊固定）；VM 實際使用 `frontend/src/alpha/production-xlsx.js` = 原檔 + 4 處已記錄的修改（多一欄 First Policy No，見 2026-10-08 段落）；`scripts/check_production_xlsx.py`（由 `run_calc_diff.sh` 呼叫）核對兩者 | 完成（JSZip 改由 npm 套件提供，同版 3.10.1；VM 版多一欄） |
 | `public/case-calculations.js` | `fd7036a492db60afaf2091d9f556001cb71f9f104bc6aa403eab0a5951920632` | `frontend/src/alpha/caseCalculations.js` | 完成（v60 起金額與記帳算法相同，兩邊一致；`run_qa.sh totals` 比對 VM 前端與後端） |
 | `public/docx-generator.js` | `6726dda0f766ac4a6b4dbc084aa857a182f93cb5639c05d02b7afc9d23ebbbad` | `frontend/public/alpha-documents/`（**原樣**，`run_calc_diff.sh` 核對雜湊；和 Alpha 一樣以一般 `<script>` 載入，不經 Vite 打包） | 完成：Word 在瀏覽器產生（同 Alpha） |
 | `public/docx-templates.js` | `b06c99814f1b0b3ecd556bdd3fe921f135363ed50a506f9f5b91d0fb2e3a0ef7` | 同上（原樣） | 完成 |
@@ -299,3 +305,297 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 - **切換匯入的案件仍是舊的 LMA3333 標題**（2026-09-29）：Alpha 案件的 `clauseDetails` 存的是 `Reinsurers Liability Clause`，匯入後產生文件會印舊標題，直到案件重新存檔。切換時要決定：匯入時一併換成新標題（屬於改寫匯入資料，要記在批次報告），或維持原樣。先問你。
 - **轉換程式要換掉條款裡的 Class id**（2026-09-29，同步回 Alpha 時發現）：再保人條款的 `payload.fixedClauses[].classIds` 存的是 Class 主檔的 id，Alpha 的 Property 是 45、VM 是 92。`backend/conversion/remap.py` 目前沒有這個位置：主檔用名稱比對時會因 id 不同而判定內容不一致（整批停止），Alpha 新建的再保人匯入後也會指向錯的 Class。要在 remap.py 與獨立檢查 integrity.py 加上這個位置（Class id 依對照表換成 VM 的 id），並用合成資料演練與故意破壞驗證。LMA3333 標題、Class 的 `fixedClauses` 兩邊已相同（v54），不再造成差異。
 - **清空測試資料**（2026-09-25 你的決定）：在 VM 上點畫面建立的測試案件（名稱用 ZZ 或 UI 開頭）、文件、回收桶、TW Reference 流水號，要在正式匯入前用一支有記錄、需要 root 執行的腳本清掉（Audit 保留）。執行前先備份並問你。
+
+
+## 2026-10-05：VM 高優先度 Bug 修正（Owner 已確認規則）
+- Production 關帳、產生報表、排除與匯率存檔共用 MySQL 月份操作鎖。遇到同月份操作衝突，立即回 409 operation_busy，提示稍後重試，不等待。
+- 匯率或來源變動後拒絕關帳，要求重新預覽並產生報表；關帳交易內再次核對匯率集合、數值及版本，衝突整筆回滾。
+- 排除業績自動跳過已關帳月份，延到第一個未關帳月份；來源、目的月份均保護到提交完成。
+- 帳號停用、降權及人員離職共用 ri_operation_locks 的 admin_accounts 交易鎖；第一筆可完成，移除最後啟用管理員的另一筆拒絕。
+- 新 migration coordination.0001_initial；ri_runtime 對新鎖表僅 SELECT、INSERT、UPDATE。
+- Audit 仍暫停直至另行通知。此次僅修高優先度項目；兩個中優先度 Bug 依 Owner 決定另行安排，尚未修正。未同步修改 Hatchable Alpha。
+- 並行回歸測試只可執行於隔離測試資料庫，因測試需提交資料讓其他連線可見；不可在正式 VM 資料庫執行。
+
+
+## 2026-10-06：VM 中優先度 Bug 修正（Owner 已確認小數處理規則）
+- 付款先沿用既有 money() 四捨五入至兩位小數，再檢查實際存入金額必須大於 0。拒絕零金額，不新增付款、Snapshot 或版本；超額付款也使用實際存入金額判斷。
+- 主檔新增／更新、匯率、登入及改密碼先確認請求是物件。非物件 JSON 回 400 invalid_body；保留既有認證、CSRF、權限及限流。
+- 匯率逐項檢查物件，NaN／sNaN／Infinity 等非有限值回 400；版本數字溢位回 400。儲存前四捨五入至六位小數，結果為 0 時拒絕，回應及 Snapshot 與資料庫數值一致。
+- 主檔評等清單拒絕非物件項目；主檔 id／rowVersion 溢位回 400。
+- 無新增 migration。原有高優先度交易鎖及 Audit 暫停規則維持；未同步修改 Hatchable Alpha。
+- 回歸測試 input_validation.py 在交易內執行並回滾，不留下測試資料。
+
+
+## 2026-10-06：補充 Bug 修正（依 Owner 指定順序與規則）
+- 關帳提交前在 production_sources 交易鎖內重讀完整預覽；案件公告、編輯、理賠、付款與工作流程寫入先取得同一保護。案件可先完成；來源有變動則拒絕關帳並要求重新產生報表。
+- 公告的業績月份已關帳時，自動建立排除紀錄延到第一個未關帳月份，保留原保單日期與金額；支援分期、跨年與連續關帳月份，前端提示延後月份。
+- 匯率新增／修改以 closed 報表判定月份鎖定，無匯率列的已關帳月份也拒絕寫入。
+- 理賠準備金及付款在既有兩位小數四捨五入後再驗證有限值；保留負數沖抵及合法零準備金，避免空值／零交易。
+- 密碼重設在管理員操作保護及使用者列鎖內重新檢查 token、啟用狀態及 Personnel 資格；同一 token 並行僅一筆成功。
+- Alpha 匯入先建立完整主檔對照，再轉換 fixedClauses[].classIds；匹配既有主檔與反向對帳使用轉換後範圍，獨立完整性檢查拒絕漏轉、錯誤 Class 及非 Class 引用。
+- 無 migration；Audit 維持暫停。本次沒有執行正式 Alpha 匯入。
+
+
+## 2026-10-06：忘記密碼完整流程檢查與修正
+- 含 @ 的合法帳號先以帳號名稱辨識，再嘗試 Personnel e-mail。
+- 遺失、非數字或超大 auth_user_id 不再造成 500；已停用 Django User 不寄信。
+- 申請／重設要求 JSON 物件及字串欄位，拒絕把陣列轉成新密碼。
+- 申請／重設使用單一表單提交並防止重複送出；重設後下次導航重讀登入狀態。
+- Nginx access log 遮蔽重設連結及 Referer 中的 token；SPA HTML 使用 no-store、no-referrer。
+- 隔離 MySQL/API/並行/Chromium 共 136 項通過，另驗證實際 token 未出現在測試 Nginx 日誌。前端建置及 nginx -t 通過。
+- 寄信仍未啟用，SMTP 尚未設定；Audit 維持暫停。沒有 migration，正式帳號／密碼與業務資料未改動。
+
+
+## 2026-10-06：Accounting 改以 SoA／Transactions 對帳
+- Accounting 預設顯示已儲存的 SoA 保費、理賠與沖銷交易：SoA／Statement no.、Transaction no.、Reconciliation Ref、Leg、對象、金額與結清狀態。
+- 可依 SoA、交易編號、對帳參考號或 TW Ref 搜尋；提供幣別、再保人／R/I Broker、公告日期、Leg、來源與結清狀態篩選。
+- transactionRows 沿用案件 SoA 的參考號與分期付款結清規則；納入 Reversed 案件歷史，不產生交易、不改寫既有交易。
+- 原有 rows 及記付款／沖銷 API 保留；Payment schedule 為獨立子分頁。會計可直接讀取對帳交易，既有案件讀取權限維持。
+- 在獨立 MySQL 與 Chromium 驗證會計 API、分期／理賠／沖銷對帳資料與畫面操作；沒有 migration。Audit 與寄信設定維持。
+- 本次只更新 VM，未同步 Hatchable Alpha。
+
+
+## 2026-10-06：交易編號改為 T／C
+- 新保費交易編號的 TX1／TX2／TX3 改為 T1／T2／T3；理賠交易的 CLM{id} 改為 C{id}。分績 a／b、分期 I{n}、更正週期 C{n} 與沖銷 RVS{n} 後綴沿用。
+- Accounting 與案件 SoA 以共用顯示函式呈現歷史交易的新寫法，包括沖銷引用文字；Accounting 同時接受原始與顯示編號搜尋。
+- 歷史 payload／Snapshot／Audit 的原始交易編號保持原樣，沒有資料重編或 migration；新交易直接儲存新格式。
+- 會計與交易金額、Leg、結清狀態沿用原規則。
+- Alpha 原始碼測試副本與雜湊保持原樣；差異測試僅轉換 Alpha 預期輸出中「新產生交易」的編號，其餘欄位與歷史交易嚴格比較。
+- 隔離驗證涵蓋理賠 API、Production 關帳、分期補登、編碼、計算差異及 Chromium 的 Accounting／案件 SoA 顯示與搜尋；Audit／寄信設定維持。
+- 本次只更新 VM，未同步 Hatchable Alpha。
+
+
+## 2026-10-06：前端金額格式、Case 預設值與 Claim 對象
+- 12 個金額輸入欄位使用共用 formatter/parser 顯示千分位；保留數字型別、原有小數位、上下限與理賠負數沖抵。百分比、匯率及天數不改。
+- New case 預設 TWD、Cedant/Reinsurer Tax 1%、登入 Personnel 姓名作 AE；新增再保人列 Tax 預設 1%。既有案件載入、續保及批改的資料沿用原值。
+- New case 選 Effective date 後帶一年後 Expiration date，閏日用翌年 2/28；手動設定迄日及既有案件編輯不覆寫。
+- 共用 Claim 對象顯示：Leg 1 顯示 Reinsurer/R/I Broker；Leg 2 顯示 Cedant。Accounting SoA、Payment schedule、Case SoA 共用此邏輯，Recipient 也顯示 Cedant 名稱；保留原始交易的 reinsurer 分配關聯。
+- 模板產生程式同步，重新產生保持既有 VM 修正與本次修正。
+- 隔離 MySQL/Chromium 驗證輸入、存檔、既有零稅率及日期保留、會計付款及 Claim Leg 名稱。只部署前端；後端、資料、Audit 與寄信設定維持。
+
+
+## 2026-10-06：批單退保費（保費差額，不走 Reverse）
+- 依使用者確認：批單輸入本次保費差額，正數加保費、負數退保費；原保單與原交易保留。
+- 後端僅允許資料庫確認為 endorsement 且有 parent_case 的批單填負保費；原保單及續保維持非負限制，批單 parentTwRef/序號由原流程資料固定。
+- 批單保費、再保保費與分期保費支援負數；保費差額欄位可在風險鎖定時編輯，風險與條件維持鎖定。分期差額須與總保費同方向，依絕對值比例分攤並保留原計算進位。
+- 新退保費交易沿用 E{n}/T1/T2/T3，T1 應退分保人、T2 應向再保人或 RI Broker 收回、T3 經紀費差額；不標記 Reverse 或 RVS。零經紀費的退保費批單仍能列入 Production 並產生交易。
+- 負數付款排程保留 signed amount/paid/outstanding，狀態與結清依絕對值計算。操作輸入正數現金金額，後端依原排程方向存入負數退款/回款紀錄，保留原超額、版本與付款沖銷檢查。
+- 非分期退保費的到期基準使用批單生效日；分期依各期基準日。提醒能識別負餘額及應退/應收方向。
+- Accounting 與 Case SoA 顯示實際對象及收付款方向；保費 Leg1 顯示分保人，Leg3 顯示 Broker。財務 Leg3 沿用經紀費差額及未追蹤付款狀態。
+- 隔離 QA 驗證批單建立、存檔、Announce、Production 關帳、非沖銷交易、退款/回款、分期進位、提醒及原保單完整保留；既有 API 與 frozen Alpha 差異驗證維持。沒有 migration 或正式資料改寫。
+
+
+## 2026-10-06：0609 AUW Facility 額外手動 TW Ref.
+- 依使用者確認：保留既有自動 TW Reference，另加案件層級 TW Ref. (Manual)，不以手動編號替換流水號。
+- 再保人名單包含 Lloyd's Underwriter Syndicate No. 0609 AUW (Facility) 時顯示欄位；混合再保人案件也適用。草稿可先留空，Announce 前前後端檢查必填，已公告及更正案件也不可存成空白。
+- 手動編號以文字保留前導零及標點、去前後空白，上限 160 字元。案件概覽、列表及 Accounting SoA／Payment schedule 顯示兩組編號，列表及會計可依手動編號搜尋。
+- 移除指定再保人後，存檔清除額外編號；新增續保與批單草稿清空手動編號供重新輸入。既有 Reinsurer Ref.、交易編號與上帳金額沿用原規則。
+- 隔離 API／MySQL／Chromium 及原有流程回歸驗證通過。沒有 migration 或既有資料改寫；未變更文件產生、Audit／寄信設定，未同步 Hatchable Alpha。
+
+
+## 2026-10-06：TW Ref. 顯示合併及順序
+- 依使用者指定：自動 TW Ref. 在前、AUW 手動編號在後，以 & 連接；例如 TWPF2601001 & TW26SM010001。
+- 案件列表及預覽、案件標題及概覽、Case SoA、Reminders、Accounting SoA／付款排程及付款視窗使用同一顯示函式。原來兩個列表欄位合併成 TW Ref. 一欄。
+- 案件及會計搜尋同時支援完整合併文字或任一單獨編號；一般案件只顯示自動編號。手動輸入欄位仍只編輯 AUW 編號。
+- 只部署前端。後端、兩個原始欄位、交易編號、文件產生、既有資料及 Audit／寄信設定維持。隔離 Chromium 驗證順序、畫面、搜尋及原始資料不變。
+
+
+## 2026-10-06：AUW 保費固定比例及 Draft Policy Period
+- 指定 0609 AUW (Facility) 再保人列的 Deductions 固定 10%、Reinsurer Tax 固定 0%。選取及載入編輯時自動帶入，欄位鎖定；後端新增／儲存一律寫固定值。其他再保人、Cedant 的比例及稅率保留各自原值。
+- 舊 AUW Draft 若仍是其他比例，前後端拒絕 Announce，要求先編輯存檔。既有交易與文件不重算、不改寫。
+- 已實際重現：Effective Date 鍵入後按 Tab，新案會帶一年後日期，已存 Draft 因 isEditing 檢查被跳過而不帶。修正空白迄日 Draft 可自動帶一年，並以日期模型監看補強；閏日帶翌年 2/28，手動或既有非空迄日保留。已公告及批單的原日期行為維持。
+- 隔離 API／MySQL／Chromium 驗證固定比例、混合再保人、零稅率上帳金額、批單退款、鍵入及重開 Draft 的日期；既有流程與 Alpha 計算差異回歸通過。沒有 migration 或正式資料批次改寫。
+
+
+## 2026-10-06：AUW Deductions 改為可修改的選取預設值
+- 依使用者確認：選取 Lloyd's Underwriter Syndicate No. 0609 AUW (Facility) 時，只有該列 Deductions 自動帶入 10%；欄位可修改。儲存、重開及 Announce 保留最後輸入的比例，包括 0%。
+- 移除前後端強制 Deductions 10% 的覆寫及公告限制；仍驗證 0–100% 的數值。草稿可保留空白，但公告前必填。選取其他列再保人不會重設既有 AUW 的比例。
+- 使用者確認 Reinsurer Tax 維持固定 0% 並鎖定；其他再保人與 Cedant 的條件維持各自數值。
+- 隔離 MySQL/API/Chromium 實測選取預設、手動修改、儲存重開、混合列及 0%；實際 Announce、Production 關帳及 SoA 驗證 8,000 保費、12.5% Deductions，應付 7,000；退費 -800 對應 -100 Deductions、-700 淨額。批改與續約沿用既有案件比例。
+- 保留已部署的 Policy Period 與雙 TW Ref. 行為。沒有 migration 或正式案件、交易及文件批次改寫。
+
+
+## 2026-10-06：AUW Facility 月底＋120 天付款及新案 Cedant 90 天預設
+- 使用者逐項確認：0609 AUW (Facility) 保費付款採適用日期所在月底＋120 個日曆天，實際付款日期遇假日不順延；Accounting 與既有提醒採實際日期前 10 天，12:00 Taiwan。單期按保單生效日、分期按各期付款基準日、批改補退保费按批改生效日。
+- AUW 120 天為固定條件，前端選取及載入時帶入且鎖定，分期 AUW override 也鎖定；後端固定 120 且排程忽略其他付款天數覆寫。Deductions 仍預設 10% 且可修改，Tax 維持 0%。
+- 所有既有 AUW 排程讀取時套用新日期，原收付款紀錄、付款對應 key、交易及上帳分錄保留。Accounting 顯示月底基準、會計提前日期、AUW 實際付款日期，避免混淆。
+- 使用者確認 Cedant 收款 95% 以上為保單生效日＋90 天；所有新案的 Case Payment Terms 預設 90 且可修改，會計仍提前 15 天。新案以 Cedant 自身的 Case／Installment terms 計算，不受再保人 override 影響；新建及工作流程的新 Draft 記錄 cedantTermsBasis=case。既有非 AUW 案件保持舊最短再保期限算法，既有已填天數及複製案件的明確條件保留。
+- AUW 固定條件以 canonical payment_terms_signature 比較，避免舊已公告案件 null／舊 override 因載入帶 120 而誤判已改付款條件；其他付款條件與計算模式公告後仍鎖定。
+- 隔離 MySQL／API／Chromium 驗證：同月不同日、月底長短與閏年世紀、跨年、分期、補退保費、既有付款／沖銷與提醒日期，以及新案 90 天、手動例外及既有 180 天保留。既有案件／會計／關帳／批改及 Alpha 計算差異回歸通過。沒有 migration 或正式資料批次改寫。
+
+
+## 2026-10-07：Board of Directors／President 正式唯讀角色
+- 使用者指定 David Kao／david.kao@tw-insure.com，Department=Board of Directors，Role=President；先建立 Personnel，暫不開通登入帳號。Board of Directors 預設不列入業績分配。
+- 新增正式 president 角色，所有相同角色共用：Dashboard 全案、Account List 全案（含他人草稿）、文件閱讀下載、Reinsurance MDM、Production Report、Accounting、FX Rates 唯讀。排除 Personnel & Accounts、Draft Recycle Bin、Audit Log；不授予寫入、公告、人員、帳號、目標設定、系統管理權限。
+- 前後端新增 board_of_directors／president 選項與預設；Personnel migration 0004 擴充既有 CHECK 約束允許值，保留既有資料與未知值拒絕檢查。
+- 修正案件頁 Record notification 缺少 cases.write 判斷，以及唯讀草稿文件頁狀態徽章誤顯示 Announced；既有各項修改／上帳／理賠／文件／收付款／Production 操作由後端既有權限與角色檢查拒絕。登入者修改自己的密碼仍沿用帳號安全流程。
+- 隔離資料庫測試 President 跨所有者草稿與各種案件狀態、業務讀取、排除 API、每項寫入拒絕且資料指紋不變；既有角色登入及人員帳號、案件流程、會計、關帳、文件、理賠回歸通過。Chromium 驗證部門角色下拉預設、人員名冊及唯讀頁面、禁止頁面導向。
+
+
+## 2026-10-07：President 作為所有部門的 Supervisor 選項
+- 使用者確認所有部門都能選 David Kao 為 Supervisor，禁止選自己，既有主管不改寫；並說明 President 只有一位，因此以在職 President 角色納入跨部門主管候選，現在為 David Kao。
+- Personnel 前端 Supervisor 選項及後端 resolve_supervisor 同時擴充：同部門在職人員、在職 General Manager、在職 President；未開通登入帳號不影響主管候選資格。停用在職人員仍排除；編輯時排除自己；原同名主管解析的同部門優先與 id 次序保留。
+- 選取時顯示 David 的 Email，後端依人員資料解析，忽略客戶端傳入的錯誤 Supervisor Email，讓後續主管提醒沿用正確聯絡資料。現有 SupervisorName／Email 與 David 帳號、在職、分績設定均保留。
+- 隔離 Personnel／Accounts 回歸及八部門 President Supervisor API、Chromium 驗證通過：跨部門選取、新增／編輯儲存、自動帶 Email、未開通帳號可被選取、停用排除、不能選自己、舊 General Manager／同部門規則保留。沒有資料庫 migration 或正式人員資料批次修改。
+
+
+## 2026-10-07：AUW Draft 手動 Ref. 必填及 Howden 綁定
+- Placement 包含 0609 AUW (Facility) 時，新增／編輯 Draft 必須填單行、最多 160 字的手動 TW Ref.；前端提示並阻擋，後端獨立驗證。Announce 仍保留原有自動流水號及自動 & 手動 Ref. 顯示。
+- AUW 的 Foreign RI Broker 自動帶入 Howden Specialty Limited 並鎖定；後端強制正規化，Announce 亦檢核。改成非 AUW 時解除鎖定、清空 Howden。混合 Placement 的其他再保人欄位保留獨立設定。
+- AUW 續保／批改先提示輸入新 Ref.，後端檢查後才建立新 Draft，不沿用來源手動 Ref.；一般案件沿用原工作流程。
+- 經使用者確認，既有 AUW 案件批次補上 Howden，逐案提升版本並留存 Snapshot；只改 AUW foreignBroker，既有稅率、Deductions、金額、手動／自動 Ref.、交易及收付款紀錄保留。缺少手動 Ref. 另輸出待補清單，不生成替代編號。Audit 暫停及寄信設定沿用。
+- 隔離資料庫 API、既有案件／工作流程／Accounting／Production 回歸及 Chromium 實際操作驗證通過，包含必填阻擋、後端防繞過、混合 Placement、續保／批改、舊案修正與重跑不重複寫入。
+
+
+## 2026-10-07：AUW 與批單單期結算規則
+- 手動 AUW 欄位及提示改為 TW Ref. (for AUW)。AUW 改選其他再保人時，清空 Howden、Deductions、Tax、再保人付款天數及其分期覆寫；新選 AUW 仍帶入可修改的 10%、固定 0% Tax 與 Howden。
+- 所有批單不允許保費分期；工作流程建立單期，前端停用分期及 Cedant 天數，後端依實際 case_kind 拒絕繞過。原保單、續保保留原有分期。
+- 批單 Cedant 天數繼承原始保單，不沿用中間批單；以台北時間實際 Announce 日與批改生效日較晚者加原保單天數，會計提前 15 天。AUW 批單採同一較晚日期的月底加固定 120 天，會計提前 10 天，遇假日不調整。非 AUW 再保人原付款規則保留。
+- Announce 時寫入伺服器認定的時間；草稿不推測公告日，後續修改不接受使用者偽造時間。公告後批改生效日依既有付款條件鎖定。
+- 經使用者確認，TWPF2609001-E01 改為單期，新日期適用，原始業績合併歸屬 2026-09；9 月已關帳，透過新增不可改寫的 exclusion 遞延到下一個未關帳月份。已關帳報表、原保單、稅率、佣金、保費、既有上帳與收付款紀錄不改寫；缺少 AUW Ref. 沿用待補，不生成號碼。保留版本與 Snapshot。
+- 隔離 API、帳務／Production／負保費回歸及 Chromium 實際操作驗證通過；既有批單修正可重跑且不重複寫入。
+
+
+## 2026-10-07：Finance 案件唯讀、President 文件限制、主管新增下屬
+- 使用者逐題確認 A/B/A/A/A：Finance Staff 與 Finance Manager 可檢視全部 Account List、案件明細、流程與理賠，保留原帳務權限，不新增案件寫入或文件權限；President 隱藏整個文件區，不能預覽、產生、下載、上傳、勾選或刪除文件。
+- 有其他 Personnel 指定本人為 Supervisor 即具主管身份，依既有同部門優先與同名排序規則判斷。所有角色可依此取得 personnel.read.team 與 personnel.create.subordinate；不授予 personnel.write 或 accounts.manage。移除最後一筆主管指定後，後端立即收回窄範圍權限。
+- 主管只能新增本人所屬部門的下屬；角色固定為再保部 sales、財務部 accounting、其他部門 viewer；Supervisor 固定本人、主管 Email 由後端解析。非原 personnel.read 角色只可讀本人及同部門直屬下屬，不能編輯既有人員；General Manager 保留既有全人員唯讀，System Administrator 保留完整人員與帳號管理。新增人員不建立或啟用登入帳號。
+- 前端新增 Add subordinate 操作，部門、角色與主管固定，隱藏無權限的人員編輯、帳號管理、業績目標及文件入口；後端拒絕跨部門新增、角色升權與換主管。保留原案件負責人轉移、Draft 文件刪除、5 年還原與禁止永久刪除規則。
+- 213 項新權限 API 驗證、12 套隔離回歸及 Chromium 驗證通過。無資料庫 migration；正式資料表內容指紋與筆數、Email 與 Audit 暫停狀態於部署前後一致。
+
+
+## 2026-10-07：主管可建立直屬下屬登入帳號
+- 使用者選擇 A：已有下屬的主管可為既有或新增的同部門、一般角色直屬下屬建立登入帳號。一般角色依部門固定為 reinsurance=sales、finance=accounting、其他=viewer。
+- 新增 accounts.create.subordinate 動態權限，僅建立帳號 API 採 accounts.manage 或此權限；停用、重新啟用及重設密碼仍限 accounts.manage。主管不能修改既有人員、角色、主管或 Email，也不能為自己、同部門非下屬、跨部門、非一般角色、非在職或已有帳號的人員建帳號。
+- 帳號建立沿用 ADMIN_ACCOUNTS 共用交易鎖，在鎖定後重新驗證主管及人員現況；主管只能使用既存 Personnel Email。維持密碼強度、一次性回傳、首次登入強制改密碼與 Audit/Snapshot 原子寫入。
+- 前端僅在後端 canCreateAccount 為真時顯示 Create account；一般主管僅取得其直屬一般角色下屬的帳號名稱，其餘管理控制仍隱藏。
+- 主管權限 API、既有帳號/密碼/角色與 President/主管回歸及 Chromium 瀏覽器驗證通過，詳見 Supervisor-Accounts-2026-10-07 驗證產物。無 migration；正式資料與帳號指紋及設定於部署前後一致。
+
+
+## 2026-10-07：Finance Staff 業績唯讀、President 人員與帳號唯讀
+- 使用者確認 Finance Staff 可檢視月業績預覽與既有版本、下載既有版本 Excel，但不能產生報表或排除業績列；關帳仍不允許。Finance Manager 與 System Administrator 保留產生、排除及關帳權限，財務兩角色原帳務操作及全部案件檢視保留。
+- 使用者選擇 A/A：President 可唯讀全部部門的人員，不能新增 Personnel，也不能建立登入帳號。新增 President personnel.read；主管身份仍可由 Personnel 指定成立，但 President 不取得任何主管額外寫入權限。帳號服務在鎖定現有資料後亦拒絕 President。
+- 業績 API 的 readOnly 與 canOperate 正確反映角色，已知無權限的寫入在取得月份鎖及計算來源前回 403；前端隱藏寫入按鈕並使用唯讀說明，既有 XLSX 下載保留。
+- President 全人員名單入口可用，前端不顯示人員新增、修改、停用或帳號建立、重設等控制。其他主管同部門一般角色下屬新增與建帳號規則保留。
+- 隔離角色權限、人員帳號、密碼、President、業績 API 回歸及 Chromium 操作與實際 XLSX 下載驗證通過，產物見 Role-Refinement-2026-10-07。無資料庫 migration；正式資料、帳號及設定部署前後一致。
+
+
+## 2026-10-07：Dashboard 貨幣位置與標題
+- Total Gross Premium 及 Outstanding · Cedant / Reinsurer 改為 TWD 前綴，例如 TWD 0 與 TWD 0 / 0，保留原有千分位格式。
+- 趨勢標題改為 YTD Brokerage Trend (TWD)。
+- 僅調整 Dashboard 前端顯示；正式建置與獨立 Chromium 驗證零值及非零金額，既有資料及後端維持。
+
+
+## 2026-10-07：Dashboard Total Bound YTD 標題
+- YTD Case Volume 改名為 Total Bound YTD；沿用原有當年及去年同期計數，後端計算規則維持。
+- 前端建置與獨立 Chromium 檢查標題、當年及去年同期數值，以及既有 TWD 格式。
+
+
+## 2026-10-08：Accounting 合併 SoA／Transactions 與收付款
+- 改為單一交易列表，每筆既有 Transaction 顯示 SoA、對帳參考號、實際對象、到期日、已收付、未清餘額及操作；不列出尚未生成交易的付款排程。
+- 同幣別、同收付方向、同實際交易對象可跨案件／分期登錄一筆匯款。每筆交易手動分配，可部分收付；分配合計須等於匯款總額。版本、餘額或任何一筆驗證失敗時整批不寫入。
+- 新 paymentEntries 記錄原始交易編號、共同 batchId、匯款參考號與金額；每案件只增加一次版本，保留 Snapshot 與原有 Audit 設定。既有排程收付以整數分攤，現金不重複計算。
+- T3 是保留經紀費，沒有獨立匯款登錄；對應的 T1／T2 全結清後自動結清，沖回後重新反映狀態。
+- Claim 紀錄建立應收應付，實際向再保人收款及付給分保人分別在 Accounting 登錄；Claims 的文字改為 obligation。案件 SoA 即時顯示一致的收付／結清狀態。
+- 更正匯款必須整筆新增不可覆寫的 reversal，保留所有原始分配。原有單筆付款 API 保留相容性，但不能繞過整批沖回規則。
+- 50 項新會計 API、既有案件／Production／理賠測試及實際 Chromium 操作驗證；7,100 組計算向量與部署前完全相同，既有 Alpha 差異不增加。無 migration、未更改正式資料、Audit 暫停與寄信關閉維持。此批為 VM 更新。
+
+
+## 2026-10-08：移除共用頁框開發提示
+- 移除所有登入後分頁的 VM 版本／Audit 狀態與案件／提醒信搬遷說明列。
+- 移除左上角「再保部 | VM」與「Facultative Outward — Phase 1」；登入、忘記密碼與重設密碼頁的同名標示一併移除。
+- 前端 production build 與正式靜態檔核對通過。僅四個 Vue 顯示模板變更，後端服務、業務資料與設定不變。
+
+
+## 2026-10-08：主分頁說明文字
+- Dashboard：Production & Records Overview。
+- Account List：All outward cases；共用路由與案件工作區的頁首設定同步更新。
+- FX Rates：Official monthly foreign currency to TWD rates。
+- 前端建置與正式靜態檔核對通過；僅說明文字調整。
+
+
+## 2026-10-08：Risk Details 欄位排列與 Type 寬度
+- 第 1 排：Reinsurance structure、Case owner、AE、Currency。
+- 第 2 排：Class、New / Renew、Type；Type 佔兩格。
+- 第 3 排：Reinsured、Original insured (EN)、Effective date、Expiration date。
+- Type 輸入改為依內容自動增高的文字欄位；固定的 structure suffix 保留。窄螢幕仍依兩欄／一欄排列。
+- 前端建置、瀏覽器欄位排列與長文字顯示檢查通過；僅重建 nginx 前端，業務資料及後端不變。
+
+
+## 2026-10-08：Case Overview 上傳與 Announce
+- Review & Announce 自 Cover & Debit Note 移至 Overview；正式確認對話框及 Announce API 保留。
+- Overview 與 Cover & Debit Note 均提供 Upload Evidence，共用檔案種類、待上傳檔案與已上傳資料。
+- 首次開啟案件即載入證據；切回 Overview 更新覆蓋狀態。Overview 顯示缺漏提醒、證據覆蓋與所選檔案。
+- 前端建置及隔離瀏覽器流程檢查通過；僅更新前端，後端與業務資料不變。
+
+
+## 2026-10-08：Case Documentation 分頁名稱
+- Case 中 Cover & Debit Note 分頁名稱與對應頁首改為 Documentation。
+- 模板產生器及既有 UI 測試選取器同步更新。
+- 前端建置及正式靜態檔文字核對通過；上傳及 Overview 的 Review & Announce 保留。
+
+
+## 2026-10-08：純 AUW 以手動 Ref. 作為主編號
+- 純 AUW 原保單、續保及批單 Announce 直接採手填 TW Ref. (for AUW)，不產生、查詢或消耗流水號；混合及一般案件保留自動 TW Ref.。顯示相同主／AUW Ref. 時去重，混合案件維持自動編號在前。
+- 手動 AUW Ref. 在 Draft、修改、批單、續保及 Announce 檢查與其他案件的主編號、手動編號及舊編號衝突；回收與封存案件仍保留編號。共用序列化鎖避免併發重號，自動流水號略過已被手動 Ref. 保留的值。手動主編號公告後鎖定。
+- 主編號與流水號前綴欄位擴為 192 字元，保留手動 Ref. 160 字元限制，並保留長 Ref. 的批單／續保來源連結。純 AUW 批單業績編號由正式 endorsementSeq 判定。
+- 使用者將免文件決定改為 C：原有 Offer Slip、所有再保人 Signed Slip／Confirmation E-mail 及 Signed Slip 提醒規則全部保留。
+- 既有純 AUW 案件僅製作轉換清單；本次未變更案件、帳務、文件、報表、流水號或其他業務資料。經確認後才可使用有版本、歷史及關聯防護的轉換工具。
+- 隔離 API 回歸與逐字鍵盤、滑鼠錄影驗證通過，包括 Production 關帳、Accounting、批單及續保。
+
+
+## 2026-10-08：已批准既有 AUW 主編號轉換
+- 使用者選 A，僅將 Polystar／Starich（fb43316b-126d-4e0b-be26-ba93b7553771）主編號 TWPF2311001 改為 TW23SM010736；舊號保留 previousTwRefs 可查詢且不能再分配。
+- 轉換前核對第 9 版、純 AUW placement、未上帳／無現金／無理賠／無報表或續保批單關聯；同一交易內只變更主編號與來源／歷史 metadata、版本與編輯資訊，新增一份 Snapshot。金額、日期、文件與流水號內容保留；Audit 暫停、寄信關閉設定保留。
+- 歷史 Ref. 改以文字 casefold 比對，避免 MySQL JSON 陣列大小寫敏感導致舊号重用；API、轉換防護與搜尋驗證通過。
+
+
+## 2026-10-08：Production Report 新增 First Policy No（首次承保號碼）
+- 起因：批單的 Policy No 是原保單的 TW Ref，所以批單即使改了 Insured Name 也能用 Policy No 歸組；但續保會產生新的 TW Ref，匯出檔上看不出新舊保單是同一個案子（系統內有記 `renewedFromTwRef`，匯出沒有）。
+- 做法（使用者選定）：匯出與畫面的**最後一欄**新增 `First Policy No`＝沿「批單→原保單、續保→來源」一路追到最初那張保單的 TW Ref。同一案子的各年度保單與批單這欄相同，不受 Insured Name 變更影響。Policy No、Endorse No 等既有 17 欄不變。
+- 追溯規則（`production/calc.py` 的 `reference_links`／`first_policy_no`）：TW Ref 改過時（`previousTwRefs`）以現行號碼為準；來源不存在時顯示最後知道的號碼；有循環或自我指向時停止；連結表用「所有有 TW Ref 的案件」建（含已封存），中間那張被封存也不會斷。**只靠 TW Ref 連結，從不比對名字**，同名不同案不會被併在一起。
+- 不放進 `source_signature`：連結不影響金額，避免讓已產生的報表全部變成「過期」。已關帳的月份保存的是當時的列，**不會補這一欄**（欄位是空白）；開著的月份重新 Generate 才會有。舊系統／Excel 轉入、沒有續保來源紀錄的案件，這欄就是它自己的 Policy No。
+- 偏離 Alpha（**尚未同步回 Alpha，使用者決定先只改 VM**）：`production-xlsx.js` 多 4 處（標題、`cellValue` 多一格、第 18 欄寬度、autoFilter A1:R）；`run_calc_diff.sh` 改由 `scripts/check_production_xlsx.py` 核對「Alpha 原檔雜湊 + VM 版 = 原檔 + 這 4 處」。差異測試（`qa/calc/compare.py`）比對 Alpha 前先拿掉 `firstPolicyNo`，沒有這個欄位會算不一致。
+- 驗證：新套件 `qa/suites/production_first_policy.py`（25 項，含批單／續保／從批單續保／兩層續保／來源不存在／中間封存／舊 TW Ref／循環）；故意弄壞 8 處（批單不追父、續保不追來源、忽略舊 Ref、不用現行 Ref、View 不傳完整連結表、欄位進簽章、少標題、拿掉循環保護）全數被抓到（拿掉循環保護會無窮迴圈卡死）。
+
+
+## 2026-10-10：Case Loss Record 0 年規範
+- New 案的 Past year(s) 可填 0，由業務員判斷；所有 Case 儲存時年數與 broker advised date 不可空白。
+- 0 年時 Loss Record 明細必須為空；Endorsement 沿用 0 年，Renewal 建立時可帶入 0，但編輯儲存前必須改為大於 0。
+- 0 年摘要在 Case、Word 與 PDF 顯示 Loss Clean since operation.；Alpha 參考檔保留原樣。
+
+
+## 2026-10-13：Accounting 顯示原被保險人名稱
+- Accounting 主分頁 SoA / Transactions 在 Transaction / SoA / TW Ref 後新增 Original Insured (EN / CN) 合併欄：英文在上、中文在下，缺值顯示 —。
+- 所有交易列從所属案件 payload 取得英文／中文原被保險人；兼容舊 original_insured 欄位。
+- 隔離 accounting_transactions API 回歸、18 組純函式比較、瀏覽器排列與唯讀／會計視圖驗證通過；交易金額、餘額、結清、權限及業務資料不變。
+
+
+## 2026-10-13：3 小時人員閒置自動登出
+- 使用者選擇 A/A：真實點擊、鍵盤／輸入、捲動重新計時；滿 3 小時閒置自動登出，提前 5 分鐘提醒，可點 Continue using 重新計時。提醒告知未儲存內容可能遺失，不會自動提交人員／案件或其他業務資料。
+- 改為 10800 秒閒置與 300 秒提醒，SESSION_SAVE_EVERY_REQUEST=False。登入建立人員活動時間與非憑證公開識別碼；只有 CSRF 保護且識別碼符合的 activity POST 才延長絕對期限，背景 API、程式捲動、焦點切換不續期。後端 middleware 與 Django session 到期共同拒絕過期存取，過期 cookie 不能復活。
+- SPA 與管理員 Data viewer 共用活動偵測程式；多分頁同步期限，登出前重新查核伺服器狀態，避免其他分頁已續期時誤登出。不同瀏覽器登入各自計時，改密碼換 Session cookie 時保留活動識別碼與期限。
+- 舊 8 小時 Session 在下一個已登入請求採用新規則；重新整理頁面載入新版提醒與活動偵測。未新增資料表或 migration，未批次刪除現有 Session，未更改角色權限、帳號、密碼或既有業務資料。
+- 新閒置邊界與 CSRF／到期重放檢查、登入／帳號／密碼重設／管理員／President 回歸與 Chromium 多分頁、持續輸入、捲動、提醒、自動登出驗證通過。僅獨立 QA 使用縮短時間，正式部署另驗證 10800/300 秒。產物見 Idle-Timeout-2026-10-13。
+
+
+## 2026-10-13：Swiss Re Asia Facility Property 會計規則
+- 僅適用 Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)／Property。原保單、續保、分期及加費批單採約定 90／會計 75 個日曆天；批單取生效日與正式 Announce 台北日較晚者。假日不順延；75 天提醒、超過 90 天逾期。
+- Swiss 固定 02/14、05/14、08/14、11/14；保費依會計 75 天、最後填寫收款日期及實際手動確認日取最晚歸期。月底為確認截止，提前收齊不提前結算，未确认顯示原定及目前預計日期。我方漏付、銀行退回保留原期並標逾期。
+- 全筆 insurer 應收（含其他再保部分）帳面結清後由會計確認；新增／修改／刪除或沖回收款紀錄須重確認。手續費／短收須先留原因登錄非現金結清。每笔 Swiss 应付一次全額沖銷，可合併匯款分配多筆。
+- 退費 Swiss 原定收款提前一個結算期，仍受正式 Announce 月底列期限制；逾期保留原日、不滾動催收日期。所有再保退款確認收齊後才整筆退保險公司，可提前退款，原 75／90 日保留。批單不分期、不混合補退費。
+- 原案及其對應退費批單同一 Swiss 結算期可抵減，保留雙邊原金額、實際淨收付與互相連結的非現金沖銷；不同原案及跨期不互抵。已送出清單跨期時由會計手動修訂確認。
+- 尚未結算舊案於讀取套用規則；可驗證歷史結清時間承接並保留來源，無來源需會計重確認；已完成付款及銀行退回原紀錄保留。雙方清帳前對帳，依使用者最新決定不建立清帳後差額項目。
+- Accounting 新增 Swiss Facility · Property 操作表。27 日期／邏輯測試、56 隔離 API 檢查、12 套 979 項既有回歸、5 項瀏覽器流程及前端建置通過。Finance QA 提醒讀取預期與 2026-10-07 已核准全案讀取權限一致，未修改權限。
+- 無 migration、無正式業務資料批次改寫；上線前後所有 managed model（除 session）筆數／內容指紋相同；Audit 暫停及 Email 關閉保持。同期 System Reference 英文介面與文件名稱更新已保留。
+
+
+## 2026-10-13：Dashboard New Business MTD 新增 Case 入口
+- 在 New Business MTD 卡片右下角新增 + New Case 按鈕；依 cases.write 權限顯示。
+- 點擊導向 /cases?action=new，消費查詢後沿用現有 startNewCase 表單及預設值。開啟表單不寫入案件資料，待使用者儲存。
+- 前端建置、隔離瀏覽器的桌面／手機點擊、預設值、重載及權限檢查通過；僅更新前端。
+
+
+## 2026-10-13：Swiss Accounting 無資料時固定顯示
+- 移除 Swiss Facility · Property 區域的非空案件顯示限制。沒有符合案件仍顯示標題、75／90 天與固定 Swiss 日期說明、日期及收齊確認欄，空白表格說明 Swiss Facility Property 案件 Announce 後列入。
+- 7 項隔離瀏覽器驗證通過：會計及唯讀空白狀態、既有收齊／清單修訂／整筆合併匯款／唯讀控制／Swiss 範圍鎖定。前端建置通過。僅重建 nginx，後端、資料庫、PDF 服務及所有 managed model 指紋保持。
