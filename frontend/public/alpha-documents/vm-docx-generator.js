@@ -158,7 +158,7 @@
       }
       const amount = index === rawInstallments.length - 1 ? roundMoney(total - used) : roundMoney(total * w[index] / weightSum);
       if (index !== rawInstallments.length - 1) used = roundMoney(used + amount);
-      const label = installmentEnabled ? (text(installment.performanceMonth) ? `${text(installment.performanceMonth)} instalment` : `Instalment ${index + 1}`) : '';
+      const label = installmentEnabled ? `Instalment ${index + 1}` : '';
       return { label, dueDate, amount };
     }).filter((row) => row.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     if (!rows.length) return '';

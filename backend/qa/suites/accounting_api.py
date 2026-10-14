@@ -190,7 +190,10 @@ try:
         _, _, rows = ledger(fin, posted); rest = next(x for x in rows if x.get("scheduleKey") == key)["outstanding"]
         r = pay(finm, posted, key, rest); posted.refresh_from_db()
         _, _, rows = ledger(fin, posted); ced3 = next(x for x in rows if x.get("scheduleKey") == key)
-        check("paying the balance settles the row (finance manager)", r.status_code == 200 and ced3["outstanding"] == 0 and ced3["paymentStatus"] == "settled" and ced3["settlement"] == "settled" and ced3["partial"] is False, ced3)
+        check("paying the Facility balance awaits manual settlement (finance manager)", r.status_code == 200 and ced3["outstanding"] == 0 and ced3["paymentStatus"] == "pending_confirmation" and ced3["settlement"] == "pending_confirmation" and ced3["partial"] is False, ced3)
+        r = post(finm, "confirm_facility_settlement", posted, scheduleKey=key, note="Bank and statement reconciled"); posted.refresh_from_db()
+        _, _, rows = ledger(fin, posted); reconciled = next(x for x in rows if x.get("scheduleKey") == key)
+        check("finance manager manually settles the cleared Facility schedule", r.status_code == 200 and reconciled["settlement"] == "settled", reconciled)
         r = pay(fin, posted, key, 0.01); check("a settled row cannot take more money -> overpayment", code(r) == "overpayment")
         rclosed = pay(admin, closed, "case-effective-date:reinsurer:r1", 5); check("admin can record on a Confirmed case", rclosed.status_code == 200, rclosed.content[:200])
 

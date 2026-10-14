@@ -244,7 +244,7 @@ selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarni
 caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
 accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
 claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
 downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
 toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
 announceDialogVisible, announceConfirmed, announcing, openAnnounceReview, announceSelectedCase,
@@ -497,6 +497,12 @@ body = body.replace(old, '                      <el-alert v-if="!selectedPayload
 # Every non-installment Debit Note reinsurer needs an effective payment term.
 body = body.replace(old, '                      <el-alert v-if="!selectedPayload.parentTwRef &amp;&amp; missingDebitPaymentTerms(selectedPayload)" type="warning" :closable="false" show-icon title="Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note."></el-alert>\n' + old, 1)
 
+# Installment Debit Notes require an actual date in every saved row.
+body = body.replace(old, '                      <el-alert v-if="!selectedPayload.parentTwRef &amp;&amp; missingDebitInstallmentBaseDates(selectedPayload)" type="warning" :closable="false" show-icon title="Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note."></el-alert>\n' + old, 1)
+
+# Each installment/reinsurer pair must resolve a valid payment term.
+body = body.replace(old, '                      <el-alert v-if="!selectedPayload.parentTwRef &amp;&amp; missingDebitInstallmentPaymentTerms(selectedPayload)" type="warning" :closable="false" show-icon title="Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note."></el-alert>\n' + old, 1)
+
 # Treaty documents temporarily bypass business-field requirements.
 body = re.sub(r'(<el-alert v-if=")([^"\n]+)("[^\n]*title="(?:Complete|Select|Add|Enter|Assign|Use)[^"\n]+(?:generating)[^"\n]+")', r'\1!isTreatyDocumentCase &amp;&amp; (\2)\3', body)
 body = body.replace(':disabled="Boolean(documentGenerating) || !selectedCase.twRef"', ':disabled="Boolean(documentGenerating) || (!isTreatyDocumentCase &amp;&amp; !selectedCase.twRef)"')
@@ -606,6 +612,9 @@ assert body.count('<el-input-number v-model="row.paymentTermsDays" :min="15"') =
 body = body.replace('<el-input-number v-model="row.paymentTermsDays" :min="15"', '<el-input-number v-model="row.paymentTermsDays" :disabled="isSwissProperty" :min="15"', 1)
 assert body.count('<el-input-number v-else v-model="row.reinsurerPaymentTerms') == 1
 body = body.replace('<el-input-number v-else v-model="row.reinsurerPaymentTerms', '<el-input-number v-else-if="isSwissProperty && isSwissFacility(reinsurer.name)" :model-value="90" disabled :controls="false"></el-input-number><el-input-number v-else v-model="row.reinsurerPaymentTerms', 1)
+
+# Facility reconciliation is explicitly confirmed by Accounting.
+body = body.replace("open: 'Open', not_tracked", "open: 'Open', pending_confirmation: 'Awaiting confirmation', not_tracked")
 
 TARGET.write_text(script % "\n".join("  " + l for l in exported.split("\n")) + body + risk_type_style, encoding="utf-8")
 print("wrote", TARGET, len(body.split("\n")), "template lines")

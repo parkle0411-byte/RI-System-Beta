@@ -599,3 +599,11 @@ Alpha 仍在持續修改。要確認哪些「已移植」的檔案在 Alpha 又�
 ## 2026-10-13：Swiss Accounting 無資料時固定顯示
 - 移除 Swiss Facility · Property 區域的非空案件顯示限制。沒有符合案件仍顯示標題、75／90 天與固定 Swiss 日期說明、日期及收齊確認欄，空白表格說明 Swiss Facility Property 案件 Announce 後列入。
 - 7 項隔離瀏覽器驗證通過：會計及唯讀空白狀態、既有收齊／清單修訂／整筆合併匯款／唯讀控制／Swiss 範圍鎖定。前端建置通過。僅重建 nginx，後端、資料庫、PDF 服務及所有 managed model 指紋保持。
+
+
+## 2026-10-14：Swiss 整合至單一 Accounting 清單
+- 使用者明確同意移除獨立 Swiss Facility · Property 專區，將日期與人工操作整合至既有 SoA / Transactions。
+- Swiss 原定／目前結算日、月底截止、75／90 日期、延期、逾期、收齊狀態均在對應交易列顯示；多分期按各自排程顯示。移除重複表格，保留會計手動收付、收齊、結清、費用／短收、同案同期抵減、清單修訂與歷史；輔助操作由該列 More 開啟。
+- 已 Announce 尚未 Production close 的 Swiss 項目在同一清單顯示，清楚標示 Awaiting Production close，沿用原 schedule payment／confirmation API；正式交易生成後以 cashParts 對應排程，避免重複列出及重複加總。原歷史反向交易及理賠不遮蔽現行保費排程。
+- 12 項資料整合檢查、16 項 Chromium 流程與前端建置通過，涵蓋無資料、已上帳／未上帳、保費／退費、收齊／取消、手續費、清單修訂、抵減、整筆合併匯款、人工結清、其他 Facility 與唯讀。測試採合成資料，無正式業務寫入。
+- 僅更新前端並重建 nginx；所有後端計算、75／90 天、Swiss 歸期及延期、月底截止及手動結清規則保留。後端／MySQL（及存在的 PDF）容器、業務資料指紋與設定保持。已備份來源與舊映像，可回復。

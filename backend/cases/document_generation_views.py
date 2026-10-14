@@ -6,6 +6,7 @@ The retired PDF route returns 410 for previously opened clients.
 """
 import re
 import uuid
+from datetime import date
 
 from django.db import transaction
 from personnel.models import Personnel
@@ -35,6 +36,16 @@ def _text(body, key):
 def _valid_payment_terms(value):
     days = js_to_number(value)
     return js_is_finite(days) and days >= 15 and days == int(days)
+
+
+def _valid_installment_base_date(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        return False
+    try:
+        date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
 
 
 def _ae_email(payload):
@@ -158,6 +169,21 @@ def _check_case(request, body):
         reinsurers = get(payload, "reinsurers")
         if any(not _valid_payment_terms(get(row, "paymentTermsDays")) and not default_valid for row in reinsurers):
             return None, kind, _error(409, "debit_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
+    if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:
+        installments = get(payload, "performanceInstallments")
+        if not isinstance(installments, list) or not installments or any(not _valid_installment_base_date(get(row, "paymentBaseDate")) for row in installments):
+            return None, kind, _error(409, "debit_installment_base_date_required", 'Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.')
+    if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:
+        for installment in get(payload, "performanceInstallments"):
+            for index, reinsurer in enumerate(get(payload, "reinsurers")):
+                sources = (
+                    get(get(installment, "reinsurerPaymentTerms"), f"r{index + 1}"),
+                    get(reinsurer, "paymentTermsDays"),
+                    get(installment, "paymentTermsDays"),
+                    get(payload, "paymentTermsDays"),
+                )
+                if not any(_valid_payment_terms(value) for value in sources):
+                    return None, kind, _error(409, "debit_installment_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
     return case, kind, None
 
 

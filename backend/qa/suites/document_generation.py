@@ -743,12 +743,100 @@ try:
                 Case.objects.filter(pk=posted.pk).update(payload={**terms_base, "paymentTermsDays": 90, "reinsurers": [{**terms_ri,"paymentTermsDays":value}]})
                 check(f"Debit {structure}: invalid RI terms {value!r} use valid Case default", docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
             for enabled in (True,False,None,0,1,"true"):
-                Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri]})
+                Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90}]})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
                 check(f"Debit {structure}: installment flag {enabled!r} respects strict boolean scope", response.status_code==(204 if enabled is True else 409) and (enabled is True or code(response)=="debit_payment_terms_required"))
         for enabled in (True,False):
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri]})
+            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90}]})
             check(f"Treaty Draft debit terms exempt, installments={enabled}",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
+        Case.objects.filter(pk=posted.pk).update(payload=original_payload)
+        # Every installment needs its own real ISO calendar date; no fallback.
+        base_dates_bad=[None,""," \t\n","　","\ufeff","2026-02-30","2025-02-29","1900-02-29","2026-04-31","2026-00-01","2026-13-01","2026-01-00","2026-01-32","2026-1-01","2026-01-1","01/01/2026","2026-01-01T00:00:00Z"," 2026-01-01 ","2026-01-01\n","0000-01-01","not a date",0,False,[],{},["2026-01-01"],"２０２６-０１-０１"]
+        base_dates_valid=["2026-01-01","2024-02-29","2000-02-29","2400-02-29","0001-01-01","9999-01-01","2026-12-31","1900-03-01","2026-02-28","2026-04-30","2027-01-01","2026-03-01"]
+        good_inst={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","ratio":100}
+        bad_inst_rows=[None,{},[],[None],[{}],[good_inst,{**good_inst,"paymentBaseDate":""}],[{**good_inst,"paymentBaseDate":""},good_inst],[good_inst,None]]
+        for structure in ("QS","XOL"):
+            dates_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True}
+            for value in base_dates_bad:
+                Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"performanceInstallments":[{**good_inst,"paymentBaseDate":value}]})
+                before=gen_audit(posted.case_uid).count()
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid),performanceInstallments=[good_inst],installmentEnabled=False)
+                check(f"Debit {structure}: invalid saved installment date {value!r} blocked without fallback/request override/audit",response.status_code==409 and code(response)=="debit_installment_base_date_required" and message(response)=='Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before)
+                for kind in ("cover","endorsement"):
+                    check(f"{kind} {structure}: no new installment date requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
+            for rows in bad_inst_rows:
+                Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"performanceInstallments":rows})
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: malformed/missing/incomplete installment rows {rows!r} blocked",response.status_code==409 and code(response)=="debit_installment_base_date_required")
+            payload={**dates_base};payload.pop("performanceInstallments",None)
+            Case.objects.filter(pk=posted.pk).update(payload=payload)
+            response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+            check(f"Debit {structure}: missing installment array blocked",response.status_code==409 and code(response)=="debit_installment_base_date_required")
+            for value in base_dates_valid:
+                Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"performanceInstallments":[{**good_inst,"paymentBaseDate":value}]})
+                check(f"Debit {structure}: saved real installment date {value!r} accepted",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            for rows in ([good_inst,{**good_inst,"paymentBaseDate":"2026-06-01"}],[good_inst,{**good_inst,"paymentBaseDate":"2024-02-29"}]):
+                Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"performanceInstallments":rows})
+                check(f"Debit {structure}: all valid installments accepted without new coverage-range restriction",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            for enabled in (True,False,None,0,1,"true"):
+                Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"installmentEnabled":enabled,"performanceInstallments":[]})
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: installment date requirement scope is strict boolean {enabled!r}",response.status_code==(409 if enabled is True else 204) and (enabled is not True or code(response)=="debit_installment_base_date_required"))
+        for rows in (None,[],[{"paymentBaseDate":"2026-02-30"}]):
+            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":rows})
+            check("Treaty Draft debit remains exempt from installment dates",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
+        Case.objects.filter(pk=posted.pk).update(payload=original_payload)
+        # Every installment/RI pair must resolve terms from the four sources.
+        inst_terms_bad=[None,""," \t\n","　","\ufeff",0,"0",-1,14,"14",15.5,"15.5","bad","90days",True,False,[],{},[None],"１５"]
+        inst_terms_good=(15,"15",15.0,"15.0",90," 90 ","9e1","0x5a")
+        inst_terms_ri={"name":"ZZ Installment Terms RI","sharePct":50,"paymentTermsDays":None}
+        inst_terms_row={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","ratio":50,"paymentTermsDays":None,"reinsurerPaymentTerms":{"r1":None,"r2":None}}
+        for structure in ("QS","XOL"):
+            pair_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":None}
+            pair_ris=[inst_terms_ri,{**inst_terms_ri,"name":"ZZ Second RI"}]
+            for value in inst_terms_bad:
+                row={**inst_terms_row,"paymentTermsDays":value,"reinsurerPaymentTerms":{"r1":value,"r2":value}}
+                payload={**pair_base,"paymentTermsDays":value,"reinsurers":[{**r,"paymentTermsDays":value} for r in pair_ris],"performanceInstallments":[row]}
+                Case.objects.filter(pk=posted.pk).update(payload=payload)
+                before=gen_audit(posted.case_uid).count()
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid),paymentTermsDays=90,reinsurers=[{**r,"paymentTermsDays":90} for r in pair_ris],performanceInstallments=[{**row,"paymentTermsDays":90,"reinsurerPaymentTerms":{"r1":90,"r2":90}}],installmentEnabled=False)
+                check(f"Debit {structure}: invalid installment terms {value!r} blocked without request override/audit",response.status_code==409 and code(response)=="debit_installment_payment_terms_required" and message(response)=='Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before)
+                for kind in ("cover","endorsement"):
+                    check(f"{kind} {structure}: no new installment term requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
+            for value in inst_terms_good:
+                for source_index in range(4):
+                    payload={**pair_base,"reinsurers":pair_ris,"performanceInstallments":[inst_terms_row]}
+                    if source_index==0:payload["performanceInstallments"]=[{**inst_terms_row,"reinsurerPaymentTerms":{"r1":value,"r2":value}}]
+                    elif source_index==1:payload["reinsurers"]=[{**r,"paymentTermsDays":value} for r in pair_ris]
+                    elif source_index==2:payload["performanceInstallments"]=[{**inst_terms_row,"paymentTermsDays":value}]
+                    else:payload["paymentTermsDays"]=value
+                    Case.objects.filter(pk=posted.pk).update(payload=payload)
+                    check(f"Debit {structure}: source {source_index+1} alone resolves valid terms {value!r}",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            for value in inst_terms_bad:
+                for fallback in (1,2,3):
+                    payload={**pair_base,"reinsurers":pair_ris,"performanceInstallments":[{**inst_terms_row,"reinsurerPaymentTerms":{"r1":value,"r2":value}}]}
+                    if fallback==1:payload["reinsurers"]=[{**r,"paymentTermsDays":90} for r in pair_ris]
+                    elif fallback==2:payload["performanceInstallments"][0]["paymentTermsDays"]=90
+                    else:payload["paymentTermsDays"]=90
+                    Case.objects.filter(pk=posted.pk).update(payload=payload)
+                    check(f"Debit {structure}: invalid override {value!r} uses fallback source {fallback+1}",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            complete={**inst_terms_row,"reinsurerPaymentTerms":{"r1":90,"r2":90}}
+            incomplete={**inst_terms_row,"performanceMonth":"2026-04","paymentBaseDate":"2026-04-01","reinsurerPaymentTerms":{"r1":90,"r2":None}}
+            for rows,ris in (([complete,incomplete],pair_ris),([{**incomplete,"reinsurerPaymentTerms":{"r1":None,"r2":90}},complete],pair_ris),([complete,{**incomplete,"reinsurerPaymentTerms":{}}],pair_ris),([incomplete],[{**pair_ris[0],"sharePct":100},{**pair_ris[1],"sharePct":0}])):
+                Case.objects.filter(pk=posted.pk).update(payload={**pair_base,"reinsurers":ris,"performanceInstallments":rows})
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: every pair checked including later/first/entire-period/zero-share gaps",response.status_code==409 and code(response)=="debit_installment_payment_terms_required")
+            for mapping in (None,[],90,"bad",{}):
+                Case.objects.filter(pk=posted.pk).update(payload={**pair_base,"paymentTermsDays":90,"reinsurers":pair_ris,"performanceInstallments":[{**inst_terms_row,"reinsurerPaymentTerms":mapping}]})
+                check(f"Debit {structure}: malformed override mapping safely uses valid default",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            for enabled in (True,False,None,0,1,"true"):
+                Case.objects.filter(pk=posted.pk).update(payload={**pair_base,"installmentEnabled":enabled,"reinsurers":pair_ris,"performanceInstallments":[inst_terms_row]})
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                expected="debit_installment_payment_terms_required" if enabled is True else "debit_payment_terms_required"
+                check(f"Debit {structure}: term scope respects strict boolean {enabled!r}",response.status_code==409 and code(response)==expected)
+        for enabled in (True,False):
+            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"reinsurers":[inst_terms_ri],"performanceInstallments":[inst_terms_row]})
+            check("Treaty Draft debit remains exempt from installment term checks",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Treaty requirements are intentionally deferred, including reference/AE.
         Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure": "TREATY"})

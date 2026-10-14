@@ -117,16 +117,7 @@ def confirmation(payload, item):
         valid = (closed and state.get('confirmed') is True and state.get('fingerprint') == fingerprint(payload, key)
                  and bool(local_date(state.get('confirmedAt'))))
         return (local_date(state['confirmedAt']), state.get('source') or 'manual') if valid else ('', '')
-    # An explicit historical reconciliation timestamp is evidence. Neither a receipt date
-    # nor automatic cash totals alone substitute for historical confirmation.
-    if closed:
-        matches = [t for t in objects(payload.get('transactions')) if not t.get('reversed') and not t.get('isReversalEntry')
-                   and str(t.get('legType') or '').startswith('Leg ' + ('1' if item['partyType'] == 'cedant' else '2'))
-                   and (not t.get('installmentId') or t['installmentId'] == item['installmentId'])
-                   and (item['partyType'] == 'cedant' or item['partyKey'] == 'r' + str(int(t.get('reinsurerIdx', -1)) + 1))]
-        if matches and all(t.get('settlement') == 'settled' and local_date(t.get('settledAt')) for t in matches):
-            latest = max(local_date(t['settledAt']) for t in matches)
-            return latest, 'historical transaction reconciliation: ' + ', '.join(str(t.get('txNo')) for t in matches)
+    # Collection is confirmed only by an explicit accountant action.
     return '', ''
 
 

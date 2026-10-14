@@ -109,6 +109,7 @@ def reset_shared_payload(payload):
         # 收付款帳本（誰實際付了／收了哪一期）不能沿用舊案件的，否則新草稿會像已經有付款紀錄
         "paymentEntries": [], "paymentScheduleReviewRequired": False,
         **({"swissAccounting": {}} if "swissAccounting" in payload else {}),
+        **({"facilityAccounting": {}} if "facilityAccounting" in payload else {}),
     }
 
 

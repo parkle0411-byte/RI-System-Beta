@@ -343,6 +343,8 @@ class CasesView(NoStoreMixin, APIView):
             payload["claims"] = stored.get("claims") or []
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
+            if "facilityAccounting" in stored:
+                payload["facilityAccounting"] = stored["facilityAccounting"]
             from .calc.swiss_facility import applies as swiss_applies
             if "swissAccounting" in stored or swiss_applies(payload):
                 payload["swissAccounting"] = stored.get("swissAccounting") or {}

@@ -391,6 +391,8 @@ def build_payment_schedule(case_data, now=None):
 
     from .swiss_facility import apply_schedule
     items = apply_schedule(case_data, items, now)
+    from ..facility_accounting import apply_schedules
+    items = apply_schedules(case_data, items)
 
     cedant_out = 0.0
     reinsurer_out = 0.0

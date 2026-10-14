@@ -46,7 +46,8 @@ def ledger_rows(cases, now=None):
                 "dueDate": item["dueDate"], "dueTime": item["dueTime"], "paymentStatus": item["status"],
                 **({field: item[field] for field in ["paymentRule", "sourceBaseDate", "contractDueDate", "accountingLeadDays"]}
                    if item.get("paymentRule") == "auw_month_end_120" else {}),
-                "partial": item["partial"], "settlement": "settled" if item["status"] == "settled" else "open",
+                "partial": item["partial"], "settlement": item.get("settlement", "settled" if item["status"] == "settled" else "open"),
+                **({field: item[field] for field in ("manualSettlementRequired", "manualSettlementConfirmed", "canConfirmSettlement") if field in item}),
                 "reviewRequired": item["status"] == "pending_review",
                 "entries": [e for e in entries if get(e, "scheduleKey") == item["scheduleKey"]],
                 **({"returnPremium": True, "paymentDirection": item["paymentDirection"]} if item.get("returnPremium") else {}),

@@ -166,8 +166,8 @@ for amount in [2500, 4500]:
         'rowVersion':case.row_version, 'scheduleKey':item['scheduleKey'], 'paymentDate':'2026-05-31', 'amount':amount})
     check('cash entry still matches the same AUW schedule '+str(amount), response.status_code==200)
 paid = ledger()
-check('fully paid AUW row stays settled and keeps both recalculated dates', paid['paid']==7000 and paid['outstanding']==0
-    and paid['paymentStatus']=='settled' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
+check('fully paid AUW row awaits manual settlement and keeps both recalculated dates', paid['paid']==7000 and paid['outstanding']==0
+    and paid['paymentStatus']=='pending_confirmation' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
 case.refresh_from_db()
 entry = case.payload['paymentEntries'][0]
 response = call('post', '/api/accounting', {'action':'reverse_payment', 'caseUid':str(case.case_uid),

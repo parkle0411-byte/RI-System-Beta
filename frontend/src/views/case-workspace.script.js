@@ -187,6 +187,28 @@ export function useCaseWorkspace() {
     const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
     return reinsurers.some(row => !valid(row?.paymentTermsDays) && !defaultValid)
   }
+  function missingDebitInstallmentBaseDates(caseData) {
+    if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
+    const valid = (value) => {
+      if (typeof value !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) || value.startsWith('0000-')) return false
+      const date = new Date(`${value}T00:00:00Z`)
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+    }
+    const installments = caseData?.performanceInstallments
+    return !Array.isArray(installments) || !installments.length || installments.some(row => !valid(row?.paymentBaseDate))
+  }
+  function missingDebitInstallmentPaymentTerms(caseData) {
+    if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
+    const valid = (value) => Number.isInteger(Number(value)) && Number(value) >= 15
+    const installments = Array.isArray(caseData?.performanceInstallments) ? caseData.performanceInstallments : []
+    const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
+    return installments.some(installment => reinsurers.some((reinsurer, index) => ![
+      installment?.reinsurerPaymentTerms?.[`r${index + 1}`],
+      reinsurer?.paymentTermsDays,
+      installment?.paymentTermsDays,
+      caseData?.paymentTermsDays
+    ].some(valid)))
+  }
   const selectedReinsurers = computed(() => {
     const seen = new Set()
     return (Array.isArray(selectedPayload.value.reinsurers) ? selectedPayload.value.reinsurers : [])
@@ -545,6 +567,12 @@ export function useCaseWorkspace() {
       }
       if (kind === 'debit' && missingDebitPaymentTerms(selectedPayload.value)) {
         return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
+      }
+      if (kind === 'debit' && missingDebitInstallmentBaseDates(selectedPayload.value)) {
+        return ElMessage.warning('Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.')
+      }
+      if (kind === 'debit' && missingDebitInstallmentPaymentTerms(selectedPayload.value)) {
+        return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
       }
     }
     if (kind === 'cover' && !isTreatyDocumentCase.value && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
@@ -1584,7 +1612,7 @@ export function useCaseWorkspace() {
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
     claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,

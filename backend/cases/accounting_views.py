@@ -124,6 +124,9 @@ class AccountingView(NoStoreMixin, APIView):
                     "reverse_batch_payment": lambda r, b: reverse_batch_payment(self,r,b)}
         for swiss_handler in ("confirm_swiss_collection", "unconfirm_swiss_collection", "record_swiss_clearance", "record_swiss_offset", "mark_swiss_statement"):
             handlers[swiss_handler] = lambda r, b: swiss_action(self, r, b)
+        from .facility_accounting import settlement_action
+        for manual_action in ('confirm_facility_settlement', 'unconfirm_facility_settlement'):
+            handlers[manual_action] = lambda r, b: settlement_action(self, r, b)
         if action not in handlers:
             return _error(400, "unsupported_action", "Unsupported Accounting action.")
         try:

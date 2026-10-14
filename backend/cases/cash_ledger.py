@@ -242,6 +242,8 @@ def transaction_details(payload, now=None):
         detail['outstanding']=0 if settled else detail['amount']
         detail['cashParts']=[]
         detail['settlementDependencies']=[{'txNo':p['_tx']['txNo'],'settlement':p['settlement']} for p in paired]
+    from .facility_accounting import apply_transactions
+    apply_transactions(payload, details)
     return {no:{k:v for k,v in d.items() if not k.startswith('_')} for no,d in details.items()}
 
 
