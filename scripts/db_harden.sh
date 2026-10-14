@@ -17,11 +17,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-RUNTIME_PW="$(cat secrets/mysql_runtime_password)"
+# 預設對正式環境；獨立測試環境（scripts/run_isolated_qa.sh）會指定自己的容器與密碼檔
+MYSQL_CONTAINER="${MYSQL_CONTAINER:-ri-mysql}"
+RUNTIME_PW="$(cat "${RUNTIME_PW_FILE:-secrets/mysql_runtime_password}")"
 DB=ri_system
 mysql_root() {  # 密碼在容器內讀取，不出現在命令列或日誌；有任何 ERROR 就中止
   local out
-  out=$(docker exec -i ri-mysql sh -c 'mysql -uroot -p"$(cat /run/secrets/mysql_root_password)" '"$1"' 2>&1' | grep -v 'Using a password' || true)
+  out=$(docker exec -i "$MYSQL_CONTAINER" sh -c 'mysql -uroot -p"$(cat /run/secrets/mysql_root_password)" '"$1"' 2>&1' | grep -v 'Using a password' || true)
   if grep -q '^ERROR' <<<"$out"; then echo "$out" >&2; exit 1; fi
   if [ -n "$out" ]; then printf '%s\n' "$out"; fi
 }

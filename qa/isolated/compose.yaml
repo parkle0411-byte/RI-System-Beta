@@ -1,0 +1,62 @@
+# 一鍵獨立測試環境（scripts/run_isolated_qa.sh 建立並在結束時連同 volume 刪除）。
+# 與正式相同的 MySQL 與後端程式碼，但資料庫、文件 volume、密鑰、網路都是獨立的；沒有對外連接埠，只有合成資料。
+# 後端以最小權限的 ri_runtime 連線（與正式相同），Audit 記錄啟用（測試要驗證 Audit），RI_DISPOSABLE_QA=true。
+name: ri-isoqa
+
+services:
+  mysql:
+    image: mysql@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
+    container_name: ri-isoqa-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: ri_system
+      MYSQL_USER: ri_app
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      TZ: Asia/Taipei
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--transaction-isolation=READ-COMMITTED"]
+    volumes: [isoqa_mysql:/var/lib/mysql]
+    secrets: [mysql_root_password, mysql_app_password]
+    networks: [isoqa]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  backend:
+    image: ri-backend:isoqa
+    container_name: ri-isoqa-backend
+    user: "1001:1001"
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: "nginx,localhost"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "http://nginx"
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      AUDIT_LOG_ENABLED: "true"
+      RI_DISPOSABLE_QA: "true"
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: ri_system
+      MYSQL_USER: ri_runtime
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_runtime_password
+      RI_EMAIL_ENABLED: "false"
+      RI_LOGIN_THROTTLE: "1000/min"   # 測試會大量登入；auth_permissions 另以預設 10/min 執行
+      TZ: Asia/Taipei
+    volumes: [isoqa_docs:/data/documents]
+    secrets: [django_secret_key, mysql_app_password, mysql_runtime_password]
+    networks: [isoqa]
+    depends_on:
+      mysql: {condition: service_healthy}
+
+secrets:
+  mysql_root_password: {file: "${ISOQA_SECRETS:?}/mysql_root_password"}
+  mysql_app_password: {file: "${ISOQA_SECRETS:?}/mysql_app_password"}
+  mysql_runtime_password: {file: "${ISOQA_SECRETS:?}/mysql_runtime_password"}
+  django_secret_key: {file: "${ISOQA_SECRETS:?}/django_secret_key"}
+
+volumes:
+  isoqa_mysql:
+  isoqa_docs:
+
+networks:
+  isoqa:
+    internal: true

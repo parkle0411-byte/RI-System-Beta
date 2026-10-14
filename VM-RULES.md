@@ -80,7 +80,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 
 **新增資料表後一定要跑 `scripts/migrate.sh`**：`ri_runtime` 對新表沒有任何權限，直接跑 `manage.py migrate` 會讓網站對新表失敗。
 
-**測試組的執行環境**：多數 `backend/qa/suites` 需要 `RI_DISPOSABLE_QA=true` 且 Audit 記錄啟用，只能在用完即丟的獨立環境跑（後端以 `ri_runtime` 連線並先套用 `db_harden.sh` 的權限；部分測試組會提交資料，每組最好用全新資料庫）。正式容器 Audit 暫停中，不要在正式資料庫跑。
+**測試組的執行環境**：多數 `backend/qa/suites` 需要 `RI_DISPOSABLE_QA=true` 且 Audit 記錄啟用，**不要在正式容器跑**（正式 Audit 暫停中）。一律用 **`scripts/run_isolated_qa.sh`**（全部約 30–40 分鐘；可只列出要跑的測試組，例如 `scripts/run_isolated_qa.sh cases_api accounting_api`；`KEEP=1` 保留環境除錯）：以目前原始碼建專用映像 `ri-backend:isoqa`、起隔離的 MySQL＋後端（`qa/isolated/compose.yaml`，`ri_runtime` 連線並套用 `db_harden.sh`），每組前重建全新資料庫，結束自動刪除。**每次改功能後、部署前都要跑**，全部通過才部署。前端與後端合計、密碼規則一致性仍用 `scripts/run_qa.sh totals`／`parity`。
+
+**畫面測試**（`scripts/run_ui_test.sh`）：2026-10-14 只更新到階段 A（42/42 通過）；H、R、B、K、D、E、F、G 仍是 9 月底的腳本，會因畫面與規則變更而失敗，待功能穩定後另行更新。
 
 ## 2026-09 規則決定（原「刻意與 Alpha 不同」）
 
