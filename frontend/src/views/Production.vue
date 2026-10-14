@@ -4,7 +4,7 @@
 // Excel 由 Alpha 的 public/production-xlsx.js 產生（逐位元組相同的副本在 src/alpha/production-xlsx.js），
 // 它需要的 JSZip 用 npm 套件 jszip 3.10.1（與 Alpha 的 vendor/jszip.min.js 同版）。
 //
-// 與 Alpha 不同的地方（都記在 MIGRATION-STATUS.md）：
+// 與 Alpha 不同的地方（都記在 VM-RULES.md）：
 //   - fetch() → apiFetch()（補上 CSRF 與同源 cookie）
 //   - 預設月份是「台北時間的上個月」（Alpha 用 UTC）
 import { onMounted, ref } from 'vue'

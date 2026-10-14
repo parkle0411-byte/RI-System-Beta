@@ -6,7 +6,7 @@
 
 - 寫入：先寫暫存檔、fsync，再原子地 rename 成正式檔名；中途失敗不會留下只寫一半的正式檔案。
 - 路徑一律檢查必須落在根目錄之下（storage_key 雖然由程式組出，這裡仍不信任它）。
-- 備份：這個 volume 不在 MySQL 備份裡，要另外備份（見 MIGRATION-STATUS.md「維運」）。
+- 備份：這個 volume 不在 MySQL 備份裡，要另外備份（見 VM-RULES.md「維運」）。
 """
 import os
 import uuid

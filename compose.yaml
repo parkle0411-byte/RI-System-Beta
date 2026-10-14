@@ -69,7 +69,7 @@ services:
       - mysql_runtime_password
 
     volumes:
-      # 案件文件的檔案本體（不在 MySQL 備份裡，要另外備份；見 MIGRATION-STATUS.md「維運」）
+      # 案件文件的檔案本體（不在 MySQL 備份裡，要另外備份；見 VM-RULES.md「維運」）
       - case_documents:/data/documents
 
     networks:

@@ -1,7 +1,7 @@
 """
 提醒信紀錄 - 對應 Alpha migrations/0017_create_signed_slip_alerts.sql、0029_create_payment_alerts.sql、0030_index_payment_alerts.sql。
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
+與 Alpha 的差異（都記在 VM-RULES.md）：
   - status 多一個 suppressed：VM 尚未啟用寄信時記成 suppressed（算「已提醒」，與 sent、simulated 相同；2026-09-26 你的決定）。
     Alpha 的 ri_payment_alerts.status 沒有 CHECK；VM 兩張表都加上同樣的 CHECK。
   - 多存信件的主旨與內文（subject、body_html、body_text），產生當下存下，案件明細的 Reminders 分頁顯示（2026-09-26 你的決定）。

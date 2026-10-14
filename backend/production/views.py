@@ -9,7 +9,7 @@ Production Report API - 對應 Hatchable Alpha 的 api/production-report.js。
 關帳（close）：報表裡的案件把這些 key 記成已確認；全部確認的案件變成 Confirmed（closed）並產生 Leg 1–3 交易
 （有待沖銷時先加 -RVS 沖銷分錄，見 closing.py）；該月匯率全部鎖定。
 
-已同步回 Alpha v58（兩邊相同，見 MIGRATION-STATUS.md）：業績月份用台北時間；關帳時每個案件與每個被鎖定的匯率寫 Snapshot；
+已同步回 Alpha v58（兩邊相同，見 VM-RULES.md）：業績月份用台北時間；關帳時每個案件與每個被鎖定的匯率寫 Snapshot；
 關帳時待沖銷又有空交易項目回 409 transactions_corrupt。
 仍然與 Alpha 不同：
   - 排除、產生版本、關帳的每個案件與匯率鎖定也寫 Audit（Alpha 的 Audit 暫停中，沒有同步）。

@@ -6,7 +6,7 @@
   POST /api/cases              cases.write     新增 Draft
   PUT  /api/cases              cases.write     編輯 Draft／Announced／Reversed（樂觀鎖 rowVersion）
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
+與 Alpha 的差異（都記在 VM-RULES.md）：
   - 列表的金額用 cases/calc/totals.py（記帳的逐步進位算法），不用 Alpha 的未進位算法。
   - 預設案件負責人只用「目前登入者」（VM 沒有 Hatchable 協作者的 P.L 後備）。
   - id、rowVersion 一律輸出成數字（Alpha 的 bigint 欄位在列表裡會變成字串）。

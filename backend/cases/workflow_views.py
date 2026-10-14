@@ -6,7 +6,7 @@
   POST /api/case-workflow    cases.write     action = create_endorsement | create_renewal | reverse_case | notify_accounting
 
 Reverse 與「通知會計」補寫 Snapshot、TW Reference 的流水號不截斷、Reverse 遇到空交易項目回 409：
-原本是與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v59（兩邊相同，見 MIGRATION-STATUS.md）。
+原本是與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v59（兩邊相同，見 VM-RULES.md）。
 仍然與 Alpha 不同：
   - 同一個案件鏈的所有動作都先鎖住「根案件」那一列（Alpha 用 PostgreSQL 的 advisory lock 與事後檢查），
     所以檢查與寫入在同一個鎖之內，同時送出的兩個請求會依序處理。

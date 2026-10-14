@@ -1,7 +1,7 @@
 <script setup>
 // 移植自 Alpha index.html 的 activeView === 'dashboard'（模板第 71–148 行原樣）與 app.js 的 loadDashboard()、
 // dashboardTrendValues()／dashboardTrendMax()／dashboardTrendX()／dashboardTrendY()／dashboardTrendPoints()／dashboardTrendSeries()、formatThousands()。
-// 與 Alpha 不同的地方（見 MIGRATION-STATUS.md）：後端用台北時間、趨勢用 Production 的規則；畫面是 fetch() → apiFetch()，
+// 與 Alpha 不同的地方（見 VM-RULES.md）：後端用台北時間、趨勢用 Production 的規則；畫面是 fetch() → apiFetch()，
 // 以及下面的 <style>：占比長條的填色 <i class="mix-fill"> 是行內元素，Alpha 的 height:100% 對它無效、長條沒有填色，補上 display:block。
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'

@@ -12,7 +12,7 @@ VM 的 Vue 元件是照這些檔案移植的；Alpha 之後改了畫面，先比
 | `development-alignment.css` | `2da6fba188145437ec9e7b68c6e36c687b8162c3cb6d4a8fa1526f64af20e544` | `src/alpha/styles/development-alignment.css`（原樣） |
 
 `case-calculations.js`（`f8fdc38c…`）沒有複製：VM 的畫面合計改用「記帳的逐步進位算法」（`src/alpha/caseCalculations.js`，
-與後端 `cases/calc/totals.py` 相同），見 MIGRATION-STATUS.md「案件合計」。
+與後端 `cases/calc/totals.py` 相同），見 VM-RULES.md「案件合計」。
 `src/alpha/lib/accounting.js` 是 Alpha `lib/accounting.js` 的原樣副本（`e0acc3c8…`，與 `backend/qa/alpha_js/lib/accounting.js` 相同）。
 `alpha-reference/production-xlsx.js` 是 Alpha `public/production-xlsx.js` 的原樣副本（`256db219f84aa2e56c9e1a36c81541c1fe7a560b0a0f9054e2253773808dcf59`）；
 `src/alpha/production-xlsx.js`（VM 實際使用）= 原檔 + 4 處「多一欄 First Policy No」的修改，`scripts/check_production_xlsx.py` 核對，

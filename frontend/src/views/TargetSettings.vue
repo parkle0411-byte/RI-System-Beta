@@ -2,7 +2,7 @@
 // 移植自 Alpha index.html Personnel 頁的「Annual target settings」頁籤與 app.js 的 loadDashboardTargets()／openTargetDialog()／
 // onTargetTypeChange()／saveDashboardTarget()／toggleDashboardTarget()。
 //
-// 與 Alpha 不同的地方（都記在 MIGRATION-STATUS.md）：
+// 與 Alpha 不同的地方（都記在 VM-RULES.md）：
 //   - fetch() → apiFetch()
 //   - 說明文字改成 VM 的實際情況：Dashboard 已使用目標、每次變更都寫 Audit（Alpha 寫「之後才使用」「Audit 暫停」）
 //   - 新增時的預設年份／月份用台北時間（Alpha 用 UTC）

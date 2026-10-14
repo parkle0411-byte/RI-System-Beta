@@ -1,7 +1,7 @@
 // 案件工作區的邏輯：逐函式移植自 Alpha public/app.js（名稱、順序、內容盡量相同，方便之後對照同步）。
 // 模板在 CaseWorkspace.vue（由 scripts/build_case_workspace.py 從 Alpha index.html 切出）。
 //
-// 與 Alpha 不同的地方（都記在 MIGRATION-STATUS.md）：
+// 與 Alpha 不同的地方（都記在 VM-RULES.md）：
 //   - fetch() → apiFetch()（補上 CSRF 與同源 cookie；回傳一樣的 Response）
 //   - 金額合計用統一的逐步進位算法（src/alpha/caseCalculations.js）
 //   - startEditCase 允許 Reversed（Alpha 漏了，「Correct reversed case」按了沒反應）

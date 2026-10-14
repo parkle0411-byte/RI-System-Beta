@@ -25,13 +25,13 @@ ROLE_LABELS = {
     "president": "President",
 }
 
-# 以 Alpha lib/authorization.js 的 ROLE_PERMISSIONS 為基礎，2026-09-27 依你的決定調整（刻意與 Alpha 不同，記在 MIGRATION-STATUS.md）：
+# 以 Alpha lib/authorization.js 的 ROLE_PERMISSIONS 為基礎，2026-09-27 依你的決定調整（刻意與 Alpha 不同，記在 VM-RULES.md）：
 #   - General Manager：案件功能與 Reinsurance Staff 相同（新增／編輯、Announce、流程、文件、理賠），保留人員檢視與業績目標；不能看 Audit Log
 #   - Audit Log 只有 System Administrator
 #   - Finance Staff／Finance Manager：Dashboard、Account List 與案件工作區可讀全部案件，保留帳务操作；不能寫案件或文件
 #   - Reinsurance Staff、General Manager：Accounting 帳本唯讀（accounting.read；記付款、沖銷要 accounting.write）
 # dashboard.read.all 是 VM 才有的權限：Dashboard 顯示全部案件（沒有它就只看自己負責或列在分績裡的案件）。
-# 修改此表時，同步更新 MIGRATION-STATUS.md 與 qa/suites/auth_permissions.py 的權限矩陣測試。
+# 修改此表時，同步更新 VM-RULES.md 與 qa/suites/auth_permissions.py 的權限矩陣測試。
 ROLE_PERMISSIONS = {
     "admin": [
         "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",

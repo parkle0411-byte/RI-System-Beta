@@ -7,7 +7,7 @@
 record_payment 會立刻產生 Claim Leg 1/2 交易（payload.transactions），分攤依「最新一張已 Announce／Confirmed 的批單」
 （沒有就用根案件）的再保人比例；這些交易會出現在 SOA 與 Accounting 帳本。
 
-以下四點原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v55（兩邊行為相同，見 MIGRATION-STATUS.md）：
+以下四點原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v55（兩邊行為相同，見 VM-RULES.md）：
   - 交易編號用根案件的 TW Ref（v53 傳入的 payload 沒有 twRef，編號開頭會是 "undefined"）。
   - 出險日、付款日期必填，而且必須是真實存在的日期。
   - 未決賠款準備：看不懂的文字回 400、不可為負；準備金與付款金額都進位到分。

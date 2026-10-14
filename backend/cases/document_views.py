@@ -7,7 +7,7 @@
   PUT    /api/case-documents                        documents.write  勾選／取消勾選 {caseUid, fileId, selected}
   DELETE /api/case-documents?caseUid=…&fileId=…     documents.write  刪除（VM：只有 Draft 可以刪）
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
+與 Alpha 的差異（都記在 VM-RULES.md）：
   - 單檔上限 10 MB（Alpha 5 MB）。
   - Announce 之後不能刪除文件（只能取消勾選），檔案保留作為證據；Draft 仍可刪。
   - signedSlipReminder.outboundEnabled 如實回報（依設定，VM 尚未設定寄信 → false）。

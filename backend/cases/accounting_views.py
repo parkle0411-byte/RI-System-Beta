@@ -5,7 +5,7 @@
     transactionRows：實際 SoA 保費與理賠交易，含 Reversed 案件歷史；rows 保留付款排程。
   POST /api/accounting   accounting.read   action = record_transaction_payments | reverse_batch_payment | record_payment | reverse_payment（均需要 accounting.write）
 
-以下原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v56（兩邊行為相同，見 MIGRATION-STATUS.md）：
+以下原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v56（兩邊行為相同，見 VM-RULES.md）：
   - 帳本讀取全部案件（v53 只讀前 1000 件）。
   - 記付款、沖銷只接受 Announced／Confirmed 的案件。
   - 付款日期必須是真實存在的日期；沖銷沒給日期時預設台北的今天。

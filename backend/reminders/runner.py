@@ -5,7 +5,7 @@
 流程與 Alpha 相同：找出今天該提醒的項目 → 解析收件人（缺資料就只寫「設定錯誤」的 Audit，不寄給任何人）→
 在提醒表「佔位」（同一天同一件只會有一筆）→ 收件人有測試網域就記 simulated → 否則寄出（sent／failed）。
 
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
+與 Alpha 的差異（都記在 VM-RULES.md）：
   - 寄信未啟用（settings.REMINDER_EMAIL_ENABLED = false，VM 目前的狀態）時記成 suppressed，並寫 Audit
     （suppress_signed_slip_reminder／suppress_payment_reminder）；suppressed 算「已提醒」。
   - 一次處理完當天全部項目（Alpha 受 Hatchable 限制每次 10 件、一分鐘後再接著跑），所以 moreWork 一律是 false。
