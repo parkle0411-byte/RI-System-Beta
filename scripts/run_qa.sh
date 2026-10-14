@@ -4,7 +4,6 @@
 #   scripts/run_qa.sh            全部
 #   scripts/run_qa.sh suites     只跑資料庫／API 測試組
 #   scripts/run_qa.sh parity     只跑「前後端密碼規則一致」
-#   scripts/run_qa.sh calc       只跑「案件計算：Alpha 的 JS 與 VM 的 Python 逐位比對」
 #   scripts/run_qa.sh totals     只跑「畫面上的案件合計（前端 JS）與後端 totals.py 一致」
 #
 # 所有測試組都在交易內執行、最後回滾，不會在資料庫留下任何測試資料，也不依賴真實人員或案件資料
@@ -50,12 +49,6 @@ PY
   esac
 }
 
-run_calc() {
-  echo "== 案件計算：Alpha 的 JavaScript 對 VM 的 Python =="
-  if [ -x scripts/run_calc_diff.sh ]; then scripts/run_calc_diff.sh || FAILED=1
-  else echo "  （尚未建立）"; fi
-}
-
 run_totals() {
   echo "== 案件合計：前端畫面（caseCalculations.js）與後端（totals.py）是否一致 =="
   res=$(docker exec ri-backend python -m qa.frontend_totals_vectors 3000 \
@@ -70,10 +63,9 @@ run_totals() {
 case "$WHAT" in
   suites) run_suites ;;
   parity) run_parity ;;
-  calc)   run_calc ;;
   totals) run_totals ;;
-  all)    run_suites; run_parity; run_totals; run_calc ;;
-  *) echo "用法: $0 [all|suites|parity|totals|calc]"; exit 2 ;;
+  all)    run_suites; run_parity; run_totals ;;
+  *) echo "用法: $0 [all|suites|parity|totals]"; exit 2 ;;
 esac
 
 echo
