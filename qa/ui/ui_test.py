@@ -836,7 +836,7 @@ def phase_r(page):
           and "ui.ae@tw-insure.com" in rows.first.inner_text() and "ui.boss@tw-insure.com" in rows.first.inner_text(), rows.first.inner_text() if rows.count() else "")
     errors = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Configuration errors")).locator(".el-table__row")
     check("Configuration errors: the first run (AE had no Personnel record) is listed",
-          errors.count() >= 1 and "AE does not match one active Personnel record." in errors.first.inner_text(), errors.count())
+          errors.count() >= 1 and "Account Executive does not match one active Personnel record." in errors.first.inner_text(), errors.count())
     pay = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Payment reminders")).locator(".el-table__row")
     check("Payment: reminders listed, Suppressed, Finance among the recipients", pay.count() >= 1 and "Suppressed (not sent)" in pay.first.inner_text()
           and "ui.fin@tw-insure.com" in pay.first.inner_text(), pay.first.inner_text() if pay.count() else "no rows")
