@@ -3,6 +3,7 @@
 import { reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
+import { auth } from '../auth'
 import { PASSWORD_RULE_TEXT, checkPassword } from '../passwordRule'
 
 const route = useRoute()
@@ -15,6 +16,7 @@ const errorMsg = ref(uid && token ? '' : 'This password reset link is incomplete
 const linkBroken = ref(!(uid && token))
 
 async function submit() {
+  if (loading.value || doneMsg.value || linkBroken.value) return
   errorMsg.value = ''
   const problem = checkPassword(form.password)
   if (problem) { errorMsg.value = problem; return }
@@ -22,6 +24,9 @@ async function submit() {
   loading.value = true
   try {
     const data = await api('/api/auth/password-reset/confirm', { method: 'POST', body: { uid, token, newPassword: form.password } })
+    // This reset ends server sessions. Recheck the session on the next route
+    // so the sign-in guard cannot redirect using the previous principal.
+    auth.ready = false
     doneMsg.value = data.message
   } catch (e) {
     if (e.code === 'invalid_reset_link') linkBroken.value = true
@@ -37,7 +42,6 @@ async function submit() {
 <template>
   <div class="login-wrap">
     <section class="login-card">
-      <div class="eyebrow">再保部 | VM</div>
       <div class="brand-name">Reinsurance Department System</div>
       <h2>Set a new password</h2>
       <template v-if="doneMsg">
@@ -51,10 +55,10 @@ async function submit() {
             <el-input v-model="form.password" type="password" show-password autocomplete="new-password" autofocus />
           </el-form-item>
           <el-form-item label="Confirm new password">
-            <el-input v-model="form.confirm" type="password" show-password autocomplete="new-password" @keyup.enter="submit" />
+            <el-input v-model="form.confirm" type="password" show-password autocomplete="new-password" />
           </el-form-item>
           <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
-          <el-button class="primary-button" :loading="loading" style="width: 100%" @click="submit">Set new password</el-button>
+          <el-button class="primary-button" native-type="submit" :loading="loading" style="width: 100%">Set new password</el-button>
         </el-form>
         <template v-else>
           <el-alert :title="errorMsg" type="error" show-icon :closable="false" />

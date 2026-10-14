@@ -11,6 +11,18 @@ export class ApiError extends Error {
   }
 }
 
+let onSessionResponse = () => {}
+export function setSessionResponseHandler(fn) { onSessionResponse = fn }
+
+function observeSession(response) {
+  const id = response.headers.get("X-RI-Session-Id")
+  if (!id) return
+  onSessionResponse({ id, expiresAt: Number(response.headers.get("X-RI-Session-Expires-At")),
+    serverNow: Number(response.headers.get("X-RI-Server-Time")),
+    timeoutSeconds: Number(response.headers.get("X-RI-Session-Timeout")),
+    warningSeconds: Number(response.headers.get("X-RI-Session-Warning")) })
+}
+
 let onUnauthorized = () => {}
 export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
@@ -35,15 +47,16 @@ async function csrfToken() {
   return token
 }
 
-export async function api(url, { method = 'GET', body, quiet401 = false } = {}) {
+export async function api(url, { method = 'GET', body, quiet401 = false, keepalive = false } = {}) {
   const headers = { Accept: 'application/json' }
-  const init = { method, headers, credentials: 'same-origin', cache: 'no-store' }
+  const init = { method, headers, credentials: 'same-origin', cache: 'no-store', keepalive }
   if (method !== 'GET' && method !== 'HEAD') {
     headers['Content-Type'] = 'application/json'
     headers['X-CSRFToken'] = await csrfToken()
     init.body = JSON.stringify(body ?? {})
   }
   const res = await fetch(url, init)
+  observeSession(res)
   let data = null
   try {
     data = await res.json()
@@ -51,7 +64,7 @@ export async function api(url, { method = 'GET', body, quiet401 = false } = {}) 
     data = null
   }
   if (!res.ok) {
-    if (res.status === 401 && !quiet401) onUnauthorized()
+    if (res.status === 401 && !quiet401) onUnauthorized(data && (data.error || data.code))
     if (res.status === 403 && data && data.error === 'PASSWORD_CHANGE_REQUIRED') onPasswordChangeRequired()
     const message =
       (data && (data.message || data.detail)) ||
@@ -69,7 +82,11 @@ export async function apiFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) }
   if (method !== 'GET' && method !== 'HEAD') headers['X-CSRFToken'] = await csrfToken()
   const response = await fetch(url, { cache: 'no-store', ...options, method, headers, credentials: 'same-origin' })
-  if (response.status === 401) onUnauthorized()
+  observeSession(response)
+  if (response.status === 401) {
+    const body = await response.clone().json().catch(() => null)
+    onUnauthorized(body && (body.error || body.code))
+  }
   if (response.status === 403) {
     const body = await response.clone().json().catch(() => null)
     if (body && body.error === 'PASSWORD_CHANGE_REQUIRED') onPasswordChangeRequired()

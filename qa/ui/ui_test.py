@@ -2,7 +2,7 @@
 畫面測試（無頭 Chromium）。只在用完即丟的測試環境執行（scripts/run_ui_test.sh），資料全是合成的。
 
   python3 ui_test.py A   外框與各頁面；業務人員：新增草稿 → 補齊 → 文件 → Announce → 通知會計 → 批單
-  python3 ui_test.py H   （案件此時是 Announced，另有一張批單 Draft）業務人員：下載 Cover Note／Debit Note 的 Word 與 PDF、批單的 PDF，檢查檔案內容
+  python3 ui_test.py H   （案件此時是 Announced，另有一張批單 Draft）業務人員：下載 Cover Note／Debit Note／批單的 Word，檢查檔案內容
   python3 ui_test.py R   （執行腳本已跑過兩次提醒排程）業務人員：案件明細的 Reminders 分頁（Suppressed 紀錄、設定錯誤、信件預覽）
   python3 ui_test.py P1  （腳本已打開寄信）登入頁的 Forgot password? → 申請重設連結
   python3 ui_test.py P2  （腳本已從信件取出連結放在 out/reset-link.txt）打開連結 → 設定新密碼 → 用新密碼登入
@@ -227,7 +227,7 @@ def phase_a(page):
     snap(page, "overview")
 
     # ---------------- 文件與 Announce ----------------
-    page.locator(".case-detail-tabs .el-tabs__item", has_text="Cover & Debit Note").click()
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Documentation").click()
     page.wait_for_timeout(800)
     docs = page.locator(".documents-grid")
     check("documents: not ready before any evidence", "Not ready to Announce" in docs.inner_text())
@@ -245,7 +245,7 @@ def phase_a(page):
             page.wait_for_timeout(250)
         upload.locator("input[type=file]").set_input_files({"name": filename, "mimeType": "application/octet-stream", "buffer": content})
         count = page.locator(".document-table .el-table__row").count()
-        upload.get_by_role("button", name="Upload evidence").click()
+        upload.get_by_role("button", name="Upload Evidence").click()
         page.wait_for_function(f"document.querySelectorAll('.document-table .el-table__row').length > {count}", timeout=10000)
         return True
 
@@ -257,6 +257,8 @@ def phase_a(page):
     check("signed slip reminder: Facility reinsurer still missing a SIGNED slip; e-mail delivery not enabled",
           "Signed Slip missing" in docs.inner_text() and "automated e-mail delivery is not enabled" in docs.inner_text())
     snap(page, "documents")
+    check("Review & Announce moved out of Documentation", page.get_by_role("button", name="Review & Announce").count() == 0)
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Overview").click()
     page.get_by_role("button", name="Review & Announce").click()
     dialog = page.locator(".announce-dialog")
     dialog.wait_for()
@@ -608,7 +610,7 @@ def phase_e(page):
     page.wait_for_timeout(600)
     soa = page.locator(".overview-card").filter(has_text="Statement of Account").first.inner_text()
     check("SOA lists the claim transactions numbered from the TW Ref (VM fix; Alpha: 'undefined-')",
-          "TWPAR2603001-CLM1-P1-R1-TX1" in soa and "undefined" not in soa, soa[:400])
+          "TWPAR2603001-C1-P1-R1-T1" in soa and "undefined" not in soa, soa[:400])
     logout(page)
 
 
@@ -639,6 +641,9 @@ def phase_f(page):
     rows = page.locator(".production-table .el-table__body-wrapper .el-table__row").filter(has_text="TWPAR2603001")
     check(f"{ym} preview lists the case: one row per reinsurer", rows.count() == 2, rows.count())
     check("no missing FX warning (USD saved in phase B)", page.locator(".el-alert", has_text="exchange rate required").count() == 0)
+    check("preview has the First Policy No column and shows the case's own number",
+          page.locator(".production-table th", has_text="First Policy No").count() >= 1
+          and "TWPAR2603001" in rows.first.locator("td").nth(17).inner_text(), rows.first.inner_text()[:300])
     snap(page, "production-preview")
 
     beta = rows.filter(has_text="UI Re Beta").first
@@ -666,6 +671,9 @@ def phase_f(page):
         workbook = z.read("xl/workbook.xml").decode()
     check("xlsx: header row, the included reinsurer, not the deferred one, dates with slashes", "Original Insured" in sheet and "UI Re Alpha" in sheet
           and "UI Re Beta" not in sheet and "2026/03/01" in sheet and f"Production Report {ym}" in workbook, sheet[:200])
+    check("xlsx: 18th column First Policy No has its header, the case's own number on the data rows, and the filter covers A:R",
+          '<c r="R1"' in sheet and "First Policy No" in sheet and 'autoFilter ref="A1:R' in sheet
+          and re.search(r'<c r="R2"[^>]*><is><t>TWPAR2603001</t>', sheet) is not None, sheet[-300:])
 
     versions.get_by_role("button", name="Close month").click()
     confirm_box(page, "Close month")
@@ -691,7 +699,7 @@ def phase_f(page):
     page.locator(".case-detail-tabs .el-tabs__item", has_text="SOA").click()
     page.wait_for_timeout(600)
     soa = page.locator(".overview-card").filter(has_text="Statement of Account").first.inner_text()
-    check("SOA lists premium transactions (Leg 1-3) numbered from the TW Ref", "TWPAR2603001-R1-TX1" in soa and "TWPAR2603001-R2-TX1" in soa, soa[:400])
+    check("SOA lists premium transactions (Leg 1-3) numbered from the TW Ref", "TWPAR2603001-R1-T1" in soa and "TWPAR2603001-R2-T1" in soa, soa[:400])
     snap(page, "soa-after-close")
     logout(page)
 
@@ -758,7 +766,7 @@ def phase_h(page):
     import zipfile
     login(page, "ui.sales")
     open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
-    page.locator(".case-detail-tabs .el-tabs__item", has_text="Cover & Debit Note").click()
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Documentation").click()
     page.wait_for_timeout(800)
     cards = page.locator(".generated-document-card")
     check("Announced case: Cover Note and Debit Note cards", cards.count() == 2 and "Cover Note" in cards.nth(0).inner_text() and "Debit Note" in cards.nth(1).inner_text())
@@ -781,17 +789,13 @@ def phase_h(page):
     text = docx_text(data)
     check("Cover Note Word: file name, success message", name == "CoverNote_TWPAR2603001.docx" and ok, name)
     check("Cover Note Word: contains the TW Reference and the insured", "TWPAR2603001" in text and "UI Test Insured Ltd" in text, text[:300])
-    name, data, ok = download("Cover Note", "Download PDF", "Cover Note PDF saved.")
-    pages = len(re.findall(rb"/Type\s*/Page(?!s)", data))
-    check("Cover Note PDF: file name, real PDF rendered by the server, success message", name == "CoverNote_TWPAR2603001.pdf" and data.startswith(b"%PDF-") and pages >= 4 and ok, (name, data[:8], pages))
     name, data, ok = download("Debit Note", "Download Word (.docx)", "Debit Note DOCX saved.")
     text = docx_text(data)
     check("Debit Note Word: file name and TW Reference", name == "DebitNote_TWPAR2603001.docx" and "TWPAR2603001" in text and ok, name)
-    name, data, ok = download("Debit Note", "Download PDF", "Debit Note PDF saved.")
-    check("Debit Note PDF: file name and a real PDF", name == "DebitNote_TWPAR2603001.pdf" and data.startswith(b"%PDF-") and ok, (name, data[:8]))
+    check("PDF download buttons retired", cards.get_by_role("button", name="Download PDF").count() == 0)
     snap(page, "documents-generated")
 
-    # 批單 Draft（階段 A 建立）：只有 Endorsement PDF
+    # 批單 Draft（階段 A 建立）：只有 Endorsement Word
     # 批單不在案件列表裡：從根案件的流程（case-workflow）取批單鏈
     chain = page.evaluate("""async () => {
       const list = await (await fetch('/api/cases', {cache: 'no-store'})).json()
@@ -804,13 +808,13 @@ def phase_h(page):
     if endo:
         page.goto(f"{BASE}/cases?case={endo['caseUid']}")
         page.locator(".case-detail-tabs").wait_for()
-        page.locator(".case-detail-tabs .el-tabs__item", has_text="Cover & Debit Note").click()
+        page.locator(".case-detail-tabs .el-tabs__item", has_text="Documentation").click()
         page.wait_for_timeout(800)
         cards = page.locator(".generated-document-card")
-        check("endorsement: only the Endorsement card (PDF only)", cards.count() == 1 and "Endorsement" in cards.first.inner_text()
+        check("endorsement: only the Endorsement card (Word only)", cards.count() == 1 and "Endorsement" in cards.first.inner_text()
               and cards.first.get_by_role("button").count() == 1)
-        name, data, ok = download("Endorsement", "Download PDF", "Endorsement PDF saved.")
-        check("Endorsement PDF: file name and a real PDF", name.startswith("Endorsement_") and name.endswith(".pdf") and data.startswith(b"%PDF-") and ok, name)
+        name, data, ok = download("Endorsement", "Download Word (.docx)", "Endorsement DOCX saved.")
+        check("Endorsement Word: file name and valid document", name.startswith("Endorsement_") and name.endswith(".docx") and "ENDORSEMENT" in docx_text(data) and ok, name)
     logout(page)
 
 

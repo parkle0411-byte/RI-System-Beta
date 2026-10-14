@@ -18,6 +18,7 @@ import Dashboard from '../views/Dashboard.vue'
 import PendingView from '../views/PendingView.vue'
 import SystemStatus from '../views/SystemStatus.vue'
 import NoAccess from '../views/NoAccess.vue'
+import SystemReference from '../views/SystemReference.vue'
 
 // 左側選單與頁首文字：與 Alpha public/app.js 的 allNavigation／headers 相同（順序、名稱、權限、階段標籤）。
 // Alpha 用 activeView 切換畫面；VM 每一項是一個路由，方便重新整理與瀏覽器上一頁。
@@ -25,24 +26,26 @@ export const allNavigation = [
   { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: NAV_ICONS.dashboard, permission: 'dashboard.read' },
   { id: 'cases', path: '/cases', label: 'Account List', icon: NAV_ICONS.cases, anyPermission: ['cases.read.all', 'cases.read.own'] },
   { id: 'mdm', path: '/mdm', label: 'Reinsurance MDM', icon: NAV_ICONS.mdm, permission: 'mdm.read' },
-  { id: 'personnel', path: '/personnel', label: 'Personnel & Accounts', icon: NAV_ICONS.personnel, permission: 'personnel.read' },
+  { id: 'personnel', path: '/personnel', label: 'Personnel & Accounts', icon: NAV_ICONS.personnel, anyPermission: ['personnel.read', 'personnel.read.team'] },
   { id: 'production', path: '/production', label: 'Production Report', icon: NAV_ICONS.production, permission: 'production.read' },
   { id: 'accounting', path: '/accounting', label: 'Accounting', icon: NAV_ICONS.accounting, permission: 'accounting.read' },
   { id: 'fxrates', path: '/fx-rates', label: 'FX Rates', icon: NAV_ICONS.fxrates, permission: 'fx.read' },
   { id: 'recycle', path: '/recycle', label: 'Draft Recycle Bin', icon: NAV_ICONS.recycle, phase: '5 years', permission: 'recycle.read' },
-  { id: 'audit', path: '/audit', label: 'Audit Log', icon: NAV_ICONS.audit, phase: 'Read only', permission: 'audit.read' }
+  { id: 'system-reference', path: '/system-reference', label: 'System Reference Data', icon: NAV_ICONS.mdm, permission: 'accounts.manage' },
+  { id: 'audit', path: '/audit', label: 'Audit Log', icon: NAV_ICONS.audit, permission: 'audit.read' }
 ]
 
 export const headers = {
-  dashboard: { kicker: 'Operations', title: 'Dashboard', subtitle: 'Production & records overview' },
-  cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All facultative outward cases' },
-  recycle: { kicker: 'Placement governance', title: 'Draft Recycle Bin', subtitle: 'Five-year restore window · permanent deletion prohibited', phase: 'Retained' },
-  mdm: { kicker: 'Master data', title: 'Reinsurance MDM', subtitle: 'Versioned master records, fixed clauses and lifecycle controls', phase: 'Milestone 11' },
-  personnel: { kicker: 'Administration', title: 'Personnel & Accounts', subtitle: 'Unified personnel, future accounts and target settings', phase: 'Milestone 21' },
-  production: { kicker: 'Reporting', title: 'Production Report', subtitle: 'Monthly read-only production preview', phase: 'Milestone 19' },
-  accounting: { kicker: 'Accounting', title: 'Accounting', subtitle: 'Statement of account, transactions and settlement', phase: 'Milestone 22' },
-  fxrates: { kicker: 'Master data', title: 'FX Rates', subtitle: 'Official monthly USD to TWD rates', phase: 'Milestone 20' },
-  audit: { kicker: 'Governance', title: 'Audit Log', subtitle: 'Append-only activity history with at least 10-year retention', phase: 'Read only' },
+  'system-reference': { kicker: 'Reference', title: 'System Reference Data', subtitle: 'Document templates and system guides' },
+  dashboard: { kicker: 'Operations', title: 'Dashboard', subtitle: 'Production & Records Overview' },
+  cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All outward cases' },
+  recycle: { kicker: 'Placement governance', title: 'Draft Recycle Bin', subtitle: 'Five-year restore window · permanent deletion prohibited' },
+  mdm: { kicker: 'Master data', title: 'Reinsurance MDM', subtitle: 'Versioned master records, fixed clauses and lifecycle controls' },
+  personnel: { kicker: 'Administration', title: 'Personnel & Accounts', subtitle: 'Unified personnel, future accounts and target settings' },
+  production: { kicker: 'Reporting', title: 'Production Report', subtitle: 'Monthly read-only production preview' },
+  accounting: { kicker: 'Accounting', title: 'Accounting', subtitle: 'Statement of account, transactions and settlement' },
+  fxrates: { kicker: 'Master data', title: 'FX Rates', subtitle: 'Official monthly foreign currency to TWD rates' },
+  audit: { kicker: 'Governance', title: 'Audit Log', subtitle: 'Append-only activity history with at least 10-year retention' },
   'system-status': { kicker: 'VM', title: 'System status', subtitle: 'Company VM health check' },
   'no-access': { kicker: 'Access', title: 'No access', subtitle: 'No pages are available for your role' }
 }
@@ -51,7 +54,7 @@ export function navAllowed(item) {
   return item.permission ? can(item.permission) : (item.anyPermission || []).some(can)
 }
 
-const component = { cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
+const component = { 'system-reference': SystemReference, cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
   // 忘記密碼（VM 專有；寄信啟用後登入頁才有入口）

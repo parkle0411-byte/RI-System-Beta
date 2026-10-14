@@ -9,6 +9,7 @@ const sentMsg = ref('')
 const errorMsg = ref('')
 
 async function submit() {
+  if (loading.value || sentMsg.value) return
   errorMsg.value = ''
   if (!form.identifier.trim()) {
     errorMsg.value = 'Enter your username or e-mail address.'
@@ -29,7 +30,6 @@ async function submit() {
 <template>
   <div class="login-wrap">
     <section class="login-card">
-      <div class="eyebrow">再保部 | VM</div>
       <div class="brand-name">Reinsurance Department System</div>
       <h2>Forgot password</h2>
       <template v-if="sentMsg">
@@ -39,10 +39,10 @@ async function submit() {
       <el-form v-else label-position="top" @submit.prevent="submit">
         <p class="hint">Enter your username or the e-mail address in your Personnel record. We will send you a link to set a new password.</p>
         <el-form-item label="Username or e-mail">
-          <el-input v-model="form.identifier" autocomplete="username" autofocus @keyup.enter="submit" />
+          <el-input v-model="form.identifier" autocomplete="username" autofocus />
         </el-form-item>
         <el-alert v-if="errorMsg" :title="errorMsg" type="error" show-icon :closable="false" />
-        <el-button class="primary-button" :loading="loading" style="width: 100%" @click="submit">Send reset link</el-button>
+        <el-button class="primary-button" native-type="submit" :loading="loading" style="width: 100%">Send reset link</el-button>
       </el-form>
       <p class="back"><router-link to="/login">Back to sign in</router-link></p>
     </section>

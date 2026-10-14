@@ -7,10 +7,11 @@
 //   - 說明文字改成 VM 的實際情況：Dashboard 已使用目標、每次變更都寫 Audit（Alpha 寫「之後才使用」「Audit 暫停」）
 //   - 新增時的預設年份／月份用台北時間（Alpha 用 UTC）
 import { onMounted, reactive, ref } from 'vue'
+import { auth } from '../auth'
 import { ElMessage } from 'element-plus'
 import { apiFetch } from '../api'
 import { can } from '../auth'
-import { formatCurrency, reportWriteError } from '../alpha/format'
+import { formatCurrency, formatMoneyInput, parseMoneyInput, reportWriteError } from '../alpha/format'
 import { shell } from '../alpha/shell'
 
 const targetLoading = ref(false)
@@ -111,7 +112,7 @@ onMounted(loadDashboardTargets)
 </script>
 
 <template>
-  <el-alert class="case-readiness-alert" type="info" :closable="false" show-icon title="Targets feed the Dashboard brokerage trend" description="Annual and monthly TWD targets are versioned, and every change is recorded in the Audit Log."></el-alert>
+  <el-alert class="case-readiness-alert" type="info" :closable="false" show-icon title="Targets feed the Dashboard brokerage trend" :description="auth.auditLogRecordingEnabled ? 'Annual and monthly TWD targets are versioned, and every change is recorded in the Audit Log.' : 'Annual and monthly TWD targets are versioned. Audit Log recording is paused until further notice.'"></el-alert>
   <section class="table-card" v-loading="targetLoading">
     <div class="section-heading"><div><h2>Annual brokerage target settings</h2><p>Used by the Dashboard YTD Brokerage Trend chart. Deactivated settings remain in history.</p></div><div><el-button v-if="can('targets.write')" class="primary-button" @click="openTargetDialog(null, 'annual')">+ Add target</el-button><el-button v-if="can('targets.write')" class="secondary-button" @click="openTargetDialog(null, 'monthly')">+ Monthly target</el-button><el-button class="secondary-button" :loading="targetLoading" @click="loadDashboardTargets">Refresh</el-button></div></div>
     <el-table :data="dashboardTargets" class="case-table" row-key="id" empty-text="No target settings yet.">
@@ -124,11 +125,11 @@ onMounted(loadDashboardTargets)
     </el-table>
   </section>
   <el-dialog v-model="targetDialogVisible" class="master-dialog" width="min(560px, 94vw)" :close-on-click-modal="false">
-    <template #header><div class="review-heading"><span class="pending-badge">{{ targetForm.id ? 'Versioned target update' : 'New target setting' }}</span><h2>{{ targetForm.id ? 'Edit' : 'Add' }} dashboard target</h2><p>Saving creates an immutable snapshot and an Audit Log event.</p></div></template>
+    <template #header><div class="review-heading"><span class="pending-badge">{{ targetForm.id ? 'Versioned target update' : 'New target setting' }}</span><h2>{{ targetForm.id ? 'Edit' : 'Add' }} dashboard target</h2><p>Saving creates an immutable snapshot<span v-if="auth.auditLogRecordingEnabled"> and an Audit Log event</span>.</p></div></template>
     <el-form label-position="top" @submit.prevent>
       <el-form-item label="Period type" required><el-select v-model="targetForm.periodType" :disabled="Boolean(targetForm.id)" @change="onTargetTypeChange"><el-option label="Annual" value="annual"></el-option><el-option label="Monthly" value="monthly"></el-option></el-select></el-form-item>
       <el-form-item label="Period" required><el-input v-if="targetForm.periodType === 'annual'" v-model="targetForm.periodKey" maxlength="4" placeholder="YYYY" :disabled="Boolean(targetForm.id)"></el-input><el-date-picker v-else v-model="targetForm.periodKey" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" :disabled="Boolean(targetForm.id)" style="width:100%"></el-date-picker></el-form-item>
-      <el-form-item label="Target amount (TWD)" required><el-input-number v-model="targetForm.amount" :min="0" :precision="2" :controls="false" style="width:100%"></el-input-number></el-form-item>
+      <el-form-item label="Target amount (TWD)" required><el-input-number :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="targetForm.amount" :min="0" :precision="2" :controls="false" style="width:100%"></el-input-number></el-form-item>
       <el-form-item v-if="targetForm.id" label="Active"><el-switch v-model="targetForm.isActive" inline-prompt active-text="Yes" inactive-text="No"></el-switch></el-form-item>
     </el-form>
     <template #footer><div class="review-footer"><p>Target settings are retained; no physical delete action is available.</p><div><el-button class="secondary-button" @click="targetDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="targetSaving" @click="saveDashboardTarget">{{ targetForm.id ? 'Save changes' : 'Add target' }}</el-button></div></div></template>

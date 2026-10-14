@@ -51,9 +51,9 @@ async function submit() {
 <template>
   <div class="login-wrap">
     <section class="login-card">
-      <div class="eyebrow">再保部 | VM</div>
       <div class="brand-name">Reinsurance Department System</div>
       <h2>Sign in</h2>
+      <el-alert v-if="route.query.reason === 'idle'" title="You were signed out after 3 hours of inactivity. Please sign in again." type="info" show-icon :closable="false" />
       <el-form label-position="top" @submit.prevent="submit">
         <el-form-item label="Username">
           <el-input v-model="form.username" autocomplete="username" autofocus />

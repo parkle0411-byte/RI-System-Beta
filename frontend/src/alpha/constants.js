@@ -19,6 +19,7 @@ export const UNIVERSAL_CLAUSES = [
 ];
 export const FX_CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR'];
 export const PERSONNEL_DEPARTMENTS = [
+  { value: 'board_of_directors', label: 'Board of Directors' },
   { value: 'reinsurance', label: 'Reinsurance Dept.' },
   { value: 'finance', label: 'Finance Dept.' },
   { value: 'admin', label: 'Admin Dept.' },
@@ -28,6 +29,7 @@ export const PERSONNEL_DEPARTMENTS = [
   { value: 'business_development', label: 'Business Development Dept.' }
 ];
 export const PERSONNEL_ROLES = [
+  { value: 'president', label: 'President' },
   { value: 'general_manager', label: 'General Manager' },
   { value: 'sales', label: 'Reinsurance Staff' },
   { value: 'accounting_manager', label: 'Finance Manager' },
@@ -38,12 +40,13 @@ export const PERSONNEL_ROLES = [
 export const PERSONNEL_DEPARTMENT_ORDER = PERSONNEL_DEPARTMENTS.map((item) => item.value);
 export const PERSONNEL_ROLE_ORDER = PERSONNEL_ROLES.map((item) => item.value);
 export const DEFAULT_ROLE_BY_DEPARTMENT = {
+  board_of_directors: 'president',
   business_1: 'viewer', business_2: 'viewer', special_risk: 'viewer',
   business_development: 'viewer', reinsurance: 'sales',
   finance: 'accounting', admin: 'admin'
 };
 export function defaultSplitEligibility(department, roleCode) {
-  return department !== 'finance' && department !== 'admin'
+  return department !== 'finance' && department !== 'admin' && department !== 'board_of_directors'
     && !(department === 'reinsurance' && roleCode === 'general_manager');
 }
 
@@ -99,7 +102,7 @@ export function currentMonth() {
 
 export function emptyDraft() {
   return {
-    ownerPersonnelId: null, ownerPersonnelName: '', parentTwRef: '', endorsementSeq: null,
+    ownerPersonnelId: null, ownerPersonnelName: '', parentTwRef: '', endorsementSeq: null, manualTwRef: '',
     renewedFromTwRef: '', endoEffectiveDate: '', endoTypes: [], endoText: '',
     type: '', typePrefix: '', originalInsured: '', originalInsuredCn: '', reinsured: '',
     situations: [{ clientKey: clientKey(), address: '', postcode: '' }],

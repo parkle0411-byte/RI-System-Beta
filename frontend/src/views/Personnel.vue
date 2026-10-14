@@ -7,7 +7,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, apiFetch } from '../api'
-import { can } from '../auth'
+import { auth, can, loadContext } from '../auth'
 import { PASSWORD_RULE_TEXT, checkPassword } from '../passwordRule'
 import {
   DEFAULT_ROLE_BY_DEPARTMENT, PERSONNEL_DEPARTMENT_ORDER, PERSONNEL_DEPARTMENTS, PERSONNEL_ROLE_ORDER,
@@ -23,6 +23,10 @@ const personnelLoading = ref(false)
 const personnelSaving = ref(false)
 const personnelDialogVisible = ref(false)
 const personnelRecords = ref([])
+const personnelScope = reactive({})
+const subordinateCreationOnly = computed(() => !can('personnel.write') && can('personnel.create.subordinate'))
+const canCreatePersonnel = computed(() => can('personnel.write') || can('personnel.create.subordinate'))
+const canCreateAccounts = computed(() => can('accounts.manage') || can('accounts.create.subordinate'))
 const sortedPersonnelRecords = computed(() => {
   const deptRank = (dept) => {
     const idx = PERSONNEL_DEPARTMENT_ORDER.indexOf(dept)
@@ -50,7 +54,7 @@ const personnelForm = reactive({
 })
 const supervisorOptions = computed(() => personnelRecords.value
   .filter((person) => person.isActive
-    && (person.department === personnelForm.department || person.roleCode === 'general_manager')
+    && (person.department === personnelForm.department || ['general_manager', 'president'].includes(person.roleCode))
     && Number(person.id) !== Number(editingPersonnelId.value))
   .slice()
   .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))))
@@ -73,10 +77,12 @@ async function loadPersonnel() {
   personnelLoading.value = true
   shell.error = ''
   try {
+    await loadContext()
     const response = await apiFetch('/api/personnel', { headers: { Accept: 'application/json' } })
     const body = await response.json()
     if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
     personnelRecords.value = Array.isArray(body.personnel) ? body.personnel : []
+    Object.assign(personnelScope, body.scope || {})
   } catch (err) {
     shell.error = err instanceof Error ? err.message : String(err)
     ElMessage.error(shell.error)
@@ -86,6 +92,7 @@ async function loadPersonnel() {
 }
 
 function openPersonnelDialog(row = null) {
+  if ((row && !can('personnel.write')) || (!row && !canCreatePersonnel.value)) return
   editingPersonnelId.value = row ? Number(row.id) : null
   editingPersonnelRowVersion.value = row ? Number(row.rowVersion) : null
   editingAccountStatus.value = row ? row.accountStatus : 'not_configured'
@@ -100,6 +107,16 @@ function openPersonnelDialog(row = null) {
         name: '', email: '', department: 'reinsurance', roleCode: 'sales',
         isActive: false, isSplitEligible: defaultSplitEligibility('reinsurance', 'sales'), supervisorName: '', supervisorEmail: ''
       })
+  if (!row && subordinateCreationOnly.value) {
+    Object.assign(personnelForm, {
+      department: personnelScope.creationDepartment,
+      roleCode: personnelScope.creationRoleCode,
+      supervisorName: personnelScope.creationSupervisorName,
+      supervisorEmail: personnelScope.creationSupervisorEmail,
+      isActive: true,
+      isSplitEligible: defaultSplitEligibility(personnelScope.creationDepartment, personnelScope.creationRoleCode)
+    })
+  }
   personnelDialogVisible.value = true
 }
 
@@ -165,6 +182,7 @@ const accountDialog = reactive({ visible: false, person: null, username: '', ema
 const secretDialog = reactive({ visible: false, title: '', username: '', password: '' })
 
 function openCreateAccount(row) {
+  if (!canCreateAccounts.value || !row.canCreateAccount) return
   Object.assign(accountDialog, { visible: true, person: row, username: (row.email || '').toLowerCase(), email: row.email || '', password: '' })
 }
 function showSecret(title, username, password) {
@@ -189,7 +207,7 @@ async function createAccount() {
       method: 'POST',
       body: {
         personnelId: accountDialog.person.id, username: accountDialog.username, email: accountDialog.email,
-        // 留空 = 由系統隨機產生；有填 = 管理員指定的初始密碼
+        // 留空 = 由系統隨機產生；有填 = 管理員或主管指定的初始密碼
         ...(password ? { initialPassword: password } : {})
       }
     })
@@ -292,14 +310,14 @@ onMounted(loadPersonnel)
     <button type="button" class="mdm-tab" :class="{ active: personnelTab === 'roster' }" @click="personnelTab = 'roster'">
       <span>Personnel roster</span>
     </button>
-    <button type="button" class="mdm-tab" :class="{ active: personnelTab === 'targets' }" @click="personnelTab = 'targets'">
+    <button v-if="can('targets.read')" type="button" class="mdm-tab" :class="{ active: personnelTab === 'targets' }" @click="personnelTab = 'targets'">
       <span>Annual target settings</span>
     </button>
   </div>
 
   <template v-if="personnelTab === 'roster'">
     <section class="table-card personnel-card" v-loading="personnelLoading">
-      <div class="section-heading"><div><h2>Personnel &amp; Accounts</h2><p>Every company person is maintained once. Login accounts are enabled on the company VM and managed by the System Administrator; there is no permanent deletion.</p></div><div><el-button v-if="can('personnel.write')" class="primary-button" @click="openPersonnelDialog()">+ Add personnel</el-button><el-button class="secondary-button" :loading="personnelLoading" @click="loadPersonnel">Refresh</el-button></div></div>
+      <div class="section-heading"><div><h2>Personnel &amp; Accounts</h2><p v-if="personnelScope.readAll">Company Personnel and their account status. There is no permanent deletion.</p><p v-else>Your personnel record and your same-department subordinates.</p></div><div><el-button v-if="canCreatePersonnel" class="primary-button" @click="openPersonnelDialog()">{{ subordinateCreationOnly ? '+ Add subordinate' : '+ Add personnel' }}</el-button><el-button class="secondary-button" :loading="personnelLoading" @click="loadPersonnel">Refresh</el-button></div></div>
       <div class="personnel-table-scroll">
       <el-table :data="sortedPersonnelRecords" class="case-table personnel-table" row-key="id" empty-text="No personnel records yet.">
         <el-table-column prop="name" label="Name" min-width="150"><template #default="{ row }"><span class="case-ref">{{ row.name }}</span><br v-if="row.email"><small v-if="row.email">{{ row.email }}</small></template></el-table-column>
@@ -309,13 +327,13 @@ onMounted(loadPersonnel)
         <el-table-column label="Login Account" min-width="150"><template #default="{ row }"><span class="status-badge" :class="accountStatusClass(row.accountStatus)">{{ accountStatusLabel(row.accountStatus) }}</span><template v-if="row.accountUsername"><br><small class="case-ref">{{ row.accountUsername }}</small></template><template v-if="row.accountMustChangePassword && row.accountStatus === 'active'"><br><small>Password change pending</small></template></template></el-table-column>
         <el-table-column label="Split Eligible" width="95"><template #default="{ row }">{{ row.isSplitEligible ? 'Yes' : 'No' }}</template></el-table-column>
         <el-table-column label="Supervisor" min-width="130"><template #default="{ row }"><div>{{ row.supervisorName || '—' }}</div><small v-if="row.supervisorEmail">{{ row.supervisorEmail }}</small></template></el-table-column>
-        <el-table-column v-if="can('personnel.write') || can('accounts.manage')" label="Action" min-width="230"><template #default="{ row }">
+        <el-table-column v-if="can('personnel.write') || canCreateAccounts" label="Action" min-width="230"><template #default="{ row }">
           <template v-if="can('personnel.write')">
             <el-button text type="primary" @click="openPersonnelDialog(row)">Edit</el-button>
             <el-button text :type="row.isActive ? 'danger' : 'success'" :loading="personnelSaving" @click="togglePersonnelStatus(row)">{{ row.isActive ? 'Deactivate' : 'Reactivate' }}</el-button>
           </template>
+          <el-button v-if="canCreateAccounts && row.canCreateAccount" text type="primary" @click="openCreateAccount(row)">Create account</el-button>
           <template v-if="can('accounts.manage') && row.isActive">
-            <el-button v-if="row.accountStatus === 'not_configured'" text type="primary" @click="openCreateAccount(row)">Create account</el-button>
             <template v-if="row.accountStatus === 'active'">
               <el-button text type="warning" @click="resetPassword(row)">Reset password</el-button>
               <el-button text type="danger" @click="disableAccount(row)">Disable account</el-button>
@@ -328,25 +346,25 @@ onMounted(loadPersonnel)
     </section>
   </template>
 
-  <template v-else>
+  <template v-else-if="can('targets.read')">
     <TargetSettings />
   </template>
 
   <el-dialog v-model="personnelDialogVisible" class="master-dialog" width="min(760px, 94vw)" :close-on-click-modal="false">
-    <template #header><div class="review-heading"><span class="pending-badge">{{ editingPersonnelId ? 'Versioned personnel update' : 'New personnel record' }}</span><h2>{{ editingPersonnelId ? 'Edit' : 'Add' }} personnel</h2><p>Saving creates an immutable snapshot and an Audit Log event. No credential or password is stored here.</p></div></template>
+    <template #header><div class="review-heading"><span class="pending-badge">{{ editingPersonnelId ? 'Versioned personnel update' : 'New personnel record' }}</span><h2>{{ subordinateCreationOnly ? 'Add subordinate' : editingPersonnelId ? 'Edit personnel' : 'Add personnel' }}</h2><p v-if="subordinateCreationOnly">The new person belongs to your Department, uses its general staff role, and reports to you. You can create their login account from the roster after saving.</p><p v-else>Saving creates an immutable snapshot<span v-if="auth.auditLogRecordingEnabled"> and an Audit Log event</span>. No credential or password is stored here.</p></div></template>
     <el-form label-position="top" @submit.prevent>
       <div class="form-grid cols-2">
         <el-form-item label="Name" required><el-input v-model="personnelForm.name" maxlength="160"></el-input></el-form-item>
         <el-form-item label="Personnel Email"><el-input v-model="personnelForm.email" maxlength="320" :disabled="emailLocked" placeholder="Optional personnel contact"></el-input><small v-if="emailLocked">This person has a bound login account; disable the account before changing the Email.</small></el-form-item>
-        <el-form-item label="Department" required><el-select v-model="personnelForm.department" @change="onPersonnelDepartmentChange"><el-option v-for="item in personnelDepartments" :key="item.value" :label="item.label" :value="item.value"></el-option></el-select></el-form-item>
-        <el-form-item label="Role assignment" required><el-select v-model="personnelForm.roleCode" @change="onPersonnelRoleChange"><el-option v-for="item in personnelRoles" :key="item.value" :label="item.label" :value="item.value"></el-option></el-select></el-form-item>
-        <el-form-item label="Supervisor name"><el-select v-model="personnelForm.supervisorName" filterable clearable placeholder="Select same-department Personnel or General Manager" @change="onSupervisorSelected"><el-option v-for="item in supervisorOptions" :key="'supervisor-' + item.id" :label="item.name" :value="item.name"></el-option></el-select></el-form-item>
+        <el-form-item label="Department" required><el-select v-model="personnelForm.department" :disabled="subordinateCreationOnly" @change="onPersonnelDepartmentChange"><el-option v-for="item in personnelDepartments" :key="item.value" :label="item.label" :value="item.value"></el-option></el-select></el-form-item>
+        <el-form-item label="Role assignment" required><el-select v-model="personnelForm.roleCode" :disabled="subordinateCreationOnly" @change="onPersonnelRoleChange"><el-option v-for="item in personnelRoles" :key="item.value" :label="item.label" :value="item.value"></el-option></el-select></el-form-item>
+        <el-form-item label="Supervisor name"><el-input v-if="subordinateCreationOnly" v-model="personnelForm.supervisorName" readonly></el-input><el-select v-else v-model="personnelForm.supervisorName" filterable clearable placeholder="Select same-department Personnel, General Manager or President" @change="onSupervisorSelected"><el-option v-for="item in supervisorOptions" :key="'supervisor-' + item.id" :label="item.name" :value="item.name"></el-option></el-select></el-form-item>
         <el-form-item label="Supervisor Email"><el-input v-model="personnelForm.supervisorEmail" readonly placeholder="Auto-filled from Personnel; may be blank"></el-input></el-form-item>
         <el-form-item label="Personnel active"><el-switch v-model="personnelForm.isActive" inline-prompt active-text="Yes" inactive-text="No"></el-switch></el-form-item>
         <el-form-item label="Performance Split eligible"><el-switch v-model="personnelForm.isSplitEligible" :disabled="!personnelForm.isActive" inline-prompt active-text="Yes" inactive-text="No"></el-switch></el-form-item>
       </div>
     </el-form>
-    <template #footer><div class="review-footer"><p>Role assignment sets the permissions of the person's login account. Accounts are created from the roster by the System Administrator.</p><div><el-button class="secondary-button" @click="personnelDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="personnelSaving" @click="savePersonnel">{{ editingPersonnelId ? 'Save changes' : 'Add personnel' }}</el-button></div></div></template>
+    <template #footer><div class="review-footer"><p>Role assignment sets the permissions of the person's login account. Login accounts can be created from the roster by the System Administrator or an eligible Supervisor.</p><div><el-button class="secondary-button" @click="personnelDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="personnelSaving" @click="savePersonnel">{{ subordinateCreationOnly ? 'Add subordinate' : editingPersonnelId ? 'Save changes' : 'Add personnel' }}</el-button></div></div></template>
   </el-dialog>
 
   <!-- VM 專有：建立登入帳號 -->
@@ -356,13 +374,13 @@ onMounted(loadPersonnel)
       <el-form-item label="Username" required>
         <el-input v-model="accountDialog.username" placeholder="Lower-case letters, digits and . _ @ + - (at least 3 characters)" />
       </el-form-item>
-      <el-form-item label="Email"><el-input v-model="accountDialog.email" placeholder="Optional; saved to the Personnel record" /></el-form-item>
+      <el-form-item label="Email"><el-input v-model="accountDialog.email" :readonly="!can('accounts.manage')" :placeholder="can('accounts.manage') ? 'Optional; saved to the Personnel record' : 'Email from Personnel'" /></el-form-item>
       <el-form-item label="Initial password">
         <el-input v-model="accountDialog.password" type="password" show-password autocomplete="new-password" placeholder="Leave blank to generate a random password" />
         <small>{{ PASSWORD_RULE_TEXT }} A password you set is not shown again; tell the person yourself. They must change it at first sign-in.</small>
       </el-form-item>
     </el-form>
-    <template #footer><div class="review-footer"><p>The account is audited; the password is never stored in plain text or in the Audit Log.</p><div><el-button class="secondary-button" @click="accountDialog.visible = false">Cancel</el-button><el-button class="primary-button" :loading="personnelSaving" @click="createAccount">Create account</el-button></div></div></template>
+    <template #footer><div class="review-footer"><p><span v-if="auth.auditLogRecordingEnabled">The account is audited; </span>the password is never stored in plain text or in the Audit Log.</p><div><el-button class="secondary-button" @click="accountDialog.visible = false">Cancel</el-button><el-button class="primary-button" :loading="personnelSaving" @click="createAccount">Create account</el-button></div></div></template>
   </el-dialog>
 
   <!-- VM 專有：一次性密碼 -->

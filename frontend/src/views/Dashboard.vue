@@ -4,11 +4,13 @@
 // 與 Alpha 不同的地方（見 MIGRATION-STATUS.md）：後端用台北時間、趨勢用 Production 的規則；畫面是 fetch() → apiFetch()，
 // 以及下面的 <style>：占比長條的填色 <i class="mix-fill"> 是行內元素，Alpha 的 height:100% 對它無效、長條沒有填色，補上 display:block。
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiFetch } from '../api'
 import { can } from '../auth'
 import { formatAmount } from '../alpha/format'
 import { shell } from '../alpha/shell'
 
+const router = useRouter()
 const dashboardLoading = ref(false)
 const dashboard = ref({ period: { year: null, currentMonth: '', monthNumber: 1 }, metrics: {}, brokerage: { labels: [], current: [], prior: [], target: [], annualTarget: null }, classMix: [], reinsurers: [] })
 
@@ -71,21 +73,21 @@ onMounted(loadDashboard)
 <div class="rdash" v-loading="dashboardLoading">
   <div class="row3">
     <section class="card">
-      <div class="card-head"><h3>YTD Case Volume</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
+      <div class="card-head"><h3>Total Bound YTD</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
       <div class="stat2"><span class="stat-value">{{ dashboard.metrics?.ytdCurrent || 0 }}</span><div class="side-stat"><div class="label">Prior-Year YTD</div><div class="val">{{ dashboard.metrics?.ytdPrior || 0 }}</div></div></div>
     </section>
     <section class="card">
       <div class="card-head"><h3>Renewals Bound MTD</h3><span class="chip muted">vs. Expected</span></div>
       <div class="stat2"><span class="stat-value">{{ dashboard.metrics?.renewalsMtd || 0 }}</span><div class="side-stat"><div class="label">Expected Renewals</div><div class="val">{{ dashboard.metrics?.expectedRenewalsMtd || 0 }}</div></div></div>
     </section>
-    <section class="card">
+    <section class="card new-business-card">
       <div class="card-head"><h3>New Business MTD</h3><span class="chip muted">{{ dashboard.period?.currentMonth }}</span></div>
-      <div class="stat2"><span class="stat-value">{{ dashboard.metrics?.newBusinessMtd || 0 }}</span></div>
+      <div class="stat2"><span class="stat-value">{{ dashboard.metrics?.newBusinessMtd || 0 }}</span><el-button v-if="can('cases.write')" size="small" class="primary-button" data-testid="dashboard-new-case" @click="router.push({ path: '/cases', query: { action: 'new' } })">+ New Case</el-button></div>
     </section>
   </div>
 
   <section class="card">
-    <div class="card-head"><h3>YTD Brokerage Trend</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
+    <div class="card-head"><h3>YTD Brokerage Trend (TWD)</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
     <div v-if="dashboard.brokerage?.labels?.length" class="trend-chart" aria-label="YTD brokerage trend line chart">
       <svg class="trend-svg" viewBox="0 0 900 220" role="img" aria-label="Current year, prior year and target brokerage trend">
         <g class="trend-grid">
@@ -128,8 +130,8 @@ onMounted(loadDashboard)
       <div class="kpi"><div class="label">Active Endorsements</div><div class="val">{{ dashboard.metrics?.activeEndorsements || 0 }}</div></div>
       <div class="kpi"><div class="label">Open Quotes</div><div class="val">{{ dashboard.metrics?.openQuotes || 0 }}</div></div>
       <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val">{{ dashboard.metrics?.retentionRatio == null ? 'N/A' : formatAmount(dashboard.metrics.retentionRatio) }}<small v-if="dashboard.metrics?.retentionRatio != null">%</small></div></div>
-      <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">{{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}<small>NT$</small></div></div>
-      <div class="kpi"><div class="label">Outstanding · Cedant / Reinsurer</div><div class="val">{{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}<small>NT$</small></div></div>
+      <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
+      <div class="kpi"><div class="label">Outstanding · Cedant / Reinsurer</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div></div>
     </div>
   </section>
 
@@ -151,4 +153,6 @@ onMounted(loadDashboard)
 <style>
 /* 占比長條需要 display:block 才有填色（Alpha v57 起在模板上加了同樣的修正；Alpha 的 CSS 檔保持原樣） */
 .rdash .mix-fill { display: block; }
+.rdash .new-business-card { display: flex; flex-direction: column; }
+.rdash .new-business-card .stat2 { margin-top: auto; }
 </style>

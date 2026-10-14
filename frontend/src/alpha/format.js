@@ -13,6 +13,17 @@ export function formatAmount(value) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(Number(value));
 }
 
+// Input formatting preserves the entered decimal digits; the parser keeps v-model numeric.
+export function formatMoneyInput(value) {
+  const text = parseMoneyInput(value);
+  return text.replace(/^(-?)(\d+)(\.\d*)?$/, (_, sign, integer, decimal = '') =>
+    sign + integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + decimal);
+}
+
+export function parseMoneyInput(value) {
+  return String(value ?? '').replace(/,/g, '');
+}
+
 export function formatFxRate(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
@@ -70,10 +81,14 @@ export function roleLabel(value) {
   return PERSONNEL_ROLES.find((item) => item.value === value)?.label || value || '—';
 }
 
+export function displayAccountExecutiveText(value) {
+  return typeof value === 'string' ? value.replace(/\bAE\b/g, 'Account Executive') : value;
+}
+
 // Alpha #22：409（版本衝突）要提供「重新載入最新版本」，其他錯誤顯示訊息
 export function reportWriteError(err, reload) {
   const status = err && err.status;
-  const message = err instanceof Error ? err.message : String(err);
+  const message = displayAccountExecutiveText(err instanceof Error ? err.message : String(err));
   if (Number(status) === 409) {
     ElMessageBox.confirm(
       `${message} Reload the latest version now?`,
@@ -89,7 +104,7 @@ export function reportWriteError(err, reload) {
 export async function jsonOrThrow(response) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const requestErr = new Error(body.message || body.error || ('HTTP ' + response.status));
+    const requestErr = new Error(displayAccountExecutiveText(body.message || body.error || ('HTTP ' + response.status)));
     requestErr.status = response.status;
     throw requestErr;
   }

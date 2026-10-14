@@ -1,10 +1,10 @@
 <script setup>
-// 外框：照 Alpha public/index.html 的 app-shell（左側選單、頁首、版本條、內容區）。
+// 外框：照 Alpha public/index.html 的 app-shell（左側選單、頁首、內容區）。
 // VM 專有：登入者的改密碼／登出、System Administrator 的唯讀資料檢視連結、強制改密碼對話框。
 import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { auth, can, changePassword, logout } from './auth'
+import { auth, can, changePassword, logout, continueSession } from './auth'
 import { PASSWORD_RULE_TEXT, checkPassword } from './passwordRule'
 import { allNavigation, navAllowed } from './router'
 import { shell } from './alpha/shell'
@@ -27,6 +27,16 @@ async function doLogout() {
 
 // 管理員建立帳號／重設密碼／重新啟用帳號之後，本人必須先改密碼才能使用系統（後端也會擋，這裡只是引導）
 const forced = computed(() => !!auth.principal?.mustChangePassword)
+const idleContinuing = ref(false)
+const idleCountdown = computed(() => {
+  const seconds = auth.idleWarningSeconds || 0
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+})
+async function staySignedIn() {
+  idleContinuing.value = true
+  try { await continueSession() } catch (error) { ElMessage.error(error.message || 'Your session could not be refreshed.') }
+  finally { idleContinuing.value = false }
+}
 const pwdOpen = ref(false)
 const pwdVisible = computed({
   get: () => pwdOpen.value || forced.value,
@@ -72,9 +82,7 @@ async function savePassword() {
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand-block">
-        <div class="eyebrow">再保部 | VM</div>
         <div class="brand-name">Reinsurance Department System</div>
-        <div class="version-chip">Facultative Outward — Phase 1</div>
       </div>
 
       <nav v-if="!forced" class="nav-list" aria-label="系統導覽">
@@ -110,7 +118,6 @@ async function savePassword() {
           <el-button class="header-secondary-button" @click="doLogout">Log out</el-button>
         </div>
       </header>
-      <div class="data-version-strip"><strong>VM · V 0.003</strong> · Company VM (Django + MySQL) · Audit Log recording enabled<br><small>Case forms: use Save draft / Save changes / Review &amp; Confirm. Payment and Signed Slip reminder e-mails are still being migrated.</small></div>
 
       <section class="content-area">
         <el-alert v-if="shell.error" title="Data could not be loaded" :description="shell.error" type="error" :closable="false" show-icon></el-alert>
@@ -149,6 +156,11 @@ async function savePassword() {
       <el-button v-else class="secondary-button" @click="pwdVisible = false">Cancel</el-button>
       <el-button class="primary-button" :loading="pwdSaving" @click="savePassword">Update password</el-button>
     </template>
+  </el-dialog>
+  <el-dialog :model-value="auth.idleWarningSeconds !== null && !!auth.principal" title="Session expiring" width="min(480px, 94vw)" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
+    <p>You will be signed out in <strong>{{ idleCountdown }}</strong> because of inactivity.</p>
+    <p>Unsaved changes will be lost. Choose Continue using to stay signed in.</p>
+    <template #footer><el-button @click="doLogout">Log out</el-button><el-button type="primary" :loading="idleContinuing" @click="staySignedIn">Continue using</el-button></template>
   </el-dialog>
 </template>
 

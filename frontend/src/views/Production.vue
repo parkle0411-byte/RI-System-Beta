@@ -122,7 +122,7 @@ onMounted(loadProductionPreview)
   <div class="overview-stack">
     <section class="table-card production-report-card" v-loading="productionLoading">
       <div class="section-heading production-heading">
-        <div><span class="pending-badge">Versioned monthly close</span><h2>Production Report</h2><p>Preview current rows, defer exceptions, generate an immutable Excel version, then close the latest unchanged version.</p></div>
+        <div><span class="pending-badge">Versioned monthly close</span><h2>Production Report</h2><p v-if="productionPreview.scope?.canOperate">Preview current rows, defer exceptions, generate an immutable Excel version, then close the latest unchanged version.</p><p v-else>View monthly Production rows and download existing report versions as Excel.</p></div>
         <div class="production-month-control"><label for="production-month">Report month</label><el-date-picker id="production-month" v-model="productionMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM"></el-date-picker><el-button class="primary-button" :loading="productionLoading" @click="loadProductionPreview">Preview</el-button></div>
       </div>
       <el-alert v-if="productionPreview.scope?.monthClosed" class="case-readiness-alert" type="success" :closable="false" show-icon :title="productionMonth + ' is closed'" description="The report version and source rows are fixed. The monthly FX rate is locked."></el-alert>
@@ -152,6 +152,7 @@ onMounted(loadProductionPreview)
           <el-table-column prop="endorseNo" label="Endorse No" width="120"><template #default="{ row }">{{ row.endorseNo || '—' }}</template></el-table-column>
           <el-table-column prop="remark" label="Remark" width="90"></el-table-column>
           <el-table-column prop="tranxDate" label="Tranx Date" width="120"></el-table-column>
+          <el-table-column prop="firstPolicyNo" label="First Policy No" width="170"><template #default="{ row }">{{ row.firstPolicyNo || '—' }}</template></el-table-column>
           <el-table-column v-if="productionPreview.scope?.canOperate && !productionPreview.scope?.monthClosed" label="Action" width="210"><template #default="{ row }"><el-button text type="primary" :disabled="Boolean(productionSaving)" @click="excludeProductionRow(row, 'reinsurer')">Exclude R/I</el-button><el-button text type="warning" :disabled="Boolean(productionSaving)" @click="excludeProductionRow(row, 'case')">Exclude case</el-button></template></el-table-column>
         </el-table>
       </div>

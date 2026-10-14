@@ -13,22 +13,27 @@ import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '../api'
-import { generateDocx, generatePdf } from '../alpha/documents'
-import { can } from '../auth'
+import { generateDocx } from '../alpha/documents'
+import { auth, can } from '../auth'
 import { RICaseCalculations } from '../alpha/caseCalculations'
 import {
   STRUCTURE_SUFFIX, UNIVERSAL_CLAUSES, clientKey, compareClauses, emptyDraft, normalizeClauseCode, normalizeClauseList
 } from '../alpha/constants'
 import {
-  departmentLabel, filled, formatAmount, formatCurrency, formatDateTime, formatFileSize, formatMoney,
+  departmentLabel, filled, formatAmount, formatCurrency, formatDateTime, formatFileSize, formatMoney, formatMoneyInput, parseMoneyInput,
   formatPolicyDateTime, formatPolicyPeriod, jsonOrThrow, reportWriteError, statusLabel, structureLabel
 } from '../alpha/format'
 import { setHeader, shell } from '../alpha/shell'
+import { AUW_FOREIGN_BROKER, displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef } from '../alpha/manualTwRef'
+import { allSumInsuredFacility, sumLocationIndex, sumInsuredPlacementIssues, mergeFacilitySumItems, sumInsuredLimitWarning } from '../alpha/sumInsured'
+import { transactionNumber } from '../alpha/transactionNumber'
+import { isSwissFacility, isSwissPropertyCase } from '../alpha/swissFacility'
+import { transactionParty, transactionRecipient, paymentDirection } from '../alpha/transactionParty'
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024 // VM：10 MB（Alpha 5 MB）
 const OPEN_SECTIONS = ['risk', 'security', 'terms', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'reinsurerPremium', 'split', 'conditions']
 const headers = {
-  cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All facultative outward cases' },
+  cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All outward cases' },
   'case-create': { kicker: 'Placement · Draft', title: 'Account', subtitle: 'Draft — not yet saved' },
   'case-detail': { kicker: 'Placement · Case', title: 'Case overview', subtitle: 'Saved case snapshot and computed amounts' }
 }
@@ -39,6 +44,9 @@ export function useCaseWorkspace() {
   const saving = ref(false)
   const saveMessage = ref('')
   const reviewAttempted = ref(false)
+  const lossSaveAttempted = ref(false)
+  const manualRefSaveAttempted = ref(false)
+  const auwBoundRows = new WeakSet()
   const reviewDialogVisible = ref(false)
   const editingCaseUid = ref('')
   const editingRowVersion = ref(null)
@@ -73,6 +81,18 @@ export function useCaseWorkspace() {
   const summary = ref({ total: 0, draft: 0, posted: 0, closed: 0, reversed: 0 })
   const filters = reactive({ search: '', status: 'all', year: 'all', className: 'all', reinsurer: 'all', reinsured: 'all', aeName: 'all' })
   const draft = reactive(emptyDraft())
+  const isSwissProperty = computed(() => isSwissPropertyCase(draft))
+  watchEffect(() => {
+    if (!isSwissProperty.value) return
+    draft.paymentTermsDays = 90
+    draft.reinsurers.forEach(row => { if (isSwissFacility(row.name)) row.paymentTermsDays = 90 })
+    draft.performanceInstallments.forEach(row => {
+      row.paymentTermsDays = 90
+      draft.reinsurers.forEach((r,index) => { if (isSwissFacility(r.name)) row.reinsurerPaymentTerms["r" + (index+1)] = 90 })
+    })
+  })
+  let autoPolicyTo = ''
+  let sumInsuredFacilityMode = null
   const openSections = ref([...OPEN_SECTIONS])
   const reviewReady = computed(() => reviewAttempted.value && collectRequiredIssues().length === 0)
   const validationMessage = computed(() => {
@@ -82,20 +102,42 @@ export function useCaseWorkspace() {
       ? 'All required fields are complete. This draft is ready for the confirmation workflow milestone.'
       : `Please complete ${count} required field${count === 1 ? '' : 's'} before Review & confirm.`
   })
+  const hasManualTwRefReinsurer = computed(() => requiresManualTwRef(draft))
   const totalOrderHereon = computed(() => RICaseCalculations.totalOrderHereon(draft))
   const isFacilityName = (name) => /\(Facility\)\s*$/i.test(String(name || '').trim())
   const selectedDraftReinsurers = computed(() => draft.reinsurers.filter((row) => String(row.name || '').trim()))
   const allFacilityReinsurers = computed(() => selectedDraftReinsurers.value.length > 0 && selectedDraftReinsurers.value.every((row) => isFacilityName(row.name)))
+  const sumInsuredGroups = computed(() => {
+    const indexed = draft.sumInsured.map((row, index) => ({ row, index }))
+    if (allFacilityReinsurers.value) return [{ key: 'facility', label: 'Items', locationIndex: null, address: '', postcode: '', rows: indexed }]
+    return draft.situations.map((situation, index) => ({ key: situation.clientKey, label: `Location ${index + 1}`, locationIndex: index, address: situation.address, postcode: situation.postcode, rows: indexed.filter(item => sumLocationIndex(item.row, draft.situations.length) === index) }))
+  })
+  const unassignedSumInsured = computed(() => allFacilityReinsurers.value ? [] : draft.sumInsured.map((row, index) => ({ row, index })).filter(item => sumLocationIndex(item.row, draft.situations.length) === null))
+  function sumGroupInvalid(index) { return reviewAttempted.value && !draft.sumInsured.some(row => sumLocationIndex(row, draft.situations.length) === index) }
+  function syncSumInsuredMode() {
+    if (!draft.reinsurers.some(row => String(row.name || '').trim())) return
+    const facility = allSumInsuredFacility(draft)
+    if (sumInsuredFacilityMode !== null && facility !== sumInsuredFacilityMode) {
+      draft.sumInsured = facility ? mergeFacilitySumItems(draft.sumInsured) : draft.sumInsured.map(row => ({ ...row, locationIndex: null }))
+      ElMessage.info(facility ? 'Matching Sum Insured items have been combined into Facility totals.' : 'Allocate the existing Sum Insured items to Locations before Review & Announce.')
+    }
+    sumInsuredFacilityMode = facility
+  }
   const hasNonFacilityReinsurer = computed(() => selectedDraftReinsurers.value.some((row) => !isFacilityName(row.name)))
   const totalSumInsured = computed(() => RICaseCalculations.totalSumInsured(draft))
+  const draftSumInsuredWarning = computed(() => sumInsuredLimitWarning(draft))
   const lossRecordSummary = computed(() => lossRecordSummaryFor(draft))
+  const lossRecordYearsMin = computed(() => validLossRecordYears(0, draft) ? 0 : 1)
   const installmentAllocations = computed(() => installmentAllocationsFor(draft))
   const installmentStatus = computed(() => installmentValidationFor(draft))
   const splitStatus = computed(() => splitValidationFor(draft))
 
   const isEditing = computed(() => Boolean(editingCaseUid.value))
   const isEndorsementDraft = computed(() => Boolean(draft.parentTwRef))
+  const auwRefLocked = computed(() => isEditing.value && editingOriginalStatus.value !== 'draft' && draft.twRefSource === 'auw_manual')
   const selectedPayload = computed(() => selectedCase.value?.payload || {})
+  const selectedSumInsuredIssues = computed(() => sumInsuredPlacementIssues(selectedPayload.value))
+  const selectedSumInsuredWarning = computed(() => sumInsuredLimitWarning(selectedPayload.value))
   const selectedOverview = computed(() => {
     const payload = selectedPayload.value
     const legs = RICaseCalculations.totals(payload)
@@ -118,24 +160,33 @@ export function useCaseWorkspace() {
       clauseDetails: normalizeClauseList(payload.clauseDetails?.length ? payload.clauseDetails : UNIVERSAL_CLAUSES).sort(compareClauses)
     }
   })
+  const isTreatyDocumentCase = computed(() => String(selectedPayload.value.reinsuranceStructure || '').trim() === 'TREATY')
   const generatedDocumentCase = computed(() => {
     const payload = selectedPayload.value || {}
     const normalizedReinsured = String(payload.reinsured || '').trim().toLowerCase()
     const reinsuredMaster = mdmRecords.value.find((row) =>
       row.entityType === 'reinsured' && String(row.name || '').trim().toLowerCase() === normalizedReinsured
     )
-    const aeName = String(payload.ae || '').trim().toLowerCase()
-    const aePerson = personnelRecords.value.find((row) => String(row.name || '').trim().toLowerCase() === aeName)
+    const aeName = String(payload.ae || '').trim()
+    const aePerson = personnelRecords.value.find((row) => String(row.name || '').trim().toLowerCase() === aeName.toLowerCase())
     return {
       ...payload,
       caseUid: selectedCase.value?.caseUid || '',
       twRef: selectedCase.value?.twRef || payload.twRef || '',
       status: selectedCase.value?.status || payload.status || 'draft',
       reinsuredAddress: payload.reinsuredAddress || reinsuredMaster?.payload?.address || '',
-      aeEmail: payload.aeEmail || aePerson?.email || '',
+      aeName,
+      aeEmail: String(payload.aeEmail || '').trim() || String(aePerson?.email || '').trim(),
       clauseDetails: selectedOverview.value.clauseDetails
     }
   })
+  function missingDebitPaymentTerms(caseData) {
+    if (caseData?.installmentEnabled === true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
+    const valid = (value) => Number.isInteger(Number(value)) && Number(value) >= 15
+    const defaultValid = valid(caseData?.paymentTermsDays)
+    const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
+    return reinsurers.some(row => !valid(row?.paymentTermsDays) && !defaultValid)
+  }
   const selectedReinsurers = computed(() => {
     const seen = new Set()
     return (Array.isArray(selectedPayload.value.reinsurers) ? selectedPayload.value.reinsurers : [])
@@ -152,7 +203,7 @@ export function useCaseWorkspace() {
     return `Not ready to Announce. Missing ${needs.join('; ')}.`
   })
   const selectedAnnounceIssues = computed(() => collectPayloadAnnounceIssues(selectedPayload.value))
-  const caseDetailTabLabel = computed(() => ({ documents: 'Cover & Debit Note', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders' }[caseDetailTab.value] || 'Case detail'))
+  const caseDetailTabLabel = computed(() => ({ documents: 'Documentation', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders' }[caseDetailTab.value] || 'Case detail'))
   function reconciliationRefFor(caseData, transaction) {
     const leg = String(transaction?.legType || '')
     const isClaim = leg.startsWith('Claim')
@@ -167,12 +218,14 @@ export function useCaseWorkspace() {
   }
   const selectedCaseTransactions = computed(() => (Array.isArray(selectedPayload.value.transactions) ? selectedPayload.value.transactions : []).map((transaction, index) => ({
     ...transaction,
+    displayTxNo: transactionNumber(transaction.txNo),
+    displayLabel: transactionRecipient(transaction, selectedPayload.value),
+    displayParty: transactionParty(transaction, selectedPayload.value),
     key: `${transaction.txNo || 'transaction'}:${index}`,
-    sourceLabel: transaction.source === 'claim' ? 'Claim' : 'Premium',
+    sourceLabel: transaction.source === 'claim' ? 'Claim' : (selectedPayload.value.parentTwRef && Number(selectedPayload.value.originalPremium) < 0 ? 'Return premium' : 'Premium'),
+    paymentDirection: paymentDirection(transaction),
     reconciliationRef: reconciliationRefFor(selectedPayload.value, transaction),
-    settlement: transaction.source === 'claim'
-      ? (transaction.settlement === 'settled' ? 'settled' : 'open')
-      : (transaction.paymentScheduleSettlement || 'not_tracked')
+    settlement: transaction.paymentScheduleSettlement || (transaction.source === 'claim' ? (transaction.settlement === 'settled' ? 'settled' : 'open') : 'not_tracked')
   })))
   const currentHeader = computed(() => {
     if (activeView.value === 'case-create' && isEditing.value) {
@@ -182,7 +235,7 @@ export function useCaseWorkspace() {
       const payload = selectedPayload.value
       return {
         ...headers['case-detail'],
-        title: selectedCase.value.twRef || 'Draft · not assigned',
+        title: selectedCase.value.twRef ? displayTwRef(selectedCase.value) : 'Draft · not assigned',
         subtitle: `${payload.originalInsured || 'Unnamed case'} · ${statusLabel(selectedCase.value.status)}`
       }
     }
@@ -200,7 +253,7 @@ export function useCaseWorkspace() {
       if (filters.aeName !== 'all' && row.aeName !== filters.aeName) return false
       if (filters.reinsurer !== 'all' && !(Array.isArray(row.reinsurers) ? row.reinsurers : []).includes(filters.reinsurer)) return false
       if (!needle) return true
-      return [row.twRef, row.originalInsured, row.originalInsuredCn, row.reinsured, row.className, row.aeName, ...(Array.isArray(row.reinsurers) ? row.reinsurers : [])]
+      return [displayTwRef(row), row.twRef, row.manualTwRef, ...(row.previousTwRefs || []), row.originalInsured, row.originalInsuredCn, row.reinsured, row.className, row.aeName, ...(Array.isArray(row.reinsurers) ? row.reinsurers : [])]
         .some((value) => String(value || '').toLowerCase().includes(needle))
     })
   })
@@ -244,6 +297,7 @@ export function useCaseWorkspace() {
     } else {
       const invalid = rows.some((row) => row?.premium === '' || row?.premium === null || row?.premium === undefined || !Number.isFinite(Number(row.premium)))
       if (invalid) return { valid: false, message: 'Enter the Premium for every installment.' }
+      if (rows.some((row) => Number(row.premium) * totalPremium < 0)) return { valid: false, message: 'Installment Premium must have the same sign as 100% Premium.' }
       const sum = rows.reduce((total, row) => total + Number(row.premium), 0)
       if (Math.abs(sum - totalPremium) > 0.01) return { valid: false, message: 'Installment Premium total must equal 100% Premium.' }
     }
@@ -254,7 +308,10 @@ export function useCaseWorkspace() {
     draft.performanceInstallments.push({ clientKey: clientKey(), id: `I${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, performanceMonth: '', paymentBaseDate: '', paymentTermsDays: null, reinsurerPaymentTerms: {}, premium: null, ratio: null })
   }
   function removeInstallment(index) { draft.performanceInstallments.splice(index, 1) }
-  function onInstallmentToggle(enabled) { if (enabled && !draft.performanceInstallments.length) addInstallment() }
+  function onInstallmentToggle(enabled) {
+    if (isEndorsementDraft.value) { draft.installmentEnabled = false; draft.performanceInstallments = []; return }
+    if (enabled && !draft.performanceInstallments.length) addInstallment()
+  }
   function installmentRowInvalid(index, key) {
     if (!reviewAttempted.value || !draft.installmentEnabled) return false
     const row = draft.performanceInstallments[index] || {}
@@ -306,10 +363,13 @@ export function useCaseWorkspace() {
     const rows = Array.isArray(caseData?.lossRecord) ? caseData.lossRecord : []
     const years = Number(caseData?.lossRecordYears || 0)
     const subject = rows.length === 0 ? 'Loss Clean' : `${rows.length} ${rows.length === 1 ? 'loss' : 'losses'}`
+    if (filled(caseData?.lossRecordYears) && years === 0 && rows.length === 0
+      && caseData?.newOrRenew === 'New' && !filled(caseData?.renewedFromTwRef)) return 'Loss Clean since operation.'
     if (!Number.isInteger(years) || years <= 0) return `${subject} — history period not specified`
     return `${subject} in the past ${years} ${years === 1 ? 'year' : 'years'}`
   }
   function addLossRecord() {
+    if (Number(draft.lossRecordYears) === 0 && filled(draft.lossRecordYears)) return
     draft.lossRecord.push({ clientKey: clientKey(), date: '', cause: '', lossPaid: null })
   }
   function removeLossRecord(index) { draft.lossRecord.splice(index, 1) }
@@ -320,12 +380,16 @@ export function useCaseWorkspace() {
   }
 
   function resetDraft() {
+    autoPolicyTo = ''
     const fresh = emptyDraft()
     Object.keys(draft).forEach((key) => delete draft[key])
     Object.assign(draft, fresh)
+    sumInsuredFacilityMode = null
     openSections.value = [...OPEN_SECTIONS]
     saveMessage.value = ''
     reviewAttempted.value = false
+    lossSaveAttempted.value = false
+    manualRefSaveAttempted.value = false
     reviewDialogVisible.value = false
     editingCaseUid.value = ''
     editingRowVersion.value = null
@@ -336,11 +400,35 @@ export function useCaseWorkspace() {
 
   function startNewCase() {
     resetDraft()
+    draft.currency = 'TWD'
+    draft.paymentTermsDays = 90
+    draft.cedantTermsBasis = 'case'
+    draft.taxPct = 1
+    draft.ae = auth.principal?.name || ''
+    draft.reinsurers.forEach((row) => { row.taxPct = 1 })
     activeView.value = 'case-create'
     if (!mdmRecords.value.length) loadMasterData()
     loadPersonnelOptions()
     window.scrollTo({ top: 0 })
   }
+  function onPolicyFromChange(value) {
+    if (isEndorsementDraft.value || (isEditing.value && editingOriginalStatus.value !== 'draft')
+      || (draft.policyTo && draft.policyTo !== autoPolicyTo)) return
+    if (value && !/^\d{4}-\d{2}-\d{2}$/.test(value)) return
+    if (!value) {
+      draft.policyTo = ''
+      autoPolicyTo = ''
+      return
+    }
+    const [year, month, day] = value.split('-').map(Number)
+    const nextYear = year + 1
+    const lastDay = new Date(Date.UTC(nextYear, month, 0)).getUTCDate()
+    autoPolicyTo = `${nextYear}-${String(month).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`
+    draft.policyTo = autoPolicyTo
+  }
+  watch(() => draft.policyFrom, (value) => {
+    if (activeView.value === 'case-create') onPolicyFromChange(value)
+  })
   function cancelNewCase() { resetDraft(); activeView.value = 'cases'; window.scrollTo({ top: 0 }) }
   function backToCases() { selectedCase.value = null; caseDetailTab.value = 'overview'; activeView.value = 'cases'; window.scrollTo({ top: 0 }) }
 
@@ -372,17 +460,102 @@ export function useCaseWorkspace() {
 
   // 同 Alpha downloadGeneratedDocument；產生程式與 VM 的 API 串接在 ../alpha/documents
   async function downloadGeneratedDocument(kind, format) {
-    if (!selectedCase.value) return
-    if (kind === 'endorsement' && format !== 'pdf') return ElMessage.warning('Endorsement is generated as PDF only.')
-    if (kind === 'debit' && selectedCase.value.status === 'draft') {
-      return ElMessage.warning('Debit Note is available after the case is Announced.')
+    if (!selectedCase.value || !can('documents.read')) return
+    if (format !== 'docx') return ElMessage.warning('Download Word (.docx) and export it to PDF in Word.')
+    if (!isTreatyDocumentCase.value) {
+      if (kind === 'cover' && !selectedCase.value.twRef) {
+        return ElMessage.warning('Cover Note is available after Announce assigns a TW Reference.')
+      }
+      if (kind === 'debit' && selectedCase.value.status === 'draft') {
+        return ElMessage.warning('Debit Note is available after the case is Announced.')
+      }
+      if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.reinsured || '').trim()) {
+        return ElMessage.warning('Complete Reinsured in the case before generating a Cover Note or Debit Note.')
+      }
+      if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.originalInsured || '').trim()) {
+        return ElMessage.warning('Complete Original Insured in the case before generating a Cover Note or Debit Note.')
+      }
+      if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.type || '').trim()) {
+        return ElMessage.warning('Complete Type in the case before generating a Cover Note or Debit Note.')
+      }
+      if ((kind === 'cover' || kind === 'debit') && (!String(selectedPayload.value.policyFrom || '').trim() || !String(selectedPayload.value.policyTo || '').trim())) {
+        return ElMessage.warning('Complete the policy start and end dates in the case before generating a Cover Note or Debit Note.')
+      }
+      if (!String(selectedPayload.value.ae || '').trim()) {
+        return ElMessage.warning('Select an Account Executive in the case before generating a document.')
+      }
+      if (!String(generatedDocumentCase.value.aeEmail || '').trim()) {
+        return ElMessage.warning('Complete the Account Executive Email in the case or Personnel before generating a document.')
+      }
+      if (kind === 'cover' && !String(selectedPayload.value.interest || '').trim()) {
+        return ElMessage.warning('Complete Interest in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && !String(selectedPayload.value.limitOfLiability ?? '').trim()) {
+        return ElMessage.warning('Complete Limit of Liability in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && String(selectedPayload.value.reinsuranceStructure || '').trim() === 'XOL' && !String(selectedPayload.value.underlyingLimits || '').trim()) {
+        return ElMessage.warning('Complete Underlying Limits in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.deductibles || '').trim()) {
+        return ElMessage.warning('Complete Deductibles in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.reinsuredRetention || '').trim()) {
+        return ElMessage.warning('Complete Reinsured’s Retention in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !String(row?.address || '').trim()))) {
+        return ElMessage.warning('Complete Risk Address for every Situation in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !/^[0-9]{3,6}$/.test(String(row?.postcode ?? '').trim())))) {
+        return ElMessage.warning('Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.')
+      }
+      if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.originalPremium ?? '').trim()) {
+        return ElMessage.warning('Complete 100% Premium in the case before generating a Cover Note or Debit Note.')
+      }
+      if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.reinsurers) || !selectedPayload.value.reinsurers.length || selectedPayload.value.reinsurers.some(row => !String(row?.sharePct ?? '').trim()))) {
+        return ElMessage.warning('Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
+        return ElMessage.warning('Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
+        return ElMessage.warning('Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
+        const issues = sumInsuredPlacementIssues(selectedPayload.value)
+        if (issues.some(issue => issue.kind === 'location')) return ElMessage.warning('Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.')
+        if (issues.some(issue => issue.kind === 'duplicate')) return ElMessage.warning('Use unique Interest insured names within each Location or the Facility items before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.lossAdvisedDate ?? '').trim()) {
+        return ElMessage.warning('Complete the Loss Record advised date in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.lossRecordYears ?? '').trim()) {
+        return ElMessage.warning('Complete Past year(s) in the Loss Record section of the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.date ?? '').trim())) {
+        return ElMessage.warning('Complete Date of Loss for every Loss Record entry in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.cause ?? '').trim())) {
+        return ElMessage.warning('Complete Cause for every Loss Record entry in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.lossPaid ?? '').trim())) {
+        return ElMessage.warning('Complete Loss Paid for every Loss Record entry in the case before generating a Cover Note.')
+      }
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.reinsurers) && selectedPayload.value.reinsurers.some(row => !String(row?.name ?? '').trim())) {
+        return ElMessage.warning('Complete the Reinsurer name for every Schedule of Security entry in the case before generating a Cover Note.')
+      }
+      if (kind === 'debit' && missingDebitPaymentTerms(selectedPayload.value)) {
+        return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
+      }
+    }
+    if (kind === 'cover' && !isTreatyDocumentCase.value && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
+      const warning = sumInsuredLimitWarning(selectedPayload.value)
+      if (warning) ElMessage.warning(warning.message)
     }
     const key = `${kind}-${format}`
     documentGenerating.value = key
     try {
       const documentCase = generatedDocumentCase.value
-      if (format === 'docx') await generateDocx(kind, documentCase)
-      else await generatePdf(kind, documentCase)
+      await generateDocx(kind, documentCase)
       ElMessage.success(`${kind === 'cover' ? 'Cover Note' : kind === 'endorsement' ? 'Endorsement' : 'Debit Note'} ${format.toUpperCase()} saved.`)
     } catch (err) {
       ElMessage.error(err instanceof Error ? err.message : String(err))
@@ -422,7 +595,7 @@ export function useCaseWorkspace() {
   }
 
   async function loadCaseDocuments() {
-    if (!selectedCase.value?.caseUid) return
+    if (!selectedCase.value?.caseUid || !can('documents.read')) return
     documentsLoading.value = true
     try {
       const response = await documentRequest('/api/case-documents?caseUid=' + encodeURIComponent(selectedCase.value.caseUid), { headers: { Accept: 'application/json' } })
@@ -452,14 +625,30 @@ export function useCaseWorkspace() {
   async function runWorkflowAction(action) {
     if (!selectedCase.value?.caseUid || workflowSaving.value) return
     const label = action === 'create_endorsement' ? 'create a new endorsement Draft' : 'create a renewal Draft'
+    let manualTwRef = ''
     try {
-      await ElMessageBox.confirm(`This will ${label} from the current case.`, 'Continue workflow', { confirmButtonText: 'Create draft', cancelButtonText: 'Cancel', type: 'warning' })
+      if (requiresManualTwRef(selectedPayload.value)) {
+        const input = await ElMessageBox.prompt(
+          `Enter the new AUW TW Ref. to ${label}.`, 'TW Ref. (for AUW)',
+          { confirmButtonText: 'Create draft', cancelButtonText: 'Cancel', inputPlaceholder: 'New AUW TW Ref.',
+            inputValidator: (value) => {
+              const reference = String(value || '').trim()
+              if (!reference) return 'TW Ref. (for AUW) is required.'
+              if (reference.length > 160) return 'TW Ref. (for AUW) must not exceed 160 characters.'
+              if (/[\x00-\x1f\x7f]/.test(reference)) return 'Enter a single-line TW Ref.'
+              return true
+            } }
+        )
+        manualTwRef = input.value.trim()
+      } else {
+        await ElMessageBox.confirm(`This will ${label} from the current case.`, 'Continue workflow', { confirmButtonText: 'Create draft', cancelButtonText: 'Cancel', type: 'warning' })
+      }
     } catch { return }
     workflowSaving.value = true
     try {
       const response = await apiFetch('/api/case-workflow', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ action, caseUid: selectedCase.value.caseUid, rowVersion: selectedCase.value.rowVersion })
+        body: JSON.stringify({ action, caseUid: selectedCase.value.caseUid, rowVersion: selectedCase.value.rowVersion, ...(manualTwRef ? { manualTwRef } : {}) })
       })
       const body = await response.json()
       if (!response.ok) {
@@ -615,7 +804,7 @@ export function useCaseWorkspace() {
     const saved = await submitClaimAction('record_payment', { claimId: activeClaimId.value, payment: { ...paymentForm } })
     if (!saved) return
     paymentDialogVisible.value = false
-    ElMessage.success('Payment recorded and Claim Leg 1/2 transactions created')
+    ElMessage.success('Claim obligations created; record actual cash in Accounting')
   }
 
   function claimTotalPaid(claim) {
@@ -623,7 +812,7 @@ export function useCaseWorkspace() {
   }
 
   function onCaseDetailTabChange(name) {
-    if (name === 'documents') loadCaseDocuments()
+    if (name === 'overview' || name === 'documents') loadCaseDocuments()
     if (name === 'reminders') loadCaseReminders()
     if (name === 'claims') loadClaims()
     if (name === 'endorsements') loadCaseWorkflow()
@@ -735,17 +924,38 @@ export function useCaseWorkspace() {
       announceDialogVisible.value = false
       announceConfirmed.value = false
       await loadData()
-      ElMessage.success(`Case Announced · ${body.case.twRef}`)
+      ElMessage.success(`Case Announced · ${displayTwRef(selectedCase.value)}`)
+      for (const warning of body.warnings || []) ElMessage.warning({ message: warning.message, duration: 8000, showClose: true })
+      if (body.productionDeferrals?.length) {
+        const moves = [...new Set(body.productionDeferrals.map((row) => `${row.fromMonth} → ${row.toMonth}`))]
+        ElMessage.warning({ message: `Production automatically deferred because the original month is closed: ${moves.join(', ')}`, duration: 8000, showClose: true })
+      }
     } catch (err) {
       reportWriteError(err, () => refreshSelectedCase())
       await loadCaseDocuments()
     } finally { announcing.value = false }
   }
   function addSituation() { draft.situations.push({ clientKey: clientKey(), address: '', postcode: '' }) }
-  function removeSituation(index) { if (draft.situations.length > 1) draft.situations.splice(index, 1) }
-  function addReinsurer() { draft.reinsurers.push({ clientKey: clientKey(), name: '', sharePct: null, premium: null, riCommPct: null, taxPct: null, paymentTermsDays: null, foreignBroker: '', settlementRef: '' }) }
-  function removeReinsurer(index) { if (draft.reinsurers.length > 1) { draft.reinsurers.splice(index, 1); syncCaseClauses() } }
-  function addSumInsured() { draft.sumInsured.push({ clientKey: clientKey(), category: '', amount: null, locationIndex: 0 }) }
+  async function removeSituation(index) {
+    if (draft.situations.length <= 1 || !draft.situations[index]) return
+    const situation = draft.situations[index]
+    const linked = allFacilityReinsurers.value ? 0 : draft.sumInsured.filter(row => sumLocationIndex(row, draft.situations.length) === index).length
+    try {
+      await ElMessageBox.confirm(`Delete Location ${index + 1}${situation.address ? ' — ' + situation.address : ''}?${linked ? ` Its ${linked} Sum Insured item(s) will also be deleted.` : ''}`, 'Delete Location', { type: 'warning', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' })
+    } catch { return }
+    if (draft.situations[index] !== situation) return
+    if (!allFacilityReinsurers.value) {
+      const count = draft.situations.length
+      draft.sumInsured = draft.sumInsured.filter(row => sumLocationIndex(row, count) !== index).map(row => {
+        const location = sumLocationIndex(row, count)
+        return { ...row, locationIndex: location === null ? null : location > index ? location - 1 : location }
+      })
+    }
+    draft.situations.splice(index, 1)
+  }
+  function addReinsurer() { draft.reinsurers.push({ clientKey: clientKey(), name: '', sharePct: null, premium: null, riCommPct: null, taxPct: 1, paymentTermsDays: null, foreignBroker: '', settlementRef: '' }) }
+  function removeReinsurer(index) { if (draft.reinsurers.length > 1) { draft.reinsurers.splice(index, 1); syncCaseClauses(); syncSumInsuredMode() } }
+  function addSumInsured(locationIndex = 0) { draft.sumInsured.push({ clientKey: clientKey(), category: '', amount: null, locationIndex: allFacilityReinsurers.value ? null : locationIndex }) }
   function removeSumInsured(index) { if (draft.sumInsured.length > 1) draft.sumInsured.splice(index, 1) }
 
   function masterOptions(type, currentValue = '') {
@@ -755,7 +965,8 @@ export function useCaseWorkspace() {
       .sort((a, b) => a.name.localeCompare(b.name, 'en'))
     const current = String(currentValue || '').trim()
     if (current && !options.some((row) => row.name === current)) {
-      options.push({ id: `historical-${type}-${current}`, entityType: type, code: '', name: current, isActive: false, historical: true })
+      const isCreator = type === 'ae' && !isEditing.value && current === auth.principal?.name
+      options.push({ id: `historical-${type}-${current}`, entityType: type, code: '', name: current, isActive: isCreator, historical: !isCreator })
     }
     return options
   }
@@ -810,9 +1021,29 @@ export function useCaseWorkspace() {
     const manualCodes = new Set(normalizeClauseList(draft.manualClauses).map((row) => row.code))
     draft.autoClauses = unique.filter((row) => !UNIVERSAL_CLAUSES.some((base) => base.code === row.code) && !manualCodes.has(row.code)).map((row) => row.code)
   }
-  function onReinsurerSelected() {
+  function applyAuwReinsurerRules() {
+    draft.reinsurers.forEach((row) => {
+      if (isAuwReinsurer(row.name)) {
+        row.taxPct = 0
+        row.paymentTermsDays = 120
+        row.foreignBroker = AUW_FOREIGN_BROKER
+        auwBoundRows.add(row)
+      }
+    })
+  }
+  function onReinsurerSelected(row) {
+    if (row && !isAuwReinsurer(row.name) && auwBoundRows.has(row)) {
+      row.foreignBroker = ''
+      row.riCommPct = null
+      row.taxPct = null
+      row.paymentTermsDays = null
+      draft.performanceInstallments.forEach((installment) => { delete installment.reinsurerPaymentTerms?.['r' + (draft.reinsurers.indexOf(row) + 1)] })
+      auwBoundRows.delete(row)
+    }
+    if (isAuwReinsurer(row?.name)) row.riCommPct = 10
+    applyAuwReinsurerRules()
     syncCaseClauses()
-    if (allFacilityReinsurers.value) draft.sumInsured.forEach((row) => { row.locationIndex = 0 })
+    syncSumInsuredMode()
   }
   function addCaseClause() {
     if (!hasNonFacilityReinsurer.value) return ElMessage.error('Case-specific clauses are available only when at least one selected reinsurer is not a Facility')
@@ -890,6 +1121,8 @@ export function useCaseWorkspace() {
     fresh.autoClauses = Array.isArray(payload?.autoClauses) ? payload.autoClauses.map(normalizeClauseCode).filter(Boolean) : []
     Object.keys(draft).forEach((key) => delete draft[key])
     Object.assign(draft, fresh)
+    sumInsuredFacilityMode = allSumInsuredFacility(draft)
+    applyAuwReinsurerRules()
   }
 
   async function startEditCase(row) {
@@ -944,7 +1177,7 @@ export function useCaseWorkspace() {
       resetDocumentForm()
       caseWorkflow.value = null
       activeView.value = 'case-detail'
-      await loadCaseWorkflow()
+      await Promise.all([loadCaseWorkflow(), loadCaseDocuments()])
       window.scrollTo({ top: 0 })
     } catch (err) {
       shell.error = err instanceof Error ? err.message : String(err)
@@ -956,12 +1189,18 @@ export function useCaseWorkspace() {
     if (['draft', 'posted', 'reversed'].includes(selectedCase.value?.status)) startEditCase(selectedCase.value)
   }
 
+  function validSumInsuredAmount(value) {
+    const amount = Number(value)
+    return filled(value) && Number.isFinite(amount) && amount > 0
+  }
+
   function collectPayloadAnnounceIssues(value) {
     const issues = []
     const add = (label) => issues.push(label)
+    if (requiresManualTwRef(value) && !filled(value?.manualTwRef)) add('TW Ref. (for AUW)')
     if (!Number.isInteger(Number(value?.ownerPersonnelId)) || Number(value.ownerPersonnelId) < 1) add('Case Owner');
     [
-      ['reinsuranceStructure', 'Reinsurance structure'], ['ae', 'AE'], ['currency', 'Currency'],
+      ['reinsuranceStructure', 'Reinsurance structure'], ['ae', 'Account Executive'], ['currency', 'Currency'],
       ['classOfBusiness', 'Class'], ['newOrRenew', 'New / Renew'], ['type', 'Type'],
       ['reinsured', 'Reinsured'], ['originalInsured', 'Original insured (EN)'],
       ['policyFrom', 'Effective date'], ['policyTo', 'Expiration date'], ['interest', 'Interest']
@@ -985,6 +1224,10 @@ export function useCaseWorkspace() {
       if (!filled(row?.premium)) add(`Reinsurer ${index + 1} Premium`)
       if (!filled(row?.riCommPct)) add(`Reinsurer ${index + 1} Deductions`)
       if (!filled(row?.taxPct)) add(`Reinsurer ${index + 1} Tax`)
+      if (isAuwReinsurer(row?.name)) {
+        if (row.foreignBroker !== AUW_FOREIGN_BROKER) add(`Reinsurer ${index + 1} Foreign RI Broker must be Howden Specialty Limited for AUW`)
+        if (filled(row?.taxPct) && Number(row.taxPct) !== 0) add(`Reinsurer ${index + 1} Tax must be 0% for AUW`)
+      }
     });
     [['limitOfLiability', 'Limit of Liability'], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ['occupation', 'Occupation'], ['construction', 'Construction']]
       .forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
@@ -993,20 +1236,41 @@ export function useCaseWorkspace() {
     if (!sumInsured.length) add('Breakdown of Sum Insured')
     sumInsured.forEach((row, index) => {
       if (!filled(row?.category)) add(`Sum insured ${index + 1} Interest insured`)
-      if (!filled(row?.amount)) add(`Sum insured ${index + 1} Amount`)
+      if (!validSumInsuredAmount(row?.amount)) add(`Sum insured ${index + 1} Amount must be greater than 0`)
     })
+    sumInsuredPlacementIssues(value).forEach(issue => add(issue.label))
     if (!filled(value?.lossAdvisedDate)) add('Loss record advised by broker on')
-    if (!Number.isInteger(Number(value?.lossRecordYears)) || Number(value?.lossRecordYears) <= 0) add('Loss history years');
-    (Array.isArray(value?.lossRecord) ? value.lossRecord : []).forEach((row, index) => {
+    if (!validLossRecordYears(value?.lossRecordYears, value)) add('Loss history years')
+    const lossRecord = Array.isArray(value?.lossRecord) ? value.lossRecord : []
+    if (filled(value?.lossRecordYears) && Number(value.lossRecordYears) === 0 && lossRecord.length) add('Loss Record must be empty when loss history years is 0')
+    lossRecord.forEach((row, index) => {
       if (!filled(row?.date)) add(`Loss ${index + 1} Date of Loss`)
       if (!filled(row?.cause)) add(`Loss ${index + 1} Cause`)
       if (!filled(row?.lossPaid)) add(`Loss ${index + 1} Loss Paid`)
     });
-    [['originalPremium', '100% Premium'], ['paymentTermsDays', 'Payment terms'], ['riCommPct', 'Ceding commission'], ['taxPct', 'Cedant tax']]
+    [['originalPremium', '100% Premium'], ['paymentTermsDays', 'Payment terms']]
       .forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
     if (value?.installmentEnabled) {
       const installmentResult = installmentValidationFor(value)
       if (!installmentResult.valid) add(installmentResult.message)
+      if (value?.renewedFromTwRef) {
+        const start = String(value.policyFrom || '')
+        const expiry = String(value.policyTo || '')
+        ;(Array.isArray(value.performanceInstallments) ? value.performanceInstallments : []).forEach((row, index) => {
+          const month = String(row?.performanceMonth || '')
+          const validMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+          const nextMonth = validMonth
+            ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1)).toISOString().slice(0, 10)
+            : ''
+          if (!validMonth || !(`${month}-01` < expiry && nextMonth > start)) {
+            add(`Installment ${index + 1} performance month must be within renewal coverage`)
+          }
+          const baseDate = String(row?.paymentBaseDate || '')
+          if (!(baseDate >= start && baseDate < expiry)) {
+            add(`Installment ${index + 1} payment base date must be within renewal coverage`)
+          }
+        })
+      }
     }
     if (value?.splitEnabled) {
       const splitResult = splitValidationFor(value)
@@ -1020,12 +1284,21 @@ export function useCaseWorkspace() {
     const number = Number(value)
     return filled(value) && Number.isInteger(number) && number > 0
   }
+  function validLossRecordYears(value, caseData) {
+    const number = Number(value)
+    return filled(value) && Number.isInteger(number) && number >= 0
+      && (number > 0 || (caseData?.newOrRenew === 'New' && !filled(caseData?.renewedFromTwRef)))
+  }
 
   function fieldInvalid(key, validator) {
+    if (key === 'manualTwRef' && manualRefSaveAttempted.value && requiresManualTwRef(draft)) return !filled(draft.manualTwRef)
+    if (key === 'lossAdvisedDate' && lossSaveAttempted.value) return !filled(draft.lossAdvisedDate)
+    if (key === 'lossRecordYears' && lossSaveAttempted.value) return !validLossRecordYears(draft.lossRecordYears, draft)
     if (!reviewAttempted.value) return false
     const value = draft[key]
     if (Array.isArray(value)) return value.length === 0
     if (validator === 'positiveInteger') return !validPositiveInteger(value)
+    if (validator === 'lossRecordYears') return !validLossRecordYears(value, draft)
     return !filled(value)
   }
 
@@ -1034,14 +1307,18 @@ export function useCaseWorkspace() {
     const row = draft[listName] && draft[listName][index]
     const value = row && row[key]
     if (validator === 'postcode') return !validPostcode(value)
+    if (listName === 'sumInsured' && key === 'category' && sumInsuredPlacementIssues(draft).some(issue => issue.kind === 'duplicate' && issue.field === `sumInsured.${index}.category`)) return true
+    if (validator === 'sumInsuredLocation') return sumLocationIndex(row, draft.situations.length) === null
+    if (validator === 'sumInsuredAmount') return !validSumInsuredAmount(value)
     return !filled(value)
   }
 
   function collectRequiredIssues() {
     const issues = []
     const add = (section, label) => issues.push({ section, label });
+    if (hasManualTwRefReinsurer.value && !filled(draft.manualTwRef)) add('security', 'TW Ref. (for AUW)')
     [
-      ['reinsuranceStructure', 'Reinsurance structure'], ['ae', 'AE'], ['currency', 'Currency'],
+      ['reinsuranceStructure', 'Reinsurance structure'], ['ae', 'Account Executive'], ['currency', 'Currency'],
       ['classOfBusiness', 'Class'], ['newOrRenew', 'New / Renew'], ['type', 'Type'],
       ['reinsured', 'Reinsured'], ['originalInsured', 'Original insured (EN)'],
       ['policyFrom', 'Effective date'], ['policyTo', 'Expiration date'], ['interest', 'Interest']
@@ -1073,10 +1350,12 @@ export function useCaseWorkspace() {
     if (!draft.sumInsured.length) add('sumInsured', 'Breakdown of Sum Insured')
     draft.sumInsured.forEach((row, index) => {
       if (!filled(row.category)) add('sumInsured', `Sum insured ${index + 1} Interest insured`)
-      if (!filled(row.amount)) add('sumInsured', `Sum insured ${index + 1} Amount`)
+      if (!validSumInsuredAmount(row.amount)) add('sumInsured', `Sum insured ${index + 1} Amount must be greater than 0`)
     })
+    sumInsuredPlacementIssues(draft).forEach(issue => add('sumInsured', issue.label))
     if (!filled(draft.lossAdvisedDate)) add('loss', 'Loss record advised by broker on')
-    if (!validPositiveInteger(draft.lossRecordYears)) add('loss', 'Loss history years')
+    if (!validLossRecordYears(draft.lossRecordYears, draft)) add('loss', 'Loss history years')
+    if (filled(draft.lossRecordYears) && Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) add('loss', 'Loss Record must be empty when loss history years is 0')
     draft.lossRecord.forEach((row, index) => {
       if (!filled(row.date)) add('loss', `Loss ${index + 1} Date of Loss`)
       if (!filled(row.cause)) add('loss', `Loss ${index + 1} Cause`)
@@ -1085,7 +1364,6 @@ export function useCaseWorkspace() {
 
     [
       ['originalPremium', '100% Premium'], ['paymentTermsDays', 'Payment terms'],
-      ['riCommPct', 'Ceding commission'], ['taxPct', 'Cedant tax']
     ].forEach(([key, label]) => { if (!filled(draft[key])) add('cedantPremium', label) })
     if (draft.installmentEnabled) {
       const installmentResult = installmentValidationFor(draft)
@@ -1128,6 +1406,8 @@ export function useCaseWorkspace() {
   }
 
   function plainDraft() {
+    syncSumInsuredMode()
+    applyAuwReinsurerRules()
     const value = JSON.parse(JSON.stringify(draft))
     value.situations.forEach((row) => delete row.clientKey)
     value.reinsurers.forEach((row) => delete row.clientKey)
@@ -1201,6 +1481,25 @@ export function useCaseWorkspace() {
   }
 
   async function saveDraft() {
+    lossSaveAttempted.value = true
+    const lossError = !filled(draft.lossAdvisedDate)
+      ? 'Loss record advised by broker on is required before saving.'
+      : !validLossRecordYears(draft.lossRecordYears, draft)
+        ? 'Loss history years is required, and 0 is allowed only for a New case.'
+        : Number(draft.lossRecordYears) === 0 && draft.lossRecord.length
+          ? 'Loss Record must be empty when loss history years is 0.' : ''
+    if (lossError) {
+      openSections.value = [...new Set([...openSections.value, 'loss'])]
+      ElMessage.error(lossError)
+      return
+    }
+    manualRefSaveAttempted.value = true
+    if (requiresManualTwRef(draft) && !filled(draft.manualTwRef)) {
+      ElMessage.error('TW Ref. (for AUW) is required before saving an AUW Draft.')
+      await nextTick()
+      document.querySelector('[data-testid="manual-tw-ref-section"] input')?.focus()
+      return
+    }
     const updating = isEditing.value
     // Alpha #7：Reversed 案件存檔會直接回到 Announced，要先明確確認；後端也會獨立檢查
     const wasReversed = editingOriginalStatus.value === 'reversed'
@@ -1256,6 +1555,11 @@ export function useCaseWorkspace() {
   const route = useRoute()
   const router = useRouter()
   async function openFromQuery() {
+    if (route.query.action === 'new') {
+      await router.replace({ path: '/cases' })
+      if (can('cases.write')) startNewCase()
+      return
+    }
     const caseUid = typeof route.query.case === 'string' ? route.query.case : ''
     if (!caseUid) return
     const tab = route.query.tab === 'soa' ? 'soa' : ''
@@ -1271,16 +1575,16 @@ export function useCaseWorkspace() {
 
   return {
     can, activeView, currentHeader, loading, saving, saveMessage,
-    filters, filteredCases, draft, openSections, startNewCase, cancelNewCase,
+    displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange,
     recycleSaving, recycleDraft,
     addSituation, removeSituation, addReinsurer, removeReinsurer, addSumInsured, removeSumInsured,
-    isEditing, isEndorsementDraft, editingRowVersion, editingOriginalStatus, endorsementFieldsUnlocked, startEditCase, startViewCase,
+    isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, endorsementFieldsUnlocked, startEditCase, startViewCase,
     casePreviewVisible, casePreview, openCasePreview, openPreviewFullCase, formatPolicyDateTime, formatPolicyPeriod,
-    selectedCase, selectedPayload, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
+    selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarning, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
     claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-    documentsLoading, documentsSaving, documentGenerating, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
@@ -1289,10 +1593,10 @@ export function useCaseWorkspace() {
     masterOptions, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected,
     caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel,
     reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,
-    reviewDialogVisible, totalOrderHereon, totalSumInsured, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, installmentAllocations, installmentStatus,
+    isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
     addInstallment, removeInstallment, onInstallmentToggle, installmentRowInvalid,
     splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
-    formatAmount, formatMoney, formatCurrency, saveReviewedDraft,
+    formatAmount, formatMoney, formatCurrency, formatMoneyInput, parseMoneyInput, saveReviewedDraft,
     addLossRecord, removeLossRecord, lossRowInvalid,
     statusLabel, loadData, saveDraft
   }

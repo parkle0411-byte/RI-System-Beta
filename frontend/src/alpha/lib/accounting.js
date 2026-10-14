@@ -44,13 +44,21 @@ export function buildPremiumTransactions(caseData) {
       { legType: 'Leg 2', label: `Payable — reinsurance dept owes ${settlementLabel}`, amount: legs.leg2 },
       { legType: 'Leg 3', label: 'Payable — reinsurance dept owes broker', amount: legs.leg3 }
     ];
+    if (caseData?.parentTwRef && numberOrZero(caseData?.originalPremium) < 0) {
+      const refundLabels = [
+        `Payable — reinsurance dept owes cedant unit (return premium; ${reinsurerLabel})`,
+        `Receivable — ${settlementLabel} owes reinsurance dept (return premium)`,
+        'Receivable — broker owes reinsurance dept (return brokerage)'
+      ];
+      base.forEach((leg, index) => { if (leg.amount < 0) leg.label = refundLabels[index]; });
+    }
     const split = caseData?.splitEnabled === true && Array.isArray(caseData?.splitParties) && caseData.splitParties.length === 2;
     if (split) {
       caseData.splitParties.forEach((party, partyIdx) => {
         const suffix = partyIdx === 0 ? 'a' : 'b';
         const pct = numberOrZero(party?.pct);
         base.forEach((leg, legIdx) => transactions.push({
-          txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-TX${legIdx + 1}${suffix}`,
+          txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${legIdx + 1}${suffix}`,
           legType: `${leg.legType}${suffix}`,
           label: `${leg.label} (${party?.name || 'Unassigned'}, ${pct}%)`,
           amount: money(leg.amount * pct / 100),
@@ -63,7 +71,7 @@ export function buildPremiumTransactions(caseData) {
       });
     } else {
       base.forEach((leg, legIdx) => transactions.push({
-        txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-TX${legIdx + 1}`,
+        txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${legIdx + 1}`,
         legType: leg.legType,
         label: leg.label,
         amount: leg.amount,
@@ -92,7 +100,7 @@ export function buildClaimPaymentTransactions(rootCase, splitSource, claim, paym
     const reinsurerLabel = stripFacilityTag(reinsurer?.name) || `Reinsurer ${splitIdx + 1}`;
     const settlementLabel = String(reinsurer?.foreignBroker || '').trim() || reinsurerLabel;
     const rootIdx = rootReinsurers.findIndex((row) => normalizedName(row?.name) === normalizedName(reinsurer?.name));
-    const txBase = `${rootCase?.twRef}-CLM${claim?.id}-P${payment?.id}-R${splitIdx + 1}`;
+    const txBase = `${rootCase?.twRef}-C${claim?.id}-P${payment?.id}-R${splitIdx + 1}`;
     const common = {
       amount: shareAmount,
       splitParty: null,
@@ -107,13 +115,13 @@ export function buildClaimPaymentTransactions(rootCase, splitSource, claim, paym
     };
     transactions.push({
       ...common,
-      txNo: `${txBase}-TX1`,
+      txNo: `${txBase}-T1`,
       legType: 'Claim Leg 1',
       label: `Receivable — ${settlementLabel} owes reinsurance dept (claim ${lossLabel})`
     });
     transactions.push({
       ...common,
-      txNo: `${txBase}-TX2`,
+      txNo: `${txBase}-T2`,
       legType: 'Claim Leg 2',
       label: `Payable — reinsurance dept owes cedant unit (claim ${lossLabel})`
     });
