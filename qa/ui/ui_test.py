@@ -127,12 +127,12 @@ def header_title(page):
 def phase_a(page):
     login(page, "ui.admin")
     page.locator(".rdash").wait_for()
-    check("admin lands on the first navigation entry (Dashboard)", page.url.endswith("/dashboard") and page.get_by_text("YTD Case Volume").is_visible(), page.url)
+    check("admin lands on the first navigation entry (Dashboard)", page.url.endswith("/dashboard") and page.get_by_text("Total Bound YTD").is_visible(), page.url)
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("sidebar shows Alpha's navigation for an admin", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "Audit Log"], labels)
+    check("sidebar shows the full navigation for an admin", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
     for label, marker in [("Account List", "All cases"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
-                          ("Production Report", "Versioned monthly close"), ("Accounting", "Payment schedule (")]:
+                          ("Production Report", "Versioned monthly close"), ("Accounting", "SoA / Transactions (")]:
         nav(page, label)
         check(f"{label} page loads", page.get_by_text(marker).first.is_visible())
     logout(page)
@@ -150,6 +150,10 @@ def phase_a(page):
     owner = selected_label(page, page, "Case owner")
     check("case owner defaults to the signed-in person", owner == "UI Sales", owner)
     fill(page, page, "Original insured (EN)", "UI Test Insured Ltd")
+    # 2026-10-10 起存檔就要有 Loss Record 的 advised date 與 Past year(s)
+    loss = section(page, "Loss Record")
+    date(loss, page, "Loss record advised by broker on", "2026-02-01")
+    fill(loss, page, "Past year(s)", "5")
     page.locator(".form-actions button", has_text="Save draft").click()
     check("incomplete Draft can be saved", message(page, "Draft saved"))
     page.locator(".case-table").wait_for()
@@ -164,11 +168,11 @@ def phase_a(page):
     page.wait_for_timeout(800)
     risk = section(page, "Risk Details")
     pick(risk, page, "Reinsurance structure", "Quota Share")
-    pick(risk, page, "AE", "UI AE One")
+    pick(risk, page, "Account Executive", "UI AE One")
     pick(risk, page, "Currency", "USD")
     pick(risk, page, "Class", "Property")
     pick(risk, page, "New / Renew", "New")
-    item(risk, page, "Type").locator("input").first.fill("Fire")
+    item(risk, page, "Type").locator("input, textarea").first.fill("Fire")
     pick(risk, page, "Reinsured", "UI Cedant Insurance")
     date(risk, page, "Effective date", "2026-03-01")
     date(risk, page, "Expiration date", "2027-03-01")
@@ -231,7 +235,7 @@ def phase_a(page):
     page.wait_for_timeout(800)
     docs = page.locator(".documents-grid")
     check("documents: not ready before any evidence", "Not ready to Announce" in docs.inner_text())
-    check("documents: generation buttons are enabled", page.locator(".generated-document-actions button").first.is_enabled())
+    check("documents: Cover Note waits for the TW Reference (disabled while Draft)", page.locator(".generated-document-actions button").first.is_disabled())
     upload = page.locator(".document-upload-card")
 
     def upload_doc(kind_label, reinsurer, filename, content):
@@ -300,7 +304,7 @@ def phase_a(page):
     check("endorsement Draft created", message(page, "Endorsement Draft created"))
     page.locator(".endorsement-editor").wait_for()
     check("endorsement form: header 'New endorsement' and risk fields locked", header_title(page) == "New endorsement"
-          and page.locator("fieldset.case-fieldset").evaluate("el => el.disabled") is True, header_title(page))
+          and page.locator("fieldset.case-fieldset").first.evaluate("el => el.disabled") is True, header_title(page))
     snap(page, "endorsement-form")
     page.locator(".page-header button", has_text="Cancel").click()
     page.locator(".case-table").wait_for()
