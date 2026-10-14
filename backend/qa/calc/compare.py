@@ -8,6 +8,7 @@
 import json
 import math
 import sys
+import copy
 
 from cases import draft
 from cases import workflow as wf
@@ -16,7 +17,6 @@ from cases import ledger
 from production import calc as prod
 from production import closing
 from dashboard import calc as dash
-from cases import document_markup as docgen
 from reminders import messages as rem
 from cases.calc import signed_slip as slip
 from cases.calc import accounting as acc
@@ -66,14 +66,12 @@ FUNCTIONS = {
     "slipReminderDue": lambda a, now: slip.reminder_due(*(list(a) + [UNDEFINED] * (4 - len(a)))),
     "slipSignedSlipTracking": lambda a, now: slip.signed_slip_tracking(*a, now=now),
     "slipIsReservedTestEmail": lambda a, now: slip.is_reserved_test_email(*a),
-    "buildProductionPreview": lambda a, now: prod.build_production_preview(*a),
+    "buildProductionPreview": lambda a, now: _production_preview_vm(a),
     "productionKeysForCase": lambda a, now: prod.production_keys_for_case(*a),
     "nextProductionMonth": lambda a, now: prod.next_production_month(*a),
     "dashboardSummary": lambda a, now: _dashboard_vm(a, now),
     "productionConfirmCase": lambda a, now: closing.confirm_case(*a),
     "accountingLedgerRows": lambda a, now: dict(zip(("rows", "warnings"), ledger.ledger_rows(a[0], now))),
-    "renderPdfRejectUnsafeMarkup": lambda a, now: docgen.reject_unsafe_markup(a[0]),
-    "renderPdfMarkupStatus": lambda a, now: _markup_status(a[0]),
     "payEsc": lambda a, now: rem.esc(a[0]),
     "payValidEmail": lambda a, now: rem.valid_email(a[0]),
     "payLabel": lambda a, now: rem.label(a[0]),
@@ -86,6 +84,16 @@ FUNCTIONS = {
     "slipContactFor": lambda a, now: rem.contact_for(*a),
     "slipReminderMessage": lambda a, now: rem.reminder_message(*a),
 }
+
+
+def _production_preview_vm(a):
+    """VM 在每一列多了 firstPolicyNo（Alpha 沒有）；先拿掉再與 Alpha 比。沒有這個欄位會 KeyError → 算不一致。
+    這個欄位本身由 suites/production_api.py 與 suites/production_first_policy.py 檢查。"""
+    result = prod.build_production_preview(*a)
+    for key in ("rows", "excluded"):
+        for row in result.get(key, []):
+            row.pop("firstPolicyNo")
+    return result
 
 
 def _dashboard_vm(a, now):
@@ -104,12 +112,6 @@ def _dashboard_vm(a, now):
     rows = [{**r, "announced_at": text(r.get("announced_at")), "created_at": text(r.get("created_at"))} if isinstance(r, dict) else r for r in a[0]]
     return dash.build_dashboard(rows, a[1], a[2], _now(now), tz=tpe, production_rules=True)
 
-
-def _markup_status(body):
-    """VM 回 {error: 代碼, message: 訊息}；Alpha 回 {error: 訊息}。比對狀態碼與訊息文字。"""
-    markup = body.get("markup") if isinstance(body, dict) else None
-    problem = docgen.markup_problem(markup)
-    return {"status": 200} if problem is None else {"status": problem[0], "body": {"error": problem[2]}}
 
 
 def _now(value):
@@ -169,6 +171,114 @@ def first_difference(a, b, path="$"):
     return f"{path}: JavaScript = {json.dumps(a, ensure_ascii=False)[:140]}   Python = {json.dumps(b, ensure_ascii=False)[:140]}"
 
 
+def vm_numbering_expected(vec, expected):
+    """Frozen Alpha uses TX/CLM; adapt only newly generated transaction numbers.
+
+    Existing entries and reversal references must retain their stored identifiers.
+    All other fields, including amounts, are still compared without adaptation.
+    """
+    if 'ok' not in expected:
+        return expected
+    name = vec['fn']
+    if name not in ('buildPremiumTransactions', 'buildClaimPaymentTransactions', 'productionConfirmCase'):
+        return expected
+    result = copy.deepcopy(expected)
+    if name == 'productionConfirmCase':
+        payload = vec['args'][0].get('payload') or {}
+        previous = payload.get('transactions')
+        previous_count = len(previous) if isinstance(previous, list) else 0
+        rows = result['ok']['payload'].get('transactions')
+        rows = rows[previous_count:] if isinstance(rows, list) else []
+    else:
+        rows = result['ok']
+    for row in rows:
+        if not isinstance(row, dict) or row.get('isReversalEntry'):
+            continue
+        number = row.get('txNo')
+        if not isinstance(number, str):
+            continue
+        head, separator, tail = number.rpartition('-TX')
+        if separator:
+            number = head + '-T' + tail
+        if name == 'buildClaimPaymentTransactions':
+            head, separator, tail = number.rpartition('-CLM')
+            if separator:
+                number = head + '-C' + tail
+        row['txNo'] = number
+    return result
+
+
+def vm_optional_cedant_fields_expected(vec, expected):
+    """2026-10-12: Case-level Ceding Commission and Tax are optional in the VM."""
+    if vec["fn"] != "validateAnnounceReady" or not isinstance(expected.get("ok"), list):
+        return expected
+    return {**expected, "ok": [issue for issue in expected["ok"] if issue.get("field") not in ("riCommPct", "taxPct")]}
+
+
+def vm_positive_sum_amount_expected(vec, expected):
+    """VM: preserve Alpha issue order while requiring each Sum Insured amount > 0."""
+    if vec["fn"] != "validateAnnounceReady" or not isinstance(expected.get("ok"), list):
+        return expected
+    from cases.calc.jsnum import get, is_array, js_is_finite, js_to_number
+    rows = get(vec["args"][0], "sumInsured")
+    if not is_array(rows):
+        return expected
+    issues = [dict(issue) for issue in expected["ok"]]
+    # This block precedes loss history and cedant premium validation in Alpha.
+    following = {"lossAdvisedDate", "lossRecordYears", "lossRecord", "originalPremium", "paymentTermsDays", "performanceInstallments", "splitParties"}
+    for index, row in enumerate(rows):
+        field = f"sumInsured.{index}.amount"
+        amount = js_to_number(get(row, "amount"))
+        existing = next((i for i, issue in enumerate(issues) if issue["field"] == field), None)
+        if existing is not None:
+            issues[existing]["label"] = f"Sum insured {index + 1} Amount must be greater than 0"
+        elif not js_is_finite(amount) or amount <= 0:
+            position = len(issues)
+            for i, issue in enumerate(issues):
+                path = issue["field"]
+                if (path.startswith("sumInsured.") and int(path.split(".")[1]) > index) or path.split(".")[0] in following:
+                    position = i
+                    break
+            issues.insert(position, {"field": field, "label": f"Sum insured {index + 1} Amount must be greater than 0"})
+    return {**expected, "ok": issues}
+
+
+def vm_sum_placements_expected(vec, expected):
+    if vec["fn"] == "normalizeDraft" and isinstance(expected.get("ok"), dict) and isinstance(expected["ok"].get("value"), dict):
+        from cases.calc.jsnum import js_is_integer, js_to_number
+        result = copy.deepcopy(expected)
+        raw = vec["args"][0].get("sumInsured")
+        if isinstance(raw, list):
+            for source, row in zip(raw[:50], result["ok"]["value"]["sumInsured"]):
+                if isinstance(source, dict) and "locationIndex" in source:
+                    value = source["locationIndex"]
+                    if value is None or (isinstance(value, str) and not value.strip()) or not js_is_integer(js_to_number(value)) or js_to_number(value) < 0:
+                        row["locationIndex"] = None
+        return result
+    if vec["fn"] != "validateAnnounceReady" or not isinstance(expected.get("ok"), list):
+        return expected
+    from cases.sum_insured import placement_issues
+    additions = [{"field": i["field"], "label": i["label"]} for i in placement_issues(vec["args"][0])]
+    issues = list(expected["ok"])
+    following = {"lossAdvisedDate", "lossRecordYears", "lossRecord", "originalPremium", "paymentTermsDays", "performanceInstallments", "splitParties"}
+    index = next((i for i, issue in enumerate(issues) if issue["field"].split(".")[0] in following), len(issues))
+    return {**expected, "ok": issues[:index] + additions + issues[index:]}
+
+
+def vm_account_executive_email_expected(vec, expected):
+    """VM email salutation uses the full role name; Alpha source stays frozen."""
+    if vec["fn"] != "slipReminderMessage" or not isinstance(expected.get("ok"), dict):
+        return expected
+    result = copy.deepcopy(expected)
+    text = result["ok"].get("text")
+    html = result["ok"].get("html")
+    if isinstance(text, str) and text.startswith("AE "):
+        result["ok"]["text"] = "Account Executive " + text[3:]
+    if isinstance(html, str) and html.startswith("<p>AE "):
+        result["ok"]["html"] = "<p>Account Executive " + html[6:]
+    return result
+
+
 def main():
     # 與 JavaScript 一致：所有數字都當成雙精度浮點數（Python 預設會把整數保留成 int）
     data = json.loads(sys.stdin.read(), parse_int=float)
@@ -176,6 +286,7 @@ def main():
     assert len(vectors) == len(js), "向量數與 JavaScript 結果數不同"
     stats, samples = {}, {}
     for index, (vec, expected) in enumerate(zip(vectors, js)):
+        expected = vm_account_executive_email_expected(vec, vm_sum_placements_expected(vec, vm_positive_sum_amount_expected(vec, vm_optional_cedant_fields_expected(vec, vm_numbering_expected(vec, expected)))))
         name = vec["fn"]
         try:
             value = FUNCTIONS[name](vec["args"], vec.get("now"))

@@ -92,11 +92,11 @@ try:
         for bad in ("2031-13", "2031-5", "", "abc", "2031-05x"):
             r = get(fin, bad); check(f"GET month {bad!r} -> 400 invalid_month", r.status_code == 400 and code(r) == "invalid_month")
         r = call(fin, "get", URL); check("GET without month -> 400", code(r) == "invalid_month")
-        r = post(fin, "generate", " 2031-05 ", sourceSignature="x"); check("POST month is trimmed (' 2031-05 ' accepted)", code(r) != "invalid_month", code(r))
-        r = post(fin, "settle", M1); check("unknown action -> 400 unsupported_action", r.status_code == 400 and code(r) == "unsupported_action")
+        r = post(finm, "generate", " 2031-05 ", sourceSignature="x"); check("POST month is trimmed (' 2031-05 ' accepted)", code(r) != "invalid_month", code(r))
+        r = post(finm, "settle", M1); check("unknown action -> 400 unsupported_action", r.status_code == 400 and code(r) == "unsupported_action")
         sc = {name: get(c, M1).json()["scope"] for name, c in (("gm", gm), ("sales", sales), ("fin", fin), ("finm", finm), ("admin", admin))}
         check("scope: GM and sales can read but not operate", not sc["gm"]["canOperate"] and not sc["sales"]["canOperate"] and not sc["gm"]["canClose"])
-        check("scope: Finance Staff operates but cannot close; Finance Manager and Admin can close", sc["fin"]["canOperate"] and not sc["fin"]["canClose"]
+        check("scope: Finance Staff is read-only; Finance Manager and Admin can close", not sc["fin"]["canOperate"] and not sc["fin"]["canClose"]
               and sc["finm"]["canOperate"] and sc["finm"]["canClose"] and sc["admin"]["canClose"])
 
         # ================= 案件 =================
@@ -123,7 +123,7 @@ try:
         check("USD without a May rate: missingRateCurrencies, rows have null NTD amounts, cannot generate",
               "USD" in j["summary"]["missingRateCurrencies"]
               and all(r["premium"] is None and r["missingRate"] for r in by(c1)) and j["scope"]["canGenerate"] is False, j["summary"])
-        r = post(fin, "generate", M1, sourceSignature=j["sourceSignature"])
+        r = post(finm, "generate", M1, sourceSignature=j["sourceSignature"])
         check("generate without the FX rate -> 400 fx_rate_required with currencies", r.status_code == 400 and code(r) == "fx_rate_required" and "USD" in r.json()["currencies"])
         fx(M1, "USD", "31.5")
         j = get(fin, M1).json(); rows = mine(j["rows"], c1, c2, c3, c4, c6)
@@ -146,13 +146,13 @@ try:
         target = r2[0]
         for label, extra, want in (("sales", dict(scope="reinsurer", reason="x", rowId=target["id"]), 403),):
             check(f"exclude by {label} -> {want}", post(sales, "exclude", M1, **extra).status_code == want)
-        r = post(fin, "exclude", M1, scope="all", reason="x", rowId=target["id"]); check("exclude: bad scope -> 400 invalid_scope", code(r) == "invalid_scope")
-        r = post(fin, "exclude", M1, scope="reinsurer", reason="   ", rowId=target["id"]); check("exclude: blank reason -> 400 reason_required", code(r) == "reason_required")
-        r = post(fin, "exclude", M1, scope="reinsurer", reason="x", rowId="nope"); check("exclude: unknown row -> 409 row_not_available", code(r) == "row_not_available")
-        r = post(fin, "exclude", M1, scope="reinsurer", reason="  waiting for signed slip  ", rowId=target["id"])
+        r = post(finm, "exclude", M1, scope="all", reason="x", rowId=target["id"]); check("exclude: bad scope -> 400 invalid_scope", code(r) == "invalid_scope")
+        r = post(finm, "exclude", M1, scope="reinsurer", reason="   ", rowId=target["id"]); check("exclude: blank reason -> 400 reason_required", code(r) == "reason_required")
+        r = post(finm, "exclude", M1, scope="reinsurer", reason="x", rowId="nope"); check("exclude: unknown row -> 409 row_not_available", code(r) == "row_not_available")
+        r = post(finm, "exclude", M1, scope="reinsurer", reason="  waiting for signed slip  ", rowId=target["id"])
         ex = r.json().get("exclusion", {})
         check("exclude (reinsurer) -> 201, deferred to next month, reason trimmed", r.status_code == 201 and ex.get("deferred_to") == M2 and ex.get("scope") == "reinsurer"
-              and ex.get("reinsurer_key") == target["reinsurerKey"] and ex.get("reason") == "waiting for signed slip" and ex.get("created_by") == fin_p.name, r.content[:300])
+              and ex.get("reinsurer_key") == target["reinsurerKey"] and ex.get("reason") == "waiting for signed slip" and ex.get("created_by") == finm_p.name, r.content[:300])
         check("VM: exclusion is audited (exclude_production_row)", audit(ex.get("id"), "exclude_production_row", "production_exclusion").exists())
         j = get(fin, M1).json()
         moved = [r for r in j["excluded"] if r["reinsurerKey"] == target["reinsurerKey"]]
@@ -160,9 +160,9 @@ try:
               and moved[0]["exclusion"]["reason"] == "waiting for signed slip" and not [r for r in j["rows"] if r["reinsurerKey"] == target["reinsurerKey"]])
         check("the signature changed after the exclusion", j["sourceSignature"] != sig0)
         check("deferred rows appear in the next month", len([r for r in get(fin, M2).json()["rows"] if r["reinsurerKey"] == target["reinsurerKey"]]) == 2)
-        r = post(fin, "exclude", M1, scope="reinsurer", reason="again", rowId=target["id"]); check("excluding the same row again -> 409 row_not_available", code(r) == "row_not_available")
+        r = post(finm, "exclude", M1, scope="reinsurer", reason="again", rowId=target["id"]); check("excluding the same row again -> 409 row_not_available", code(r) == "row_not_available")
         r9 = mine(get(fin, M1).json()["rows"], c9)
-        r = post(fin, "exclude", M1, scope="case", reason="whole installment later", rowId=r9[0]["id"]); e9 = r.json().get("exclusion", {})
+        r = post(finm, "exclude", M1, scope="case", reason="whole installment later", rowId=r9[0]["id"]); e9 = r.json().get("exclusion", {})
         j9 = get(fin, M1).json()
         check("exclude (case scope): no reinsurer key; every reinsurer row of that installment moves to 'excluded'", r.status_code == 201 and e9.get("reinsurer_key") is None
               and e9.get("installment_key") == r9[0]["key"] and mine(j9["rows"], c9) == [] and len(mine(j9["excluded"], c9)) == len(r9) == 2, r.content[:200])
@@ -174,13 +174,13 @@ try:
 
         # ================= 產生版本 =================
         j = get(fin, M1).json()
-        r = post(fin, "generate", M1, sourceSignature="stale"); check("generate with a stale signature -> 409 source_changed", code(r) == "source_changed")
+        r = post(finm, "generate", M1, sourceSignature="stale"); check("generate with a stale signature -> 409 source_changed", code(r) == "source_changed")
         check("GM cannot generate (403)", post(gm, "generate", M1, sourceSignature=j["sourceSignature"]).status_code == 403)
-        r = post(fin, "generate", M1, sourceSignature=j["sourceSignature"]); v1 = r.json().get("report", {})
+        r = post(finm, "generate", M1, sourceSignature=j["sourceSignature"]); v1 = r.json().get("report", {})
         check("generate -> 201 version 1 valid, rows stored", r.status_code == 201 and v1.get("version") == 1 and v1.get("status") == "valid"
               and v1.get("rows") == j["rows"] and v1.get("excluded") == j["excluded"] and v1.get("sourceSignature") == j["sourceSignature"], r.content[:300])
         check("VM: generate is audited", audit(v1.get("reportUid"), "generate_production_report", "production_report").exists())
-        r = post(fin, "generate", M1, sourceSignature=j["sourceSignature"]); v2 = r.json().get("report", {})
+        r = post(finm, "generate", M1, sourceSignature=j["sourceSignature"]); v2 = r.json().get("report", {})
         rep1 = ProductionReport.objects.get(report_uid=v1["reportUid"])
         check("generate again -> version 2; version 1 becomes invalid (row_version 2)", v2.get("version") == 2 and rep1.status == "invalid" and rep1.row_version == 2)
         j = get(fin, M1).json()
@@ -225,7 +225,7 @@ try:
         leg = lambda rows, name, r: [t for t in rows if t["legType"] == name and t["reinsurerIdx"] == r]
         check("c3: May installment closed -> only I1 transactions: 2 reinsurers x Leg 1-3, numbered ...-I1 with installmentId",
               len(t3) == 6 and all(t["installmentId"] == "I1" and t["installmentLabel"] == M1 and t["txNo"].endswith("-I1") for t in t3)
-              and sorted(t["txNo"] for t in t3) == sorted(f"{c3.tw_ref}-R{r}-TX{n}-I1" for r in (1, 2) for n in (1, 2, 3)), [t["txNo"] for t in t3])
+              and sorted(t["txNo"] for t in t3) == sorted(f"{c3.tw_ref}-R{r}-T{n}-I1" for r in (1, 2) for n in (1, 2, 3)), [t["txNo"] for t in t3])
         check("c3: I1 amounts = 60% of each leg (600/1000): A 324 / 205.2 / 118.8, B 216 / 91.2 / 124.8",
               [leg(t3, n, r)[0]["amount"] for r in (0, 1) for n in ("Leg 1", "Leg 2", "Leg 3")] == [324, 205.2, 118.8, 216, 91.2, 124.8],
               [(t["txNo"], t["amount"]) for t in t3])
@@ -245,8 +245,8 @@ try:
         j = get(finm, M1).json()
         check("after close: month closed, cannot generate or close again; confirmed rows gone", j["scope"]["monthClosed"] and not j["scope"]["canGenerate"]
               and not j["scope"]["canCloseLatest"] and mine(j["rows"], c1, c4) == [] and j["scope"]["fxLocked"])
-        check("after close: generate -> 409 month_closed; exclude -> 409 month_closed", code(post(fin, "generate", M1, sourceSignature=j["sourceSignature"])) == "month_closed"
-              and code(post(fin, "exclude", M1, scope="case", reason="x", rowId="a")) == "month_closed")
+        check("after close: generate -> 409 month_closed; exclude -> 409 month_closed", code(post(finm, "generate", M1, sourceSignature=j["sourceSignature"])) == "month_closed"
+              and code(post(finm, "exclude", M1, scope="case", reason="x", rowId="a")) == "month_closed")
         check("DB: a second closed report for the same month is rejected", denied_write(lambda: ProductionReport.objects.filter(report_uid=v1["reportUid"]).update(
               status="closed", close_token=uuid.uuid4(), closed_by="t", closed_at=timezone.now())))
         jm2 = get(finm, M2).json()
@@ -279,8 +279,8 @@ try:
             {"scheduleKey": "I1:cedant", "amount": 540, "entryType": "payment", "paidAt": "2031-06-01"}]})
         got = call(sales, "get", f"/api/cases?caseUid={c3.case_uid}").json()["case"]["payload"]["transactions"]
         st = lambda inst, name, r: [t["paymentScheduleSettlement"] for t in got if t["installmentId"] == inst and t["legType"] == name and t["reinsurerIdx"] == r][0]
-        check("SoA settlement per installment: Leg 1 of I1 settled (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 not tracked",
-              st("I1", "Leg 1", 0) == "settled" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "not_tracked",
+        check("SoA settlement per installment: Leg 1 of I1 settled (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 partial until Leg 2 is paid",
+              st("I1", "Leg 1", 0) == "settled" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "partial",
               [(t["txNo"], t["paymentScheduleSettlement"]) for t in got])
 
         # ================= 關帳衝突：產生之後案件被改（簽章不變） =================

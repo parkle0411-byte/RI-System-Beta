@@ -1,0 +1,180 @@
+"""AUW month-end settlement dates, cash matching and reminder dates in disposable QA."""
+import calendar
+import copy
+import json
+import os
+from datetime import date, timedelta
+from django.contrib.auth import get_user_model
+from django.test import Client
+from cases.models import Case
+from cases.draft import normalize_draft
+from cases.manual_reference import MANUAL_TW_REF_REINSURER as TARGET
+from cases.resolve import payment_terms_signature, same_content
+from cases.calc.payment_terms import build_payment_schedule, month_end_date, reminder_kind
+from cases.calc.accounting import build_premium_transactions
+from personnel.models import Personnel
+from reminders.messages import due_kind
+
+assert os.environ.get('RI_DISPOSABLE_QA') == 'true'
+checks = []
+def check(name, condition):
+    assert condition, name
+    checks.append(name)
+    print('PASS '+name, flush=True)
+def ri(payload, index=0, installment=None):
+    return next(row for row in build_payment_schedule(payload)['items']
+                if row['partyKey']=='r'+str(index+1) and (installment is None or row['installmentId']==installment))
+def add(value, days):
+    return (date.fromisoformat(value)+timedelta(days=days)).isoformat()
+
+ready = dict(reinsuranceStructure='QS', ae='QA AUW Dates AE', currency='TWD', classOfBusiness='QA AUW Dates Class',
+    classCode='ADP', newOrRenew='New', typePrefix='Fire', reinsured='QA AUW Dates Cedant', originalInsured='QA AUW Dates Policy',
+    policyFrom='2026-01-01', policyTo='2027-01-01', interest='Buildings', situations=[{'address':'QA Road', 'postcode':'100'}],
+    reinsurers=[{'name':TARGET, 'sharePct':100, 'premium':8000, 'riCommPct':12.5, 'taxPct':0,
+                 'foreignBroker':'Howden Specialty Limited'}], limitOfLiability=1000000, deductibles='As original',
+    originalConditions='As original', occupation='Office', construction='Concrete',
+    sumInsured=[{'category':'Building', 'amount':1000000}], lossAdvisedDate='2025-12-01', lossRecordYears=5,
+    originalPremium=10000, paymentTermsDays=90, riCommPct=17, taxPct=1, manualTwRef='TW26SM010001')
+
+matrix = 0
+for year in [2026, 2027, 2028, 2100, 2400]:
+    for month in range(1, 13):
+        last = calendar.monthrange(year, month)[1]
+        end = date(year, month, last)
+        for day in [1, 15, last]:
+            raw = copy.deepcopy(ready)
+            raw['policyFrom'] = date(year, month, day).isoformat()
+            item = ri(raw)
+            assert item['sourceBaseDate']==raw['policyFrom'] and item['baseDate']==end.isoformat()
+            assert item['contractDueDate']==(end+timedelta(days=120)).isoformat()
+            assert item['dueDate']==(end+timedelta(days=110)).isoformat()
+            assert item['termsDays']==120 and item['accountingLeadDays']==10
+            matrix += 1
+check('180 start/middle/end dates agree with independent calendar arithmetic, including leap centuries', matrix==180)
+check('January 1 and January 31 share May 31 AUW payment and May 21 accounting dates', all(
+    ri({**ready, 'policyFrom':day})['contractDueDate']=='2026-05-31' and ri({**ready, 'policyFrom':day})['dueDate']=='2026-05-21'
+    for day in ['2026-01-01', '2026-01-31']))
+for raw_date in ['', '2026-02-30', '2026-13-01', 'bad', None]:
+    check('invalid AUW source date is pending review '+repr(raw_date), ri({**ready, 'policyFrom':raw_date})['dueDate']=='')
+check('leap-February uses February 29', month_end_date('2028-02-01')=='2028-02-29')
+for row_terms in [None, 15, 90, 365, 'bad']:
+    raw = copy.deepcopy(ready)
+    raw['reinsurers'][0]['paymentTermsDays'] = row_terms
+    normalized = normalize_draft(raw)
+    check('AUW terms are always 120 despite row value '+repr(row_terms), not normalized['errors']
+        and normalized['value']['reinsurers'][0]['paymentTermsDays']==120 and ri(raw)['dueDate']=='2026-05-21')
+for name in [TARGET.lower(), '  '+TARGET.replace(' ', '  ')+'  ']:
+    raw = copy.deepcopy(ready)
+    raw['reinsurers'][0]['name'] = name
+    check('AUW date matching tolerates case and whitespace', ri(raw)['contractDueDate']=='2026-05-31')
+for name in [TARGET.replace('0609', '0610'), TARGET.replace(' (Facility)', ''), 'Other (Facility)']:
+    raw = copy.deepcopy(ready)
+    raw['reinsurers'][0]['name'] = name
+    item = ri(raw)
+    check('unrelated facilities keep date-based terms '+name, item['dueDate']=='2026-03-22'
+        and item['baseDate']=='2026-01-01' and 'contractDueDate' not in item)
+
+def cedant(raw):
+    return next(row for row in build_payment_schedule(raw)['items'] if row['partyType']=='cedant')
+check('AUW case Cedant uses its own 90 days and 15-day accounting lead', cedant(ready)['termsDays']==90
+    and cedant(ready)['dueDate']=='2026-03-17')
+ordinary = copy.deepcopy(ready)
+ordinary['reinsurers'][0].update(name='QA Ordinary Reinsurer', paymentTermsDays=30)
+check('unmarked ordinary historical cases retain minimum-reinsurer collection dates', cedant(ordinary)['termsDays']==30
+    and cedant(ordinary)['dueDate']=='2026-01-16')
+new = {**ordinary, 'cedantTermsBasis':'case'}
+check('new-case Cedant is independent of a shorter reinsurer term', cedant(new)['termsDays']==90
+    and cedant(new)['dueDate']=='2026-03-17' and ri(new)['dueDate']=='2026-01-21')
+check('manual Cedant exceptions still work', cedant({**new, 'paymentTermsDays':105})['dueDate']=='2026-04-01')
+
+old = copy.deepcopy(ready)
+old['reinsurers'][0]['paymentTermsDays'] = None
+value = normalize_draft(old)['value']
+check('canonical signatures permit old posted AUW null terms to become fixed 120 without false locks',
+    same_content(payment_terms_signature(old), payment_terms_signature(value)))
+for premium in [8000, -800]:
+    raw = copy.deepcopy(ready)
+    raw.update(parentTwRef='TWAUW2601001', endoEffectiveDate='2026-03-15', endorsementAnnouncedAt='2026-03-01T00:00:00+00:00', originalPremium=1000 if premium>0 else -1000)
+    raw['reinsurers'][0]['premium'] = premium
+    item = ri(raw)
+    check('positive and negative endorsements use their March effective month '+str(premium), item['baseDate']=='2026-03-31'
+        and item['contractDueDate']=='2026-07-29' and item['dueDate']=='2026-07-19')
+    check('endorsement keys and premium signs are preserved '+str(premium), item['scheduleKey']=='case-effective-date:reinsurer:r1'
+        and item['amount']==(7000 if premium>0 else -700))
+raw['endoEffectiveDate'] = ''
+check('missing endorsement effective date does not silently fall back to policy date', ri(raw)['dueDate']=='')
+
+installments = copy.deepcopy(ready)
+installments.update(installmentEnabled=True, performanceInstallments=[
+    {'id':'I1', 'performanceMonth':'2026-01', 'paymentBaseDate':'2026-01-01', 'premium':4000,
+     'paymentTermsDays':15, 'reinsurerPaymentTerms':{'r1':35}},
+    {'id':'I2', 'performanceMonth':'2026-02', 'paymentBaseDate':'2026-02-28', 'premium':6000,
+     'paymentTermsDays':300, 'reinsurerPaymentTerms':{'r1':400}}])
+one, two = ri(installments, installment='I1'), ri(installments, installment='I2')
+check('each installment uses its own month-end and ignores terms overrides for AUW', one['dueDate']=='2026-05-21'
+    and two['dueDate']==add('2026-02-28', 110) and one['termsDays']==two['termsDays']==120)
+check('installment amount allocation and matching keys are preserved', one['amount']==2800 and two['amount']==4200
+    and one['scheduleKey']=='I1:reinsurer:r1' and two['scheduleKey']=='I2:reinsurer:r1')
+check('reminders use the accounting date seven days before and on May 21', reminder_kind(ri(ready), '2026-05-14')=='seven_days_before'
+    and reminder_kind(ri(ready), '2026-05-21')=='due_today' and due_kind(ri(ready), '2026-05-14', {})=='seven_days_before')
+check('contract payment day does not trigger a duplicate due-today notice', reminder_kind(ri(ready), '2026-05-31')!='due_today')
+
+user = get_user_model().objects.create_user(username='zz.auw.dates', password='AUW-Dates-Password-9!')
+person = Personnel.objects.create(name=ready['ae'], department='admin', role_code='admin', auth_user_id=str(user.pk),
+    account_status='active', created_by='qa', updated_by='qa')
+client = Client(enforce_csrf_checks=True, HTTP_HOST='localhost', raise_request_exception=False)
+def call(method, url, body=None):
+    client.get('/api/auth/csrf')
+    kw = {'HTTP_X_CSRFTOKEN':client.cookies['csrftoken'].value}
+    if body is not None:
+        kw.update(data=json.dumps(body), content_type='application/json')
+    return getattr(client, method)(url, **kw)
+assert call('post', '/api/auth/login', {'username':user.username, 'password':'AUW-Dates-Password-9!'}).status_code==200
+response = call('post', '/api/cases', {'case':ready})
+assert response.status_code==201, response.content
+case = Case.objects.get(case_uid=response.json()['case']['caseUid'])
+check('POST marks new cases for independent Cedant terms', case.payload['cedantTermsBasis']=='case')
+case.status = 'posted'
+case.tw_ref = 'TWADP2601001'
+case.payload['transactions'] = build_premium_transactions({**case.payload, 'twRef':case.tw_ref})
+case.save()
+def ledger():
+    return next(row for row in call('get', '/api/accounting').json()['rows']
+                if row['caseUid']==str(case.case_uid) and row['partyType']=='reinsurer')
+before = copy.deepcopy(case.payload)
+item = ledger()
+case.refresh_from_db()
+check('Accounting exposes fixed month-end, internal date and contract date', item['baseDate']=='2026-01-31'
+    and item['dueDate']=='2026-05-21' and item['contractDueDate']=='2026-05-31' and item['termsDays']==120)
+check('reading recalculated dates does not rewrite existing payload, transactions or entries', case.payload==before)
+loaded = call('get', '/api/cases?caseUid='+str(case.case_uid)).json()['case']['payload']
+response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion':case.row_version, 'case':loaded})
+check('editing a posted AUW case with unchanged terms remains allowed', response.status_code==200)
+case.refresh_from_db()
+changed = copy.deepcopy(case.payload)
+changed['paymentTermsDays'] = 105
+response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion':case.row_version, 'case':changed})
+check('posted Cedant terms remain locked', response.status_code==409 and response.json()['error']=='payment_terms_locked')
+changed = copy.deepcopy(case.payload)
+changed.pop('cedantTermsBasis')
+response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion':case.row_version, 'case':changed})
+check('posted cases cannot silently switch back to the old Cedant rule', response.status_code==409
+    and response.json()['error']=='payment_terms_locked')
+for amount in [2500, 4500]:
+    case.refresh_from_db()
+    response = call('post', '/api/accounting', {'action':'record_payment', 'caseUid':str(case.case_uid),
+        'rowVersion':case.row_version, 'scheduleKey':item['scheduleKey'], 'paymentDate':'2026-05-31', 'amount':amount})
+    check('cash entry still matches the same AUW schedule '+str(amount), response.status_code==200)
+paid = ledger()
+check('fully paid AUW row stays settled and keeps both recalculated dates', paid['paid']==7000 and paid['outstanding']==0
+    and paid['paymentStatus']=='settled' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
+case.refresh_from_db()
+entry = case.payload['paymentEntries'][0]
+response = call('post', '/api/accounting', {'action':'reverse_payment', 'caseUid':str(case.case_uid),
+    'rowVersion':case.row_version, 'entryId':entry['id'], 'paymentDate':'2026-06-01'})
+partial = ledger()
+check('immutable cash reversal leaves 4500 paid and 2500 outstanding', response.status_code==200
+    and partial['paid']==4500 and partial['outstanding']==2500 and partial['contractDueDate']=='2026-05-31')
+case.refresh_from_db()
+check('payment and reversal operations preserve the original SoA transactions', case.payload['transactions']==before['transactions'])
+print(f'{len(checks)}/{len(checks)} AUW payment terms checks passed', flush=True)

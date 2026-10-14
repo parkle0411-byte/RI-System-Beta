@@ -242,6 +242,115 @@ try:
         r = wf(sales, "notify_accounting", nt, accountingPersonnelId=fin2.pk, note="x" * 3000); nt.refresh_from_db()
         check("a second notification is appended; note capped at 2000 characters", len(nt.payload["accountingNotifications"]) == 2 and len(nt.payload["accountingNotifications"][1]["note"]) == 2000)
         check("the notifications are returned by the workflow state", len(call(sales, "get", f"/api/case-workflow?caseUid={nt.case_uid}").json()["workflow"]["notifications"]) == 2)
+        # Optional Case commission remains empty through save and Announce.
+        sales_p.email = "zz.wf.commission@example.invalid"
+        sales_p.save(update_fields=["email"])
+        from cases.draft import validate_announce_ready
+        from cases.calc.accounting import calc_legs_for_reinsurer
+        for structure in ("QS", "XOL", "TREATY"):
+            for value in (None, "", 0, 10):
+                optional = create(sales, reinsuranceStructure=structure, riCommPct=value, ae=sales_p.name, reinsuredRetention="Advice of Reinsured's retention waived.", underlyingLimits="Primary layer limit")
+                check(f"{structure}: optional commission {value!r} saved", optional.payload["riCommPct"] == (None if value in (None, "") else value))
+                check(f"{structure}: optional commission {value!r} is Announce-ready", not validate_announce_ready(optional.payload, allow_zero_loss_years=True), optional.payload)
+                full_docs(optional)
+                r = announce(sales, optional);optional.refresh_from_db()
+                check(f"{structure}: optional commission {value!r} Announce -> 200", r.status_code == 200 and optional.status == "posted" and bool(optional.tw_ref), r.content[:250])
+                check(f"{structure}: Announce preserves stored commission {value!r}", optional.payload["riCommPct"] == (None if value in (None, "") else value))
+                legs = calc_legs_for_reinsurer(optional.payload, optional.payload["reinsurers"][0])
+                check(f"{structure}: commission {value!r} amount correct", legs["ri"] == (60 if value == 10 else 0))
+                for kind in ("cover", "debit"):
+                    r = call(sales, "post", "/api/document-generation-log", {"caseUid": str(optional.case_uid), "kind": kind, "format": "docx"})
+                    check(f"{structure}: commission {value!r} permits {kind} Word after Announce", r.status_code == 204, r.content[:250])
+                updated_payload = {**optional.payload, "riCommPct": None}
+                r = call(sales, "put", "/api/cases", {"caseUid": str(optional.case_uid), "rowVersion": optional.row_version, "case": updated_payload})
+                optional.refresh_from_db()
+                check(f"{structure}: announced Case edit can clear commission", r.status_code == 200 and optional.payload["riCommPct"] is None, r.content[:250])
+        required_deductions = create(sales, riCommPct=None, reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=None, taxPct=0)])
+        r = announce(sales, required_deductions, docs=[])
+        check("Reinsurer Deductions remains required", r.status_code == 400 and code(r) == "case_not_ready" and {issue["field"] for issue in r.json()["issues"]} == {"reinsurers.0.riCommPct"}, r.content[:250])
+        for value in (-1, 101):
+            r = call(sales, "post", "/api/cases", {"case": ready(riCommPct=value)})
+            check(f"filled commission {value} remains outside 0–100 range", r.status_code == 400 and code(r) == "validation_failed")
+        # Optional Case tax: save, Announce, authorize Word, then clear on edit.
+        for structure in ("QS", "XOL", "TREATY"):
+            for value in (None, "", 0, 1, 10):
+                optional_tax = create(sales, reinsuranceStructure=structure, taxPct=value, ae=sales_p.name, reinsuredRetention="Advice of Reinsured's retention waived.", underlyingLimits="Primary layer limit")
+                expected_tax = None if value in (None, "") else value
+                check(f"{structure}: optional Tax {value!r} saved", optional_tax.payload["taxPct"] == expected_tax)
+                check(f"{structure}: optional Tax {value!r} is Announce-ready", not validate_announce_ready(optional_tax.payload, allow_zero_loss_years=True))
+                full_docs(optional_tax)
+                r = announce(sales, optional_tax);optional_tax.refresh_from_db()
+                check(f"{structure}: optional Tax {value!r} Announce -> 200", r.status_code == 200 and optional_tax.status == "posted" and bool(optional_tax.tw_ref), r.content[:250])
+                check(f"{structure}: Announce preserves stored Tax {value!r}", optional_tax.payload["taxPct"] == expected_tax)
+                legs = calc_legs_for_reinsurer(optional_tax.payload, optional_tax.payload["reinsurers"][0])
+                check(f"{structure}: Tax {value!r} amount correct", legs["tax"] == (0 if expected_tax is None else expected_tax * 6))
+                for kind in ("cover", "debit"):
+                    r = call(sales, "post", "/api/document-generation-log", {"caseUid": str(optional_tax.case_uid), "kind": kind, "format": "docx"})
+                    check(f"{structure}: Tax {value!r} permits {kind} Word after Announce", r.status_code == 204, r.content[:250])
+                updated_payload = {**optional_tax.payload, "taxPct": None}
+                r = call(sales, "put", "/api/cases", {"caseUid": str(optional_tax.case_uid), "rowVersion": optional_tax.row_version, "case": updated_payload})
+                optional_tax.refresh_from_db()
+                check(f"{structure}: announced Case edit can clear Tax", r.status_code == 200 and optional_tax.payload["taxPct"] is None, r.content[:250])
+        required_ri_tax = create(sales, taxPct=None, reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=5, taxPct=None)])
+        r = announce(sales, required_ri_tax, docs=[])
+        check("Reinsurer Tax remains required", r.status_code == 400 and code(r) == "case_not_ready" and {issue["field"] for issue in r.json()["issues"]} == {"reinsurers.0.taxPct"}, r.content[:250])
+        for value in (-1, 101):
+            r = call(sales, "post", "/api/cases", {"case": ready(taxPct=value)})
+            check(f"filled Tax {value} remains outside 0–100 range", r.status_code == 400 and code(r) == "validation_failed")
+        # Draft may save incomplete amounts; Review/Announce requires every row > 0.
+        from cases.draft import validate_announce_ready
+        for structure in ("QS", "XOL", "TREATY"):
+            for value in (None, "", 0, "0"):
+                invalid = create(sales, reinsuranceStructure=structure, sumInsured=[dict(category="Building", amount=1000), dict(category="Plant", amount=value)])
+                full_docs(invalid)
+                before_audit = audit(invalid.case_uid).count()
+                r = announce(sales, invalid); invalid.refresh_from_db()
+                check(f"{structure}: amount {value!r} Draft saved but Announce blocked", r.status_code == 400 and code(r) == "case_not_ready" and r.json()["issues"] == [{"field": "sumInsured.1.amount", "label": "Sum insured 2 Amount must be greater than 0"}] and invalid.status == "draft" and not invalid.tw_ref and audit(invalid.case_uid).count() == before_audit, r.content[:250])
+            for value in (0.01, 1, 1000.25):
+                positive = create(sales, reinsuranceStructure=structure, sumInsured=[dict(category="Building", amount=value)])
+                check(f"{structure}: positive amount {value} Announce ready", not validate_announce_ready(positive.payload, allow_zero_loss_years=True))
+                full_docs(positive)
+                check(f"{structure}: positive amount {value} Announce accepted", announce(sales, positive).status_code == 200)
+        # Location coverage, explicit unassigned persistence, uniqueness, API conversion.
+        locations = [dict(address="Risk A", postcode="100"), dict(address="Risk B", postcode="200")]
+        assigned = [dict(category="Building", amount=1000, locationIndex=0), dict(category="Building", amount=2000, locationIndex=1)]
+        for structure in ("QS", "XOL", "TREATY"):
+            missing = create(sales, reinsuranceStructure=structure, situations=locations, sumInsured=assigned[:1])
+            full_docs(missing); response = announce(sales, missing)
+            check(f"{structure}: every Location must be covered", code(response) == "case_not_ready" and response.json()["issues"] == [{"field": "sumInsuredLocation.1", "label": "Location 2 requires at least one Sum Insured entry"}], response.content[:250])
+            pending = create(sales, reinsuranceStructure=structure, situations=locations, sumInsured=[dict(category="Building", amount=3000, locationIndex=None)])
+            check(f"{structure}: unassigned survives Draft save", pending.payload["sumInsured"][0]["locationIndex"] is None)
+            response = announce(sales, pending, docs=[])
+            check(f"{structure}: unassigned cannot Announce", code(response) == "case_not_ready" and any(i["field"] == "sumInsured.0.locationIndex" for i in response.json()["issues"]))
+            duplicate = create(sales, reinsuranceStructure=structure, situations=locations, sumInsured=assigned + [dict(category=" building ", amount=1, locationIndex=0)])
+            response = announce(sales, duplicate, docs=[])
+            check(f"{structure}: same Location rejects duplicate name", code(response) == "case_not_ready" and response.json()["issues"] == [{"field": "sumInsured.2.category", "label": "Sum insured 3 Interest insured must be unique within Location 1"}])
+            valid = create(sales, reinsuranceStructure=structure, situations=locations, sumInsured=assigned)
+            full_docs(valid);check(f"{structure}: cross-Location same name Announce accepted", announce(sales, valid).status_code == 200)
+            facility = create(sales, reinsuranceStructure=structure, situations=locations, reinsurers=[dict(name="ZZ Re B (Facility)", sharePct=100, premium=1000, riCommPct=5, taxPct=0)], sumInsured=[dict(category="Building", amount=3000, locationIndex=None)])
+            check(f"{structure}: all Facility ready without assignments", not validate_announce_ready(facility.payload, allow_zero_loss_years=True))
+        editable = create(sales, situations=locations, sumInsured=assigned)
+        incoming = {**editable.payload, "reinsurers": [dict(name="ZZ Re B (Facility)", sharePct=100, premium=1000, riCommPct=5, taxPct=0)]}
+        response = call(sales, "put", "/api/cases", {"caseUid": str(editable.case_uid), "rowVersion": editable.row_version, "case": incoming});editable.refresh_from_db()
+        check("API switching to Facility combines same names and keeps Total", response.status_code == 200 and editable.payload["sumInsured"] == [dict(category="Building", amount=3000, locationIndex=None)], response.content[:250])
+        incoming = {**editable.payload, "reinsurers": ready()["reinsurers"]}
+        response = call(sales, "put", "/api/cases", {"caseUid": str(editable.case_uid), "rowVersion": editable.row_version, "case": incoming});editable.refresh_from_db()
+        check("API switching from Facility preserves amount as unassigned", response.status_code == 200 and editable.payload["sumInsured"] == [dict(category="Building", amount=3000, locationIndex=None)])
+        response = announce(sales, editable, docs=[])
+        check("API converted draft cannot Announce until allocated", code(response) == "case_not_ready" and any(i["field"] == "sumInsured.0.locationIndex" for i in response.json()["issues"]))
+        incoming = {**editable.payload, "sumInsured": assigned}
+        response = call(sales, "put", "/api/cases", {"caseUid": str(editable.case_uid), "rowVersion": editable.row_version, "case": incoming});editable.refresh_from_db()
+        check("API manual allocation persists and is ready", response.status_code == 200 and not validate_announce_ready(editable.payload, allow_zero_loss_years=True))
+        # Displayed mismatch is advisory; Announce preserves entered amounts.
+        from cases.sum_insured import limit_warning
+        for structure in ("QS", "XOL", "TREATY"):
+            for currency, amount, limit, mismatch in (("USD",1000.001,1000.004,False), ("USD",1000.004,1000.005,True), ("TWD",1000.4,1000.49,False), ("TWD",1000.49,1000.5,True), ("USD",1000,0,True), ("USD",1.005,1.01,False)):
+                sample = create(sales, reinsuranceStructure=structure, currency=currency, sumInsured=[dict(category="Building",amount=amount,locationIndex=0)], limitOfLiability=limit)
+                full_docs(sample); response = announce(sales, sample); sample.refresh_from_db()
+                check(f"{structure}/{currency}: mismatch {mismatch} never blocks Announce", response.status_code==200 and sample.status=="posted" and bool(sample.tw_ref), response.content[:200])
+                warning = limit_warning(sample.payload)
+                check(f"{structure}/{currency}: API uses Word display precision", response.json().get("warnings")==([warning] if warning else []) and bool(warning)==mismatch, response.content[:200])
+                check(f"{structure}/{currency}: warning never rounds stored source", sample.payload["sumInsured"][0]["amount"]==amount and sample.payload["limitOfLiability"]==limit)
         raise Rollback()
 except Rollback:
     pass

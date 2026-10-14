@@ -93,7 +93,7 @@ try:
             x.refresh_from_db()
         ta, tb = a.payload["transactions"], b.payload["transactions"]
         check("a: I1 transactions added (6, numbered -I1, 60% of each leg), row_version + 1",
-              len(ta) == 6 and all(t["installmentId"] == "I1" and t["txNo"] == f"{a.tw_ref}-R{t['reinsurerIdx'] + 1}-TX{n}-I1"
+              len(ta) == 6 and all(t["installmentId"] == "I1" and t["txNo"] == f"{a.tw_ref}-R{t['reinsurerIdx'] + 1}-T{n}-I1"
                                    for t in ta for n in [int(t["legType"][-1])]) and a.row_version == before_rows[a.pk] + 1
               and sorted(t["amount"] for t in ta if t["legType"] == "Leg 1") == [216, 324], [(t["txNo"], t["amount"]) for t in ta])
         check("b: both installments added (12), status unchanged, confirmed keys untouched", len(tb) == 12 and b.status == "closed"

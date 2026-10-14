@@ -80,8 +80,9 @@ try:
 
         # ================= 權限 =================
         check("anonymous -> 401", call(new_client(), "get", f"/api/claims?caseUid={root.case_uid}").status_code == 401)
-        for label, c in (("viewer", viewer), ("finance staff", fin)):
+        for label, c in (("viewer", viewer),):
             check(f"{label}: no cases.read.all -> GET 403, POST 403", claims(c, root).status_code == 403 and act(c, "create_claim", root).status_code == 403)
+        check("finance staff: claims GET allowed, POST denied", claims(fin, root).status_code == 200 and act(fin, "create_claim", root).status_code == 403)
         r = claims(gm, root)
         check("general manager: GET 200 (cases.read.all), no-store", r.status_code == 200 and r["Cache-Control"] == "no-store, max-age=0")
         check("general manager can write claims like Reinsurance Staff (2026-09-27): unsupported action 400, not 403", act(gm, "zz_unknown", root).status_code == 400)
@@ -175,14 +176,14 @@ try:
         p1 = root.payload["claims"][0]["payments"][0]; tx = [t for t in root.payload.get("transactions", []) if t.get("source") == "claim"]
         check("payment recorded: id 1, amount parsed and rounded, note trimmed", r.status_code == 200 and p1 == {"id": 1, "date": "2026-07-01", "amount": 1000.01, "note": "first"}, (r.status_code, p1))
         check("transactions: Claim Leg 1 + Leg 2 per reinsurer of the split source (3 -> 6)", len(tx) == 6 and [t["legType"] for t in tx[:2]] == ["Claim Leg 1", "Claim Leg 2"], len(tx))
-        check("VM fix: transaction numbers start with the root TW Ref (Alpha: 'undefined')", all(t["txNo"].startswith(root.tw_ref + "-CLM1-P1-R") for t in tx) and not any("undefined" in t["txNo"] for t in tx), [t["txNo"] for t in tx[:2]])
+        check("VM fix: transaction numbers start with the root TW Ref (Alpha: 'undefined')", all(t["txNo"].startswith(root.tw_ref + "-C1-P1-R") for t in tx) and not any("undefined" in t["txNo"] for t in tx), [t["txNo"] for t in tx[:2]])
         check("shares follow the endorsement split: 50% / 30% / 20%", [t["amount"] for t in tx[::2]] == [money(1000.01 * 0.5), money(1000.01 * 30 / 100), money(1000.01 * 20 / 100)], [t["amount"] for t in tx[::2]])
         check("reinsurerIdx maps to the root lines by name (Re C is not on the root -> null); broker used as settlement party",
               [t["reinsurerIdx"] for t in tx[::2]] == [0, None, 1] and tx[4]["reinsurer"] == "ZZ Broker" and tx[4]["viaForeignBroker"] is True, [(t["reinsurerIdx"], t["reinsurer"]) for t in tx[::2]])
         check("audit record_claim_payment + snapshot claim_payment_recorded", audit(root.case_uid, "record_claim_payment").first().metadata == {"claimId": 1, "action": "record_payment"}
               and snaps(root.case_uid, "claim_payment_recorded").filter(entity_version=v2 + 1).exists())
         r = act(sales, "record_payment", root, claimId=1, payment={"amount": -200, "date": "2026-07-02"}); root.refresh_from_db()
-        tx2 = [t for t in root.payload["transactions"] if "-CLM1-P2-" in t["txNo"]]
+        tx2 = [t for t in root.payload["transactions"] if "-C1-P2-" in t["txNo"]]
         check("negative payment allowed (recovery / correction), payment id 2, negative transactions", r.status_code == 200 and root.payload["claims"][0]["payments"][1]["amount"] == -200
               and len(tx2) == 6 and all(t["amount"] < 0 for t in tx2), r.content[:200])
         rows = [x for x in ledger(fin, root) if x["source"] == "claim"]

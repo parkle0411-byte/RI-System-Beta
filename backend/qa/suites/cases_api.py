@@ -45,7 +45,7 @@ def code(r):
 def body(**over):
     base = dict(originalInsured="ZZ Insured", reinsured="ZZ Cedant", classOfBusiness="ZZ Class", currency="USD",
                 policyFrom="2026-01-01", policyTo="2026-12-31", originalPremium=1000, riCommPct=10, taxPct=0,
-                paymentTermsDays=30,
+                paymentTermsDays=30, lossAdvisedDate="2026-01-01", lossRecordYears=5,
                 reinsurers=[dict(name="ZZ Re", sharePct=100, premium=1000, riCommPct=5, taxPct=0)])
     base.update(over); return base
 def create(c, **over):
@@ -64,7 +64,7 @@ try:
         # --- 權限 ---
         anon = new_client()
         check("anonymous GET -> 401", call(anon, "get", "/api/cases").status_code == 401)
-        r = call(acct, "get", "/api/cases"); check("accounting (no dashboard/cases read) GET -> 403 PERMISSION_DENIED", r.status_code == 403 and code(r) == "PERMISSION_DENIED", (r.status_code, code(r)))
+        r = call(acct, "get", "/api/cases"); check("accounting can read Account List", r.status_code == 200, r.status_code)
         r = call(acct, "post", "/api/cases", {"case": body()}); check("accounting POST -> 403", r.status_code == 403)
         r = call(viewer, "post", "/api/cases", {"case": body()}); check("viewer (read only) POST -> 403", r.status_code == 403)
         r = call(viewer, "put", "/api/cases", {"caseUid": str(uuid.uuid4()), "rowVersion": 1, "case": body()}); check("viewer PUT -> 403", r.status_code == 403)

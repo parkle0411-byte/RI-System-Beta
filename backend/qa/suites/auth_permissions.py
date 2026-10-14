@@ -9,7 +9,7 @@ User = get_user_model()
 
 # 測試自己建立臨時人員（在會回滾的交易內），不挑用真實資料：真實人員被建了帳號或改名都不影響測試
 _DEPT = {"admin": "admin", "sales": "reinsurance", "accounting": "finance", "accounting_manager": "finance",
-         "general_manager": "reinsurance", "viewer": "business_1"}
+         "general_manager": "reinsurance", "viewer": "business_1", "president": "board_of_directors"}
 _seq = [0]
 def pick(role):
     _seq[0] += 1
@@ -35,6 +35,7 @@ EXPECT = {
     "accounting_manager": (1, 1, 0, 0),
     "general_manager": (1, 0, 1, 1),
     "viewer": (0, 0, 0, 0),
+    "president": (1, 0, 1, 0),
 }
 
 
@@ -119,8 +120,8 @@ try:
                       acc.json()["scope"]["canEdit"] is (role in ("admin", "accounting", "accounting_manager")))
             check(f"[{role}] Dashboard readable", c.get("/api/dashboard").status_code == 200)
             perms = set(c.get("/api/app-context").json()["principal"]["permissions"])
-            check(f"[{role}] dashboard.read.all {'yes' if role != 'viewer' else 'no'}; Account List {'yes' if role in ('admin', 'sales', 'general_manager') else 'no'}",
-                  ("dashboard.read.all" in perms) is (role != "viewer") and ("cases.read.all" in perms) is (role in ("admin", "sales", "general_manager")), sorted(perms))
+            check(f"[{role}] dashboard.read.all {'yes' if role != 'viewer' else 'no'}; Account List {'yes' if role in ('admin', 'sales', 'general_manager', 'president', 'accounting', 'accounting_manager') else 'no'}",
+                  ("dashboard.read.all" in perms) is (role != "viewer") and ("cases.read.all" in perms) is (role in ("admin", "sales", "general_manager", "president", "accounting", "accounting_manager")) and ("personnel.read" in perms) is (role in ("admin", "general_manager", "president")), sorted(perms))
             check(f"[{role}] case writing {'allowed' if role in ('admin', 'sales', 'general_manager') else 'denied'}",
                   ({"cases.write", "cases.announce", "documents.write"} <= perms) is (role in ("admin", "sales", "general_manager")))
             h = c.get("/health/")
