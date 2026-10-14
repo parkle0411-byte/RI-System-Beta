@@ -1,0 +1,8 @@
+{% extends "admin/base.html" %}
+{% load static %}
+{% block title %}{{ title }} | {{ site_title|default:_("Django site admin") }}{% endblock %}
+{% block branding %}<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_("Django administration") }}</a></div>{% endblock %}
+{% block extrahead %}{{ block.super }}
+{% if ri_idle_session %}{{ ri_idle_session|json_script:"ri-idle-session-state" }}
+<script type="module" src="{% static 'ri_system/admin-session-idle.js' %}"></script>{% endif %}
+{% endblock %}

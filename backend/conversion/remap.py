@@ -94,6 +94,18 @@ def remap_payload(payload, maps):
     return p
 
 
+def remap_master(row, maps):
+    """Fixed-clause Class scopes contain master IDs, including forward references."""
+    r = copy.deepcopy(row)
+    payload = r.get("payload")
+    clauses = payload.get("fixedClauses") if isinstance(payload, dict) else None
+    if isinstance(clauses, list):
+        for clause in clauses:
+            if isinstance(clause, dict) and isinstance(clause.get("classIds"), list):
+                clause["classIds"] = [map_id(maps.masters, value, "fixedClauses.classIds") for value in clause["classIds"]]
+    return r
+
+
 def remap_case(row, maps):
     """ri_cases 的一列（Alpha 的欄位名稱；也用於回收桶的 case_snapshot）。"""
     r = copy.deepcopy(row)

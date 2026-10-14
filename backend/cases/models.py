@@ -53,7 +53,7 @@ class Case(models.Model):
         on_delete=models.PROTECT,
         related_name="child_cases",
     )
-    tw_ref = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    tw_ref = models.CharField(max_length=192, null=True, blank=True, unique=True)
     case_kind = models.CharField(
         max_length=20, choices=CASE_KIND_CHOICES, default="original"
     )
@@ -213,7 +213,7 @@ class CaseDocument(models.Model):
 class ReferenceSequence(models.Model):
     """對應 Alpha 的 ri_reference_sequences：Announce 時產生 TW Reference 的流水號。"""
 
-    prefix = models.CharField(max_length=64, primary_key=True)
+    prefix = models.CharField(max_length=192, primary_key=True)
     last_value = models.PositiveIntegerField()
     updated_at = models.DateTimeField(auto_now=True)
 

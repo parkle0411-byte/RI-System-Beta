@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Q
 
 DEPARTMENT_CHOICES = [
+    ("board_of_directors", "Board of Directors"),
     ("business_1", "Business 1"),
     ("business_2", "Business 2"),
     ("special_risk", "Special Risk"),
@@ -12,6 +13,7 @@ DEPARTMENT_CHOICES = [
 ]
 
 ROLE_CODE_CHOICES = [
+    ("president", "President"),
     ("sales", "Sales"),
     ("accounting", "Accounting"),
     ("accounting_manager", "Accounting Manager"),

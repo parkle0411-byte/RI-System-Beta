@@ -11,6 +11,7 @@ Reverse 與「通知會計」補寫 Snapshot、TW Reference 的流水號不截�
   - 同一個案件鏈的所有動作都先鎖住「根案件」那一列（Alpha 用 PostgreSQL 的 advisory lock 與事後檢查），
     所以檢查與寫入在同一個鎖之內，同時送出的兩個請求會依序處理。
 """
+import copy
 import uuid
 from datetime import datetime, timezone as dt_timezone
 
@@ -19,6 +20,8 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from coordination.services import PRODUCTION_SOURCES, serialized
+from production.deferrals import defer_closed_production
 from audit.services import record_audit, record_snapshot, request_id_from
 from personnel.models import Personnel
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
@@ -26,7 +29,10 @@ from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 from . import workflow as wf
 from .calc.jsnum import get, is_array, js_is_integer, js_or, js_to_number, js_to_string, js_trim
 from .draft import text, validate_announce_ready
+from .sum_insured import limit_warning
 from .models import Case, CaseDocument, ReferenceSequence
+from .manual_reference import prepare_auw_workflow_draft, is_pure_auw_case, manual_reference_error, reference_in_use
+from .renewal_premiums import RenewalPremiumError, calculate_renewal_premiums, renewal_installment_issues
 
 DISPLAY_VERSION = "V 0.003"
 ACCOUNTING_DEPARTMENTS = ("accounting", "finance")
@@ -111,7 +117,7 @@ class AnnounceView(NoStoreMixin, APIView):
         actor_info = actor_from(request.ri_principal)
         conflict = None
         try:
-            with transaction.atomic():
+            with serialized(PRODUCTION_SOURCES):
                 response = self._announce(request, case_uid, expected_version, body, actor_info)
         except IntegrityError:
             conflict = _error(409, "reference_conflict", "The TW Reference is already in use. Reload and try again.")
@@ -129,12 +135,27 @@ class AnnounceView(NoStoreMixin, APIView):
         if not current.owner_personnel_id:
             return _error(400, "case_owner_required", "Assign a Case Owner before Announce.")
 
-        payload = _payload(current)
-        issues = validate_announce_ready(payload)
+        payload = copy.deepcopy(_payload(current))
+        now = timezone.now()
+        if current.case_kind == "endorsement":
+            from .endorsement_terms import apply_endorsement_terms
+            root = _live(Case.objects).filter(pk=current.parent_case_id, parent_case__isnull=True).first()
+            if root is None:
+                return _error(409, "root_reference_required", "The root policy is required before endorsement Announce.")
+            if payload.get("installmentEnabled") is True or payload.get("performanceInstallments"):
+                return _error(400, "endorsement_installments_not_allowed", "Endorsements must use a single premium settlement.")
+            apply_endorsement_terms(payload, root, announced_at=now)
+        issues = validate_announce_ready(payload, allow_zero_loss_years=True, case_kind=current.case_kind)
+        if current.case_kind == "renewal":
+            issues.extend(renewal_installment_issues(payload))
         if issues:
             n = len(issues)
             return _error(400, "case_not_ready", f"Complete {n} required field{'' if n == 1 else 's'} before Announce.", issues=issues)
 
+        ref_error = manual_reference_error(payload, exclude_case_uid=current.case_uid)
+        if ref_error:
+            return _error(409, "manual_reference_conflict", ref_error)
+        pure_auw = is_pure_auw_case(payload)
         files = [
             {"id": d.pk, "kind": d.kind, "reinsurers": d.reinsurers, "is_selected": d.is_selected}
             for d in CaseDocument.objects.filter(case=current).order_by("uploaded_at", "id")
@@ -155,33 +176,43 @@ class AnnounceView(NoStoreMixin, APIView):
             if root is None or not root.tw_ref:
                 return _error(409, "root_reference_required", "The root case must have a TW Reference before endorsement Announce.")
             prefix, digits = f"{root.tw_ref}-E", 2
-        if not prefix:
+        if not pure_auw and not prefix:
             return _error(400, "effective_date_required", "A valid Effective date is required before Announce.")
 
         before = {"caseUid": case_uid, "twRef": current.tw_ref, "status": current.status,
-                  "rowVersion": current.row_version, "payload": payload}
+                  "rowVersion": current.row_version, "payload": _payload(current)}
         review = {"confirmed": True, "documentIds": coverage["selected"], "confirmedBy": actor_info["id"]}
         was_endorsement = current.case_kind == "endorsement"
 
-        # 流水號：同一個 prefix 的計數器，在同一個交易內加一（upsert 會鎖住該列直到交易結束）
-        now = timezone.now()
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO ri_reference_sequences (prefix, `last_value`, updated_at) VALUES (%s, 1, %s) AS new "
-                "ON DUPLICATE KEY UPDATE `last_value` = ri_reference_sequences.`last_value` + 1, updated_at = new.updated_at",
-                [prefix, now])
-            cursor.execute("SELECT `last_value` FROM ri_reference_sequences WHERE prefix = %s", [prefix])  # last_value 是 MySQL 8 的保留字
-            sequence = cursor.fetchone()[0]
-
-        current.tw_ref = prefix + str(sequence).zfill(digits)
+        if pure_auw:
+            # No sequence row is read, created or consumed for a pure AUW case.
+            current.tw_ref = payload["manualTwRef"]
+            payload["twRefSource"] = "auw_manual"
+        else:
+            # Avoid references already reserved by a manual AUW Draft or history.
+            while True:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "INSERT INTO ri_reference_sequences (prefix, `last_value`, updated_at) VALUES (%s, 1, %s) AS new "
+                        "ON DUPLICATE KEY UPDATE `last_value` = ri_reference_sequences.`last_value` + 1, updated_at = new.updated_at",
+                        [prefix, now])
+                    cursor.execute("SELECT `last_value` FROM ri_reference_sequences WHERE prefix = %s", [prefix])
+                    sequence = cursor.fetchone()[0]
+                candidate = prefix + str(sequence).zfill(digits)
+                if not reference_in_use(candidate):
+                    current.tw_ref = candidate
+                    break
+            payload["twRefSource"] = "system"
         current.status = "posted"
         current.row_version += 1
         current.announced_by = actor_info["id"]
         current.announced_at = now
+        current.payload = payload
         current.updated_by = actor_info["id"]
         current.save()
+        deferrals = defer_closed_production(current, actor_info, request_id_from(request))
 
-        after = _snapshot_data(current, payload, documentReview=review)
+        after = _snapshot_data(current, payload, documentReview=review, productionDeferrals=deferrals)
         record_snapshot(entity_type="case", entity_id=current.case_uid, version=current.row_version,
                         reason="announced", data=after, created_by=actor_info["id"])
         record_audit(entity_type="case", entity_id=current.case_uid,
@@ -189,8 +220,10 @@ class AnnounceView(NoStoreMixin, APIView):
                      before=before, after=after, actor=actor_info, request_id=request_id_from(request),
                      metadata={"displayVersion": DISPLAY_VERSION, "milestone": "review-announce",
                                "documentIds": coverage["selected"]})
+        warning = limit_warning(payload)
         return Response({
-            "ok": True, "displayVersion": DISPLAY_VERSION,
+            "ok": True, "displayVersion": DISPLAY_VERSION, "productionDeferrals": deferrals,
+            "warnings": [warning] if warning else [],
             "case": {"caseUid": str(current.case_uid), "twRef": current.tw_ref, "status": current.status,
                      "rowVersion": current.row_version, "announcedAt": current.announced_at},
         })
@@ -236,7 +269,7 @@ class WorkflowView(NoStoreMixin, APIView):
             "notifications": notes if is_array(notes) else [],
             "actions": {
                 "canCreateEndorsement": str(source.case_uid) == latest["caseUid"] and source.status in ("posted", "closed"),
-                "canRenew": source.status == "closed",
+                "canRenew": str(source.case_uid) == latest["caseUid"] and source.status == "closed",
                 "canEditAnnounced": source.status in ("posted", "reversed"),
                 "canReverse": source.status == "closed",
                 "canNotifyAccounting": source.status in ("posted", "reversed"),
@@ -255,7 +288,7 @@ class WorkflowView(NoStoreMixin, APIView):
         }
         actor_info = actor_from(request.ri_principal)
         try:
-            with transaction.atomic():
+            with serialized(PRODUCTION_SOURCES):
                 first = _find_case(case_uid)
                 if first is None:
                     return _error(404, "case_not_found", "Case was not found.")
@@ -289,6 +322,14 @@ class WorkflowView(NoStoreMixin, APIView):
                           latestCaseUid=str(latest.case_uid))
         count = _live(Case.objects).filter(parent_case_id=root.pk).count()
         payload = wf.build_endorsement_payload(_payload(source), root.tw_ref, count)
+        from .endorsement_terms import apply_endorsement_terms
+        apply_endorsement_terms(payload, root)
+        errors = prepare_auw_workflow_draft(payload, body)
+        ref_error = manual_reference_error(payload)
+        if ref_error:
+            return _error(409, "manual_reference_conflict", ref_error)
+        if errors:
+            return _error(400, "validation_failed", errors[0], errors=errors)
         case_uid = uuid.uuid4()
         created = self._insert_child(source, case_uid, "endorsement", root.pk, payload, actor_info,
                                      source.effective_date, source.expiration_date)
@@ -310,10 +351,36 @@ class WorkflowView(NoStoreMixin, APIView):
                           currentRowVersion=source.row_version)
         if source.status != "closed":
             return _error(409, "renewal_source_status", "Renewal is available only from a Confirmed case.")
+        root = _root_for(source)
+        if root is None:
+            return _error(409, "root_case_not_found", "The original policy is unavailable for renewal.")
+        children = list(_live(Case.objects.select_for_update()).filter(parent_case_id=root.pk).order_by("id"))
+        latest = children[-1] if children else root
+        if source.pk != latest.pk:
+            return _error(409, "latest_endorsement_required",
+                          "A newer endorsement exists. Create the renewal from the latest Confirmed case.",
+                          latestCaseUid=str(latest.case_uid))
+        if any(child.status not in ("posted", "closed") for child in children):
+            return _error(409, "renewal_chain_review_required",
+                          "This policy chain contains an unfinished or reversed endorsement. Review it before renewal.")
         if _live(Case.objects).filter(payload__renewedFromTwRef=source.tw_ref or "").exists():
             return _error(409, "renewal_already_exists",
                           "A renewal already exists for this case, or the source case changed. Reload and try again.")
         payload = wf.build_renewal_payload(_payload(source), source.tw_ref)
+        try:
+            annual, reinsurer_premiums = calculate_renewal_premiums(
+                _payload(root), [_payload(child) for child in children], _payload(source))
+        except RenewalPremiumError as exc:
+            return _error(409, "renewal_premium_review_required", str(exc))
+        payload["originalPremium"] = annual
+        for row, amount in zip(payload["reinsurers"], reinsurer_premiums):
+            row["premium"] = amount
+        errors = prepare_auw_workflow_draft(payload, body)
+        ref_error = manual_reference_error(payload)
+        if ref_error:
+            return _error(409, "manual_reference_conflict", ref_error)
+        if errors:
+            return _error(400, "validation_failed", errors[0], errors=errors)
         case_uid = uuid.uuid4()
         created = self._insert_child(source, case_uid, "renewal", None, payload, actor_info,
                                      payload["policyFrom"] or None, payload["policyTo"] or None)
@@ -330,6 +397,7 @@ class WorkflowView(NoStoreMixin, APIView):
 
     @staticmethod
     def _insert_child(source, case_uid, kind, parent_id, payload, actor_info, effective_date, expiration_date):
+        payload["cedantTermsBasis"] = "case"
         return Case.objects.create(
             case_uid=case_uid, parent_case_id=parent_id, case_kind=kind, status="draft",
             reinsurance_structure=source.reinsurance_structure,

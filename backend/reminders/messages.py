@@ -79,10 +79,19 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
     rows = []
     for item in items:
         amount = to_locale_2(js_or(get(item, "outstanding"), 0))
-        rows.append(f"{_s(get(item, 'installmentLabel'))} · {_s(get(item, 'partyName'))} · {_s(get(item, 'currency'))} {amount} · "
-                    f"{_s(get(item, 'dueDate'))} 12:00 (Taiwan)")
+        if get(item, "returnPremium") is True:
+            direction = "應退分保人" if get(item, "paymentDirection") == "payable" else "應向再保人／再保經紀人收回"
+            amount = direction + " " + amount
+        if get(item, 'paymentRule') == 'swiss_cedant_75_90':
+            timing = f"75天會計提醒 {_s(get(item, 'dueDate'))}；90天約定期限 {_s(get(item, 'contractDueDate'))} (Taiwan)"
+        elif get(item, 'swissFacility') is True:
+            timing = f"Swiss結算日 {_s(get(item, 'dueDate'))} (Taiwan)"
+        else:
+            timing = f"{_s(get(item, 'dueDate'))} 12:00 (Taiwan)"
+        rows.append(f"{_s(get(item, 'installmentLabel'))} · {_s(get(item, 'partyName'))} · {_s(get(item, 'currency'))} {amount} · " + timing)
+    heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') == 'swiss_cedant_75_90' for i in items) else label(kind))
     return {
-        "subject": f"[Payment {label(kind)}] {_s(reference)}",
+        "subject": f"[Payment {heading}] {_s(reference)}",
         "html": f"<p>案件 <strong>{esc(reference)}</strong> 有以下付款期限項目：</p><ul>{''.join('<li>' + esc(r) + '</li>' for r in rows)}</ul>"
                 f"<p><a href=\"{link_url}\">{link_text}</a></p><p style=\"color:#666\">本信由系統自動產生。</p>",
     }
@@ -119,11 +128,23 @@ def finance_emails(personnel):
 def due_kind(item, today, success_dates):
     due_date = get(item, "dueDate") if isinstance(item, dict) else UNDEFINED
     outstanding = get(item, "outstanding") if isinstance(item, dict) else UNDEFINED
+    if isinstance(item, dict) and item.get("returnPremium") is True:
+        outstanding = abs(js_to_number(outstanding))
     if not js_truthy(due_date) or _le(outstanding, 0.004):
         return ""
     days = days_between_dates(today, due_date)
     if days is None:
         return ""
+    if item.get('paymentRule') == 'swiss_cedant_75_90':
+        contract = item.get('contractDueDate')
+        if contract and today > contract:
+            last = get(success_dates, 'weekly_overdue')
+            return 'weekly_overdue' if not js_truthy(last) or today >= add_calendar_days(last, 7) else ''
+        if 1 <= days <= 7 and not js_truthy(get(success_dates, 'seven_days_before')):
+            return 'seven_days_before'
+        if -6 <= days <= 0 and not js_truthy(get(success_dates, 'due_today')):
+            return 'due_today'
+        return ''
     sd = lambda k: get(success_dates, k)
     truthy = js_truthy
     if 1 <= days <= 7 and not truthy(sd("seven_days_before")):
@@ -166,12 +187,12 @@ def reminder_message(case_data, due, contact, link_url=ALPHA_LINK_URL, link_text
     ae = js_or(get(case_data, "ae"), "—")
     days_text = _s(get(due, "daysSinceEffective"))
     subject = f"[Signed Slip 逾期警示] {_s(reference)} — 尚缺 {len(missing)} 家再保人簽署文件"
-    text = (f"AE {_s(ae)}、{_s(get(contact, 'supervisorName'))} 您好：\n\n"
+    text = (f"Account Executive {_s(ae)}、{_s(get(contact, 'supervisorName'))} 您好：\n\n"
             f"案件 {_s(reference)} 自保單生效日 {_s(get(case_data, 'policyFrom'))} 起已經過 {days_text} 天，系統仍未收到以下再保人的 Reinsurer Signed Slip：\n"
             f"{chr(10).join('• ' + _s(name) for name in missing)}\n\n"
             "即使已上傳 Reinsurer Confirmation E-mail，Signed Slip 追蹤仍會持續。請完成追蹤並將 Signed Slip 上傳至 Reinsurance Department System。\n\n"
             "本信由系統自動產生。")
-    html = (f"<p>AE {escape_html(ae)}、{escape_html(get(contact, 'supervisorName'))} 您好：</p>"
+    html = (f"<p>Account Executive {escape_html(ae)}、{escape_html(get(contact, 'supervisorName'))} 您好：</p>"
             f"<p>案件 <strong>{escape_html(reference)}</strong> 自保單生效日 {escape_html(get(case_data, 'policyFrom'))} 起已經過 {days_text} 天，"
             f"系統仍未收到以下再保人的 Reinsurer Signed Slip：</p><ul>{''.join(f'<li>{escape_html(name)}</li>' for name in missing)}</ul>"
             "<p>即使已上傳 Reinsurer Confirmation E-mail，Signed Slip 追蹤仍會持續。請完成追蹤並將 Signed Slip 上傳至 Reinsurance Department System。</p>"

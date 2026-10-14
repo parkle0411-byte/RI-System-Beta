@@ -50,13 +50,12 @@ EMAIL_TIMEOUT = 30
 DEFAULT_FROM_EMAIL = os.getenv("RI_EMAIL_FROM", "ri-system@tw-insure.com")
 EMAIL_FILE_PATH = os.getenv("RI_EMAIL_FILE_PATH", "/tmp/ri-mail")   # 只有 filebased 後端（畫面測試）會用到
 
-# 產生 PDF：內部的 Gotenberg（Chromium）服務，不對外開放（compose.yaml 的 pdf 服務）
-PDF_RENDERER_URL = os.getenv("RI_PDF_RENDERER_URL", "http://pdf:3000")
-PDF_RENDERER_TIMEOUT = int(os.getenv("RI_PDF_RENDERER_TIMEOUT", "45"))
-
 AUDIT_LOG_ENABLED = (
     os.getenv("AUDIT_LOG_ENABLED", "false").lower() == "true"
 )
+
+# Explicit temporary pause requested by the owner; snapshots remain enabled.
+AUDIT_LOG_PAUSED = os.getenv("AUDIT_LOG_PAUSED", "false").lower() == "true"
 
 INSTALLED_APPS = [
     "ri_system.apps.RIAdminConfig",  # 唯讀的 Django admin（見 ri_system/admin_site.py）
@@ -71,6 +70,7 @@ INSTALLED_APPS = [
     "personnel",
     "cases",
     "production",
+    "coordination",
     "dashboard",
     "conversion",
     "reminders",
@@ -83,6 +83,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "ri_system.session_idle.IdleSessionMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -92,7 +93,7 @@ ROOT_URLCONF = "ri_system.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "ri_system" / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -129,8 +130,12 @@ DATABASES = {
 # 目前 VM 是純 HTTP（區網）。上正式環境加上 HTTPS 後，DJANGO_COOKIE_SECURE 必須設為 true。
 COOKIE_SECURE = os.getenv("DJANGO_COOKIE_SECURE", "false").lower() == "true"
 SESSION_COOKIE_NAME = "ri_sessionid"
-SESSION_COOKIE_AGE = 8 * 60 * 60  # 8 小時，閒置滑動延長
-SESSION_SAVE_EVERY_REQUEST = True
+# Production defaults: three hours since genuine UI activity, with a five-minute warning.
+# Disposable QA can shorten these values without changing the production configuration.
+SESSION_IDLE_TIMEOUT_SECONDS = int(os.getenv("RI_SESSION_IDLE_TIMEOUT_SECONDS", str(3 * 60 * 60)))
+SESSION_IDLE_WARNING_SECONDS = min(int(os.getenv("RI_SESSION_IDLE_WARNING_SECONDS", "300")), SESSION_IDLE_TIMEOUT_SECONDS)
+SESSION_COOKIE_AGE = SESSION_IDLE_TIMEOUT_SECONDS
+SESSION_SAVE_EVERY_REQUEST = False
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = COOKIE_SECURE
@@ -173,6 +178,7 @@ TIME_ZONE = "Asia/Taipei"
 USE_I18N = True
 USE_TZ = True
 
+STATICFILES_DIRS = [BASE_DIR / "ri_system" / "static"]
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 

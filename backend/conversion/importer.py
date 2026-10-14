@@ -27,6 +27,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from audit.services import record_audit, record_snapshot
+from coordination.services import PRODUCTION_SOURCES, serialized
 from cases import storage
 from cases.models import Case, CaseDocument, DraftRecycleBin, ReferenceSequence
 from dashboard.models import DashboardTarget
@@ -125,10 +126,10 @@ class Importer:
     # ------------------------------------------------------------ 入口
     def run(self):
         self._validate()
-        self._require_empty()
         self.src_hash = source_hash(self.export)
         try:
-            with transaction.atomic():
+            with serialized(PRODUCTION_SOURCES):
+                self._require_empty()
                 self.batch = MigrationBatch.objects.create(
                     source_system=str((self.export.get("source") or {}).get("system") or "hatchable-alpha"),
                     source_version=str((self.export.get("source") or {}).get("version") or "") or None,
@@ -230,14 +231,30 @@ class Importer:
         def create_master(r):
             obj = MasterRecord.objects.create(
                 entity_type=r["entity_type"], code=r.get("code") or None, name=r["name"], display_order=r["display_order"],
-                is_active=r["is_active"], payload=r.get("payload") or {}, row_version=r["row_version"],
+                is_active=r["is_active"], payload={}, row_version=r["row_version"],
                 created_by=r["created_by"], updated_by=r["updated_by"], deactivated_by=r.get("deactivated_by"),
                 deactivated_at=_t(r.get("deactivated_at")))
             MasterRecord.objects.filter(pk=obj.pk).update(created_at=_t(r["created_at"]), updated_at=_t(r["updated_at"]))
             return obj
 
-        masters = list(self._match_or_create("ri_master_records", self._rows("ri_master_records"), find_master, MASTER_FIELDS,
+        masters = list(self._match_or_create("ri_master_records", self._rows("ri_master_records"), find_master, tuple(f for f in MASTER_FIELDS if f != "payload"),
                                              create_master, lambda r: f"{r['entity_type']}:{r.get('code') or r['name']}"))
+        self.maps.masters = {int(r["id"]): obj.pk for r, obj, _ in masters}
+        payload_conflicts = []
+        for row, obj, created in masters:
+            mapped = rm.remap_master(row, self.maps)
+            payload = mapped.get("payload") or {}
+            if created:
+                obj.payload = payload
+                obj.save(update_fields=["payload"])
+            else:
+                mine = canonical("ri_master_records", export_model_row("ri_master_records", obj)).get("payload")
+                theirs = canonical("ri_master_records", mapped).get("payload")
+                if mine != theirs:
+                    payload_conflicts.append({"table": "ri_master_records", "alphaId": row["id"], "vmId": obj.pk,
+                        "fields": {"payload": {"alphaMapped": theirs, "vm": mine}}})
+        if payload_conflicts:
+            raise ConversionError("reference_conflict", payload_conflicts)
 
         def find_person(r):
             exact = [p for p in Personnel.objects.filter(name__iexact=r["name"]) if p.name.lower() == r["name"].lower()]
@@ -471,7 +488,8 @@ class Importer:
             created = [(r, o) for r, o, c in self.reference[table] if c]
             skip = ("id",) + (tuple(PERSONNEL_SKIPPED) if table == "ri_personnel" else ())
             compare(table, [r for r, _ in created], {str(r["id"]): type(o).objects.get(pk=o.pk) for r, o in created},
-                    lambda r: str(r["id"]), lambda x, c=cols: rm.remap_actor_row(x, inv, c), skip=skip)
+                    lambda r: str(r["id"]), lambda x, c=cols, t=table: (rm.remap_master(rm.remap_actor_row(x, inv, c), inv)
+                         if t == "ri_master_records" else rm.remap_actor_row(x, inv, c)), skip=skip)
         # 3. 參照完整性
         tw = Counter((c.tw_ref or "").strip().lower() for c in Case.objects.filter(recycled_at__isnull=True, is_archived=False) if (c.tw_ref or "").strip())
         problems += [f"duplicate TW Ref {k}" for k, n in tw.items() if n > 1]

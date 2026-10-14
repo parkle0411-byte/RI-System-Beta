@@ -18,18 +18,23 @@ import uuid
 from django.db import IntegrityError, transaction
 from django.db.models import BooleanField, Count, Q
 from django.db.models.expressions import RawSQL
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from coordination.services import PRODUCTION_SOURCES, serialized
 from audit.services import record_audit, record_snapshot, request_id_from
 from masterdata.models import MasterRecord
 from ri_system.authz import AuthError, NoStoreMixin, RIPermission, actor_from, has_permission
 
 from .calc.jsnum import js_is_integer, js_to_number, js_to_string
 from .calc.payment_terms import derive_ledger_settlement
+from .cash_ledger import transaction_details
 from .calc.totals import list_financials
-from .draft import normalize_draft
+from .draft import loss_record_save_errors, normalize_draft
+from .sum_insured import prepare_transition
 from .models import Case
+from .manual_reference import manual_tw_ref_fields, requires_manual_tw_ref, manual_reference_error
 from .resolve import (
     payment_terms_signature, resolve_case_owner, resolve_master_references,
     resolve_personnel_splits, same_content,
@@ -147,6 +152,7 @@ class CasesView(NoStoreMixin, APIView):
             cases.append({
                 "id": row.pk, "caseUid": str(row.case_uid), "twRef": row.tw_ref, "status": row.status,
                 "rowVersion": row.row_version,
+                **manual_tw_ref_fields(payload),
                 **list_financials(payload),
                 "caseKind": row.case_kind, "reinsuranceStructure": row.reinsurance_structure,
                 "ownerPersonnelId": row.owner_personnel_id,
@@ -176,12 +182,15 @@ class CasesView(NoStoreMixin, APIView):
         if row is None:
             return _error(404, "case_not_found", "Case was not found.")
         # 記帳交易上儲存的 settlement 對「保費來源」的列永遠是過時的（付款條件上線後沒有東西再寫它）。
-        # 這裡即時算出狀態附在回傳內容上，不動資料庫裡的 payload；claim 來源的列維持原樣。
-        payload = dict(row.payload or {})
+        # 即時計算逐筆保費、理賠收付與保留經紀費狀態；回傳欄位不寫回資料庫。
+        from .calc.swiss_facility import case_payload
+        payload = case_payload(row)
         if isinstance(payload.get("transactions"), list):
+            cash = transaction_details({**payload, "currency":payload.get("currency") or row.currency, "reinsured":payload.get("reinsured") or row.reinsured_name_snapshot})
             payload["transactions"] = [
-                {**(t if isinstance(t, dict) else {}), "paymentScheduleSettlement": derive_ledger_settlement(payload, t)}
-                for t in payload["transactions"]
+                {**t, "paymentScheduleSettlement": cash.get(t.get("txNo"), {}).get("settlement", derive_ledger_settlement(payload, t)),
+                 **{k:v for k,v in cash.get(t.get("txNo"), {}).items() if k in ("cashTracking","cashDescription","paymentDirection","paid","outstanding")}}
+                if isinstance(t, dict) else t for t in payload["transactions"]
             ]
         return Response({
             "ok": True, "displayVersion": DISPLAY_VERSION,
@@ -200,11 +209,20 @@ class CasesView(NoStoreMixin, APIView):
         normalized = normalize_draft(body.get("case"))
         if normalized["errors"]:
             return _error(400, "validation_failed", normalized["errors"][0], errors=normalized["errors"])
+        loss_errors = loss_record_save_errors(normalized["value"])
+        if loss_errors:
+            return _error(400, "validation_failed", loss_errors[0], errors=loss_errors)
 
         person = request.ri_principal
         actor_info = actor_from(person)
         case_uid = uuid.uuid4()
         payload = normalized["value"]
+        from .calc.swiss_facility import applies as swiss_applies
+        if swiss_applies(payload):
+            for field in ("transactions", "paymentEntries", "claims"):
+                payload[field] = []
+            payload["swissAccounting"] = {}
+        payload["cedantTermsBasis"] = "case"
         columns = normalized["columns"]
         if not payload.get("ownerPersonnelId"):
             # VM 只用「目前登入者」當預設負責人（已在 load_principal 確認在職）
@@ -221,7 +239,10 @@ class CasesView(NoStoreMixin, APIView):
         after = _case_state(case_uid=case_uid, status="draft", case_kind="original", row_version=1,
                             columns=columns, master_references=masters, payload=payload)
 
-        with transaction.atomic():
+        with serialized(PRODUCTION_SOURCES):
+            ref_error = manual_reference_error(payload)
+            if ref_error:
+                return _error(409, "manual_reference_conflict", ref_error)
             try:
                 case = Case.objects.create(
                     case_uid=case_uid, case_kind="original", status="draft",
@@ -266,7 +287,7 @@ class CasesView(NoStoreMixin, APIView):
         actor_info = actor_from(person)
         parsed_uid = _parse_uuid(raw_uid)
 
-        with transaction.atomic():
+        with serialized(PRODUCTION_SOURCES):
             current = (
                 Case.objects.select_for_update()
                 .filter(case_uid=parsed_uid, recycled_at__isnull=True, is_archived=False).first()
@@ -280,12 +301,41 @@ class CasesView(NoStoreMixin, APIView):
                 return _error(409, "version_conflict", "This Draft was changed elsewhere. Reload it before saving again.",
                               currentRowVersion=current.row_version)
 
-            normalized = normalize_draft(body.get("case"))
+            normalized = normalize_draft(prepare_transition(current.payload, body.get("case")),
+                                         allow_negative_premiums=current.case_kind == "endorsement" and current.parent_case_id is not None)
             if normalized["errors"]:
                 return _error(400, "validation_failed", normalized["errors"][0], errors=normalized["errors"])
             payload = normalized["value"]
+            loss_errors = loss_record_save_errors(payload, case_kind=current.case_kind)
+            if loss_errors:
+                return _error(400, "validation_failed", loss_errors[0], errors=loss_errors)
             columns = normalized["columns"]
             stored = current.payload if isinstance(current.payload, dict) else {}
+            ref_error = manual_reference_error(payload, exclude_case_uid=current.case_uid)
+            if ref_error:
+                return _error(409, "manual_reference_conflict", ref_error)
+            # Primary references are immutable after Announce, as with system references.
+            if stored.get("twRefSource") == "auw_manual" and payload.get("manualTwRef") != current.tw_ref:
+                return _error(409, "primary_reference_locked", "The AUW reference is the primary TW Reference and is locked after Announce.")
+            for key in ("twRefSource", "previousTwRefs"):
+                if key in stored:
+                    payload[key] = stored[key]
+            if current.status in ("posted", "reversed") and requires_manual_tw_ref(payload) and not payload.get("manualTwRef"):
+                message = "TW Ref. (for AUW) is required for an Announced case with 0609 AUW (Facility)."
+                return _error(400, "validation_failed", message, errors=[message])
+            # Endorsement identity comes from the persisted workflow, not editable request fields.
+            if current.case_kind == "endorsement" and current.parent_case_id is not None:
+                payload["parentTwRef"] = stored.get("parentTwRef") or current.parent_case.tw_ref or ""
+                payload["endorsementSeq"] = stored.get("endorsementSeq")
+                from .endorsement_terms import apply_endorsement_terms
+                root = current.parent_case
+                from .calc.swiss_facility import applies as swiss_applies
+                expected_terms = 90 if swiss_applies(payload) else (root.payload or {}).get("paymentTermsDays")
+                if payload.get("paymentTermsDays") != expected_terms:
+                    return _error(400, "endorsement_cedant_terms_locked", "Endorsement Cedant payment terms must follow the original policy.")
+                apply_endorsement_terms(payload, root, announced_at=current.announced_at)
+                if "endorsementPerformanceMonth" in stored:
+                    payload["endorsementPerformanceMonth"] = stored["endorsementPerformanceMonth"]
 
             # #8：Claims 只能追加（用相反方向的付款更正，不刪除、不改寫），且只由 claims API 寫入；
             # transactions／paymentEntries 只由 claims、Reverse／Close、accounting 寫入。
@@ -293,6 +343,9 @@ class CasesView(NoStoreMixin, APIView):
             payload["claims"] = stored.get("claims") or []
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
+            from .calc.swiss_facility import applies as swiss_applies
+            if "swissAccounting" in stored or swiss_applies(payload):
+                payload["swissAccounting"] = stored.get("swissAccounting") or {}
 
             if current.status == "posted" and not same_content(
                 payment_terms_signature(payload), payment_terms_signature(stored)
@@ -345,6 +398,8 @@ class CasesView(NoStoreMixin, APIView):
             current.currency = columns["currency"]
             current.effective_date = columns["effectiveDate"]
             current.expiration_date = columns["expirationDate"]
+            from .calc.swiss_facility import reset_after_changes
+            reset_after_changes(stored, payload, timezone.now().isoformat())
             current.payload = payload
             current.owner_personnel_id = owner["id"]
             current.status = next_status

@@ -19,18 +19,22 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import record_audit, record_snapshot, request_id_from
+from coordination.services import ADMIN_ACCOUNTS, serialized
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
 from .accounts import active_admin_count
 from .audit_state import personnel_state
 from .models import Personnel
+from .supervision import (can_create_subordinate_account, is_general_subordinate,
+                          subordinate_role, supervisor_candidates)
 
 DEPARTMENTS = {
     "business_1", "business_2", "special_risk", "reinsurance",
-    "finance", "admin", "business_development",
+    "finance", "admin", "business_development", "board_of_directors",
 }
-ROLES = {"sales", "accounting", "accounting_manager", "general_manager", "admin", "viewer"}
+ROLES = {"sales", "accounting", "accounting_manager", "general_manager", "admin", "viewer", "president"}
 DEFAULT_ROLES = {
+    "board_of_directors": "president",
     "business_1": "viewer", "business_2": "viewer", "special_risk": "viewer",
     "business_development": "viewer", "reinsurance": "sales",
     "finance": "accounting", "admin": "admin",
@@ -48,7 +52,7 @@ def valid_email(value):
 
 
 def default_split_eligibility(department, role_code):
-    return department not in ("finance", "admin") and not (department == "reinsurance" and role_code == "general_manager")
+    return department not in ("finance", "admin", "board_of_directors") and not (department == "reinsurance" and role_code == "general_manager")
 
 
 def parse_input(body):
@@ -80,7 +84,7 @@ def parse_input(body):
 
 def resolve_supervisor(inp, excluded_id=0):
     """
-    主管必須是「同部門的在職人員」或「在職的 General Manager」，且不能是自己。
+    主管必須是「同部門的在職人員」、「在職的 General Manager」或「在職的 President」，且不能是自己。
     Alpha #14：資料庫裡本來就有同名跨部門的人（例如兩位 A.L），沒有排序時取哪一位不確定。
     這裡固定「同部門優先，再依 id」，結果永遠可重現。
     """
@@ -88,16 +92,11 @@ def resolve_supervisor(inp, excluded_id=0):
         inp["supervisor_name"] = None
         inp["supervisor_email"] = None
         return None
-    candidates = list(
-        Personnel.objects.filter(name__iexact=inp["supervisor_name"], is_active=True)
-        .filter(Q(department=inp["department"]) | Q(role_code="general_manager"))
-        .exclude(pk=excluded_id)
-    )
-    candidates.sort(key=lambda p: (p.department != inp["department"], p.pk))
+    candidates = supervisor_candidates(inp["supervisor_name"], inp["department"], excluded_id)
     if not candidates:
         return {
             "error": "invalid_supervisor",
-            "message": "Select an active Supervisor in the same Department or a General Manager. Self-selection is not allowed.",
+            "message": "Select an active Supervisor in the same Department, a General Manager or the President. Self-selection is not allowed.",
         }
     inp["supervisor_name"] = candidates[0].name
     inp["supervisor_email"] = candidates[0].email or None
@@ -153,7 +152,7 @@ def serialize(person, usernames=None):
         "rowVersion": person.row_version,
         "updatedAt": person.updated_at,
     }
-    if usernames is not None:  # 只有 accounts.manage 看得到登入帳號名稱（VM 專有欄位）
+    if usernames is not None:  # 呼叫端只對帳號管理員或符合範圍的主管提供登入帳號名稱（VM 專有欄位）
         data["accountUsername"] = usernames.get(person.auth_user_id or "", "")
         data["accountMustChangePassword"] = person.must_change_password
     return data
@@ -161,12 +160,32 @@ def serialize(person, usernames=None):
 
 class PersonnelView(NoStoreMixin, APIView):
     permission_classes = [RIPermission]
-    permission_map = {"GET": "personnel.read", "POST": "personnel.write", "PUT": "personnel.write"}
+    permission_map = {"GET": ("personnel.read", "personnel.read.team"),
+                      "POST": ("personnel.write", "personnel.create.subordinate"), "PUT": "personnel.write"}
 
     def get(self, request):
-        people = list(Personnel.objects.order_by("-is_active", "name", "id"))
-        names = usernames_for(people) if has_permission(request.ri_principal, "accounts.manage") else None
-        rows = [serialize(p, names) for p in people]
+        principal = request.ri_principal
+        can_edit = has_permission(principal, "personnel.write")
+        can_add_subordinate = has_permission(principal, "personnel.create.subordinate")
+        people = Personnel.objects.order_by("-is_active", "name", "id")
+        read_all = has_permission(principal, "personnel.read")
+        if not read_all:
+            people = people.filter(department=principal.department).filter(
+                Q(pk=principal.pk) | Q(supervisor_name__iexact=principal.name))
+        people = list(people)
+        account_manager = has_permission(principal, "accounts.manage")
+        subordinate_accounts = has_permission(principal, "accounts.create.subordinate")
+        visible_accounts = people if account_manager else [p for p in people
+            if subordinate_accounts and is_general_subordinate(principal, p)]
+        names = usernames_for(visible_accounts) if account_manager or subordinate_accounts else None
+        visible_account_ids = {p.pk for p in visible_accounts}
+        rows = []
+        for person in people:
+            row = serialize(person, names if person.pk in visible_account_ids else None)
+            row["canCreateAccount"] = (account_manager and person.is_active and not person.auth_user_id
+                and person.account_status == "not_configured") or (subordinate_accounts
+                and can_create_subordinate_account(principal, person))
+            rows.append(row)
         return Response({
             "ok": True,
             "displayVersion": "V 0.003",
@@ -184,11 +203,31 @@ class PersonnelView(NoStoreMixin, APIView):
                 "rolesEnforced": True,
                 "passwordStorage": "django_pbkdf2",
                 "accountLifecycleSeparateFromPersonnel": True,
+                "readAll": read_all,
+                "canCreate": can_edit or can_add_subordinate,
+                "canEdit": can_edit,
+                "subordinateCreationOnly": not can_edit and can_add_subordinate,
+                "creationDepartment": principal.department,
+                "creationRoleCode": subordinate_role(principal.department),
+                "creationSupervisorName": principal.name,
+                "creationSupervisorEmail": principal.email or "",
             },
         })
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
+        principal = request.ri_principal
+        if not has_permission(principal, "personnel.write"):
+            # Never broaden personnel.write: a Supervisor can only create their
+            # own subordinate, in their department, with the fixed general role.
+            role = subordinate_role(principal.department)
+            if (("department" in body and clean_text(body["department"], 40) != principal.department)
+                    or ("roleCode" in body and clean_text(body["roleCode"], 40) != role)
+                    or ("supervisorName" in body and clean_text(body["supervisorName"], 160).casefold() != principal.name.casefold())):
+                return Response({"error": "subordinate_scope_denied", "message":
+                    "Add only your own subordinate in your Department with its general staff role."}, status=403)
+            body = {**body, "department": principal.department, "roleCode": role,
+                    "supervisorName": principal.name, "supervisorEmail": principal.email or ""}
         inp = parse_input(body)
         if "error" in inp:
             return Response(inp, status=400)
@@ -246,7 +285,7 @@ class PersonnelView(NoStoreMixin, APIView):
         actor_info = actor_from(request.ri_principal)
         actor = actor_info["id"]
         try:
-            with transaction.atomic():
+            with serialized(ADMIN_ACCOUNTS):
                 try:
                     current = Personnel.objects.select_for_update().get(pk=person_id)
                 except Personnel.DoesNotExist:
@@ -338,7 +377,7 @@ class PersonnelOptionsView(NoStoreMixin, APIView):
             "ok": True,
             "defaultOwnerId": default_owner.pk if default_owner else None,
             "personnel": [
-                {"id": p.pk, "name": p.name, "isActive": True, "isSplitEligible": p.is_split_eligible}
+                {"id": p.pk, "name": p.name, "email": p.email or "", "isActive": True, "isSplitEligible": p.is_split_eligible}
                 for p in rows
             ],
         })

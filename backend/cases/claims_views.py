@@ -22,6 +22,7 @@ from django.db import IntegrityError, transaction
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from coordination.services import PRODUCTION_SOURCES, serialized
 from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
@@ -160,7 +161,7 @@ class ClaimsView(NoStoreMixin, APIView):
         if action not in ACTIONS:
             return _error(400, "invalid_action", "Unsupported Claims action.")
         try:
-            with transaction.atomic():
+            with serialized(PRODUCTION_SOURCES):
                 return self._apply(request, body, case_uid, action, int(expected))
         except IntegrityError:
             return _error(409, "version_conflict", "Claims changed elsewhere. Reload before saving.")
@@ -192,12 +193,15 @@ class ClaimsView(NoStoreMixin, APIView):
             reserve = _parse_amount(get(data, "outstandingReserve"))
             if reserve is None or reserve < 0:
                 return _error(400, "invalid_claim_reserve", "Outstanding Reserve must be a number of zero or more.")
+            reserve = money(reserve)
+            if not js_is_finite(reserve):
+                return _error(400, "invalid_claim_reserve", "Outstanding Reserve must remain finite after rounding.")
             claim = {
                 "id": _id_out(_next_id(payload["claims"])),
                 "lossNo": clean_text(get(data, "lossNo"), 160),
                 "dateOfLoss": date_of_loss,
                 "causeOfLoss": clean_text(get(data, "causeOfLoss"), 2000),
-                "outstandingReserve": money(reserve),
+                "outstandingReserve": reserve,
                 "payments": [],
             }
             payload["claims"].append(claim)
@@ -210,13 +214,16 @@ class ClaimsView(NoStoreMixin, APIView):
                 reserve = _parse_amount(body.get("outstandingReserve"))
                 if reserve is None or reserve < 0:
                     return _error(400, "invalid_claim_reserve", "Outstanding Reserve must be a number of zero or more.")
-                claim["outstandingReserve"] = money(reserve)
+                reserve = money(reserve)
+                if not js_is_finite(reserve):
+                    return _error(400, "invalid_claim_reserve", "Outstanding Reserve must remain finite after rounding.")
+                claim["outstandingReserve"] = reserve
             else:
                 data = body.get("payment")
                 # 理賠付款可以是負數（追償、自負額沖抵等，2026-09-25 確認），只拒絕 0 與看不懂的輸入
                 amount = _parse_amount(get(data, "amount"))
                 amount = money(amount) if amount is not None else 0
-                if not amount:
+                if not amount or not js_is_finite(amount):
                     return _error(400, "payment_amount_required", "Enter a non-zero payment amount.")
                 payment_date = clean_text(get(data, "date"), 20)
                 if not _real_date(payment_date):

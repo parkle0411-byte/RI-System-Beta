@@ -14,16 +14,20 @@ from cases.views import CasesView
 from cases.workflow_views import AnnounceView, WorkflowView
 from personnel.views import PersonnelOptionsView, PersonnelView
 
-from .auth_views import AppContextView, ChangePasswordView, CsrfView, LoginView, LogoutView
+from .auth_views import AppContextView, ChangePasswordView, CsrfView, LoginView, LogoutView, SessionActivityView, SessionStatusView
 from .password_reset import PasswordResetConfirmView, PasswordResetView
+from .reference_views import SystemReferenceView
 from .views import HealthView
 
 urlpatterns = [
+    path("api/system-reference", SystemReferenceView.as_view(), name="system-reference"),
     path("admin/", admin.site.urls),
     path("health/", HealthView.as_view(), name="health"),
     path("api/auth/csrf", CsrfView.as_view(), name="auth-csrf"),
     path("api/auth/login", LoginView.as_view(), name="auth-login"),
     path("api/auth/logout", LogoutView.as_view(), name="auth-logout"),
+    path("api/auth/session", SessionStatusView.as_view(), name="auth-session-status"),
+    path("api/auth/activity", SessionActivityView.as_view(), name="auth-session-activity"),
     path("api/auth/change-password", ChangePasswordView.as_view(), name="auth-change-password"),
     path("api/auth/password-reset", PasswordResetView.as_view(), name="auth-password-reset"),
     path("api/auth/password-reset/confirm", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),

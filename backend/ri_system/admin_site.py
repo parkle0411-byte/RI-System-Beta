@@ -22,6 +22,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.html import format_html
 
+from .session_idle import session_state
 from .authz import AuthError, has_permission, load_principal
 
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
@@ -40,6 +41,11 @@ class RIAdminSite(admin.AdminSite):
         except AuthError:
             return False
         return not person.must_change_password and has_permission(person, "accounts.manage")
+
+    def each_context(self, request):
+        context = super().each_context(request)
+        context["ri_idle_session"] = session_state(request) if request.user.is_authenticated else None
+        return context
 
     def register(self, model_or_iterable, admin_class=None, **options):
         if admin_class is None or not issubclass(admin_class, ReadOnlyModelAdmin):

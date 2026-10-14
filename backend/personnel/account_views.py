@@ -1,8 +1,9 @@
 """
-帳號管理 API（VM 專有；Alpha 沒有，因為 Alpha 的登入由 Hatchable 代管）。全部需要 accounts.manage（System Administrator）。
+帳號管理 API（VM 專有；Alpha 沒有，因為 Alpha 的登入由 Hatchable 代管）。
+建立帳號另允許 accounts.create.subordinate（限主管同部門、一般角色的直屬下屬）。其餘生命週期需要 accounts.manage。
 
   POST /api/personnel-accounts                 建立帳號   {personnelId, username, email?, initialPassword?}
-                                               initialPassword 留空 → 系統產生並回傳一次；有填 → 管理員指定，不回傳
+                                               initialPassword 留空 → 系統產生並回傳一次；有填 → 管理員或主管指定，不回傳
   POST /api/personnel-accounts/disable         停用帳號   {personnelId}
   POST /api/personnel-accounts/enable          重新啟用帳號 {personnelId}（沿用原密碼，但第一次登入須改密碼）
   POST /api/personnel-accounts/reset-password  重設密碼   {personnelId} → 回傳一次性新密碼
@@ -14,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import request_id_from
-from ri_system.authz import NoStoreMixin, RIPermission, actor_from
+from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
 from . import accounts
 from .views import serialize
@@ -47,21 +48,25 @@ class AccountBase(NoStoreMixin, APIView):
 
 class CreateAccountView(AccountBase):
     """
-    initialPassword 有填 -> 管理員指定的初始密碼（須通過密碼規則，且不會再回傳）。
+    initialPassword 有填 -> 管理員或主管指定的初始密碼（須通過密碼規則，且不會再回傳）。
     沒填 -> 系統隨機產生，只在這次回應回傳一次。
     """
+    permission_map = {"POST": ("accounts.manage", "accounts.create.subordinate")}
 
     def run(self, request, person_id, actor, request_id):
         supplied = request.data.get("initialPassword")
+        administrator = has_permission(request.ri_principal, "accounts.manage")
         person, user, password, generated = accounts.create_account(
             personnel_id=person_id, username=request.data.get("username"), email=request.data.get("email"),
             password=str(supplied) if supplied not in (None, "") else None,
             actor=actor, source="application", request_id=request_id,
+            supervisor_personnel_id=None if administrator else request.ri_principal.pk,
         )
         body = {"ok": True, "person": serialize_with_username(person, user.username),
-                "username": user.username, "passwordSource": "generated" if generated else "admin"}
+                "username": user.username, "passwordSource": "generated" if generated else
+                ("admin" if administrator else "supervisor")}
         if generated:
-            body["initialPassword"] = password  # 只有系統產生的才回傳；管理員自己設的不回傳
+            body["initialPassword"] = password  # 只有系統產生的才回傳；呼叫者自己設的不回傳
         return Response(body, status=201)
 
 

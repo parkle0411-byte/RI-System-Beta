@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
 from personnel.models import Personnel
+from personnel.supervision import is_supervisor, supervisor_permissions
 
 ROLE_LABELS = {
     "admin": "System Administrator",
@@ -21,12 +22,13 @@ ROLE_LABELS = {
     "accounting_manager": "Finance Manager",
     "general_manager": "General Manager",
     "viewer": "Case Viewer",
+    "president": "President",
 }
 
 # 以 Alpha lib/authorization.js 的 ROLE_PERMISSIONS 為基礎，2026-09-27 依你的決定調整（刻意與 Alpha 不同，記在 MIGRATION-STATUS.md）：
 #   - General Manager：案件功能與 Reinsurance Staff 相同（新增／編輯、Announce、流程、文件、理賠），保留人員檢視與業績目標；不能看 Audit Log
 #   - Audit Log 只有 System Administrator
-#   - Finance Staff／Finance Manager：Dashboard 看全部案件（dashboard.read.all），但仍然不能開 Account List 與案件明細
+#   - Finance Staff／Finance Manager：Dashboard、Account List 與案件工作區可讀全部案件，保留帳务操作；不能寫案件或文件
 #   - Reinsurance Staff、General Manager：Accounting 帳本唯讀（accounting.read；記付款、沖銷要 accounting.write）
 # dashboard.read.all 是 VM 才有的權限：Dashboard 顯示全部案件（沒有它就只看自己負責或列在分績裡的案件）。
 # 修改此表時，同步更新 MIGRATION-STATUS.md 與 qa/suites/auth_permissions.py 的權限矩陣測試。
@@ -45,10 +47,10 @@ ROLE_PERMISSIONS = {
         "production.read", "fx.read", "accounting.read",
     ],
     "accounting": [
-        "dashboard.read", "dashboard.read.all", "production.read", "fx.read", "accounting.read", "accounting.write",
+        "dashboard.read", "dashboard.read.all", "cases.read.all", "production.read", "fx.read", "accounting.read", "accounting.write",
     ],
     "accounting_manager": [
-        "dashboard.read", "dashboard.read.all", "production.read", "fx.read", "fx.write", "accounting.read", "accounting.write",
+        "dashboard.read", "dashboard.read.all", "cases.read.all", "production.read", "fx.read", "fx.write", "accounting.read", "accounting.write",
     ],
     "general_manager": [
         "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",
@@ -59,6 +61,12 @@ ROLE_PERMISSIONS = {
     "viewer": [
         "dashboard.read", "cases.read.own",
     ],
+    # Board oversight: business records read-only; no document access.
+    # President can inspect all Personnel; Supervisor status never grants Personnel creation.
+    "president": [
+        "dashboard.read", "dashboard.read.all", "cases.read.all",
+        "mdm.read", "production.read", "fx.read", "accounting.read", "personnel.read",
+    ],
 }
 
 
@@ -67,6 +75,14 @@ class AuthError(APIException):
         self.status_code = status_code
         self.code = code
         super().__init__(detail=message, code=code)
+
+
+def object_body(request):
+    """Reject non-object JSON before a view accesses fields or writes data."""
+    body = request.data
+    if not isinstance(body, dict):
+        raise AuthError(400, "invalid_body", "Request body must be a JSON object.")
+    return body
 
 
 def ri_exception_handler(exc, context):
@@ -81,7 +97,11 @@ def permissions_for_role(role_code):
 
 
 def has_permission(person, permission):
-    return person is not None and permission in ROLE_PERMISSIONS.get(person.role_code, [])
+    if person is None:
+        return False
+    if permission in ROLE_PERMISSIONS.get(person.role_code, []):
+        return True
+    return permission in supervisor_permissions(person) and is_supervisor(person)
 
 
 def actor_from(person):
@@ -90,6 +110,10 @@ def actor_from(person):
 
 
 def serialize_principal(person):
+    supervisor = is_supervisor(person)
+    permissions = permissions_for_role(person.role_code)
+    if supervisor:
+        permissions.extend(supervisor_permissions(person))
     return {
         "id": person.pk,
         "name": person.name,
@@ -101,7 +125,8 @@ def serialize_principal(person):
         "isSplitEligible": person.is_split_eligible,
         "accountStatus": person.account_status,
         "mustChangePassword": person.must_change_password,  # VM 專有（Alpha 沒有）
-        "permissions": permissions_for_role(person.role_code),
+        "isSupervisor": supervisor,
+        "permissions": permissions,
     }
 
 
@@ -134,7 +159,8 @@ class RIPermission(BasePermission):
         if person.must_change_password:
             raise AuthError(403, "PASSWORD_CHANGE_REQUIRED", "You must change your password before using the system.")
         required = getattr(view, "permission_map", {}).get(request.method)
-        if required is None or not has_permission(person, required):
+        alternatives = required if isinstance(required, (tuple, list)) else (required,)
+        if required is None or not any(has_permission(person, permission) for permission in alternatives):
             raise AuthError(403, "PERMISSION_DENIED", "You do not have permission for this operation.")
         request.ri_principal = person
         return True

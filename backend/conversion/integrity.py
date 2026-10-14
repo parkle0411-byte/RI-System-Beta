@@ -184,7 +184,46 @@ class Checker:
                 for i, (s, v) in enumerate(zip(keys_s, keys_v)):
                     self.expect_case_key(s, v, f"{where}.confirmedProductionKeys[{i}]")
 
+    def master_clauses(self, source, master):
+        src_payload = source.get("payload")
+        vm_payload = master.payload
+        src_clauses = src_payload.get("fixedClauses") if isinstance(src_payload, dict) else None
+        vm_clauses = vm_payload.get("fixedClauses") if isinstance(vm_payload, dict) else None
+        if not isinstance(src_clauses, list):
+            return
+        where = f"master {source['id']}.fixedClauses"
+        if not isinstance(vm_clauses, list) or len(src_clauses) != len(vm_clauses):
+            self.bad(where, "clause list differs")
+            return
+        for index, (src, vm) in enumerate(zip(src_clauses, vm_clauses)):
+            if not isinstance(src, dict):
+                continue
+            w = f"{where}[{index}].classIds"
+            if not isinstance(vm, dict):
+                self.bad(w, "VM clause is not an object")
+                continue
+            if "classIds" not in src:
+                if "classIds" in vm:
+                    self.bad(w, "All classes scope must remain unscoped")
+                continue
+            a, b = src["classIds"], vm.get("classIds")
+            if not isinstance(a, list) or not isinstance(b, list) or len(a) != len(b):
+                self.bad(w, "class ID list differs or is malformed")
+                continue
+            for j, (src_id, vm_id) in enumerate(zip(a, b)):
+                referenced = self.src_master.get(self._as_int(src_id))
+                if referenced is None or referenced["entity_type"] != "class":
+                    self.bad(f"{w}[{j}]", "source scope must reference a Class master")
+                self.expect_master_id(src_id, vm_id, f"{w}[{j}]")
+
     def run(self, export_row):
+        for source in self.tables.get("ri_master_records") or []:
+            found = [m for m in self.vm_master.values() if (m.entity_type, (m.code or "").lower(), m.name.lower())
+                     == (source["entity_type"], (source.get("code") or "").lower(), str(source["name"]).lower())]
+            if len(found) != 1:
+                self.bad(f"master {source['id']}", "expected exactly one VM counterpart")
+            else:
+                self.master_clauses(source, found[0])
         cases = {str(c.case_uid): c for c in Case.objects.all()}
         for r in self.tables.get("ri_cases") or []:
             c = cases.get(str(r["case_uid"]))

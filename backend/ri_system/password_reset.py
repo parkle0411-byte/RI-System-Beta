@@ -31,12 +31,13 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from audit.services import record_audit, request_id_from
+from coordination.services import ADMIN_ACCOUNTS, serialized
 from personnel.accounts import end_sessions
 from personnel.audit_state import personnel_state
 from personnel.models import Personnel
 from reminders.messages import valid_email
 
-from .authz import NoStoreMixin
+from .authz import AuthError, NoStoreMixin, object_body
 
 log = logging.getLogger(__name__)
 GENERIC = "If the account exists and has an e-mail address, a password reset link has been sent. The link is valid for 1 hour."
@@ -51,19 +52,31 @@ def _eligible(person):
     return person.is_active and person.account_status == "active" and person.auth_user_id and valid_email(person.email)
 
 
+def _active_user(person):
+    if not _eligible(person):
+        return None
+    try:
+        user_id = int(person.auth_user_id)
+        return get_user_model().objects.filter(pk=user_id, is_active=True).first()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 def find_person(identifier):
     """帳號（不分大小寫）或 e-mail（不分大小寫，必須剛好一個人）。找不到或不符資格回 None。"""
     text = str(identifier or "").strip()
     if not text:
         return None
+    # Account names permit @. Resolve a matching username before trying e-mail.
+    user = get_user_model().objects.filter(username__iexact=text).first()
+    if user is not None:
+        person = Personnel.objects.filter(auth_user_id=str(user.pk)).first()
+        return person if user.is_active and person and _eligible(person) else None
     if "@" in text:
-        matches = [p for p in Personnel.objects.filter(email__iexact=text) if _eligible(p)]
-        return matches[0] if len(matches) == 1 else None
-    user = get_user_model().objects.filter(username__iexact=text, is_active=True).first()
-    if user is None:
-        return None
-    person = Personnel.objects.filter(auth_user_id=str(user.pk)).first()
-    return person if person and _eligible(person) else None
+        matches = list(Personnel.objects.filter(email__iexact=text))
+        if len(matches) == 1 and _active_user(matches[0]) is not None:
+            return matches[0]
+    return None
 
 
 def reset_link(user):
@@ -103,9 +116,15 @@ class PasswordResetView(NoStoreMixin, APIView):
     def post(self, request):
         if not settings.EMAIL_ENABLED:
             return _error(503, "password_reset_unavailable", "Password reset by e-mail is not available yet. Please contact a System Administrator.")
-        person = find_person(request.data.get("identifier") if isinstance(request.data, dict) else None)
+        body = object_body(request)
+        identifier = body.get("identifier", "")
+        if not isinstance(identifier, str):
+            raise AuthError(400, "invalid_body", "Username or e-mail must be a string.")
+        person = find_person(identifier)
         if person is not None:
-            user = get_user_model().objects.get(pk=int(person.auth_user_id))
+            user = _active_user(person)
+            if user is None:
+                return Response({"ok": True, "message": GENERIC})
             try:
                 send_reset_email(person, user)
             except Exception as exc:  # noqa: BLE001 - 不透露給申請者；記在伺服器日誌
@@ -126,23 +145,37 @@ class PasswordResetConfirmView(NoStoreMixin, APIView):
     throttle_scope = "password_reset"
 
     def post(self, request):
-        body = request.data if isinstance(request.data, dict) else {}
+        body = object_body(request)
         invalid = _error(400, "invalid_reset_link", "This password reset link is invalid or has expired. Request a new one.")
+        uid = body.get("uid", "")
+        token = body.get("token", "")
+        if not isinstance(uid, str) or not isinstance(token, str):
+            return invalid
         try:
-            user = get_user_model().objects.get(pk=int(force_str(urlsafe_base64_decode(str(body.get("uid") or "")))), is_active=True)
+            user = get_user_model().objects.get(pk=int(force_str(urlsafe_base64_decode(uid))), is_active=True)
         except (ValueError, TypeError, OverflowError, get_user_model().DoesNotExist):
             return invalid
-        if not default_token_generator.check_token(user, str(body.get("token") or "")):
+        if not default_token_generator.check_token(user, token):
             return invalid
         person = Personnel.objects.filter(auth_user_id=str(user.pk)).first()
         if person is None or not person.is_active or person.account_status != "active":
             return invalid
-        new = str(body.get("newPassword") or "")
+        new = body.get("newPassword", "")
+        if not isinstance(new, str):
+            raise AuthError(400, "invalid_body", "New password must be a string.")
         try:
             validate_password(new, user)
         except ValidationError as exc:
             return _error(400, "WEAK_PASSWORD", " ".join(exc.messages))
-        with transaction.atomic():
+        with serialized(ADMIN_ACCOUNTS):
+            # Account administration uses this guard before taking person/user
+            # rows, so eligibility cannot change between the check and commit.
+            person = Personnel.objects.select_for_update().filter(auth_user_id=str(user.pk)).first()
+            user = get_user_model().objects.select_for_update().get(pk=user.pk)
+            if (not user.is_active or person is None or not person.is_active
+                    or person.account_status != "active"
+                    or not default_token_generator.check_token(user, token)):
+                return invalid
             user.set_password(new)
             user.save(update_fields=["password"])
             ended = end_sessions(user)

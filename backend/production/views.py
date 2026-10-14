@@ -3,7 +3,7 @@ Production Report API - 對應 Hatchable Alpha 的 api/production-report.js。
 
   GET  /api/production-report?month=YYYY-MM   production.read   預覽（未確認的業績列）、已產生的版本、摘要、權限
   POST /api/production-report                 production.read   action = exclude | generate | close
-       exclude／generate：System Administrator、Finance Staff、Finance Manager（依 role_code，同 Alpha）
+       exclude／generate：System Administrator、Finance Manager（依使用者確認，Finance Staff 僅檢視／下載）
        close：System Administrator、Finance Manager
 
 關帳（close）：報表裡的案件把這些 key 記成已確認；全部確認的案件變成 Confirmed（closed）並產生 Leg 1–3 交易
@@ -30,6 +30,7 @@ from rest_framework.views import APIView
 from audit.services import record_audit, record_snapshot, request_id_from
 from cases.calc.jsnum import UNDEFINED, get, is_array, js_or, js_slice, js_to_number, js_to_string, js_trim, json_roundtrip
 from cases.models import Case
+from coordination.services import PRODUCTION_SOURCES, monthly_operation, serialized
 from fxrates.models import FxRate
 from fxrates.views import fx_state
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
@@ -58,7 +59,7 @@ def _utc_text(value):
 
 
 def can_operate(person):
-    return person.role_code in ("admin", "accounting", "accounting_manager")
+    return person.role_code in ("admin", "accounting_manager")
 
 
 def can_close(person):
@@ -106,7 +107,9 @@ def load_month(month):
     reports = list(ProductionReport.objects.filter(year_month=month).order_by("-version"))
     fx_rates = {month: {r.currency: float(r.rate) for r in fx_rows}}
     sources = [case_source(c) for c in cases]
-    preview = calc.build_production_preview(sources, month, fx_rates, [exclusion_row(e) for e in exclusions])
+    # First Policy No 要沿著續保鏈往回追：連結表用「所有有 TW Ref 的案件」建（含已封存），中間有一張被封存也不會斷
+    links = calc.reference_links(Case.objects.filter(tw_ref__isnull=False).values_list("tw_ref", "payload").iterator())
+    preview = calc.build_production_preview(sources, month, fx_rates, [exclusion_row(e) for e in exclusions], links)
     return {"cases": cases, "sources": sources, "fx_rows": fx_rows, "reports": reports, "preview": preview}
 
 
@@ -148,8 +151,8 @@ class ProductionReportView(NoStoreMixin, APIView):
             "versions": [report_view(r) for r in state["reports"]],
             "summary": summary(preview),
             "scope": {
-                "readOnly": False, "canOperate": can_operate(person), "canClose": can_close(person), "monthClosed": closed,
-                "fxLocked": any(r.is_locked for r in state["fx_rows"]),
+                "readOnly": not can_operate(person), "canOperate": can_operate(person), "canClose": can_close(person), "monthClosed": closed,
+                "fxLocked": closed or any(r.is_locked for r in state["fx_rows"]),
                 "canGenerate": can_operate(person) and not closed and not preview["missingRateCurrencies"],
                 "canCloseLatest": can_close(person) and latest is not None and latest.status == "valid"
                 and latest.source_signature == preview["sourceSignature"],
@@ -165,13 +168,38 @@ class ProductionReportView(NoStoreMixin, APIView):
         handlers = {"exclude": self.exclude, "generate": self.generate, "close": self.close}
         if action not in handlers:
             return _error(400, "unsupported_action", "Unsupported Production Report action.")
-        return handlers[action](request, body, month, load_month(month))
+        permitted = can_close(request.ri_principal) if action == "close" else can_operate(request.ri_principal)
+        if not permitted:
+            return _error(403, "permission_denied", "Only Finance Manager or System Administrator can modify Production Reports.")
+        with monthly_operation(month) as acquire:
+            deferred_to = None
+            if action == "exclude":
+                candidate = month
+                while True:
+                    candidate = calc.next_production_month(candidate)
+                    if not _MONTH.match(candidate) or candidate <= month:
+                        return _error(409, "no_open_month", "No later open month is available for this exclusion.")
+                    acquire(candidate)
+                    if not ProductionReport.objects.filter(year_month=candidate, status="closed").exists():
+                        deferred_to = candidate
+                        break
+            with transaction.atomic():
+                state = load_month(month)
+                state["deferred_to"] = deferred_to
+                if action == "close":
+                    return self.close(request, body, month, state)
+                with serialized(PRODUCTION_SOURCES):
+                    fresh = load_month(month)
+                    if fresh["preview"] != state["preview"]:
+                        return _error(409, "source_changed", "Production source data changed. Refresh the preview before continuing.")
+                    fresh["deferred_to"] = deferred_to
+                    return handlers[action](request, body, month, fresh)
 
-    # ---- 排除（延到下個月） ----
+    # ---- 排除（延到第一個未關帳月份） ----
     def exclude(self, request, body, month, state):
         person = request.ri_principal
         if not can_operate(person):
-            return _error(403, "permission_denied", "Accounting access is required to exclude Production rows.")
+            return _error(403, "permission_denied", "Finance Manager or System Administrator access is required to exclude Production rows.")
         if any(r.status == "closed" for r in state["reports"]):
             return _error(409, "month_closed", "This Production month is closed.")
         scope = _text(body.get("scope"))
@@ -190,7 +218,7 @@ class ProductionReportView(NoStoreMixin, APIView):
                 exclusion = ProductionExclusion.objects.create(
                     case_id=int(row["caseId"]), year_month=month, scope=scope, installment_key=row["key"],
                     reinsurer_key=row["reinsurerKey"] if scope == "reinsurer" else None,
-                    deferred_to=calc.next_production_month(month), reason=reason, created_by=actor_info["name"],
+                    deferred_to=state["deferred_to"], reason=reason, created_by=actor_info["name"],
                 )
                 data = exclusion_row(exclusion)
                 # VM 補上：排除會改變業績歸屬月份，寫 Audit（Alpha 沒有）
@@ -205,7 +233,7 @@ class ProductionReportView(NoStoreMixin, APIView):
     def generate(self, request, body, month, state):
         person = request.ri_principal
         if not can_operate(person):
-            return _error(403, "permission_denied", "Accounting access is required to generate Production Reports.")
+            return _error(403, "permission_denied", "Finance Manager or System Administrator access is required to generate Production Reports.")
         if any(r.status == "closed" for r in state["reports"]):
             return _error(409, "month_closed", "This Production month is closed and cannot be regenerated.")
         preview = state["preview"]
@@ -278,11 +306,21 @@ class ProductionReportView(NoStoreMixin, APIView):
         closed_cases = sum(p[2]["closedCases"] for p in plans)
         conflict = _error(409, "close_conflict", "The report, a case, or the FX rate changed while closing. Nothing was closed; refresh and try again.")
         try:
-            with transaction.atomic():
+            with serialized(PRODUCTION_SOURCES):
                 locked_report = ProductionReport.objects.select_for_update().filter(pk=report.pk).first()
                 if (locked_report is None or locked_report.row_version != expected or locked_report.status != "valid"
                         or locked_report.year_month != month):
                     raise _Conflict()
+                locked_fx = list(FxRate.objects.select_for_update().filter(year_month=month).order_by("currency"))
+                expected_fx = [(r.pk, r.currency, r.rate, r.row_version, r.is_locked) for r in state["fx_rows"]]
+                actual_fx = [(r.pk, r.currency, r.rate, r.row_version, r.is_locked) for r in locked_fx]
+                if actual_fx != expected_fx:
+                    raise _Conflict()
+                # Source writers acquire the same guard BEFORE any case row.
+                # Re-read the complete preview under that guard to catch new,
+                # removed, excluded or edited cases before any close write.
+                if load_month(month)["preview"] != state["preview"]:
+                    return _error(409, "source_changed", "Production source data changed while closing. Generate a new version before closing.")
                 now = timezone.now()
                 locked_report.status = "closed"
                 locked_report.row_version += 1
@@ -310,7 +348,9 @@ class ProductionReportView(NoStoreMixin, APIView):
                                  before={"status": source["status"], "rowVersion": source["row_version"], "payload": js_or(source["payload"], {})},
                                  after=after, actor=actor_info, request_id=request_id,
                                  metadata={"reportUid": report_uid, "month": month, "productionClosed": not result["remaining"]})
-                for fx in FxRate.objects.select_for_update().filter(year_month=month, is_locked=False):
+                for fx in locked_fx:
+                    if fx.is_locked:
+                        continue
                     before = fx_state(fx)
                     fx.is_locked = True
                     fx.locked_by = actor_info["id"]

@@ -1,5 +1,5 @@
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
 from django.utils import timezone
@@ -8,7 +8,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import record_audit, record_snapshot, request_id_from
-from ri_system.authz import NoStoreMixin, RIPermission, actor_from
+from coordination.services import monthly_operation
+from production.models import ProductionReport
+from ri_system.authz import NoStoreMixin, RIPermission, actor_from, object_body
 
 from .models import CURRENCIES, FxRate
 from .serializers import FxRateSerializer
@@ -52,7 +54,7 @@ class FxRatesView(NoStoreMixin, APIView):
         })
 
     def post(self, request):
-        body = request.data
+        body = object_body(request)
         year_month = str(body.get("yearMonth", "")).strip()
         if not YEAR_MONTH_RE.match(year_month):
             return Response(
@@ -70,6 +72,8 @@ class FxRatesView(NoStoreMixin, APIView):
         seen = set()
         parsed = []
         for row in rates_input:
+            if not isinstance(row, dict):
+                return Response({"error": "invalid_rate_item", "message": "Each currency rate must be a JSON object."}, status=400)
             currency = str(row.get("currency", "")).strip().upper()
             if currency not in CURRENCIES or currency in seen:
                 return Response(
@@ -83,7 +87,7 @@ class FxRatesView(NoStoreMixin, APIView):
                 rate = Decimal(str(row.get("rate")))
             except (InvalidOperation, TypeError):
                 rate = None
-            if rate is None or rate <= 0 or rate > 1000:
+            if rate is None or not rate.is_finite() or rate <= 0 or rate > 1000:
                 return Response(
                     {
                         "error": "invalid_rate",
@@ -91,11 +95,15 @@ class FxRatesView(NoStoreMixin, APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            # Normalize before saving so response and snapshots match the stored DECIMAL(18,6).
+            rate = rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            if rate <= 0:
+                return Response({"error": "invalid_rate", "message": f"{currency} Rate to TWD must remain positive after rounding to six decimal places."}, status=400)
             row_version = row.get("rowVersion")
             if row_version is not None:
                 try:
                     row_version = int(row_version)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     return Response(
                         {"error": "invalid_version", "message": f"{currency} has an invalid row version."},
                         status=status.HTTP_400_BAD_REQUEST,
@@ -113,7 +121,9 @@ class FxRatesView(NoStoreMixin, APIView):
         actor = actor_info["id"]
         request_id = request_id_from(request)
 
-        with transaction.atomic():
+        with monthly_operation(year_month), transaction.atomic():
+            if ProductionReport.objects.filter(year_month=year_month, status="closed").exists():
+                return Response({"error": "month_locked", "message": "This Performance month is locked because its Production Report is closed."}, status=409)
             existing = {
                 r.currency: r
                 for r in FxRate.objects.select_for_update().filter(year_month=year_month)

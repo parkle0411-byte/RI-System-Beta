@@ -4,6 +4,7 @@
 paymentEntries／transactions 裡不是物件的項目一律略過（Alpha v56 起相同；v53 遇到 paymentEntries 裡的 null 會整個帳本拋錯）。
 """
 from .calc.accounting import reconciliation_ref_for
+from .manual_reference import manual_tw_ref_fields
 from .calc.jsnum import get, is_array, js_locale_key, js_or, js_to_number, js_to_string
 from .calc.payment_terms import build_payment_schedule
 
@@ -30,6 +31,7 @@ def ledger_rows(cases, now=None):
             rows.append({
                 "key": c["caseUid"] + ":" + item["scheduleKey"],
                 "caseUid": c["caseUid"], "caseRowVersion": c["rowVersion"],
+                **manual_tw_ref_fields(payload),
                 "twRef": c["twRef"], "caseStatus": c["status"], "announcedAt": c["announcedAt"],
                 "source": "premium", "scheduleKey": item["scheduleKey"],
                 "installmentId": item["installmentId"], "installmentLabel": item["installmentLabel"],
@@ -37,15 +39,23 @@ def ledger_rows(cases, now=None):
                 "legType": "Cedant" if cedant else "Reinsurer",
                 "reinsured": c["reinsured"],
                 "reinsurer": item["partyName"] if item["partyType"] == "reinsurer" else "",
-                "label": ("Receivable from " if cedant else "Payable to ") + item["partyName"],
+                "label": (("Payable to " if cedant else "Receivable from ") if item.get("returnPremium")
+                          else ("Receivable from " if cedant else "Payable to ")) + item["partyName"],
                 "amount": item["amount"], "paid": item["paid"], "outstanding": item["outstanding"],
                 "currency": item["currency"], "baseDate": item["baseDate"], "termsDays": item["termsDays"],
                 "dueDate": item["dueDate"], "dueTime": item["dueTime"], "paymentStatus": item["status"],
+                **({field: item[field] for field in ["paymentRule", "sourceBaseDate", "contractDueDate", "accountingLeadDays"]}
+                   if item.get("paymentRule") == "auw_month_end_120" else {}),
                 "partial": item["partial"], "settlement": "settled" if item["status"] == "settled" else "open",
                 "reviewRequired": item["status"] == "pending_review",
                 "entries": [e for e in entries if get(e, "scheduleKey") == item["scheduleKey"]],
+                **({"returnPremium": True, "paymentDirection": item["paymentDirection"]} if item.get("returnPremium") else {}),
             })
 
+        cash_claims = {}
+        if any(e.get("transactionNo") for e in entries):
+            from .cash_ledger import transaction_details
+            cash_claims = transaction_details(payload, now)
         for tx in _objects(payload.get("transactions")):
             if get(tx, "source") != "claim":
                 continue
@@ -54,6 +64,7 @@ def ledger_rows(cases, now=None):
             rows.append({
                 "key": c["caseUid"] + ":" + js_to_string(get(tx, "txNo")),
                 "caseUid": c["caseUid"], "caseRowVersion": c["rowVersion"],
+                **manual_tw_ref_fields(payload),
                 "twRef": c["twRef"], "caseStatus": c["status"], "announcedAt": c["announcedAt"],
                 "source": "claim", "txNo": _text(get(tx, "txNo")),
                 "legType": _text(get(tx, "legType")), "reinsured": c["reinsured"],
@@ -64,6 +75,9 @@ def ledger_rows(cases, now=None):
                 "paymentStatus": "settled" if settled else "upcoming",
                 "settledAt": js_or(get(tx, "settledAt"), None), "settledBy": js_or(get(tx, "settledBy"), None),
                 "reversed": get(tx, "reversed") is True, "isReversalEntry": get(tx, "isReversalEntry") is True,
+                **{field: cash_claims.get(tx.get("txNo"), {})[field]
+                   for field in ("paid","outstanding","settlement","paymentStatus","partyName","partyType","paymentDirection","entries")
+                   if field in cash_claims.get(tx.get("txNo"), {})},
             })
     # a.twRef.localeCompare(b.twRef) || String(a.dueDate || "").localeCompare(...)（穩定排序，同 JavaScript）
     rows.sort(key=lambda r: (js_locale_key(r["twRef"]), js_locale_key(_text(r.get("dueDate")))))

@@ -5,10 +5,14 @@
 餵同一批輸入，要求輸出完全一致。所以這裡刻意保留 JavaScript 的語意（見 jsnum.py），不「順手」改成 Python 的慣用寫法。
 
 案件列表與畫面的合計（case_totals）不在 Alpha 的這個檔案裡，見檔案最後的說明。
+2026-10-06 VM 編碼規則：交易 Leg 改為 T1/T2/T3，理賠段改為 C{id}。
+差異測試只調整 Alpha 預期結果中的新交易編號，其餘內容仍逐位比較。
+
+VM 2026-10-06：批單負保費保留 signed Leg 金額，並產生退款／收回方向的文字；原保單與 Reverse 分录規則沿用。
 """
 from .jsnum import (
     UNDEFINED, at, get, is_array, js_is_integer, js_or, js_string_to_number, js_to_string, js_trim, js_num_str,
-    money, strip_ws_regex, is_nullish, WS_CLASS, js_is_finite,
+    money, strip_ws_regex, is_nullish, WS_CLASS, js_is_finite, js_truthy,
 )
 
 import re
@@ -67,6 +71,15 @@ def build_premium_transactions(case_data, installment=None):
             {"legType": "Leg 2", "label": f"Payable — reinsurance dept owes {settlement_label}", "amount": legs["leg2"]},
             {"legType": "Leg 3", "label": "Payable — reinsurance dept owes broker", "amount": legs["leg3"]},
         ]
+        if js_truthy(get(case_data, "parentTwRef")) and number_or_zero(get(case_data, "originalPremium")) < 0:
+            refund_labels = [
+                f"Payable — reinsurance dept owes cedant unit (return premium; {reinsurer_label})",
+                f"Receivable — {settlement_label} owes reinsurance dept (return premium)",
+                "Receivable — broker owes reinsurance dept (return brokerage)",
+            ]
+            for leg, label in zip(base, refund_labels):
+                if leg["amount"] < 0:
+                    leg["label"] = label
         split_parties = get(case_data, "splitParties")
         split = get(case_data, "splitEnabled") is True and is_array(split_parties) and len(split_parties) == 2
         tw_ref = js_to_string(get(case_data, "twRef"))
@@ -78,7 +91,7 @@ def build_premium_transactions(case_data, installment=None):
                 for leg_idx, leg in enumerate(base):
                     party_name = get(party, "name")
                     transactions.append({
-                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-TX{leg_idx + 1}{suffix}{tag}",
+                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg_idx + 1}{suffix}{tag}",
                         "legType": f"{leg['legType']}{suffix}",
                         "label": f"{leg['label']} ({js_to_string(js_or(party_name, 'Unassigned'))}, {js_num_str(pct)}%){note}",
                         "amount": money(leg["amount"] * pct / 100),
@@ -92,7 +105,7 @@ def build_premium_transactions(case_data, installment=None):
         else:
             for leg_idx, leg in enumerate(base):
                 transactions.append({
-                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-TX{leg_idx + 1}{tag}",
+                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg_idx + 1}{tag}",
                     "legType": leg["legType"],
                     "label": f"{leg['label']}{note}",
                     "amount": leg["amount"],
@@ -127,7 +140,7 @@ def build_claim_payment_transactions(root_case, split_source, claim, payment):
              if normalized_name(get(row, "name")) == normalized_name(get(reinsurer, "name"))),
             -1,
         )
-        tx_base = (f"{js_to_string(get(root_case, 'twRef'))}-CLM{js_to_string(get(claim, 'id'))}"
+        tx_base = (f"{js_to_string(get(root_case, 'twRef'))}-C{js_to_string(get(claim, 'id'))}"
                    f"-P{js_to_string(get(payment, 'id'))}-R{split_idx + 1}")
         common = {
             "amount": share_amount,
@@ -141,9 +154,9 @@ def build_claim_payment_transactions(root_case, split_source, claim, payment):
             "paymentId": get(payment, "id"),
             "lossNo": js_or(get(claim, "lossNo"), ""),
         }
-        transactions.append({**common, "txNo": f"{tx_base}-TX1", "legType": "Claim Leg 1",
+        transactions.append({**common, "txNo": f"{tx_base}-T1", "legType": "Claim Leg 1",
                              "label": f"Receivable — {settlement_label} owes reinsurance dept (claim {loss_label})"})
-        transactions.append({**common, "txNo": f"{tx_base}-TX2", "legType": "Claim Leg 2",
+        transactions.append({**common, "txNo": f"{tx_base}-T2", "legType": "Claim Leg 2",
                              "label": f"Payable — reinsurance dept owes cedant unit (claim {loss_label})"})
     return transactions
 

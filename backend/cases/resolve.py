@@ -7,6 +7,8 @@
 """
 from django.db.models import Q
 
+from .manual_reference import is_auw_reinsurer
+from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
 from masterdata.models import MasterRecord
 from personnel.models import Personnel
 
@@ -132,22 +134,29 @@ def payment_terms_signature(payload):
     所以 JSON 物件鍵的順序不同也會被當成有變動（資料庫會重排鍵的順序）；VM 改為比較內容，
     鍵的順序不同不算變動，真正的內容有變都仍然會被擋下。
     """
+    from .calc.swiss_facility import applies as swiss_applies, is_swiss_facility
+    swiss = swiss_applies(payload)
     installments = get(payload, "performanceInstallments")
     reinsurers = get(payload, "reinsurers")
     return {
-        "paymentTermsDays": _nn(get(payload, "paymentTermsDays")),
+        "paymentTermsDays": 90 if swiss else _nn(get(payload, "paymentTermsDays")),
+        **({"endoEffectiveDate": _nn(get(payload, "endoEffectiveDate"))} if get(payload, "parentTwRef") else {}),
+        **({"cedantTermsBasis": "case"} if get(payload, "cedantTermsBasis") == "case" else {}),
         "installmentEnabled": get(payload, "installmentEnabled") is True,
         "installments": [
             {
                 "id": js_or(get(row, "id"), ""),
                 "paymentBaseDate": js_or(get(row, "paymentBaseDate"), ""),
-                "paymentTermsDays": _nn(get(row, "paymentTermsDays")),
-                "reinsurerPaymentTerms": js_or(get(row, "reinsurerPaymentTerms"), {}),
+                "paymentTermsDays": 90 if swiss else _nn(get(row, "paymentTermsDays")),
+                "reinsurerPaymentTerms": ({**(get(row, "reinsurerPaymentTerms") if isinstance(get(row, "reinsurerPaymentTerms"), dict) else {}), **{
+                    "r" + str(i+1): 90 for i, r in enumerate(reinsurers if is_array(reinsurers) else [])
+                    if is_swiss_facility(get(r, "name"))}} if swiss else js_or(get(row, "reinsurerPaymentTerms"), {})),
             }
             for row in (installments if is_array(installments) else [])
         ],
         "reinsurers": [
-            {"name": js_or(get(row, "name"), ""), "paymentTermsDays": _nn(get(row, "paymentTermsDays"))}
+            {"name": js_or(get(row, "name"), ""), "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS
+             if is_auw_reinsurer(get(row, "name")) else 90 if swiss and is_swiss_facility(get(row, "name")) else _nn(get(row, "paymentTermsDays"))}
             for row in (reinsurers if is_array(reinsurers) else [])
         ],
     }

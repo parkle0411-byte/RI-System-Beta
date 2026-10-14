@@ -101,11 +101,14 @@ def reset_shared_payload(payload):
     """Endorsement / Renewal 的新 Draft：清掉屬於「舊案件實際發生過的事」的欄位。"""
     return {
         **payload,
-        "status": "draft", "postedAt": "", "confirmedProductionKeys": [], "productionExclusions": {},
+        **({"manualTwRef": ""} if "manualTwRef" in payload else {}),
+        "twRefSource": "", "previousTwRefs": [],
+        "status": "draft", "postedAt": "", "endorsementAnnouncedAt": "", "endorsementPerformanceMonth": "", "confirmedProductionKeys": [], "productionExclusions": {},
         "productionPartiallyConfirmed": False, "endorsements": [], "transactions": [], "claims": [],
         "statementNo": "", "reversalCycle": 0, "pendingReversalOffset": None, "accountingNotifications": [],
         # 收付款帳本（誰實際付了／收了哪一期）不能沿用舊案件的，否則新草稿會像已經有付款紀錄
         "paymentEntries": [], "paymentScheduleReviewRequired": False,
+        **({"swissAccounting": {}} if "swissAccounting" in payload else {}),
     }
 
 
@@ -120,6 +123,8 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     payload["endoEffectiveDate"] = ""
     payload["endoTypes"] = []
     payload["endoText"] = ""
+    payload["installmentEnabled"] = False
+    payload["performanceInstallments"] = []
     payload["originalPremium"] = None
     payload["exchRate"] = None
     payload["statementNo"] = ""

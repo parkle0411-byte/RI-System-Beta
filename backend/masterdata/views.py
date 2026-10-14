@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import record_audit, record_snapshot, request_id_from
-from ri_system.authz import NoStoreMixin, RIPermission, actor_from
+from ri_system.authz import NoStoreMixin, RIPermission, actor_from, object_body
 
 from .models import MasterRecord
 from .serializers import MasterRecordSerializer
@@ -87,7 +87,8 @@ def validate_payload(entity_type, supplied, fallback=None):
 
     ratings = []
     for row in ratings_in:
-        row = row or {}
+        if not isinstance(row, dict):
+            return None, "Every rating must be an object with an agency and a grade."
         agency = clean_text(row.get("agency"), 120)
         grade = clean_text(row.get("grade"), 80)
         if not agency or not grade:
@@ -235,7 +236,7 @@ class MasterDataView(NoStoreMixin, APIView):
         return Response({"ok": True, "displayVersion": "V 0.003", "records": records, "counts": counts})
 
     def post(self, request):
-        body = request.data or {}
+        body = object_body(request)
         actor_info = actor_from(request.ri_principal)
         actor = actor_info["id"]
         entity_type = clean_text(body.get("entityType"), 40).lower()
@@ -308,13 +309,13 @@ class MasterDataView(NoStoreMixin, APIView):
         )
 
     def put(self, request):
-        body = request.data or {}
+        body = object_body(request)
         actor_info = actor_from(request.ri_principal)
         actor = actor_info["id"]
         try:
             record_id = int(body.get("id"))
             expected_version = int(body.get("rowVersion"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return Response(
                 {"error": "version_required", "message": "A valid master id and rowVersion are required."},
                 status=400,

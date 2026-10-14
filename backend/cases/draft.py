@@ -9,8 +9,14 @@ JavaScript 與這裡的 Python 餵同一批輸入，要求輸出完全一致。�
 例如文字以 UTF-16 單位截斷、Number() 的解析規則、Date.UTC 把 0–99 年當成 1900–1999、Clause 代碼用 ICU 排序。
 
 一個刻意的差別：整數值的數字輸出成 int（5，而不是 5.0），因為存進 JSON 後要能用文字比對（例如 personnelId）。
+
+VM 2026-10-06：只有已驗證的批單編輯可透過 allow_negative_premiums 接受本次負保費差額；一般案件沿用非負限制。
 """
 import re
+
+from .sum_insured import placement_issues
+from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
+from .manual_reference import AUW_FOREIGN_BROKER, is_auw_reinsurer, normalize_manual_tw_ref, requires_manual_tw_ref
 
 from .calc.jsnum import (
     UNDEFINED, WS_CLASS, get, is_array, is_nullish, js_json_stringify, js_is_finite, js_is_integer, js_len, js_locale_key,
@@ -160,11 +166,12 @@ def _texts(items, max_len):
     return [t for t in (text(item, max_len) for item in items) if t]
 
 
-def normalize_draft(input_):
+def normalize_draft(input_, *, allow_negative_premiums=False):
     errors = []
     if not isinstance(input_, dict):
         return {"errors": ["case must be an object."], "value": None}
     inp = input_
+    premium_minimum = None if allow_negative_premiums else 0
 
     situations = []
     for index, row in enumerate(rows(get(inp, "situations"), "Situation", errors)):
@@ -177,14 +184,16 @@ def normalize_draft(input_):
     reinsurers = []
     for index, row in enumerate(rows(get(inp, "reinsurers"), "Schedule of Security", errors)):
         n = index + 1
+        name = text(get(row, "name"), 240)
+        auw = is_auw_reinsurer(name)
         reinsurers.append({
-            "name": text(get(row, "name"), 240),
+            "name": name,
             "sharePct": nullable_number(get(row, "sharePct"), f"Reinsurer {n} Order hereon", errors, min=0, max=100),
-            "premium": nullable_number(get(row, "premium"), f"Reinsurer {n} Premium", errors, min=0),
+            "premium": nullable_number(get(row, "premium"), f"Reinsurer {n} Premium", errors, min=premium_minimum),
             "riCommPct": nullable_number(get(row, "riCommPct"), f"Reinsurer {n} Deductions", errors, min=0, max=100),
-            "taxPct": nullable_number(get(row, "taxPct"), f"Reinsurer {n} Tax", errors, min=0, max=100),
-            "paymentTermsDays": nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
-            "foreignBroker": text(get(row, "foreignBroker"), 240),
+            "taxPct": 0 if auw else nullable_number(get(row, "taxPct"), f"Reinsurer {n} Tax", errors, min=0, max=100),
+            "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS if auw else nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
+            "foreignBroker": AUW_FOREIGN_BROKER if auw else text(get(row, "foreignBroker"), 240),
             "settlementRef": text(get(row, "settlementRef"), 160),
         })
 
@@ -194,7 +203,7 @@ def normalize_draft(input_):
         category = text(get(row, "category"), 240)
         amount = nullable_number(get(row, "amount"), f"Sum insured row {n} Amount", errors, min=0)
         location = nullable_number(get(row, "locationIndex"), f"Sum insured row {n} location", errors, min=0, integer=True)
-        sum_insured.append({"category": category, "amount": amount, "locationIndex": 0 if location is None else location})
+        sum_insured.append({"category": category, "amount": amount, "locationIndex": 0 if get(row, "locationIndex") is UNDEFINED else location})
 
     performance_installments = []
     for index, row in enumerate(rows(get(inp, "performanceInstallments"), "Premium Installments", errors)):
@@ -208,7 +217,7 @@ def normalize_draft(input_):
             "paymentBaseDate": js_or(nullable_date(get(row, "paymentBaseDate"), f"Installment {n} payment base date", errors), ""),
             "paymentTermsDays": nullable_number(get(row, "paymentTermsDays"), f"Installment {n} Payment terms", errors, min=15, integer=True),
             "reinsurerPaymentTerms": compatible_json(get(row, "reinsurerPaymentTerms"), {}, f"Installment {n} Reinsurer Payment terms", errors),
-            "premium": nullable_number(get(row, "premium"), f"Installment {n} Premium", errors, min=0),
+            "premium": nullable_number(get(row, "premium"), f"Installment {n} Premium", errors, min=premium_minimum),
             "ratio": nullable_number(get(row, "ratio"), f"Installment {n} ratio", errors, min=0, max=100),
         })
 
@@ -282,9 +291,9 @@ def normalize_draft(input_):
     value = {}
     value["ownerPersonnelId"] = nullable_number(get(inp, "ownerPersonnelId"), "Case owner Personnel ID", errors, min=1, integer=True)
     value["ownerPersonnelName"] = text(get(inp, "ownerPersonnelName"), 160)
-    value["parentTwRef"] = text(get(inp, "parentTwRef"), 120)
+    value["parentTwRef"] = text(get(inp, "parentTwRef"), 192)
     value["endorsementSeq"] = nullable_number(get(inp, "endorsementSeq"), "Endorsement sequence", errors, min=0, integer=True)
-    value["renewedFromTwRef"] = text(get(inp, "renewedFromTwRef"), 120)
+    value["renewedFromTwRef"] = text(get(inp, "renewedFromTwRef"), 192)
     value["endoEffectiveDate"] = js_or(nullable_date(get(inp, "endoEffectiveDate"), "Endorsement effective date", errors), "")
     value["endoTypes"] = _texts(compatible_rows(get(inp, "endoTypes"), "Endorsement types", errors, 20), 120)
     value["endoText"] = text(get(inp, "endoText"), 5000)
@@ -302,12 +311,20 @@ def normalize_draft(input_):
     value["policyTo"] = expiration_date or ""
     value["policyToTime"] = policy_to_time if policy_to_time in ("00:00", "12:00") else "12:00"
     value["currency"] = currency
-    value["originalPremium"] = nullable_number(get(inp, "originalPremium"), "100% Premium", errors, min=0)
+    value["originalPremium"] = nullable_number(get(inp, "originalPremium"), "100% Premium", errors, min=premium_minimum)
     value["riCommPct"] = nullable_number(get(inp, "riCommPct"), "Ceding commission", errors, min=0, max=100)
     value["taxPct"] = nullable_number(get(inp, "taxPct"), "Cedant tax", errors, min=0, max=100)
     value["paymentTermsDays"] = nullable_number(get(inp, "paymentTermsDays"), "Payment terms", errors, min=15, integer=True)
+    if get(inp, "cedantTermsBasis") == "case":
+        value["cedantTermsBasis"] = "case"
     value["installmentEnabled"] = get(inp, "installmentEnabled") is True
     value["performanceInstallments"] = performance_installments
+    if allow_negative_premiums and (value["installmentEnabled"] or performance_installments):
+        errors.append("Endorsements must use a single premium settlement; installments are not allowed.")
+    if allow_negative_premiums and value["installmentEnabled"] and value["originalPremium"] is not None:
+        for index, row in enumerate(performance_installments):
+            if row["premium"] is not None and row["premium"] * value["originalPremium"] < 0:
+                errors.append(f"Installment {index + 1} Premium must have the same sign as 100% Premium.")
     value["splitEnabled"] = get(inp, "splitEnabled") is True
     value["splitParties"] = split_parties
     value["reinsurers"] = reinsurers if reinsurers else [{
@@ -363,6 +380,24 @@ def normalize_draft(input_):
     value["paymentEntries"] = compatible_rows(get(inp, "paymentEntries"), "Payment entries", errors)
     value["paymentScheduleReviewRequired"] = get(inp, "paymentScheduleReviewRequired") is True
 
+    from .calc.swiss_facility import applies as swiss_applies
+    if swiss_applies(value):
+        value["paymentTermsDays"] = 90
+        for r in value["reinsurers"]:
+            from .calc.swiss_facility import is_swiss_facility
+            if is_swiss_facility(r["name"]):
+                r["paymentTermsDays"] = 90
+        if value.get("parentTwRef"):
+            signs = {1 if r["premium"] > 0 else -1 for r in value["reinsurers"] if r.get("premium")}
+            if value.get("originalPremium"):
+                signs.add(1 if value["originalPremium"] > 0 else -1)
+            if len(signs) > 1:
+                errors.append("Swiss Facility Property endorsements cannot mix additional and return premiums; use separate endorsements.")
+
+    if requires_manual_tw_ref(value):
+        value["manualTwRef"], manual_errors = normalize_manual_tw_ref(inp.get("manualTwRef"))
+        errors.extend(manual_errors)
+
     return {
         "errors": errors,
         "value": value,
@@ -383,17 +418,35 @@ def _filled(value):
     return True
 
 
+def loss_record_save_errors(payload, *, case_kind="original"):
+    """Fields required when a Case is saved, including an incomplete Draft."""
+    errors = []
+    if not _filled(get(payload, "lossAdvisedDate")):
+        errors.append("Loss record advised by broker on is required before saving.")
+    years = get(payload, "lossRecordYears")
+    if not _filled(years):
+        errors.append("Loss history years is required before saving.")
+    elif years == 0:
+        if case_kind == "renewal" or get(payload, "newOrRenew") != "New":
+            errors.append("Loss history years may be 0 only for a New case.")
+        if get(payload, "lossRecord"):
+            errors.append("Loss Record must be empty when loss history years is 0.")
+    return errors
+
+
 def _is_int_number(value):
     return js_is_integer(js_to_number(value))
 
 
-def validate_announce_ready(payload):
+def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=None):
     issues = []
 
     def add(field, label):
         issues.append({"field": field, "label": label})
 
     value = payload if isinstance(payload, (dict, list)) else {}
+    if js_truthy(get(value, "parentTwRef")) and (get(value, "installmentEnabled") is True or get(value, "performanceInstallments")):
+        add("installmentEnabled", "Endorsements must use a single premium settlement")
     if not _is_int_number(get(value, "ownerPersonnelId")) or js_to_number(get(value, "ownerPersonnelId")) < 1:
         add("ownerPersonnelId", "Case Owner")
     for field, label in (
@@ -404,6 +457,9 @@ def validate_announce_ready(payload):
     ):
         if not _filled(get(value, field)):
             add(field, label)
+
+    if requires_manual_tw_ref(value) and not _filled(get(value, "manualTwRef")):
+        add("manualTwRef", "TW Ref. (for AUW)")
 
     if _filled(get(value, "parentTwRef")):
         if not _filled(get(value, "endoEffectiveDate")):
@@ -440,6 +496,11 @@ def validate_announce_ready(payload):
             add(f"reinsurers.{index}.riCommPct", f"Reinsurer {n} Deductions")
         if not _filled(get(row, "taxPct")):
             add(f"reinsurers.{index}.taxPct", f"Reinsurer {n} Tax")
+        if is_auw_reinsurer(get(row, "name")):
+            if get(row, "foreignBroker") != AUW_FOREIGN_BROKER:
+                add(f"reinsurers.{index}.foreignBroker", f"Reinsurer {n} Foreign RI Broker must be Howden Specialty Limited for AUW")
+            if _filled(get(row, "taxPct")) and js_to_number(get(row, "taxPct")) != 0:
+                add(f"reinsurers.{index}.taxPct", f"Reinsurer {n} Tax must be 0% for AUW")
 
     if not _filled(get(value, "limitOfLiability")):
         add("limitOfLiability", "Limit of Liability")
@@ -462,15 +523,23 @@ def validate_announce_ready(payload):
         n = index + 1
         if not _filled(get(row, "category")):
             add(f"sumInsured.{index}.category", f"Sum insured {n} Interest insured")
-        if not _filled(get(row, "amount")):
-            add(f"sumInsured.{index}.amount", f"Sum insured {n} Amount")
+        amount = js_to_number(get(row, "amount"))
+        if not _filled(get(row, "amount")) or not js_is_finite(amount) or amount <= 0:
+            add(f"sumInsured.{index}.amount", f"Sum insured {n} Amount must be greater than 0")
+    for issue in placement_issues(value):
+        add(issue["field"], issue["label"])
     if not _filled(get(value, "lossAdvisedDate")):
         add("lossAdvisedDate", "Loss record advised by broker on")
-    years = js_to_number(get(value, "lossRecordYears"))
-    if not js_is_integer(years) or years <= 0:
+    raw_years = get(value, "lossRecordYears")
+    years = js_to_number(raw_years)
+    zero_allowed = (allow_zero_loss_years and get(value, "newOrRenew") == "New"
+                    and case_kind != "renewal" and not _filled(get(value, "renewedFromTwRef")))
+    if not _filled(raw_years) or not js_is_integer(years) or years < 0 or (years == 0 and not zero_allowed):
         add("lossRecordYears", "Loss history years")
     loss_record = get(value, "lossRecord")
     loss_record = loss_record if is_array(loss_record) else []
+    if allow_zero_loss_years and years == 0 and loss_record:
+        add("lossRecord", "Loss Record must be empty when loss history years is 0")
     for index, row in enumerate(loss_record):
         n = index + 1
         if not _filled(get(row, "date")):
@@ -480,8 +549,7 @@ def validate_announce_ready(payload):
         if not _filled(get(row, "lossPaid")):
             add(f"lossRecord.{index}.lossPaid", f"Loss {n} Loss Paid")
 
-    for field, label in (("originalPremium", "100% Premium"), ("paymentTermsDays", "Payment terms"),
-                         ("riCommPct", "Ceding commission"), ("taxPct", "Cedant tax")):
+    for field, label in (("originalPremium", "100% Premium"), ("paymentTermsDays", "Payment terms")):
         if not _filled(get(value, field)):
             add(field, label)
     if _filled(get(value, "paymentTermsDays")) and js_to_number(get(value, "paymentTermsDays")) < 15:
@@ -538,4 +606,11 @@ def validate_announce_ready(payload):
                 total += pct if js_is_finite(pct) else 0
             if abs(total - 100) > 0.0001:
                 add("splitParties", "Performance Split percentages totaling 100%")
+    from .calc.swiss_facility import applies as swiss_applies
+    if swiss_applies(value) and value.get("parentTwRef"):
+        signs = {1 if r["premium"] > 0 else -1 for r in value.get("reinsurers", []) if r.get("premium")}
+        if value.get("originalPremium"):
+            signs.add(1 if value["originalPremium"] > 0 else -1)
+        if len(signs) > 1:
+            add("reinsurers", "Swiss Facility Property endorsements must use one premium direction")
     return issues

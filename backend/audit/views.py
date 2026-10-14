@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from ri_system.authz import NoStoreMixin, RIPermission
 
 from .models import AuditLog
+from .services import audit_recording_enabled
 
 
 class AuditLogView(NoStoreMixin, APIView):
@@ -25,4 +26,4 @@ class AuditLogView(NoStoreMixin, APIView):
                 "occurred_at", "retention_until", "metadata",
             )[:limit]
         )
-        return Response({"ok": True, "displayVersion": "V 0.003", "events": events, "readOnly": True})
+        return Response({"ok": True, "displayVersion": "V 0.003", "events": events, "readOnly": True, "recordingEnabled": audit_recording_enabled()})

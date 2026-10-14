@@ -15,7 +15,10 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from .authz import AuthError, NoStoreMixin, RIPermission, load_principal, serialize_principal
+from audit.services import audit_recording_enabled
+
+from .session_idle import SESSION_ID, session_state, start_idle_session, touch_idle_session
+from .authz import AuthError, NoStoreMixin, RIPermission, load_principal, object_body, serialize_principal
 
 
 class CsrfView(NoStoreMixin, APIView):
@@ -35,8 +38,9 @@ class LoginView(NoStoreMixin, APIView):
     throttle_scope = "login"
 
     def post(self, request):
-        username = str(request.data.get("username") or "").strip().lower()
-        password = str(request.data.get("password") or "")
+        body = object_body(request)
+        username = str(body.get("username") or "").strip().lower()
+        password = str(body.get("password") or "")
         user = authenticate(request, username=username, password=password) if username and password else None
         if user is None:
             # 不區分「帳號不存在」與「密碼錯誤」，避免帳號列舉
@@ -47,7 +51,8 @@ class LoginView(NoStoreMixin, APIView):
         request.user = user
         person = load_principal(request)
         login(request, user)
-        return Response({"ok": True, "principal": serialize_principal(person)})
+        start_idle_session(request)
+        return Response({"ok": True, "principal": serialize_principal(person), "auditLogRecordingEnabled": audit_recording_enabled(), "session": session_state(request)})
 
 
 class LogoutView(NoStoreMixin, APIView):
@@ -68,7 +73,9 @@ class AppContextView(NoStoreMixin, APIView):
         return Response({
             "principal": serialize_principal(person),
             "authenticationEnabled": True,
+            "auditLogRecordingEnabled": audit_recording_enabled(),
             "permissionModel": "enforced",
+            "session": session_state(request),
         })
 
 
@@ -77,8 +84,9 @@ class ChangePasswordView(NoStoreMixin, APIView):
 
     def post(self, request):
         person = load_principal(request)
-        current = str(request.data.get("currentPassword") or "")
-        new = str(request.data.get("newPassword") or "")
+        body = object_body(request)
+        current = str(body.get("currentPassword") or "")
+        new = str(body.get("newPassword") or "")
         if not request.user.check_password(current):
             raise AuthError(400, "INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
         if person.must_change_password and new == current:
@@ -94,3 +102,24 @@ class ChangePasswordView(NoStoreMixin, APIView):
             person.must_change_password = False
             person.save(update_fields=["must_change_password"])
         return Response({"ok": True, "changedAt": timezone.now().isoformat(), "principal": serialize_principal(person)})
+
+
+class SessionStatusView(NoStoreMixin, APIView):
+    permission_classes = []
+
+    def get(self, request):
+        load_principal(request)
+        return Response({"session": session_state(request)})
+
+
+class SessionActivityView(NoStoreMixin, APIView):
+    # SessionAuthentication enforces CSRF; an initial-password user may still type in that dialog.
+    permission_classes = []
+
+    def post(self, request):
+        load_principal(request)
+        body = object_body(request)
+        if body.get("sessionId") != request.session.get(SESSION_ID):
+            return Response({"error": "SESSION_CHANGED", "message": "The signed-in session has changed."}, status=409)
+        touch_idle_session(request)
+        return Response({"ok": True, "session": session_state(request)})

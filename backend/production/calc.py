@@ -7,6 +7,8 @@ Production Report 的計算 - 逐函式移植自 Alpha lib/production-report.js�
   - 正則的 \\d 與 /i 只對 ASCII（Python 的 IGNORECASE 會讓 i 比對到 ı、İ，所以寫成明確的字元類別）；$ 只比對字串結尾
   - localeCompare（js_locale_key）、Array.prototype.sort() 的 UTF-16 順序
 這裡不做時區換算：月份是「傳入的文字的前 7 個字」，要用台北時間就由呼叫端傳入台北時間的文字（見 views.py）。
+
+VM 2026-10-06：負保費批單即使經紀費為零，仍列入 Production 與確認 key，以產生應退／應收交易。
 """
 import re
 
@@ -20,6 +22,7 @@ PRODUCTION_REPORT_HEADERS = [
     "Original Insured", "Reinsured", "Reinsurer / RI Broker", "Class", "Type",
     "Currency", "Exch. Rate", "A/E", "Eff Date", "Exp Date", "Comm (%)",
     "Premium (NTD)", "Income (NTD)", "Policy No", "Endorse No", "Remark", "Tranx Date",
+    "First Policy No",  # VM 新增（Alpha 沒有）：續保鏈最初那張保單的 TW Ref，放最後一欄
 ]
 
 _MONTH = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])\Z")
@@ -72,9 +75,17 @@ def next_production_month(month):
 
 
 def base_month(case_data):
+    # An endorsement's premium belongs to its own effective month. The original
+    # policy's policyFrom can be months earlier than the amendment.
+    if js_truthy(get(case_data, "parentTwRef")):
+        # Preserve the explicit, one-off attribution of already repaired legacy
+        # cases; normal Drafts cannot set this server-owned field.
+        override = year_month(get(case_data, "endorsementPerformanceMonth"))
+        if override:
+            return override
+        return year_month(get(case_data, "endoEffectiveDate")) or year_month(get(case_data, "policyFrom"))
     effective = year_month(get(case_data, "policyFrom"))
-    activity_source = get(case_data, "createdAt") if js_truthy(get(case_data, "parentTwRef")) \
-        else js_or(get(case_data, "announcedAt"), get(case_data, "postedAt"))
+    activity_source = js_or(get(case_data, "announcedAt"), get(case_data, "postedAt"))
     activity = year_month(activity_source)
     return effective if _utf16(effective) > _utf16(activity) else activity
 
@@ -224,6 +235,12 @@ def _income_split(case_data, reinsurers, installment):
     return raw, installment["income"] - total
 
 
+def _return_premium_activity(case_data, reinsurer, installment):
+    return (js_truthy(get(case_data, "parentTwRef"))
+            and number_or_zero(get(case_data, "originalPremium")) < 0
+            and reinsurer_legs(case_data, reinsurer)["cedantPremium"] * installment["ratio"] != 0)
+
+
 def production_key_groups_for_case(source):
     """依分期分組的 Production key（與 installment_allocations 同順序；沒有收入的期別 keys 是空串列）。"""
     case_data = normalize_source(source)
@@ -231,11 +248,11 @@ def production_key_groups_for_case(source):
     reinsurers = _reinsurers(case_data)
     for installment in installment_allocations(case_data):
         keys = []
-        if installment["income"] != 0:
+        if installment["income"] != 0 or any(_return_premium_activity(case_data, r, installment) for r in reinsurers):
             key = f"{js_num_str(case_data['id'])}:{installment['id']}"
             raw, tail = _income_split(case_data, reinsurers, installment)
             for index in range(len(reinsurers)):
-                if raw[index] + (tail if index == 0 else 0) != 0:
+                if raw[index] + (tail if index == 0 else 0) != 0 or _return_premium_activity(case_data, reinsurers[index], installment):
                     keys.append(f"{key}:R{index}")
         groups.append({"id": installment["id"], "keys": keys})
     return groups
@@ -254,11 +271,54 @@ def production_source_signature(rows):
     ] for row in (rows if is_array(rows) else [])])
 
 
-def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UNDEFINED):
+# ---------- First Policy No（首次承保號碼）：VM 新增，Alpha 沒有 ----------
+# 續保會產生新的 TW Ref，Policy No 因此不同；批單的 Policy No 則是原保單的 TW Ref。
+# 這裡沿著「批單 → 原保單 → 續保來源」一路追到最初那張保單，讓 Insured Name 改過的續保也能用同一個號碼分組。
+# 這個欄位不放進 production_source_signature：連結不會影響金額，也避免讓已產生的報表全部變成「過期」。
+
+def _ref_text(value):
+    return value.strip() if isinstance(value, str) else ""
+
+
+def reference_links(cases):
+    """cases：(tw_ref, payload) 的可迭代物件 → {任一 TW Ref（含 previousTwRefs）: 連結資料}。"""
+    links = {}
+    for tw_ref, payload in cases:
+        payload = payload if isinstance(payload, dict) else {}
+        entry = {"ref": _ref_text(tw_ref), "parent": _ref_text(payload.get("parentTwRef")),
+                 "renewedFrom": _ref_text(payload.get("renewedFromTwRef"))}
+        previous = payload.get("previousTwRefs")
+        for ref in [tw_ref, *(previous if isinstance(previous, list) else [])]:
+            ref = _ref_text(ref)
+            if ref:
+                links.setdefault(ref, entry)
+    return links
+
+
+def first_policy_no(policy_no, links):
+    """從 policy_no 出發：批單回到原保單，續保回到來源；找不到來源時，以最後知道的號碼為準。"""
+    current, seen = _ref_text(policy_no), set()
+    while current and current not in seen:
+        seen.add(current)
+        entry = links.get(current)
+        if entry is None:
+            break
+        if entry["parent"]:
+            current = entry["parent"]
+        elif entry["renewedFrom"]:
+            current = entry["renewedFrom"]
+        else:
+            return entry["ref"] or current
+    return current
+
+
+def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UNDEFINED, links=UNDEFINED):
     fx_rates = {} if fx_rates is UNDEFINED else fx_rates
     exclusions = [] if exclusions is UNDEFINED else exclusions
     if not _MONTH.match(_js(js_or(month, ""))):
         return {"errors": ["Report month must use YYYY-MM."], "rows": [], "excluded": [], "missingRateCurrencies": []}
+    if links is UNDEFINED:  # 呼叫端沒給完整連結表時，只用傳進來的案件
+        links = reference_links((data["twRef"], data) for data in map(normalize_source, case_rows if is_array(case_rows) else []))
     rows, excluded_rows, missing_rates = [], [], []
     for source in (case_rows if is_array(case_rows) else []):
         case_data = normalize_source(source)
@@ -281,7 +341,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                 legs = reinsurer_legs(case_data, reinsurer)
                 source_premium = legs["cedantPremium"] * installment["ratio"]
                 source_income = raw[reinsurer_index] + (tail if reinsurer_index == 0 else 0)
-                if source_income == 0:
+                if source_income == 0 and not _return_premium_activity(case_data, reinsurer, installment):
                     continue
                 rate = rate_for(case_data, month, fx_rates)
                 currency = js_upper(_js(js_or(get(case_data, "currency"), "TWD")))
@@ -300,6 +360,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                     comm = source_income / source_premium * 100
                 else:
                     comm = 0.0
+                policy_no = _js(js_or(get(case_data, "parentTwRef"), get(case_data, "twRef"), ""))
                 for person_index, person in enumerate(people):
                     row = {
                         "id": f"{reinsurer_key}:P{person_index}", "key": key, "reinsurerKey": reinsurer_key,
@@ -315,8 +376,8 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                         "effDate": _js(js_or(get(case_data, "policyFrom"), "")),
                         "expDate": _js(js_or(get(case_data, "policyTo"), "")),
                         "comm": comm, "premium": premiums[person_index], "income": incomes[person_index],
-                        "policyNo": _js(js_or(get(case_data, "parentTwRef"), get(case_data, "twRef"), "")),
-                        "endorseNo": endorse.group(1) if endorse else "",
+                        "policyNo": policy_no, "firstPolicyNo": first_policy_no(policy_no, links),
+                        "endorseNo": _js(get(case_data, "endorsementSeq")) if get(case_data, "twRefSource") == "auw_manual" and js_truthy(get(case_data, "parentTwRef")) else (endorse.group(1) if endorse else ""),
                         "remark": "Ty" if get(case_data, "reinsuranceStructure") == "TREATY" else "Fac",
                         "tranxDate": month_end(month), "installment": installment_index + 1,
                         "exclusion": {

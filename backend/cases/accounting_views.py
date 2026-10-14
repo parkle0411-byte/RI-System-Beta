@@ -2,7 +2,8 @@
 記帳 API - 對應 Hatchable Alpha 的 api/accounting.js。
 
   GET  /api/accounting   accounting.read   整合帳本：已 Announce／Confirmed 案件的保費付款排程（依期別與付款對象拆開）＋理賠交易
-  POST /api/accounting   accounting.read   action = record_payment | reverse_payment（兩者都另外需要 accounting.write）
+    transactionRows：實際 SoA 保費與理賠交易，含 Reversed 案件歷史；rows 保留付款排程。
+  POST /api/accounting   accounting.read   action = record_transaction_payments | reverse_batch_payment | record_payment | reverse_payment（均需要 accounting.write）
 
 以下原本是 VM 與 Alpha v53 的差異，2026-09-29 已同步回 Alpha v56（兩邊行為相同，見 MIGRATION-STATUS.md）：
   - 帳本讀取全部案件（v53 只讀前 1000 件）。
@@ -20,6 +21,7 @@ from django.db import IntegrityError, transaction
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from coordination.services import PRODUCTION_SOURCES, serialized
 from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
@@ -29,6 +31,11 @@ from .calc.jsnum import (
 from .calc.payment_terms import build_payment_schedule, taipei_date
 from .ledger import _objects, ledger_rows
 from .models import Case
+from .transaction_ledger import transaction_rows
+from .cash_ledger import payment_batches
+from .transaction_payments import record_transaction_payments, reverse_batch_payment
+from .calc.swiss_facility import applies as swiss_applies, DISPLAY_FIELDS, reset_after_changes, payment_error, case_payload
+from .swiss_accounting import swiss_action
 
 LEDGER_STATUSES = ("posted", "closed")
 _DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
@@ -70,9 +77,9 @@ def _text(value):
 # ------------------------------------------------------------------ 帳本
 
 def _case_view(case):
-    payload = case.payload if isinstance(case.payload, dict) and case.payload else {}
+    payload = case_payload(case)
     return {
-        "caseUid": str(case.case_uid), "rowVersion": case.row_version,
+        "caseUid": str(case.case_uid), "rootCaseUid": str(case.parent_case.case_uid) if case.parent_case_id else str(case.case_uid), "rowVersion": case.row_version,
         "twRef": case.tw_ref or "", "status": case.status, "announcedAt": case.announced_at,
         "reinsured": js_or(payload.get("reinsured"), case.reinsured_name_snapshot, ""),
         "currency": js_or(payload.get("currency"), case.currency, ""), "payload": payload,
@@ -86,26 +93,41 @@ class AccountingView(NoStoreMixin, APIView):
     permission_map = {"GET": "accounting.read", "POST": "accounting.read"}
 
     def get(self, request):
-        cases = _live(Case.objects.filter(status__in=LEDGER_STATUSES)).order_by("tw_ref", "id")
-        rows, warnings = ledger_rows([_case_view(c) for c in cases])
+        cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").order_by("tw_ref", "id")
+        case_views = [_case_view(c) for c in cases]
+        rows, warnings = ledger_rows([c for c in case_views if c["status"] in LEDGER_STATUSES])
+        transactions = transaction_rows(case_views)
+        swiss_rows = []
+        for c in case_views:
+            if c["status"] not in LEDGER_STATUSES or not swiss_applies(c["payload"]):
+                continue
+            for item in build_payment_schedule(c["payload"])["items"]:
+                swiss_rows.append({**item, "key": c["caseUid"] + ":" + item["scheduleKey"], "caseUid": c["caseUid"],
+                                   "caseRowVersion": c["rowVersion"], "twRef": c["twRef"], "rootCaseUid": c["rootCaseUid"],
+                                   "entries": [e for e in _objects(c["payload"].get("paymentEntries")) if e.get("scheduleKey") == item["scheduleKey"]]})
         currencies = []
-        for row in rows:  # [...new Set(currency.filter(Boolean))].sort()
+        for row in [*rows, *transactions]:  # Include currencies in historical transactions.
             if js_truthy(row["currency"]) and row["currency"] not in currencies:
                 currencies.append(row["currency"])
         currencies.sort(key=js_to_string)
         return Response(json_roundtrip({
-            "ok": True, "rows": rows, "warnings": warnings, "currencies": currencies,
+            "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,
             "scope": {"canEdit": _can_edit(request.ri_principal)},
+            "cashBatches": payment_batches(case_views), "swissRows": swiss_rows,
         }))
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
         action = _text(body.get("action"))
-        handlers = {"record_payment": self.record_payment, "reverse_payment": self.reverse_payment}
+        handlers = {"record_payment": self.record_payment, "reverse_payment": self.reverse_payment,
+                    "record_transaction_payments": lambda r, b: record_transaction_payments(self,r,b),
+                    "reverse_batch_payment": lambda r, b: reverse_batch_payment(self,r,b)}
+        for swiss_handler in ("confirm_swiss_collection", "unconfirm_swiss_collection", "record_swiss_clearance", "record_swiss_offset", "mark_swiss_statement"):
+            handlers[swiss_handler] = lambda r, b: swiss_action(self, r, b)
         if action not in handlers:
             return _error(400, "unsupported_action", "Unsupported Accounting action.")
         try:
-            with transaction.atomic():
+            with serialized(PRODUCTION_SOURCES):
                 return handlers[action](request, body)
         except IntegrityError:
             return _error(409, "payment_conflict", "This case changed while saving. Nothing was changed; refresh and try again.")
@@ -136,12 +158,13 @@ class AccountingView(NoStoreMixin, APIView):
             return _error(409, "version_conflict", "This case changed. Refresh Accounting and try again.")
         old_entries = case.payload.get("paymentEntries") if isinstance(case.payload, dict) else None
         before = {"rowVersion": case.row_version, "paymentEntries": js_or(old_entries, [])}
+        reset_after_changes(case.payload or {}, payload, _iso_now())
         case.payload = payload
         case.row_version += 1
         case.updated_by = actor_info["id"]
         case.save()
         record_snapshot(entity_type="case", entity_id=case.case_uid, version=case.row_version,
-                        reason={"record_payment": "payment_recorded", "reverse_payment": "payment_reversed"}[action],
+                        reason={"record_payment": "payment_recorded", "reverse_payment": "payment_reversed"}.get(action, action),
                         data={"caseUid": str(case.case_uid), "twRef": case.tw_ref, "status": case.status,
                               "rowVersion": case.row_version, "payload": payload},
                         created_by=actor_info["id"])
@@ -161,30 +184,42 @@ class AccountingView(NoStoreMixin, APIView):
         payment_date = _text(body.get("paymentDate"))
         if not case_uid or not schedule_key or not js_is_finite(amount) or amount <= 0 or not _real_date(payment_date):
             return _error(400, "invalid_payment", "Case, installment, party, payment date, and a positive amount are required.")
+        # Validate and compare the same rounded amount that will be stored.
+        amount = money(amount)
+        if not js_is_finite(amount) or amount <= 0:
+            return _error(400, "invalid_payment", "Payment amount must remain positive after rounding to two decimal places.")
         case = self._load_case_for_update(case_uid)
         if case is None:
             return _error(404, "case_not_found", "Case not found.")
         locked = self._status_error(case, "recorded")
         if locked:
             return locked
-        payload = json_roundtrip(case.payload if isinstance(case.payload, dict) and case.payload else {})
+        payload = json_roundtrip(case_payload(case))
         item = next((i for i in build_payment_schedule(payload)["items"] if i["scheduleKey"] == schedule_key), None)
         if item is None:
             return _error(400, "schedule_not_found", "The selected installment and party no longer exist.")
         # Alpha 也檢查 item.reviewRequired，但排程項目沒有這個欄位；實際只靠「沒有到期日」擋下
         if not item["dueDate"]:
             return _error(400, "schedule_pending_review", "Confirm the installment payment base date before recording payment.")
-        if amount - item["outstanding"] > 0.004:
+        if amount - abs(item["outstanding"]) > 0.004:
             return _error(400, "overpayment", "Payment cannot exceed the selected installment balance.")
+        blocked = payment_error(item, amount)
+        if blocked:
+            return _error(400, "swiss_payment_blocked", blocked)
         actor_info = actor_from(person)
         entry = {
             "id": str(uuid.uuid4()), "entryType": "payment", "scheduleKey": schedule_key,
             "installmentId": item["installmentId"], "installmentLabel": item["installmentLabel"],
             "partyType": item["partyType"], "partyName": item["partyName"],
-            "amount": money(amount), "paymentDate": payment_date,
+            "amount": -amount if item["amount"] < 0 else amount, "paymentDate": payment_date,
             "note": js_slice(js_trim(_text(body.get("note"))), 0, 1000),
             "createdAt": _iso_now(), "createdBy": actor_info["id"], "createdByName": actor_info["name"],
         }
+        if item.get("swissFacility") and item["amount"] > 0:
+            entry["settlementDueDate"] = item["dueDate"]
+        if item.get("returnPremium"):
+            entry["paymentDirection"] = item["paymentDirection"]
+            entry["returnPremium"] = True
         existing = payload.get("paymentEntries")
         payload["paymentEntries"] = [*(existing if is_array(existing) else []), entry]
         return self._save(request, body, case, payload, "record_payment", {
@@ -207,12 +242,14 @@ class AccountingView(NoStoreMixin, APIView):
         locked = self._status_error(case, "reversed")
         if locked:
             return locked
-        payload = json_roundtrip(case.payload if isinstance(case.payload, dict) and case.payload else {})
+        payload = json_roundtrip(case_payload(case))
         entries = payload.get("paymentEntries") if is_array(payload.get("paymentEntries")) else []
         original = next((e for e in _objects(entries)
                          if get(e, "id") == entry_id and get(e, "entryType") == "payment"), None)
         if original is None:
             return _error(400, "payment_not_found", "The original payment entry was not found.")
+        if original.get("batchId"):
+            return _error(400, "batch_reverse_required", "Reverse the entire remittance from Accounting history.")
         if any(get(e, "entryType") == "reversal" and get(e, "reversalOf") == entry_id for e in _objects(entries)):
             return _error(409, "already_reversed", "This payment has already been reversed.")
         actor_info = actor_from(person)
@@ -225,6 +262,11 @@ class AccountingView(NoStoreMixin, APIView):
             "note": js_slice(js_trim(_text(body.get("note"))), 0, 1000),
             "createdAt": _iso_now(), "createdBy": actor_info["id"], "createdByName": actor_info["name"],
         }
+        for field in ("settlementDueDate", "nonCash", "entryKind"):
+            if field in original:
+                reversal[field] = original[field]
+        if original.get("offsetId"):
+            return _error(400, "linked_offset_locked", "Offset records must remain linked to both policies; review them with Accounting.")
         payload["paymentEntries"] = json_roundtrip([*entries, reversal])
         return self._save(request, body, case, payload, "reverse_payment", json_roundtrip({
             "paymentEntryId": reversal["id"], "reversalOf": entry_id,

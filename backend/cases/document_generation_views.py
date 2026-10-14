@@ -1,52 +1,26 @@
-"""
-產生 Cover Note／Debit Note／Endorsement - 對應 Hatchable Alpha 的 api/render-document-pdf.js。
+"""Word-only Cover Note, Debit Note and Endorsement generation authorization.
 
-Word（.docx）與 PDF 的版面都在瀏覽器端組好（Alpha 的 docx-generator.js／pdf-generator.js 原樣照搬）：
-  POST /api/render-document-pdf         documents.read   {markup, kind, caseUid} → A4 PDF
-       Alpha 用 Hatchable 內建的無頭 Chromium；VM 送到內部的 Gotenberg（Chromium，見 compose.yaml 的 pdf 服務）。
-  POST /api/document-generation-log     documents.read   {kind, format: "docx", caseUid} → 204
-       Word 完全在瀏覽器產生，伺服器看不到；前端下載 Word 之前先呼叫這裡寫 Audit（2026-09-26 你的決定）。
-
-與 Alpha 的差異（都記在 MIGRATION-STATUS.md）：
-  - 需要 documents.read（Alpha 只要登入）。
-  - kind 必須是 cover／endorsement／debit，caseUid 必填且必須是看得到的案件（Alpha 只有 debit 才帶 caseUid）；
-    每次成功產生都寫一筆 generate_document Audit（Alpha 不記錄；不存文件內容）。
-  - Debit Note 的 Word 也在伺服器檢查已有 TW Ref（Alpha 的 Word 路徑只有前端擋）。
+Word files are assembled in the browser. This API validates access and the
+stored Case fields, then records generation metadata without document content.
+The retired PDF route returns 410 for previously opened clients.
 """
-import logging
-import urllib.error
-import urllib.request
+import re
 import uuid
 
-from django.conf import settings
 from django.db import transaction
-from django.http import HttpResponse
+from personnel.models import Personnel
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import record_audit, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
-from .calc.jsnum import get, is_nullish, js_to_string, js_trim
-from .document_markup import markup_problem
+from .calc.jsnum import get, is_nullish, js_to_string, js_trim, js_to_number, js_is_finite
 from .document_views import visible_cases
+from .sum_insured import placement_issues
 
-log = logging.getLogger(__name__)
 
 KINDS = ("cover", "endorsement", "debit")
-DOCUMENT_HTML = """<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  @page { size: 794px 1123px; margin: 0; }
-  html, body { margin: 0; padding: 0; background: #fff; }
-  .page { break-after: page; page-break-after: always; }
-  .page:last-child { break-after: auto; page-break-after: auto; }
-</style>
-</head>
-<body>%s</body>
-</html>"""
 
 
 def _error(status, code, message):
@@ -56,6 +30,25 @@ def _error(status, code, message):
 def _text(body, key):
     value = get(body, key)
     return js_trim("" if is_nullish(value) else js_to_string(value))
+
+
+def _valid_payment_terms(value):
+    days = js_to_number(value)
+    return js_is_finite(days) and days >= 15 and days == int(days)
+
+
+def _ae_email(payload):
+    """Use Case email first, then the first active AE in personnel-options order."""
+    email = _text(payload, "aeEmail")
+    if email:
+        return email
+    name = _text(payload, "ae").lower()
+    if not name:
+        return ""
+    for person in Personnel.objects.filter(is_active=True).order_by("name", "id").only("name", "email"):
+        if _text({"name": person.name}, "name").lower() == name:
+            return _text({"email": person.email}, "email")
+    return ""
 
 
 def _find_case(request, case_uid):
@@ -80,10 +73,91 @@ def _check_case(request, body):
             return None, kind, _error(400, "case_uid_required", "caseUid is required to render a Debit Note.")
         return None, kind, _error(400, "case_uid_required", "caseUid is required to generate a document.")
     case = _find_case(request, case_uid)
-    if kind == "debit" and (case is None or not case.tw_ref):
-        return None, kind, _error(409, "debit_requires_tw_ref", "Debit Note is only available after Announce assigns a TW Reference.")
     if case is None:
+        if kind == "debit":
+            return None, kind, _error(409, "debit_requires_tw_ref", "Debit Note is only available after Announce assigns a TW Reference.")
         return None, kind, _error(404, "case_not_found", "Case was not found.")
+    payload = case.payload if isinstance(case.payload, dict) else {}
+    # Treaty document requirements are deferred until its workflow is defined.
+    if _text(payload, "reinsuranceStructure") == "TREATY":
+        return case, kind, None
+    if kind == "debit" and not case.tw_ref:
+        return None, kind, _error(409, "debit_requires_tw_ref", "Debit Note is only available after Announce assigns a TW Reference.")
+    if kind == "cover" and not case.tw_ref:
+        return None, kind, _error(409, "cover_requires_tw_ref", "Cover Note is only available after Announce assigns a TW Reference.")
+    if kind in ("cover", "debit") and not _text(payload, "reinsured"):
+        return None, kind, _error(409, "reinsured_required", "Complete Reinsured in the case before generating a Cover Note or Debit Note.")
+    if kind in ("cover", "debit") and not _text(payload, "originalInsured"):
+        return None, kind, _error(409, "original_insured_required", "Complete Original Insured in the case before generating a Cover Note or Debit Note.")
+    if kind in ("cover", "debit") and not _text(payload, "type"):
+        return None, kind, _error(409, "type_required", "Complete Type in the case before generating a Cover Note or Debit Note.")
+    if kind in ("cover", "debit") and (not _text(payload, "policyFrom") or not _text(payload, "policyTo")):
+        return None, kind, _error(409, "policy_period_required", "Complete the policy start and end dates in the case before generating a Cover Note or Debit Note.")
+    if not _text(payload, "ae"):
+        return None, kind, _error(409, "ae_required", "Select an AE in the case before generating a document.")
+    if not _ae_email(payload):
+        return None, kind, _error(409, "ae_email_required", "Complete the AE Email in the case or Personnel before generating a document.")
+    if kind == "cover" and not _text(payload, "interest"):
+        return None, kind, _error(409, "interest_required", "Complete Interest in the case before generating a Cover Note.")
+    if kind == "cover" and not _text(payload, "limitOfLiability"):
+        return None, kind, _error(409, "limit_of_liability_required", "Complete Limit of Liability in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") == "XOL" and not _text(payload, "underlyingLimits"):
+        return None, kind, _error(409, "underlying_limits_required", "Complete Underlying Limits in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "deductibles"):
+        return None, kind, _error(409, "deductibles_required", "Complete Deductibles in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "reinsuredRetention"):
+        return None, kind, _error(409, "reinsured_retention_required", "Complete Reinsured’s Retention in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        situations = get(payload, "situations")
+        if not isinstance(situations, list) or not situations or any(not isinstance(row, dict) or not _text(row, "address") for row in situations):
+            return None, kind, _error(409, "situation_address_required", "Complete Risk Address for every Situation in the case before generating a Cover Note.")
+        if any(not re.fullmatch(r"[0-9]{3,6}", _text(row, "postcode")) for row in situations):
+            return None, kind, _error(409, "situation_postcode_required", "Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.")
+    if kind in ("cover", "debit") and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "originalPremium"):
+        return None, kind, _error(409, "original_premium_required", "Complete 100% Premium in the case before generating a Cover Note or Debit Note.")
+    if kind in ("cover", "debit") and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        reinsurers = get(payload, "reinsurers")
+        if not isinstance(reinsurers, list) or not reinsurers or any(not isinstance(row, dict) or not _text(row, "sharePct") for row in reinsurers):
+            return None, kind, _error(409, "order_hereon_required", "Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        sums = get(payload, "sumInsured")
+        if not isinstance(sums, list) or not sums or any(not isinstance(row, dict) or not _text(row, "category") for row in sums):
+            return None, kind, _error(409, "sum_insured_name_required", "Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        sums = get(payload, "sumInsured")
+        if any(not js_is_finite(js_to_number(get(row, "amount"))) or js_to_number(get(row, "amount")) <= 0 for row in sums):
+            return None, kind, _error(409, "sum_insured_amount_required", "Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        issues = placement_issues(payload)
+        if any(issue["kind"] == "location" for issue in issues):
+            return None, kind, _error(409, "sum_insured_locations_required", "Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.")
+        if any(issue["kind"] == "duplicate" for issue in issues):
+            return None, kind, _error(409, "sum_insured_duplicate_names", "Use unique Interest insured names within each Location or the Facility items before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "lossAdvisedDate"):
+        return None, kind, _error(409, "loss_advised_date_required", "Complete the Loss Record advised date in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "lossRecordYears"):
+        return None, kind, _error(409, "loss_record_years_required", "Complete Past year(s) in the Loss Record section of the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        losses = get(payload, "lossRecord")
+        if isinstance(losses, list) and any(not isinstance(row, dict) or not _text(row, "date") for row in losses):
+            return None, kind, _error(409, "loss_record_date_required", "Complete Date of Loss for every Loss Record entry in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        losses = get(payload, "lossRecord")
+        if isinstance(losses, list) and any(not isinstance(row, dict) or not _text(row, "cause") for row in losses):
+            return None, kind, _error(409, "loss_record_cause_required", "Complete Cause for every Loss Record entry in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        losses = get(payload, "lossRecord")
+        if isinstance(losses, list) and any(not isinstance(row, dict) or not _text(row, "lossPaid") for row in losses):
+            return None, kind, _error(409, "loss_record_paid_required", "Complete Loss Paid for every Loss Record entry in the case before generating a Cover Note.")
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+        reinsurers = get(payload, "reinsurers")
+        if isinstance(reinsurers, list) and any(not isinstance(row, dict) or not _text(row, "name") for row in reinsurers):
+            return None, kind, _error(409, "reinsurer_name_required", "Complete the Reinsurer name for every Schedule of Security entry in the case before generating a Cover Note.")
+    if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is not True:
+        default_valid = _valid_payment_terms(get(payload, "paymentTermsDays"))
+        reinsurers = get(payload, "reinsurers")
+        if any(not _valid_payment_terms(get(row, "paymentTermsDays")) and not default_valid for row in reinsurers):
+            return None, kind, _error(409, "debit_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
     return case, kind, None
 
 
@@ -95,60 +169,13 @@ def _audit(request, case, kind, fmt):
                      metadata={"kind": kind, "format": fmt})
 
 
-def _multipart(fields, files):
-    boundary = f"----ri-{uuid.uuid4().hex}"
-    out = bytearray()
-    for name, value in fields.items():
-        out += f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
-    for name, (filename, data, content_type) in files.items():
-        out += (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
-                f"Content-Type: {content_type}\r\n\r\n").encode() + data + b"\r\n"
-    out += f"--{boundary}--\r\n".encode()
-    return bytes(out), f"multipart/form-data; boundary={boundary}"
-
-
-def render_pdf(document_html):
-    """
-    Alpha：browser.pdf(url, { format: "A4", printBackground: true })。
-    Gotenberg 的紙張以英吋計：A4 = 8.27 × 11.7；邊界預設 0.39 英吋，要明確設成 0（版面本身就是 794×1123 px 的絕對定位）。
-    generateTaggedPdf：Hatchable 的 browser.pdf 會產生加標籤（無障礙結構）的 PDF，VM 也加上；以同一份版面實測，第 1–4 頁的內容串流
-    與 Alpha 逐位元組相同（2026-09-26）。
-    """
-    body, content_type = _multipart(
-        {"paperWidth": "8.27", "paperHeight": "11.7", "marginTop": "0", "marginBottom": "0", "marginLeft": "0",
-         "marginRight": "0", "printBackground": "true", "preferCssPageSize": "false", "generateTaggedPdf": "true"},
-        {"files": ("index.html", document_html.encode("utf-8"), "text/html; charset=utf-8")})
-    req = urllib.request.Request(f"{settings.PDF_RENDERER_URL.rstrip('/')}/forms/chromium/convert/html", data=body,
-                                 method="POST", headers={"Content-Type": content_type})
-    with urllib.request.urlopen(req, timeout=settings.PDF_RENDERER_TIMEOUT) as resp:
-        data = resp.read()
-    if not data.startswith(b"%PDF-"):
-        raise ValueError("renderer did not return a PDF")
-    return data
-
-
 class RenderDocumentPdfView(NoStoreMixin, APIView):
+    """Retired compatibility endpoint; no markup is rendered or logged."""
     permission_classes = [RIPermission]
     permission_map = {"POST": "documents.read"}
 
     def post(self, request):
-        body = request.data if isinstance(request.data, dict) else {}
-        markup = body.get("markup")
-        problem = markup_problem(markup)
-        if problem:
-            return _error(*problem)
-        case, kind, err = _check_case(request, body)
-        if err:
-            return err
-        try:
-            pdf = render_pdf(DOCUMENT_HTML % markup)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            log.error("Document PDF rendering failed: %s", exc)
-            return _error(500, "pdf_render_failed", "Unable to render PDF.")
-        _audit(request, case, kind, "pdf")
-        response = HttpResponse(pdf, content_type="application/pdf")
-        response["Cache-Control"] = "no-store"
-        return response
+        return _error(410, "pdf_generation_retired", "PDF generation is no longer available. Download Word (.docx) and export it to PDF in Word.")
 
 
 class DocumentGenerationLogView(NoStoreMixin, APIView):
@@ -158,11 +185,9 @@ class DocumentGenerationLogView(NoStoreMixin, APIView):
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
         if _text(body, "format") != "docx":
-            return _error(400, "invalid_document_format", "Only Word (docx) generation is logged here; PDF is logged when it is rendered.")
+            return _error(400, "invalid_document_format", "Only Word (docx) generation is available.")
         case, kind, err = _check_case(request, body)
         if err:
             return err
-        if kind == "endorsement":
-            return _error(400, "invalid_document_kind", "Endorsement is generated as PDF only.")
         _audit(request, case, kind, "docx")
         return Response(status=204)

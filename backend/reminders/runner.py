@@ -23,6 +23,7 @@ from django.utils import timezone
 
 from audit.services import record_audit
 from cases.calc.payment_terms import build_payment_schedule, taipei_date
+from cases.calc.swiss_facility import case_payload, applies as swiss_applies
 from cases.calc.jsnum import get, is_array
 from cases.calc.signed_slip import is_reserved_test_email, reinsurer_key, reminder_due, taipei_today
 from cases.models import Case, CaseDocument
@@ -179,10 +180,10 @@ def run_payment(today=None):
 
     due = []
     for case in cases:
-        case_data = {**(case.payload if isinstance(case.payload, dict) else {}), "id": case.pk, "caseUid": str(case.case_uid),
-                     "twRef": case.tw_ref or ""}
+        case_data = {**case_payload(case), "id": case.pk, "caseUid": str(case.case_uid), "twRef": case.tw_ref or ""}
         grouped = {}
-        for item in build_payment_schedule(case_data)["items"]:
+        schedule_now = today + 'T01:30:00Z' if swiss_applies(case_data) else None
+        for item in build_payment_schedule(case_data, schedule_now)["items"]:
             dates = {k: success.get(f"{case.pk}::{item.get('scheduleKey')}::{k}", "") for k in ("seven_days_before", "due_today", "weekly_overdue")}
             kind = msg.due_kind(item, today, dates)
             if kind:
