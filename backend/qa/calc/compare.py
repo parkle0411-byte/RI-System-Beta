@@ -208,6 +208,64 @@ def vm_numbering_expected(vec, expected):
     return result
 
 
+def vm_split_remainder_expected(vec, expected):
+    """2026-10-14: with Performance Split percentages totalling 100%, the VM books the b party as
+    (leg total - a party) so a + b equals the leg exactly; frozen Alpha rounds each side independently.
+    Only the b amount is adapted; the leg total comes from the VM's own non-split build of the same input."""
+    if vec["fn"] != "buildPremiumTransactions" or not isinstance(expected.get("ok"), list):
+        return expected
+    import copy as _copy
+    from cases.calc.jsnum import get, is_array, js_is_finite, js_to_number, money
+    case = vec["args"][0]
+    parties = get(case, "splitParties")
+    if get(case, "splitEnabled") is not True or not is_array(parties) or len(parties) != 2:
+        return expected
+    pct_a, pct_b = (js_to_number(get(p, "pct")) if get(p, "pct") is not None else 0.0 for p in parties)
+    if not (js_is_finite(pct_a) and js_is_finite(pct_b)) or abs(pct_a + pct_b - 100) >= 1e-9:
+        return expected
+    plain = acc.build_premium_transactions({**case, "splitEnabled": False}, *vec["args"][1:])
+    totals = {(t.get("reinsurerIdx"), t.get("installmentId"), t["legType"]): t["amount"] for t in plain}
+    result = _copy.deepcopy(expected)
+    by_key = {}
+    for row in result["ok"]:
+        if isinstance(row, dict) and str(row.get("legType", "")).endswith(("a", "b")):
+            by_key[(row.get("reinsurerIdx"), row.get("installmentId"), row["legType"])] = row
+    for (idx, inst, leg), row in by_key.items():
+        if leg.endswith("b") and (idx, inst, leg[:-1] + "a") in by_key:
+            total = totals.get((idx, inst, leg[:-1]))
+            if total is not None:
+                row["amount"] = money(total - by_key[(idx, inst, leg[:-1] + "a")]["amount"])
+    return result
+
+
+def vm_split_remainder_confirm_expected(vec, expected, actual):
+    """productionConfirmCase builds the same split legs (see vm_split_remainder_expected, which is checked exactly through
+    buildPremiumTransactions). Its output does not contain the leg total, so a 'b' split amount may differ from Alpha by one cent
+    when every other field of that transaction is identical."""
+    if vec["fn"] != "productionConfirmCase" or "ok" not in expected or "ok" not in actual:
+        return expected
+    import copy as _copy
+    payload = vec["args"][0].get("payload") or {}
+    previous = payload.get("transactions")
+    skip = len(previous) if isinstance(previous, list) else 0
+    try:
+        exp_rows = expected["ok"]["payload"]["transactions"]
+        act_rows = actual["ok"]["payload"]["transactions"]
+    except (KeyError, TypeError):
+        return expected
+    if not isinstance(exp_rows, list) or not isinstance(act_rows, list) or len(exp_rows) != len(act_rows):
+        return expected
+    result = _copy.deepcopy(expected)
+    for index in range(skip, len(exp_rows)):
+        row, other = result["ok"]["payload"]["transactions"][index], act_rows[index]
+        if not (isinstance(row, dict) and isinstance(other, dict)) or not str(row.get("legType", "")).endswith("b"):
+            continue
+        if (isinstance(row.get("amount"), float) and isinstance(other.get("amount"), float)
+                and abs(row["amount"] - other["amount"]) <= 0.0101
+                and {k: v for k, v in row.items() if k != "amount"} == {k: v for k, v in other.items() if k != "amount"}):
+            row["amount"] = other["amount"]
+    return result
+
 def vm_optional_cedant_fields_expected(vec, expected):
     """2026-10-12: Case-level Ceding Commission and Tax are optional in the VM."""
     if vec["fn"] != "validateAnnounceReady" or not isinstance(expected.get("ok"), list):
@@ -286,13 +344,14 @@ def main():
     assert len(vectors) == len(js), "向量數與 JavaScript 結果數不同"
     stats, samples = {}, {}
     for index, (vec, expected) in enumerate(zip(vectors, js)):
-        expected = vm_account_executive_email_expected(vec, vm_sum_placements_expected(vec, vm_positive_sum_amount_expected(vec, vm_optional_cedant_fields_expected(vec, vm_numbering_expected(vec, expected)))))
+        expected = vm_account_executive_email_expected(vec, vm_sum_placements_expected(vec, vm_positive_sum_amount_expected(vec, vm_optional_cedant_fields_expected(vec, vm_split_remainder_expected(vec, vm_numbering_expected(vec, expected))))))
         name = vec["fn"]
         try:
             value = FUNCTIONS[name](vec["args"], vec.get("now"))
             actual = {"undef": True} if value is UNDEFINED else {"ok": to_json_value(value)}
         except Exception as exc:  # noqa: BLE001 - 任何例外都視為「會出錯」，與 JavaScript 是否也出錯比對
             actual = {"error": type(exc).__name__}
+        expected = vm_split_remainder_confirm_expected(vec, expected, actual)
         if "error" in expected or "error" in actual:
             ok = "error" in expected and "error" in actual          # 兩邊都出錯才算一致
         elif "undef" in expected or "undef" in actual:

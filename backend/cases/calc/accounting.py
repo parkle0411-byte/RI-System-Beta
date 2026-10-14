@@ -85,16 +85,24 @@ def build_premium_transactions(case_data, installment=None):
         tw_ref = js_to_string(get(case_data, "twRef"))
         via = settlement_label != reinsurer_label
         if split:
+            # VM 2026-10-14：兩方比例合計 100% 時，b 方取「整筆金額 - a 方」，讓 a+b 與該 Leg 的總額分毫不差
+            # （各自四捨五入會多出或少掉 1 分錢，造成交易合計與付款排程不一致）。比例合計不是 100% 時沿用原算法。
+            pct_a = number_or_zero(get(split_parties[0], "pct"))
+            pct_b = number_or_zero(get(split_parties[1], "pct"))
+            complete = js_is_finite(pct_a) and js_is_finite(pct_b) and abs(pct_a + pct_b - 100) < 1e-9
             for party_idx, party in enumerate(split_parties):
                 suffix = "a" if party_idx == 0 else "b"
                 pct = number_or_zero(get(party, "pct"))
                 for leg_idx, leg in enumerate(base):
                     party_name = get(party, "name")
+                    amount = money(leg["amount"] * pct / 100)
+                    if complete and party_idx == 1:
+                        amount = money(leg["amount"] - money(leg["amount"] * pct_a / 100))
                     transactions.append({
                         "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg_idx + 1}{suffix}{tag}",
                         "legType": f"{leg['legType']}{suffix}",
                         "label": f"{leg['label']} ({js_to_string(js_or(party_name, 'Unassigned'))}, {js_num_str(pct)}%){note}",
-                        "amount": money(leg["amount"] * pct / 100),
+                        "amount": amount,
                         "splitParty": js_or(party_name, f"Party {suffix.upper()}"),
                         "reinsurer": settlement_label,
                         "viaForeignBroker": via,

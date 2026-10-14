@@ -129,6 +129,11 @@ def _offset(view, request, body):
         return _error(400, 'invalid_offset_amount', 'Offset the entire refund balance without exceeding the original premium balance.')
     if premium['partyType'] == 'reinsurer' and premium.get('paymentAllowed') is False:
         return _error(400, 'collection_confirmation_required', premium['paymentBlockedReason'])
+    # A Cedant refund is released only after every Reinsurer refund is confirmed collected;
+    # netting it against the original premium must not bypass that gate.
+    if returned.get('paymentAllowed') is False:
+        return _error(400, 'refund_collection_required', returned.get('paymentBlockedReason') or
+                      'Await collection and confirmation of every Reinsurer refund.')
     if premium.get('statementNeedsRevision'):
         return _error(400, 'statement_revision_required', 'Revise the settlement statement before offsetting.')
     actor = actor_from(request.ri_principal)
