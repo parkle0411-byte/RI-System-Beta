@@ -33,6 +33,7 @@ from cases.models import Case
 from coordination.services import PRODUCTION_SOURCES, monthly_operation, serialized
 from fxrates.models import FxRate
 from fxrates.views import fx_state
+from ri_system import result_cache
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
 from . import calc
@@ -99,17 +100,37 @@ def _live_cases():
     return Case.objects.filter(recycled_at__isnull=True, is_archived=False, status__in=("posted", "closed", "reversed"))
 
 
-def load_month(month):
-    cases = list(_live_cases().order_by(F("announced_at").asc(nulls_last=True), F("created_at").asc(nulls_last=True), "id"))
+def _exclusions(month):
+    return ProductionExclusion.objects.filter(year_month=month) | ProductionExclusion.objects.filter(deferred_to=month)
+
+
+def load_month(month, *, cached=False):
+    """cached=True（只給 GET 預覽）：預覽結果（最花時間的部分）用 result_cache；回傳的 cases／sources 是 None。
+    Generate／Close／Exclude 一律 cached=False：在鎖之內從資料庫讀最新資料，並用它檢查來源是否變動。"""
+    fingerprint = None
+    if cached and result_cache.enabled():   # 先取得指紋、再讀資料
+        fingerprint = (result_cache.table_fingerprint(_live_cases()), result_cache.table_fingerprint(Case.objects.filter(tw_ref__isnull=False)),
+                       result_cache.table_fingerprint(FxRate.objects.filter(year_month=month)),
+                       result_cache.table_fingerprint(_exclusions(month), version=None, stamp="created_at"))
     fx_rows = list(FxRate.objects.filter(year_month=month).order_by("currency"))
-    exclusions = list(ProductionExclusion.objects.filter(year_month=month) | ProductionExclusion.objects.filter(deferred_to=month))
+    exclusions = list(_exclusions(month))
     exclusions.sort(key=lambda e: (e.created_at, str(e.id)))
     reports = list(ProductionReport.objects.filter(year_month=month).order_by("-version"))
     fx_rates = {month: {r.currency: float(r.rate) for r in fx_rows}}
-    sources = [case_source(c) for c in cases]
-    # First Policy No 要沿著續保鏈往回追：連結表用「所有有 TW Ref 的案件」建（含已封存），中間有一張被封存也不會斷
-    links = calc.reference_links(Case.objects.filter(tw_ref__isnull=False).values_list("tw_ref", "payload").iterator())
-    preview = calc.build_production_preview(sources, month, fx_rates, [exclusion_row(e) for e in exclusions], links)
+
+    def compute():
+        cases = list(_live_cases().order_by(F("announced_at").asc(nulls_last=True), F("created_at").asc(nulls_last=True), "id"))
+        sources = [case_source(c) for c in cases]
+        # First Policy No 要沿著續保鏈往回追：連結表用「所有有 TW Ref 的案件」建（含已封存），中間有一張被封存也不會斷
+        links = calc.reference_links(Case.objects.filter(tw_ref__isnull=False).values_list("tw_ref", "payload").iterator())
+        preview = calc.build_production_preview(sources, month, fx_rates, [exclusion_row(e) for e in exclusions], links)
+        return cases, sources, preview
+
+    if fingerprint is None:
+        cases, sources, preview = compute()
+    else:
+        cases = sources = None
+        preview = result_cache.get_or_compute(("production", month), fingerprint, lambda: compute()[2])
     return {"cases": cases, "sources": sources, "fx_rows": fx_rows, "reports": reports, "preview": preview}
 
 
@@ -141,7 +162,7 @@ class ProductionReportView(NoStoreMixin, APIView):
         if month is None:
             return _error(400, "invalid_month", "Report month must use YYYY-MM.")
         person = request.ri_principal
-        state = load_month(month)
+        state = load_month(month, cached=True)
         latest = state["reports"][0] if state["reports"] else None
         closed = any(r.status == "closed" for r in state["reports"])
         preview = state["preview"]

@@ -34,6 +34,7 @@ services:
       DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
       AUDIT_LOG_ENABLED: "true"
       RI_DISPOSABLE_QA: "true"
+      RI_RESULT_CACHE: "false"        # 其他測試組會用 update() 直接改資料；result_cache 測試組自己打開快取
       MYSQL_HOST: mysql
       MYSQL_DATABASE: ri_system
       MYSQL_USER: ri_runtime

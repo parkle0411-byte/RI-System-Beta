@@ -29,6 +29,7 @@ from cases.calc.jsnum import (
 )
 from cases.models import Case
 from fxrates.models import FxRate
+from ri_system import result_cache
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
 from .calc import build_dashboard
@@ -81,15 +82,31 @@ class DashboardView(NoStoreMixin, APIView):
     def get(self, request):
         person = request.ri_principal
         see_all = has_permission(person, "dashboard.read.all")   # VM：Finance 也看全部（Alpha 用 cases.read.all）
-        cases = Case.objects.filter(recycled_at__isnull=True, is_archived=False).order_by("id")
-        rows = [{"id": c.pk, "parent_case_id": c.parent_case_id, "status": c.status, "payload": c.payload,
-                 "announced_at": _taipei_text(c.announced_at), "created_at": _taipei_text(c.created_at)}
-                for c in cases if see_all or _visible(c, person)]
-        targets = [{"period_type": t.period_type, "period_key": t.period_key, "amount": float(t.amount)}
-                   for t in DashboardTarget.objects.filter(is_active=True).order_by("period_key", "id")]
-        fx = [{"year_month": f.year_month, "currency": f.currency, "rate": float(f.rate)}
-              for f in FxRate.objects.order_by("year_month", "id")]
-        return Response(json_roundtrip(build_dashboard(rows, targets, fx, _now(), tz=TAIPEI, production_rules=True)))
+        now = _now()
+        local = now.astimezone(TAIPEI)
+        # 先取得資料變更指紋、再讀資料（見 ri_system/result_cache.py）。「今天」「本月」與 12:00 前後也是依據。
+        live = Case.objects.filter(recycled_at__isnull=True, is_archived=False)
+        if see_all:
+            # 看全部的人：草稿只用來算「進行中報價」件數（其餘數字都只看已公布／已確認），所以草稿存檔不該讓快取失效；
+            # 草稿的新增、回收、公布（變成非草稿）仍會改變指紋。
+            case_fingerprint = (result_cache.table_fingerprint(live.exclude(status="draft")), live.filter(status="draft", parent_case__isnull=True).count())
+        else:
+            case_fingerprint = result_cache.table_fingerprint(live)   # 只看自己的案件：可見範圍可能因草稿內容改變，用完整指紋
+        fingerprint = (case_fingerprint, result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()))
+        key = ("dashboard", "all" if see_all else ("person", person.pk), local.strftime("%Y-%m-%d"), local.strftime("%H:%M") > "12:00")
+
+        def compute():
+            cases = Case.objects.filter(recycled_at__isnull=True, is_archived=False).order_by("id")
+            rows = [{"id": c.pk, "parent_case_id": c.parent_case_id, "status": c.status, "payload": c.payload,
+                     "announced_at": _taipei_text(c.announced_at), "created_at": _taipei_text(c.created_at)}
+                    for c in cases if see_all or _visible(c, person)]
+            targets = [{"period_type": t.period_type, "period_key": t.period_key, "amount": float(t.amount)}
+                       for t in DashboardTarget.objects.filter(is_active=True).order_by("period_key", "id")]
+            fx = [{"year_month": f.year_month, "currency": f.currency, "rate": float(f.rate)}
+                  for f in FxRate.objects.order_by("year_month", "id")]
+            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True)
+
+        return Response(json_roundtrip(result_cache.get_or_compute(key, fingerprint, compute)))
 
 
 # ------------------------------------------------------------------ 業績目標

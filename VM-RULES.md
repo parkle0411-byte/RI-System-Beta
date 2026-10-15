@@ -535,3 +535,11 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - 結果（同一份 1 萬件資料）：單次 Accounting 23 秒→13 秒；7 人同一秒開 Accounting 由每輪 3/7 逾時變成全部成功（最慢 33 秒）；7 人平常使用時 Accounting 中位 13 秒、最慢 18 秒。
 - 驗證：新舊程式對 1 萬件資料的 Accounting 回應及 589 件案件明細逐位元組完全相同；新增 accounting_shared_compute 測試（共用結果須與重算相同，故意弄壞會失敗）；全部 52 組資料庫／API 測試與 13 階段畫面測試通過；部署前已備份，回復用映像 before-accel-20261015_203721；部署後各表筆數相同。
 - 仍未改：Dashboard、Production Report 每次讀全部案件（約 7 秒）；每件案件的結果快取尚未實作。
+
+
+### 2026-10-15：Dashboard 與 Production Report 結果快取
+- 問題：1 萬件案件時 Dashboard 約 7 秒、Production Report 約 6 秒，每次都把全部案件讀出來重算。
+- 使用者選擇做結果快取（只有 GET 讀取；Production 的 Generate、Close、Exclude 一律不使用快取，仍在鎖之內讀最新資料）。做法見 `ri_system/result_cache.py`：每次請求先取得「資料變更指紋」（案件筆數、版本號總和、最新更新時間；匯率、目標、當月排除紀錄；Production 另含所有有 TW Ref 的案件），再讀資料；指紋相同且未超過保險上限才回傳上次結果。Dashboard 的鍵還包含台北日期、是否過了 12:00、使用者範圍（看全部／個人）；看全部的人，草稿存檔不使 Dashboard 快取失效（草稿只用於「進行中報價」件數，草稿的新增、回收、公布仍立即反映）。
+- 保險上限：使用者決定 5 分鐘（compose.yaml 的 RI_RESULT_CACHE_TTL=300；程式預設 60 秒）。只補「直接改資料庫、繞過系統」這種不更新版本號的情況；系統內所有案件寫入都會更新版本號與更新時間。RI_RESULT_CACHE=false 可完全關閉。快取在各 worker 的記憶體，每個 worker 最多 32 筆，重啟或部署後清空。
+- 結果（1 萬件資料）：命中時 Dashboard 約 0.02~0.2 秒、Production Report 約 0.08~0.3 秒；沒命中仍約 6~8 秒。寫入頻繁、或查看間隔很長時命中率低。7 人同一秒查看時，第一輪約 7 秒，之後幾輪約 0.1~0.2 秒。
+- 驗證：新舊程式輸出逐位元組相同（Dashboard、三個月份的 Production Report、Accounting、589 件案件明細，含快取命中的第二次回應）；新增 result_cache 測試 35 項（各種變更後快取等於重新計算；故意弄壞 4 種都會失敗）；全部 53 組資料庫／API 測試與 13 階段畫面測試通過；其他測試組在隔離環境預設關閉快取（RI_RESULT_CACHE=false）。部署前已備份，回復用映像 before-cache-20261015_221400；部署後各表筆數相同。

@@ -27,6 +27,9 @@ ALLOWED_HOSTS = [
 
 # 案件文件的檔案本體（Docker volume `case_documents` 掛在這裡；見 cases/storage.py）
 CASE_DOCUMENT_ROOT = os.getenv("RI_CASE_DOCUMENT_ROOT", "/data/documents")
+# Dashboard／Production Report 的結果快取（ri_system/result_cache.py）。RI_RESULT_CACHE=false 關閉；保險上限預設 60 秒。
+RESULT_CACHE_ENABLED = os.getenv("RI_RESULT_CACHE", "true").lower() == "true"
+RESULT_CACHE_TTL_SECONDS = int(os.getenv("RI_RESULT_CACHE_TTL", "60"))
 # 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
 DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
 # 提醒信（Signed Slip #10、付款 #9）：SMTP 尚未決定，VM 目前「不寄信」——提醒照常產生，記成 suppressed（reminders/runner.py）。

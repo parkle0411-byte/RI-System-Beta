@@ -57,6 +57,8 @@ services:
       AUDIT_LOG_ENABLED: "true"
       # Owner requested Audit recording paused until further notice (2026-10-05).
       AUDIT_LOG_PAUSED: "true"
+      # Dashboard／Production Report 的結果快取保險上限（秒）。資料有沒有變主要靠變更指紋判斷；這個上限只補「直接改資料庫」的情況（2026-10-15 決定 5 分鐘）。
+      RI_RESULT_CACHE_TTL: "300"
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
       MYSQL_DATABASE: ri_system

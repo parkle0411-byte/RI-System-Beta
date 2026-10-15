@@ -13,6 +13,15 @@ r = c.get("/api/accounting")
 elapsed = time.perf_counter() - t
 open(f"/data/documents/accounting_{label}.json", "wb").write(r.content)
 print(f"accounting {label}: status {r.status_code}, {len(r.content)} bytes, {elapsed:.1f}s, sha256 {hashlib.sha256(r.content).hexdigest()[:16]}")
+for name, path in (("dashboard", "/api/dashboard"), ("production_2026_09", "/api/production-report?month=2026-09"),
+                   ("production_2026_08", "/api/production-report?month=2026-08"), ("production_2025_12", "/api/production-report?month=2025-12")):
+    t = time.perf_counter()
+    rr = c.get(path)
+    open(f"/data/documents/{name}_{label}.json", "wb").write(rr.content)
+    print(f"{name} {label}: status {rr.status_code}, {len(rr.content)} bytes, {time.perf_counter()-t:.2f}s, sha256 {hashlib.sha256(rr.content).hexdigest()[:16]}")
+    t = time.perf_counter()
+    rr2 = c.get(path)
+    print(f"{name} {label} (second request): {time.perf_counter()-t:.2f}s, same body: {rr2.content == rr.content}")
 uids = [str(u) for u in Case.objects.order_by("id").values_list("case_uid", flat=True)[::17][:600]]   # 約 600 件，涵蓋各狀態
 bodies = []
 for uid in uids:
