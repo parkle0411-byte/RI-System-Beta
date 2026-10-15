@@ -137,6 +137,12 @@ def blank_draft_body():
     return b
 
 
+# ------------------------------------------------------------ 匯率（2025-10 ~ 2026-10；Dashboard／Production Report 需要）
+from fxrates.models import FxRate  # noqa: E402
+for y, m in [(2025, 10), (2025, 11), (2025, 12)] + [(2026, i) for i in range(1, 11)]:
+    for cur, rate in (("USD", 32.1), ("EUR", 35.4), ("JPY", 0.213), ("GBP", 41.2)):
+        FxRate.objects.get_or_create(year_month=f"{y}-{m:02d}", currency=cur, defaults={"rate": rate, "created_by": "stress", "updated_by": "stress"})
+
 # ------------------------------------------------------------ 建立案件
 now_utc = datetime.now(tz.utc)
 seq = {}
