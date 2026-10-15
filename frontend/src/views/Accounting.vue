@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiFetch } from '../api'
@@ -25,6 +25,12 @@ const filtered=computed(()=>rows.value.filter(r=>{
   const includes=(values,query)=>values.some(v=>String(v||'').toLowerCase().includes(query.trim().toLowerCase()))
   return (!filters.reference||includes([r.statementNo,r.txNo,transactionNumber(r.txNo),r.reconciliationRef,displayTwRef(r)],filters.reference)) && (!filters.party||includes([transactionParty(r),r.reinsurer],filters.party)) && (!filters.currency||r.currency===filters.currency) && (!filters.leg||String(r.legType||'').startsWith(filters.leg)) && (!filters.settlement||r.settlement===filters.settlement) && (!filters.source||r.source===filters.source) && (!filters.from||!r.announcedAt||String(r.announcedAt).slice(0,10)>=filters.from) && (!filters.to||!r.announcedAt||String(r.announcedAt).slice(0,10)<=filters.to)
 }))
+// 2026-10-15：列表分頁。1 萬件案件約 1.8 萬列，一次全部畫出會讓瀏覽器卡住；篩選仍在全部資料上進行，只有顯示分頁。
+const pageSize=ref(100), page=ref(1)
+const pagedRows=computed(()=>filtered.value.slice((page.value-1)*pageSize.value,page.value*pageSize.value))
+watch(filters,()=>{page.value=1},{deep:true})
+watch(pageSize,()=>{page.value=1})
+watch(filtered,list=>{const last=Math.max(1,Math.ceil(list.length/pageSize.value));if(page.value>last)page.value=last})
 const toCents=v=>Math.round(Number(v||0)*100)
 const allocated=computed(()=>payment.allocations.reduce((sum,a)=>sum+toCents(a.amount),0)/100)
 const difference=computed(()=>(toCents(payment.amount)-toCents(allocated.value))/100)
@@ -93,7 +99,7 @@ onMounted(load)
 </section>
 <section class="table-card" v-loading="loading">
  <div class="section-heading"><div><h2>SoA / Transactions ({{ filtered.length }})</h2><p>Select transactions with the same currency, cash direction and counterparty to record one remittance.</p></div><el-button v-if="canEdit" class="primary-button" :disabled="!selected.length" @click="openPayment(selected)">Record selected ({{ selected.length }})</el-button></div>
- <el-table :data="filtered" row-key="key" data-testid="accounting-table" empty-text="No accounting entries. Premium transactions appear after Production close; announced Swiss Facility Property entries can be handled before close.">
+ <el-table :data="pagedRows" row-key="key" data-testid="accounting-table" empty-text="No accounting entries. Premium transactions appear after Production close; announced Swiss Facility Property entries can be handled before close.">
   <el-table-column v-if="canEdit" width="44"><template #default="{row}"><el-checkbox v-if="!row.scheduleOnly" :model-value="selected.some(r=>r.key===row.key)" :disabled="!eligible(row)" :aria-label="'Select '+transactionNumber(row.txNo)" @change="value=>toggle(row,value)" /></template></el-table-column>
   <el-table-column label="Transaction / SoA / TW Ref" min-width="250" fixed="left"><template #default="{row}"><el-button v-if="can('cases.read.all')" text class="table-action" @click="openCase(row)">{{ rowTitle(row) }}</el-button><strong v-else>{{ rowTitle(row) }}</strong><br><small>SoA: {{ row.statementNo||'—' }}<br>{{ displayTwRef(row) }} · {{ row.installmentLabel|| (row.source==='claim'?'Claim':'Premium') }}</small><small v-if="row.scheduleOnly">Awaiting Production close</small><small v-if="row.reversed||row.isReversalEntry">{{ statusLabel(row) }}</small></template></el-table-column>
   <el-table-column label="Original Insured (EN / CN)" min-width="240"><template #default="{row}"><div>{{ row.originalInsured||'—' }}</div><div>{{ row.originalInsuredCn||'—' }}</div></template></el-table-column>
@@ -127,6 +133,7 @@ onMounted(load)
    <el-button v-if="row.entries?.length||row.cashTracking==='derived'||row.settlementHistory?.length" text @click="historyRow=row">{{ row.cashTracking==='derived'?'Settlement history':'History' }}</el-button>
   </template></el-table-column>
  </el-table>
+ <div v-if="filtered.length>50" class="table-pagination"><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[50,100,200,500]" :total="filtered.length" layout="total, sizes, prev, pager, next" background data-testid="accounting-pagination" /></div>
 </section>
 <AccountingEntryActions ref="entryActions" :rows="swissRows" :can-edit="canEdit" @refresh="load" />
 <el-dialog v-model="paymentVisible" title="Record remittance" width="min(900px, 94vw)" :close-on-click-modal="false">
@@ -154,4 +161,4 @@ onMounted(load)
 </el-dialog>
 </div>
 </template>
-<style scoped>.cash-overdue{display:block;color:var(--el-color-danger)}small{display:block}.entry-dates+.entry-dates{margin-top:8px}</style>
+<style scoped>.cash-overdue{display:block;color:var(--el-color-danger)}small{display:block}.entry-dates+.entry-dates{margin-top:8px}.table-pagination{display:flex;justify-content:flex-end;margin-top:12px;overflow-x:auto}</style>
