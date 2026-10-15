@@ -263,6 +263,13 @@ class WorkflowView(NoStoreMixin, APIView):
         chain = [case_view(c) for c in [root, *children]]
         latest = chain[-1]
         notes = _payload(source).get("accountingNotifications")
+        # 2026-10-14：續保只能從「最新且已確認」的案件建立，而且鏈上的批單都要處理完；畫面據此說明按鈕為什麼不見
+        renewal_notice = ""
+        if source.status == "closed":
+            if str(source.case_uid) != latest["caseUid"]:
+                renewal_notice = "Renewal is not available because a newer endorsement exists. Complete or discard it, then renew from the latest Confirmed case."
+            elif any(child.status not in ("posted", "closed") for child in children):
+                renewal_notice = "Renewal is not available until every endorsement in this policy chain is Announced or Confirmed."
         return Response({"ok": True, "workflow": {
             "root": case_view(root), "chain": chain, "latestCaseUid": latest["caseUid"],
             "accountingStaff": [{"id": p.pk, "name": p.name} for p in _accounting_staff()],
@@ -270,6 +277,7 @@ class WorkflowView(NoStoreMixin, APIView):
             "actions": {
                 "canCreateEndorsement": str(source.case_uid) == latest["caseUid"] and source.status in ("posted", "closed"),
                 "canRenew": str(source.case_uid) == latest["caseUid"] and source.status == "closed",
+                "renewalNotice": renewal_notice,
                 "canEditAnnounced": source.status in ("posted", "reversed"),
                 "canReverse": source.status == "closed",
                 "canNotifyAccounting": source.status in ("posted", "reversed"),

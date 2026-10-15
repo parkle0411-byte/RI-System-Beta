@@ -82,7 +82,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 
 **測試組的執行環境**：多數 `backend/qa/suites` 需要 `RI_DISPOSABLE_QA=true` 且 Audit 記錄啟用，**不要在正式容器跑**（正式 Audit 暫停中）。一律用 **`scripts/run_isolated_qa.sh`**（全部約 30–40 分鐘；可只列出要跑的測試組，例如 `scripts/run_isolated_qa.sh cases_api accounting_api`；`KEEP=1` 保留環境除錯）：以目前原始碼建專用映像 `ri-backend:isoqa`、起隔離的 MySQL＋後端（`qa/isolated/compose.yaml`，`ri_runtime` 連線並套用 `db_harden.sh`），每組前重建全新資料庫，結束自動刪除。**每次改功能後、部署前都要跑**，全部通過才部署。前端與後端合計、密碼規則一致性仍用 `scripts/run_qa.sh totals`／`parity`。
 
-**畫面測試**（`scripts/run_ui_test.sh`，無頭 Chromium，另起用完即丟的環境）：2026-10-15 全部階段 A、H、R、B、K、C、E、F、D、G、P1、P2 共 182 項通過。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 可指定用目前原始碼建出的映像（預設是正式在跑的 `ri-backend:local`／`ri-frontend:local`，可能比原始碼舊）。階段 D（Accounting）排在 F（Production close）之後，因為交易要關帳後才產生；畫面改版時請同步更新對應階段的欄位標籤與流程。
+**畫面測試**（`scripts/run_ui_test.sh`，無頭 Chromium，另起用完即丟的環境）：2026-10-15 全部階段 A、H、R、B0、B、K、C、E、F、D、G、P1、P2 共 185 項通過。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 可指定用目前原始碼建出的映像（預設是正式在跑的 `ri-backend:local`／`ri-frontend:local`，可能比原始碼舊）。階段 D（Accounting）排在 F（Production close）之後，因為交易要關帳後才產生；畫面改版時請同步更新對應階段的欄位標籤與流程。
 
 ## 2026-09 規則決定（原「刻意與 Alpha 不同」）
 
@@ -506,3 +506,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - 正式環境 Bug（已修）：重新登入、F5 或直接連結開啟案件時，人員清單尚未載入，Cover Note／Debit Note 被誤報「缺少 Account Executive Email」；案件明細現在一併載入人員清單（c0e0e6a，已備份並部署）。
 - Debit Note 檢查分期的 Premium／Ratio；System Reference 新增 AUW Facility 與 Swiss Re Asia Facility 規則說明檔。
 - 畫面測試全部階段更新到現行規則（見上方）；階段 D 改寫成合併後的 Accounting：部分收款、收完仍為 Awaiting confirmation、人工確認、沖回整筆匯款。
+
+### 2026-10-15：續保說明、移除自動結清的殘留
+- 續保規則不變：案件有較新的批單，或批單鏈上有未完成（非 Announced／Confirmed）的批單時不能續保。新增：`GET /api/case-workflow` 的 `actions.renewalNotice` 說明原因，案件明細頁頂端顯示提示（有 `cases.write` 才看得到），不再只是讓「Create renewal」按鈕消失。
+- 後端移除經紀費 T3 隨 T1／T2 自動結清的舊計算（`cash_ledger.py`）：T3 的結清一律由 `facility_accounting` 的人工確認決定。以 1,500 組隨機案件比對新舊程式，12,702 筆交易中非歷史交易 0 筆不同；只有已沖回（Reversed）的 T3 不再顯示 Settled。前端刪除「Auto settlement」按鈕字樣與「settles automatically」說明。
+- 沖回整筆匯款成功後，Remittance details 與 Payment history 視窗維持開啟（使用者決定維持現狀）。
+- 注意：`frontend/src/views/CaseWorkspace.vue` 已直接維護，產生器 `frontend/scripts/build_case_workspace.py` 與現況不同步（表單標籤大小寫等），**不要重新產生**，否則會蓋掉直接修改的內容。

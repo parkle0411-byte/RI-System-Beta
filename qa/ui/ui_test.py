@@ -312,6 +312,17 @@ def phase_a(page):
     logout(page)
 
 
+def phase_b0(page):
+    """已確認的案件還有未完成的批單 Draft：不能續保，畫面要說明原因（2026-10-14）。"""
+    login(page, "ui.admin")
+    open_case(page, "UI Test Insured Ltd")
+    check("open endorsement Draft: no Create renewal button", page.locator(".page-header button", has_text="Create renewal").count() == 0)
+    notice = page.locator(".renewal-notice")
+    check("the screen explains why renewal is not available", notice.is_visible() and "newer endorsement" in notice.inner_text().lower(), notice.all_inner_texts())
+    snap(page, "renewal-notice")
+    logout(page)
+
+
 def phase_b(page):
     login(page, "ui.admin")
     open_case(page, "UI Test Insured Ltd")
@@ -1016,7 +1027,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

@@ -130,13 +130,13 @@ try:
         check("GET unknown case -> 404; viewer 403; GM allowed", code(call(sales, "get", f"/api/case-workflow?caseUid={uuid.uuid4()}")) == "case_not_found" and call(viewer, "get", f"/api/case-workflow?caseUid={c1.case_uid}").status_code == 403 and call(gm, "get", f"/api/case-workflow?caseUid={c1.case_uid}").status_code == 200)
         w = call(sales, "get", f"/api/case-workflow?caseUid={c1.case_uid}").json()["workflow"]
         check("state of an announced root: chain=[root], latest=root, actions", [x["caseUid"] for x in w["chain"]] == [str(c1.case_uid)] and w["latestCaseUid"] == str(c1.case_uid) and w["root"]["twRef"] == "TWPAR2603001"
-              and w["actions"] == {"canCreateEndorsement": True, "canRenew": False, "canEditAnnounced": True, "canReverse": False, "canNotifyAccounting": True}, w["actions"])
+              and w["actions"] == {"canCreateEndorsement": True, "canRenew": False, "renewalNotice": "", "canEditAnnounced": True, "canReverse": False, "canNotifyAccounting": True}, w["actions"])
         check("state: chain fields", w["chain"][0]["originalInsured"] == "ZZ Insured" and w["chain"][0]["policyFromTime"] == "12:00" and w["chain"][0]["endoTypes"] == [] and w["chain"][0]["parentCaseId"] is None)
         names = [p["name"] for p in w["accountingStaff"]]
         check("state: active Finance people only, sorted by name", "ZZ WF Fin A" in names and "ZZ WF Fin B" in names and names.index("ZZ WF Fin A") < names.index("ZZ WF Fin B") and fin_off.name not in names and biz.name not in names and sales_p.name not in names, names)
         d = call(sales, "get", f"/api/case-workflow?caseUid={inc.case_uid}").json()["workflow"]["actions"]; check("draft: no workflow actions", not any(d.values()))
         Case.objects.filter(pk=c2.pk).update(status="closed"); d = call(sales, "get", f"/api/case-workflow?caseUid={c2.case_uid}").json()["workflow"]["actions"]
-        check("closed: endorse, renew, reverse; not notify / edit", d == {"canCreateEndorsement": True, "canRenew": True, "canEditAnnounced": False, "canReverse": True, "canNotifyAccounting": False}, d)
+        check("closed: endorse, renew, reverse; not notify / edit", d == {"canCreateEndorsement": True, "canRenew": True, "renewalNotice": "", "canEditAnnounced": False, "canReverse": True, "canNotifyAccounting": False}, d)
         Case.objects.filter(pk=c2.pk).update(status="posted")
         r = call(sales, "post", "/api/case-workflow", {"action": "reverse_case"}); check("POST without caseUid -> 400", code(r) == "case_uid_required")
         r = call(sales, "post", "/api/case-workflow", {"action": "reverse_case", "caseUid": str(uuid.uuid4())}); check("POST unknown case -> 404", r.status_code == 404)
@@ -165,6 +165,11 @@ try:
               and audit(e1.case_uid, "create_endorsement").first().metadata == {"endorsementSequence": 1})
         check("response has the case view + payload", j["case"]["caseKind"] == "endorsement" and j["case"]["parentCaseId"] == root.pk and j["case"]["payload"]["endorsementSeq"] == 1 and j["case"]["rowVersion"] == 1)
         r = wf(sales, "create_endorsement", root); check("a second endorsement from the root -> 409 latest_endorsement_required + latestCaseUid", r.status_code == 409 and code(r) == "latest_endorsement_required" and r.json()["latestCaseUid"] == str(e1.case_uid), r.content[:200])
+        saved_status = Case.objects.get(pk=root.pk).status
+        Case.objects.filter(pk=root.pk).update(status="closed")
+        d = call(sales, "get", f"/api/case-workflow?caseUid={root.case_uid}").json()["workflow"]["actions"]
+        check("Confirmed root with a newer open endorsement: no renewal, and the notice says why", d["canRenew"] is False and "newer endorsement" in d["renewalNotice"], d)
+        Case.objects.filter(pk=root.pk).update(status=saved_status)
         r = wf(sales, "create_endorsement", e1); check("endorse from the Draft endorsement itself -> endorsement_source_status", code(r) == "endorsement_source_status")
         w = call(sales, "get", f"/api/case-workflow?caseUid={e1.case_uid}").json()["workflow"]
         check("state seen from the child: same chain [root, child], latest = child, root reported", [x["caseUid"] for x in w["chain"]] == [str(root.case_uid), str(e1.case_uid)] and w["latestCaseUid"] == str(e1.case_uid) and w["root"]["caseUid"] == str(root.case_uid))
@@ -222,7 +227,7 @@ try:
         r = wf(sales, "reverse_case", bad); bad2 = Case.objects.get(pk=bad.pk)
         check("a null entry in transactions -> 409 transactions_corrupt (Alpha throws), nothing changed", r.status_code == 409 and code(r) == "transactions_corrupt" and bad2.status == "closed" and bad2.row_version == bad.row_version and bad2.payload == bad.payload and AuditLog.objects.count() == n_audit and not snaps(bad.case_uid, "case_reversed").exists())
         check("a second reverse -> 409 reverse_status", code(wf(sales, "reverse_case", rv)) == "reverse_status")
-        check("reversed case: state actions", call(sales, "get", f"/api/case-workflow?caseUid={rv.case_uid}").json()["workflow"]["actions"] == {"canCreateEndorsement": False, "canRenew": False, "canEditAnnounced": True, "canReverse": False, "canNotifyAccounting": True})
+        check("reversed case: state actions", call(sales, "get", f"/api/case-workflow?caseUid={rv.case_uid}").json()["workflow"]["actions"] == {"canCreateEndorsement": False, "canRenew": False, "renewalNotice": "", "canEditAnnounced": True, "canReverse": False, "canNotifyAccounting": True})
 
         # ================= 通知會計 =================
         nt = c1

@@ -97,6 +97,7 @@ const {
 
           <template v-else-if="activeView === 'case-detail'">
             <div v-loading="caseDetailLoading">
+              <el-alert v-if="caseWorkflow?.actions?.renewalNotice && can('cases.write')" class="case-readiness-alert renewal-notice" :title="caseWorkflow.actions.renewalNotice" type="info" :closable="false" show-icon></el-alert>
               <el-tabs v-model="caseDetailTab" class="case-detail-tabs" @tab-change="onCaseDetailTabChange">
                 <el-tab-pane label="Overview" name="overview"></el-tab-pane>
                 <el-tab-pane v-if="can('documents.read')" label="Documentation" name="documents"></el-tab-pane>

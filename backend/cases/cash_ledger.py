@@ -2,7 +2,9 @@
 
 New receipts carry the raw transaction number. Legacy schedule receipts are allocated
 to the remaining capacities of matching transactions, so their cash is counted once.
-Brokerage is retained, and settles only when its matching premium legs settle.
+Brokerage is retained and has no cash of its own. Nothing settles automatically (2026-10-14): this module
+only computes cash balances; facility_accounting.apply_transactions turns a cleared balance into
+"Awaiting confirmation" and Accounting's manual confirmation into "Settled".
 """
 import copy
 import re
@@ -234,12 +236,13 @@ def transaction_details(payload, now=None):
                       and other.get('installmentId')==tx.get('installmentId'))
             if exact or fallback:
                 paired.append(candidate)
-        settled={p['_leg'] for p in paired if p['settlement']=='settled'}=={'1','2'} and all(p['settlement']=='settled' for p in paired)
+        # 2026-10-14：經紀費（T3）不再自動結清；只有 T1／T2 開始收付款時顯示 partial，結清一律由會計人工確認
+        # （facility_accounting.apply_transactions 依 T1／T2 的人工確認狀態決定 T3 能否確認）
         partial=any(abs(p['paid'])>0 for p in paired)
-        detail['settlement']='settled' if settled else 'partial' if partial else 'open'
+        detail['settlement']='partial' if partial else 'open'
         detail['paymentStatus']=detail['settlement']
-        detail['paid']=detail['amount'] if settled else 0
-        detail['outstanding']=0 if settled else detail['amount']
+        detail['paid']=0
+        detail['outstanding']=detail['amount']
         detail['cashParts']=[]
         detail['settlementDependencies']=[{'txNo':p['_tx']['txNo'],'settlement':p['settlement']} for p in paired]
     from .facility_accounting import apply_transactions
