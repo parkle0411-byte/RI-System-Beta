@@ -776,8 +776,12 @@ def phase_h(page):
     check("Announced case: Cover Note and Debit Note cards", cards.count() == 2 and "Cover Note" in cards.nth(0).inner_text() and "Debit Note" in cards.nth(1).inner_text())
 
     def download(card, button, expect_message):
-        with page.expect_download(timeout=60000) as info:
-            page.locator(".generated-document-card").filter(has_text=card).get_by_role("button", name=button).click()
+        try:
+            with page.expect_download(timeout=20000) as info:
+                page.locator(".generated-document-card").filter(has_text=card).get_by_role("button", name=button).click()
+        except Exception:  # noqa: BLE001 - 沒有下載時，把畫面上的提示一起報出來（多半是產生前的必填檢查）
+            shown = page.locator(".el-message").all_inner_texts()
+            raise AssertionError(f"{card}: no download; messages on screen: {shown}")
         d = info.value
         path = f"out/{d.suggested_filename}"
         d.save_as(path)

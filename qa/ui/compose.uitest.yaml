@@ -23,7 +23,7 @@ services:
       retries: 60
 
   backend:
-    image: ri-backend:local
+    image: ${UT_BACKEND_IMAGE:-ri-backend:local}
     container_name: ri-ut-backend
     user: "1001:1001"
     environment:
@@ -51,7 +51,7 @@ services:
       mysql: {condition: service_healthy}
 
   nginx:
-    image: ri-frontend:local
+    image: ${UT_FRONTEND_IMAGE:-ri-frontend:local}
     container_name: ri-ut-nginx
     networks: [ut]
     depends_on: [backend]

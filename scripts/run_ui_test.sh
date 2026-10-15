@@ -35,6 +35,17 @@ run_phase() {
 }
 STATUS=0
 run_phase A || STATUS=1
+# 提醒信（不寄信模式）：先在 AE 沒有人員資料時跑一次（設定錯誤），補上 AE／主管／Finance 的 e-mail 後再跑（Suppressed），階段 R 在畫面上檢查。
+# 2026-10-13 起產生 Word 文件需要 AE 的 Email（由 Personnel 依姓名帶入），所以「設定錯誤」那一次提醒先在階段 H 之前跑，再補上聯絡資料。
+reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
+case " ${PHASES:-A H R B K C D E F G P1 P2} " in *" H "*|*" R "*)
+  reminders run_signed_slip_reminders >/dev/null
+  docker exec ri-ut-backend python manage.py shell -c "
+from personnel.models import Personnel
+Personnel.objects.create(name='UI AE One', department='reinsurance', role_code='sales', email='ui.ae@tw-insure.com', supervisor_name='UI Boss',
+                         supervisor_email='ui.boss@tw-insure.com', created_by='seed', updated_by='seed')
+Personnel.objects.filter(name='UI Finance').update(email='ui.fin@tw-insure.com'); print('reminder contacts seeded')" 2>&1 | grep seeded
+esac
 run_phase H || STATUS=1
 # 階段 H：每次 Word 下載都記錄 Audit，PDF 引擎已退役。
 case " ${PHASES:-A H R B K C D E F G P1 P2} " in *" H "*)
@@ -48,15 +59,7 @@ grep -E 'PASS|FAIL' "$UT_SECRETS/audit.txt"; grep -q '^PASS' "$UT_SECRETS/audit.
 esac
 # 畫面上要到 Production close 才會變成 Confirmed（尚未移植）：在測試環境直接把案件設成 Confirmed，才能測 Reverse／Renewal／修正
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
-# 提醒信（不寄信模式）：先在 AE 沒有人員資料時跑一次（設定錯誤），補上 AE／主管／Finance 的 e-mail 後再跑（Suppressed），階段 R 在畫面上檢查
-reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
 case " ${PHASES:-A H R B K C D E F G P1 P2} " in *" R "*)
-  reminders run_signed_slip_reminders >/dev/null
-  docker exec ri-ut-backend python manage.py shell -c "
-from personnel.models import Personnel
-Personnel.objects.create(name='UI AE One', department='reinsurance', role_code='sales', email='ui.ae@tw-insure.com', supervisor_name='UI Boss',
-                         supervisor_email='ui.boss@tw-insure.com', created_by='seed', updated_by='seed')
-Personnel.objects.filter(name='UI Finance').update(email='ui.fin@tw-insure.com'); print('reminder contacts seeded')" 2>&1 | grep seeded
   echo "signed slip: $(reminders run_signed_slip_reminders)"
   echo "payment:     $(reminders run_payment_reminders)"
 esac
