@@ -1,0 +1,77 @@
+# 壓力測試用的獨立環境（scripts/run_stress.sh 建立並在結束時連同 volume 刪除）。
+# 設定刻意與正式相同：同一個 MySQL 映像與預設參數（沒有調校）、同樣的 gunicorn（2 個 worker）、
+# 後端用 ri_runtime、Audit 暫停、前面有同一個 nginx。資料庫、文件 volume、密鑰、網路都獨立；沒有對外連接埠。
+name: ri-stress
+
+services:
+  mysql:
+    image: mysql@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
+    container_name: ri-stress-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+      MYSQL_DATABASE: ri_system
+      MYSQL_USER: ri_app
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_app_password
+      TZ: Asia/Taipei
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--transaction-isolation=READ-COMMITTED",
+              "--innodb-buffer-pool-size=${STRESS_BP:-536870912}"]   # 預設 512 MB = 正式目前的值（2026-10-15 起）
+    mem_limit: ${STRESS_MEM_MYSQL:-1200m}        # 壓測容器加記憶體上限，避免擠壓同一台機器上的正式系統
+    memswap_limit: ${STRESS_MEM_MYSQL:-1200m}
+    volumes: [stress_mysql:/var/lib/mysql]
+    secrets: [mysql_root_password, mysql_app_password]
+    networks: [stress]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  backend:
+    image: ri-backend:stress
+    container_name: ri-stress-backend
+    user: "1001:1001"
+    # 預設 = 正式目前的 gunicorn 參數（4 個 worker、沒有 thread、60 秒；2026-10-15 前是 2 個）
+    command: ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "${STRESS_WORKERS:-4}", "--threads", "${STRESS_THREADS:-1}", "--timeout", "60", "ri_system.wsgi:application"]
+    mem_limit: ${STRESS_MEM_BACKEND:-2600m}
+    memswap_limit: ${STRESS_MEM_BACKEND:-2600m}
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: "nginx,localhost,backend"
+      DJANGO_CSRF_TRUSTED_ORIGINS: "http://nginx"
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      AUDIT_LOG_ENABLED: "true"
+      AUDIT_LOG_PAUSED: "true"        # 與正式相同（2026-10-05 決定）
+      STRESS_STACK: "true"            # seed.py 只在壓測環境執行
+      MYSQL_HOST: mysql
+      MYSQL_DATABASE: ri_system
+      MYSQL_USER: ri_runtime
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_runtime_password
+      RI_EMAIL_ENABLED: "false"
+      TZ: Asia/Taipei
+    volumes: [stress_docs:/data/documents]
+    secrets: [django_secret_key, mysql_app_password, mysql_runtime_password]
+    networks: [stress]
+    depends_on:
+      mysql: {condition: service_healthy}
+
+  nginx:
+    image: ri-frontend:stress
+    container_name: ri-stress-nginx
+    environment:
+      TZ: Asia/Taipei
+    networks: [stress]
+    depends_on: [backend]
+
+secrets:
+  mysql_root_password: {file: "${STRESS_SECRETS:?}/mysql_root_password"}
+  mysql_app_password: {file: "${STRESS_SECRETS:?}/mysql_app_password"}
+  mysql_runtime_password: {file: "${STRESS_SECRETS:?}/mysql_runtime_password"}
+  django_secret_key: {file: "${STRESS_SECRETS:?}/django_secret_key"}
+
+volumes:
+  stress_mysql:
+  stress_docs:
+
+networks:
+  stress:
+    internal: true

@@ -512,3 +512,11 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - 後端移除經紀費 T3 隨 T1／T2 自動結清的舊計算（`cash_ledger.py`）：T3 的結清一律由 `facility_accounting` 的人工確認決定。以 1,500 組隨機案件比對新舊程式，12,702 筆交易中非歷史交易 0 筆不同；只有已沖回（Reversed）的 T3 不再顯示 Settled。前端刪除「Auto settlement」按鈕字樣與「settles automatically」說明。
 - 沖回整筆匯款成功後，Remittance details 與 Payment history 視窗維持開啟（使用者決定維持現狀）。
 - 注意：`frontend/src/views/CaseWorkspace.vue` 已直接維護，產生器 `frontend/scripts/build_case_workspace.py` 與現況不同步（表單標籤大小寫等），**不要重新產生**，否則會蓋掉直接修改的內容。
+
+
+### 2026-10-15：壓力測試與後端／MySQL 設定調整
+- 壓力測試（1 萬件案件、SoA 1.8 萬列、7 人使用；工具 qa/stress/，結果 qa/stress/RESULTS-20261015.md，在獨立環境執行，正式系統未動）：單人 Accounting 約 23 秒（回應 47 MB）、Dashboard 8 秒、Production Report 8.5 秒。原本只有 2 個 gunicorn worker，有人開 Accounting 時其他人全部排隊，7 人同一秒開 Accounting 有 3/7 逾時（504）。
+- 使用者選擇調整設定：gunicorn worker 2→4（= CPU 核心數，backend/Dockerfile）、MySQL innodb_buffer_pool_size 128MB→512MB（compose.yaml）。重測：7 人平常使用時開案件 P90 29 秒→0.09 秒、Accounting 最慢 52→27 秒、6 分鐘無錯誤；後端記憶體尖峰約 2.4 GB。
+- 不使用 thread（--threads）：多個 Accounting 同時在記憶體，測試中撐爆記憶體被終止。nginx 轉發逾時維持 60 秒（7 人同一秒開 Accounting 仍可能有 1/7 逾時）。
+- 單次 Accounting 約 24 秒不變（程式計算量：每件案件重算交易明細、回應 47 MB；Dashboard、Production Report 每次讀全部案件），設定改不了；是否優化程式另行決定。
+- 無 migration、不改業務規則與資料；部署前已備份，保留回復用映像 before-workers4-20261015_180259，部署前後各表筆數相同。

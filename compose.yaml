@@ -18,6 +18,8 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
       - --transaction-isolation=READ-COMMITTED
+      # 2026-10-15：緩衝區預設 128MB 小於案件資料表（1 萬件約 180MB），每次掃全部案件都有約 1/4 要讀磁碟
+      - --innodb-buffer-pool-size=536870912
 
     volumes:
       - mysql_data:/var/lib/mysql

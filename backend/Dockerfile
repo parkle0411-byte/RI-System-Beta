@@ -36,4 +36,6 @@ RUN useradd --create-home --uid 10001 appuser \
 
 USER appuser
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "60", "ri_system.wsgi:application"]
+# 2026-10-15 壓力測試（qa/stress/RESULTS-20261015.md）：2 個 worker 時，有人開 Accounting（23 秒）其他人全部排隊；
+# 4 個 worker（= CPU 核心數）後一般操作不再被卡住。不要用 --threads：多個 Accounting 同時在記憶體裡會撐爆記憶體。
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "60", "ri_system.wsgi:application"]
