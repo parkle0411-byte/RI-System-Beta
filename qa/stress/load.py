@@ -32,12 +32,14 @@ class Session:
         self.cookies, self.conn = {}, None
 
     def _headers(self, method):
-        h = {"Host": "nginx", "Accept": "application/json", "Origin": "http://nginx",
+        h = {**self.extra_headers, "Host": "nginx", "Accept": "application/json", "Origin": "http://nginx",
              "Cookie": "; ".join(f"{k}={v}" for k, v in self.cookies.items())}
         if method != "GET":
             h["Content-Type"] = "application/json"
             h["X-CSRFToken"] = self.cookies.get("csrftoken", "")
         return h
+
+    extra_headers = {}
 
     def request(self, method, path, body=None, label=None):
         payload = json.dumps(body).encode() if body is not None else None
@@ -159,6 +161,25 @@ def single(paths, reps):
             fin.request("GET", path)
             time.sleep(0.5)
     report(f"1 個人，每支 API {reps} 次（已暖機）")
+
+
+def gzip_check(path):
+    """要求 gzip 壓縮：回報線上實際傳輸的大小、解壓後大小與 sha256（和不壓縮的結果比對）。"""
+    import gzip, hashlib
+    s = Session("stress.finmgr", "accounting_manager").login()
+    s.request("GET", path)                      # 暖機
+    for label, headers in (("不壓縮", {}), ("gzip", {"Accept-Encoding": "gzip"})):
+        s.extra_headers = headers
+        s.conn = None
+        t = time.perf_counter()
+        s.conn = http.client.HTTPConnection(HOST, PORT, timeout=240)
+        s.conn.request("GET", path, headers=s._headers("GET"))
+        resp = s.conn.getresponse()
+        raw = resp.read()
+        wire = time.perf_counter() - t
+        enc = resp.getheader("Content-Encoding") or "(無)"
+        body = gzip.decompress(raw) if enc == "gzip" else raw
+        print(f"{label:6s} Content-Encoding={enc:6s} 線上傳輸 {len(raw)/1048576:6.1f} MB  解壓後 {len(body)/1048576:6.1f} MB  收完 {wire:5.1f} 秒  sha256 {hashlib.sha256(body).hexdigest()[:16]}")
 
 
 def burst(paths, rounds):
@@ -293,7 +314,7 @@ def sustained(path, seconds):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("scenario", choices=["baseline", "single", "burst", "mixed", "sustained"])
+    ap.add_argument("scenario", choices=["baseline", "single", "gzip", "burst", "mixed", "sustained"])
     ap.add_argument("paths", nargs="*")
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--rounds", type=int, default=3)
@@ -305,6 +326,8 @@ if __name__ == "__main__":
         baseline(a.reps)
     elif a.scenario == "single":
         single(a.paths, a.reps)
+    elif a.scenario == "gzip":
+        gzip_check(a.paths[0])
     elif a.scenario == "burst":
         burst(a.paths or ["/api/accounting"], a.rounds)
     elif a.scenario == "mixed":

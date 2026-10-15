@@ -27,10 +27,11 @@ from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
 from .calc.jsnum import (
-    UNDEFINED, get, is_array, js_is_finite, js_locale_key, js_or, js_truthy, js_slice, js_to_number, js_to_string, js_trim, json_roundtrip, money,
+    UNDEFINED, get, is_array, js_is_finite, js_locale_key_cached, js_or, js_truthy, js_slice, js_to_number, js_to_string, js_trim, json_roundtrip, money,
 )
 from .calc.payment_terms import build_payment_schedule, taipei_date
 from .ledger import _objects, ledger_rows
+from .shared_compute import CaseCompute
 from .models import Case
 from .transaction_ledger import transaction_rows
 from .cash_ledger import payment_batches
@@ -79,7 +80,7 @@ def _text(value):
 # ------------------------------------------------------------------ 帳本
 
 def _case_view(case):
-    payload = case_payload(case)
+    payload = case_payload(case, copy_payload=False)   # 只讀：這份 payload 只用來算列表，不複製整份（2026-10-15 效能）
     return {
         "caseUid": str(case.case_uid), "rootCaseUid": str(case.parent_case.case_uid) if case.parent_case_id else str(case.case_uid), "rowVersion": case.row_version,
         "twRef": case.tw_ref or "", "status": case.status, "announcedAt": case.announced_at,
@@ -98,14 +99,16 @@ class AccountingView(NoStoreMixin, APIView):
         cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").order_by("tw_ref", "id")
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
         case_views, rows, warnings, transactions, swiss_rows = [], [], [], [], []
+        now = datetime.now(dt_timezone.utc)   # 整個請求用同一個時間
         for case in cases:
             try:
                 c = _case_view(case)
-                case_rows, case_warnings = ledger_rows([c]) if c["status"] in LEDGER_STATUSES else ([], [])
-                case_transactions = transaction_rows([c])
+                shared = {c["caseUid"]: CaseCompute(c, now)}   # 付款排程與交易明細每件案件只算一次，三處共用
+                case_rows, case_warnings = ledger_rows([c], now, shared) if c["status"] in LEDGER_STATUSES else ([], [])
+                case_transactions = transaction_rows([c], shared)
                 case_swiss = []
                 if c["status"] in LEDGER_STATUSES and swiss_applies(c["payload"]):
-                    for item in build_payment_schedule(c["payload"])["items"]:
+                    for item in shared[c["caseUid"]].schedule("raw")["items"]:
                         case_swiss.append({**item, "key": c["caseUid"] + ":" + item["scheduleKey"], "caseUid": c["caseUid"],
                                            "caseRowVersion": c["rowVersion"], "twRef": c["twRef"], "rootCaseUid": c["rootCaseUid"],
                                            "entries": [e for e in _objects(c["payload"].get("paymentEntries")) if e.get("scheduleKey") == item["scheduleKey"]]})
@@ -120,7 +123,7 @@ class AccountingView(NoStoreMixin, APIView):
             transactions.extend(case_transactions)
             swiss_rows.extend(case_swiss)
         # 與 ledger_rows 相同的排序（twRef，再依到期日；穩定排序）
-        rows.sort(key=lambda r: (js_locale_key(r["twRef"]), js_locale_key(_text(r.get("dueDate")))))
+        rows.sort(key=lambda r: (js_locale_key_cached(r["twRef"]), js_locale_key_cached(_text(r.get("dueDate")))))
         currencies = []
         for row in [*rows, *transactions]:  # Include currencies in historical transactions.
             if js_truthy(row["currency"]) and row["currency"] not in currencies:

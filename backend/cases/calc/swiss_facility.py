@@ -27,9 +27,11 @@ def applies(payload):
             and any(is_swiss_facility(r.get('name')) for r in objects(payload.get('reinsurers'))))
 
 
-def case_payload(case):
-    """Read the persisted Announce event; never infer a legacy endorsement from today."""
-    payload = copy.deepcopy(case.payload) if isinstance(case.payload, dict) else {}
+def case_payload(case, copy_payload=True):
+    """Read the persisted Announce event; never infer a legacy endorsement from today.
+
+    copy_payload=False（只讀的 Accounting GET）：只複製最上層，省掉整份 deepcopy；呼叫端不得修改巢狀內容。"""
+    payload = (copy.deepcopy(case.payload) if copy_payload else dict(case.payload)) if isinstance(case.payload, dict) else {}
     if applies(payload) and case.case_kind == 'endorsement':
         if case.announced_at:
             payload['endorsementAnnouncedAt'] = case.announced_at.isoformat()

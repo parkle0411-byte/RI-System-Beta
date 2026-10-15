@@ -5,7 +5,7 @@ paymentEntries／transactions 裡不是物件的項目一律略過（Alpha v56 �
 """
 from .calc.accounting import reconciliation_ref_for
 from .manual_reference import manual_tw_ref_fields
-from .calc.jsnum import get, is_array, js_locale_key, js_or, js_to_number, js_to_string
+from .calc.jsnum import get, is_array, js_locale_key_cached, js_or, js_to_number, js_to_string
 from .calc.payment_terms import build_payment_schedule
 
 
@@ -18,11 +18,13 @@ def _objects(value):
     return [row for row in value if isinstance(row, dict)] if is_array(value) else []
 
 
-def ledger_rows(cases, now=None):
+def ledger_rows(cases, now=None, shared=None):
+    """shared：{caseUid: CaseCompute}（Accounting 列表共用已算好的付款排程與交易明細；沒給就各自計算）。"""
     rows, warnings = [], []
     for c in cases:
         payload = c["payload"]
-        schedule = build_payment_schedule(payload, now)
+        memo = (shared or {}).get(c["caseUid"])
+        schedule = memo.schedule("raw") if memo else build_payment_schedule(payload, now)
         if schedule["reviewRequired"]:
             warnings.append({"caseUid": c["caseUid"], "twRef": c["twRef"], "issues": schedule["issues"]})
         entries = _objects(payload.get("paymentEntries"))
@@ -56,7 +58,7 @@ def ledger_rows(cases, now=None):
         cash_claims = {}
         if any(e.get("transactionNo") for e in entries):
             from .cash_ledger import transaction_details
-            cash_claims = transaction_details(payload, now)
+            cash_claims = memo.details("raw") if memo else transaction_details(payload, now)
         for tx in _objects(payload.get("transactions")):
             if get(tx, "source") != "claim":
                 continue
@@ -81,5 +83,5 @@ def ledger_rows(cases, now=None):
                    if field in cash_claims.get(tx.get("txNo"), {})},
             })
     # a.twRef.localeCompare(b.twRef) || String(a.dueDate || "").localeCompare(...)（穩定排序，同 JavaScript）
-    rows.sort(key=lambda r: (js_locale_key(r["twRef"]), js_locale_key(_text(r.get("dueDate")))))
+    rows.sort(key=lambda r: (js_locale_key_cached(r["twRef"]), js_locale_key_cached(_text(r.get("dueDate")))))
     return rows, warnings

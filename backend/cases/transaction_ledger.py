@@ -5,11 +5,13 @@ from .ledger import _objects
 from .manual_reference import manual_tw_ref_fields
 
 
-def transaction_rows(cases):
+def transaction_rows(cases, shared=None):
+    """shared：{caseUid: CaseCompute}（見 ledger_rows）。"""
     rows = []
     for case in cases:
         payload = case["payload"]
-        cash = transaction_details({**payload, "currency":case["currency"], "reinsured":case["reinsured"]})
+        memo = (shared or {}).get(case["caseUid"])
+        cash = memo.details("override") if memo else transaction_details({**payload, "currency":case["currency"], "reinsured":case["reinsured"]})
         for index, tx in enumerate(_objects(payload.get("transactions"))):
             rows.append({
                 **tx,

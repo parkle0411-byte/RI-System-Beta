@@ -79,9 +79,10 @@ def apply_schedules(payload, items):
     return items
 
 
-def apply_transactions(payload, details):
+def apply_transactions(payload, details, schedule_items=None):
     from .calc.payment_terms import build_payment_schedule
-    schedule = {i['scheduleKey']: i for i in build_payment_schedule(payload)['items']}
+    # schedule_items：呼叫端（transaction_details）已算好的付款排程項目，同一份 payload，不必再算一次
+    schedule = {i['scheduleKey']: i for i in (build_payment_schedule(payload)['items'] if schedule_items is None else schedule_items)}
     transactions = {str(t.get('txNo') or ''): t for t in objects(payload.get('transactions'))}
     # Cash legs first: brokerage eligibility must use the manual settlement of its dependencies.
     ordered = sorted(details.items(), key=lambda pair: pair[1]['cashTracking'] == 'derived')

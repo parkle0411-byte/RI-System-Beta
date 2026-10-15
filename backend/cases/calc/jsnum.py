@@ -10,6 +10,7 @@ JavaScript 語意的小工具。
   - undefined 與 null 是兩回事（String(undefined) 是 "undefined"）
 每一項都已用 Node 實測，並由差異測試（scripts/run_qa.sh calc）持續比對。
 """
+import functools
 import math
 import re
 import sys
@@ -331,7 +332,10 @@ def js_json_quote(text):
 def _key_order(keys):
     """JavaScript 物件的鍵順序：像整數的鍵先（由小到大），其餘依插入順序。"""
     ints = sorted((k for k in keys if k.isascii() and k.isdigit() and (k == "0" or not k.startswith("0")) and int(k) < 2 ** 32 - 1), key=int)
-    return ints + [k for k in keys if k not in set(ints)]
+    if not ints:                      # 絕大多數物件沒有像整數的鍵：順序不變（2026-10-15 效能：原本每個鍵都重建一次 set）
+        return list(keys)
+    seen = set(ints)
+    return ints + [k for k in keys if k not in seen]
 
 
 def js_json_stringify(value):
@@ -442,3 +446,8 @@ def js_locale_key(text):
             else:
                 element(1000 + code)
     return (primary, secondary, tertiary)
+
+
+# 排序鍵只取決於文字本身；Accounting 排序時同一個 TW Ref／到期日會重複出現上萬次，快取後只算一次。
+# 回傳的 tuple 只拿來比較，不會被修改。
+js_locale_key_cached = functools.lru_cache(maxsize=65536)(js_locale_key)

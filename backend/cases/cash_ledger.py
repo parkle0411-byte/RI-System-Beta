@@ -90,12 +90,13 @@ def _matches(item, tx):
             and idx >= 0 and int(idx) == idx and item['partyKey'] == 'r' + str(int(idx) + 1))
 
 
-def transaction_details(payload, now=None):
+def transaction_details(payload, now=None, schedule_result=None):
+    """schedule_result：呼叫端已用同一份 payload 與同一個 now 算好的 build_payment_schedule 結果（Accounting 列表共用，省掉重算）。"""
     now = _as_utc(now)
     today = taipei_date(now)
     transactions = objects(payload.get('transactions'))
     counts = Counter(str(t.get('txNo') or '') for t in transactions)
-    schedule = build_payment_schedule(payload, now)['items']
+    schedule = (build_payment_schedule(payload, now) if schedule_result is None else schedule_result)['items']
     entries = objects(payload.get('paymentEntries'))
     details, parts, legacy_targets = {}, {}, defaultdict(list)
     for tx in transactions:
@@ -246,7 +247,7 @@ def transaction_details(payload, now=None):
         detail['cashParts']=[]
         detail['settlementDependencies']=[{'txNo':p['_tx']['txNo'],'settlement':p['settlement']} for p in paired]
     from .facility_accounting import apply_transactions
-    apply_transactions(payload, details)
+    apply_transactions(payload, details, schedule)
     return {no:{k:v for k,v in d.items() if not k.startswith('_')} for no,d in details.items()}
 
 
