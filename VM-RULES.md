@@ -82,7 +82,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 
 **測試組的執行環境**：多數 `backend/qa/suites` 需要 `RI_DISPOSABLE_QA=true` 且 Audit 記錄啟用，**不要在正式容器跑**（正式 Audit 暫停中）。一律用 **`scripts/run_isolated_qa.sh`**（全部約 30–40 分鐘；可只列出要跑的測試組，例如 `scripts/run_isolated_qa.sh cases_api accounting_api`；`KEEP=1` 保留環境除錯）：以目前原始碼建專用映像 `ri-backend:isoqa`、起隔離的 MySQL＋後端（`qa/isolated/compose.yaml`，`ri_runtime` 連線並套用 `db_harden.sh`），每組前重建全新資料庫，結束自動刪除。**每次改功能後、部署前都要跑**，全部通過才部署。前端與後端合計、密碼規則一致性仍用 `scripts/run_qa.sh totals`／`parity`。
 
-**畫面測試**（`scripts/run_ui_test.sh`）：2026-10-14 只更新到階段 A（42/42 通過）；H、R、B、K、D、E、F、G 仍是 9 月底的腳本，會因畫面與規則變更而失敗，待功能穩定後另行更新。
+**畫面測試**（`scripts/run_ui_test.sh`，無頭 Chromium，另起用完即丟的環境）：2026-10-15 全部階段 A、H、R、B、K、C、E、F、D、G、P1、P2 共 182 項通過。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 可指定用目前原始碼建出的映像（預設是正式在跑的 `ri-backend:local`／`ri-frontend:local`，可能比原始碼舊）。階段 D（Accounting）排在 F（Production close）之後，因為交易要關帳後才產生；畫面改版時請同步更新對應階段的欄位標籤與流程。
 
 ## 2026-09 規則決定（原「刻意與 Alpha 不同」）
 
@@ -501,3 +501,8 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - 收付款、沖回、費用／短收、抵減一律由會計手動登錄（原本即如此）；「自動」只曾指狀態，現已取消。
 - Facility 結清 API 收到非文字的交易或排程編號回 400，不再造成伺服器錯誤。
 - 測試：facility_manual、accounting_unified、accounting_transactions、production_api、endorsement_refunds 依新規則更新（含一般案件、理賠、經紀費的人工流程）。
+
+### 2026-10-15：畫面測試更新與 AE Email 修正部署
+- 正式環境 Bug（已修）：重新登入、F5 或直接連結開啟案件時，人員清單尚未載入，Cover Note／Debit Note 被誤報「缺少 Account Executive Email」；案件明細現在一併載入人員清單（c0e0e6a，已備份並部署）。
+- Debit Note 檢查分期的 Premium／Ratio；System Reference 新增 AUW Facility 與 Swiss Re Asia Facility 規則說明檔。
+- 畫面測試全部階段更新到現行規則（見上方）；階段 D 改寫成合併後的 Accounting：部分收款、收完仍為 Awaiting confirmation、人工確認、沖回整筆匯款。
