@@ -244,7 +244,7 @@ selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarni
 caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
 accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
 claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
 downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
 toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
 announceDialogVisible, announceConfirmed, announcing, openAnnounceReview, announceSelectedCase,
@@ -502,6 +502,12 @@ body = body.replace(old, '                      <el-alert v-if="!selectedPayload
 
 # Each installment/reinsurer pair must resolve a valid payment term.
 body = body.replace(old, '                      <el-alert v-if="!selectedPayload.parentTwRef &amp;&amp; missingDebitInstallmentPaymentTerms(selectedPayload)" type="warning" :closable="false" show-icon title="Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note."></el-alert>\n' + old, 1)
+
+# Every installment must have a saved Premium or Ratio allocation.
+body = body.replace(old, '                      <el-alert v-if="!selectedPayload.parentTwRef &amp;&amp; missingDebitInstallmentAllocation(selectedPayload)" type="warning" :closable="false" show-icon title="Complete Premium or Ratio for every installment before generating a Debit Note."></el-alert>\n' + old, 1)
+
+# Each effective Word allocation weight must be finite and positive.
+body = body.replace(old, '                      <el-alert v-if="!selectedPayload.parentTwRef &amp;&amp; !missingDebitInstallmentAllocation(selectedPayload) &amp;&amp; invalidDebitInstallmentAllocation(selectedPayload)" type="warning" :closable="false" show-icon title="Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note."></el-alert>\n' + old, 1)
 
 # Treaty documents temporarily bypass business-field requirements.
 body = re.sub(r'(<el-alert v-if=")([^"\n]+)("[^\n]*title="(?:Complete|Select|Add|Enter|Assign|Use)[^"\n]+(?:generating)[^"\n]+")', r'\1!isTreatyDocumentCase &amp;&amp; (\2)\3', body)

@@ -38,6 +38,16 @@ def _valid_payment_terms(value):
     return js_is_finite(days) and days >= 15 and days == int(days)
 
 
+def _valid_debit_installment_allocation(row):
+    # Match the Word generator's premium-first weight selection exactly.
+    raw_premium = get(row, "premium")
+    premium = js_to_number(raw_premium)
+    if js_is_finite(premium) and not is_nullish(raw_premium) and raw_premium != "":
+        return premium > 0
+    ratio = js_to_number(get(row, "ratio"))
+    return js_is_finite(ratio) and ratio > 0
+
+
 def _valid_installment_base_date(value):
     if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
         return False
@@ -184,6 +194,11 @@ def _check_case(request, body):
                 )
                 if not any(_valid_payment_terms(value) for value in sources):
                     return None, kind, _error(409, "debit_installment_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
+    if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:
+        if any(not _text(row, "premium") and not _text(row, "ratio") for row in get(payload, "performanceInstallments")):
+            return None, kind, _error(409, "debit_installment_allocation_required", 'Complete Premium or Ratio for every installment before generating a Debit Note.')
+        if any(not _valid_debit_installment_allocation(row) for row in get(payload, "performanceInstallments")):
+            return None, kind, _error(409, "debit_installment_allocation_positive_required", 'Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
     return case, kind, None
 
 

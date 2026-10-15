@@ -105,7 +105,7 @@ onMounted(load)
     <el-alert v-if="unreadable" type="warning" :closable="false" show-icon :title="`${unreadable} document template record(s) could not be read and are not listed.`" />
     <section class="reference-card">
       <h2>System Guides</h2>
-      <p>Download system guides for master data management, database structure and AUW Facility accounting.</p>
+      <p>Download system guides for master data management, database structure and Facility accounting.</p>
       <el-table :data="manuals" empty-text="The system guides are in the Recycle Bin. Restore them below.">
         <el-table-column prop="filename" label="Filename" min-width="260" />
         <el-table-column prop="release_date" label="Release date" width="160" />

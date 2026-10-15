@@ -743,11 +743,11 @@ try:
                 Case.objects.filter(pk=posted.pk).update(payload={**terms_base, "paymentTermsDays": 90, "reinsurers": [{**terms_ri,"paymentTermsDays":value}]})
                 check(f"Debit {structure}: invalid RI terms {value!r} use valid Case default", docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
             for enabled in (True,False,None,0,1,"true"):
-                Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90}]})
+                Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90,"ratio":100}]})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
                 check(f"Debit {structure}: installment flag {enabled!r} respects strict boolean scope", response.status_code==(204 if enabled is True else 409) and (enabled is True or code(response)=="debit_payment_terms_required"))
         for enabled in (True,False):
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90}]})
+            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90,"ratio":100}]})
             check(f"Treaty Draft debit terms exempt, installments={enabled}",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Every installment needs its own real ISO calendar date; no fallback.
@@ -837,6 +837,104 @@ try:
         for enabled in (True,False):
             Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"reinsurers":[inst_terms_ri],"performanceInstallments":[inst_terms_row]})
             check("Treaty Draft debit remains exempt from installment term checks",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
+        Case.objects.filter(pk=posted.pk).update(payload=original_payload)
+        # All installments lacking both allocation sources must not silently split equally.
+        allocation_row={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01"}
+        allocation_blanks=(None,""," \t\n","　","\ufeff")
+        for structure in ("QS","XOL"):
+            allocation_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
+            rows=[allocation_row,{**allocation_row,"paymentBaseDate":"2026-06-01"}]
+            for premium in allocation_blanks:
+                for ratio in allocation_blanks:
+                    saved_rows=[{**r,"premium":premium,"ratio":ratio} for r in rows]
+                    Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"performanceInstallments":saved_rows})
+                    before=gen_audit(posted.case_uid).count()
+                    response=docx(sales,kind="debit",caseUid=str(posted.case_uid),performanceInstallments=[{**allocation_row,"premium":1000,"ratio":100}],installmentEnabled=False)
+                    check(f"Debit {structure}: all blank allocation {premium!r}/{ratio!r} blocked without request override/audit",response.status_code==409 and code(response)=="debit_installment_allocation_required" and message(response)=='Complete Premium or Ratio for every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before)
+            for saved_rows in ([allocation_row],rows,[{**r,"premium":None} for r in rows],[{**r,"ratio":""} for r in rows]):
+                Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"performanceInstallments":saved_rows})
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: missing allocation fields and single/multiple rows blocked",response.status_code==409 and code(response)=="debit_installment_allocation_required")
+                for kind in ("cover","endorsement"):
+                    check(f"{kind} {structure}: no new installment allocation requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
+            for key in ("premium","ratio"):
+                for value in (1,"1",1.25," 1 ",50.25):
+                    for index in (0,1):
+                        saved_rows=[dict(r) for r in rows];saved_rows[index][key]=value;saved_rows[1-index]["ratio"]=50
+                        Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"performanceInstallments":saved_rows})
+                        check(f"Debit {structure}: every period allocated with saved {key}={value!r} at period {index+1} accepted",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            for enabled in (False,None,0,1,"true"):
+                Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"installmentEnabled":enabled,"performanceInstallments":rows})
+                check(f"Debit {structure}: allocation rule uses strict boolean flag {enabled!r}",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"performanceInstallments":[{**allocation_row,"paymentBaseDate":""}]})
+            response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+            check(f"Debit {structure}: existing base-date guard keeps priority",code(response)=="debit_installment_base_date_required")
+            Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"paymentTermsDays":None,"performanceInstallments":rows})
+            response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+            check(f"Debit {structure}: existing payment-term guard keeps priority",code(response)=="debit_installment_payment_terms_required")
+        for saved_rows in ([allocation_row],[{**allocation_row,"premium":None,"ratio":"　"}],[]):
+            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":saved_rows})
+            for kind in ("cover","debit","endorsement"):
+                check(f"Treaty Draft {kind}: blank allocation remains exempt",docx(sales,kind=kind,caseUid=str(draft.case_uid)).status_code==204)
+        Case.objects.filter(pk=posted.pk).update(payload=original_payload)
+        # A missing first, middle or final allocation blocks even when other periods are filled.
+        for structure in ("QS","XOL"):
+            each_allocation_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
+            complete_rows=[{"performanceMonth":month,"paymentBaseDate":day,"ratio":1} for month,day in (("2026-03","2026-03-01"),("2026-06","2026-06-01"),("2026-09","2026-09-01"))]
+            for gap in range(3):
+                for premium,ratio in ((None,None),("","　")):
+                    saved_rows=[dict(r) for r in complete_rows];saved_rows[gap].update(premium=premium,ratio=ratio)
+                    saved={**each_allocation_base,"performanceInstallments":saved_rows}
+                    Case.objects.filter(pk=posted.pk).update(payload=saved)
+                    before=gen_audit(posted.case_uid).count()
+                    response=docx(sales,kind="debit",caseUid=str(posted.case_uid),performanceInstallments=complete_rows,installmentEnabled=False)
+                    check(f"Debit {structure}: period {gap+1} blank allocation blocked without override/audit/data changes",response.status_code==409 and code(response)=="debit_installment_allocation_required" and message(response)=='Complete Premium or Ratio for every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before and Case.objects.get(pk=posted.pk).payload==saved)
+            for kind in ("cover","endorsement"):
+                check(f"{kind} {structure}: partial installment allocation remains outside scope",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
+            Case.objects.filter(pk=posted.pk).update(payload={**each_allocation_base,"originalPremium":0,"performanceInstallments":complete_rows})
+            check(f"Debit {structure}: zero original premium with every ratio filled accepted",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+            Case.objects.filter(pk=posted.pk).update(payload={**each_allocation_base,"performanceInstallments":[{**r,"premium":0,"ratio":None} for r in complete_rows]})
+            response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+            check(f"Debit {structure}: explicit zero allocation for every period blocked",response.status_code==409 and code(response)=="debit_installment_allocation_positive_required")
+        Case.objects.filter(pk=posted.pk).update(payload=original_payload)
+        # Effective installment weights must be positive, even when original premium is zero.
+        positive_cases=[
+            ({"premium":0,"ratio":50},False),({"premium":"0","ratio":50},False),
+            ({"premium":-1,"ratio":50},False),({"premium":"-1","ratio":50},False),
+            ({"premium":" \t\n","ratio":50},False),({"premium":False,"ratio":50},False),
+            ({"premium":[],"ratio":50},False),({"ratio":0},False),({"ratio":"0"},False),
+            ({"ratio":-1},False),({"ratio":"bad"},False),({"premium":"bad","ratio":0},False),
+            ({"premium":1,"ratio":0},True),({"premium":0.01,"ratio":0},True),
+            ({"premium":" 1 ","ratio":0},True),({"premium":None,"ratio":50},True),
+            ({"premium":"","ratio":50},True),({"ratio":0.01},True),
+            ({"premium":"bad","ratio":50},True),({"premium":{},"ratio":50},True),
+        ]
+        for structure in ("QS","XOL"):
+            positive_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
+            row_base={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01"}
+            for original in (0,1000):
+                for fields,valid in positive_cases:
+                    saved_rows=[{**row_base,**fields},{**row_base,"paymentBaseDate":"2026-06-01","ratio":1}]
+                    saved={**positive_base,"originalPremium":original,"performanceInstallments":saved_rows}
+                    Case.objects.filter(pk=posted.pk).update(payload=saved)
+                    before=gen_audit(posted.case_uid).count()
+                    response=docx(sales,kind="debit",caseUid=str(posted.case_uid),performanceInstallments=[{**row_base,"premium":1000,"ratio":100}],originalPremium=1000,installmentEnabled=False)
+                    if valid:
+                        check(f"Debit {structure}: original={original}, effective positive {fields!r} accepted",response.status_code==204)
+                    else:
+                        check(f"Debit {structure}: original={original}, invalid effective allocation {fields!r} blocked without override/audit/data change",response.status_code==409 and code(response)=="debit_installment_allocation_positive_required" and message(response)=='Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before and Case.objects.get(pk=posted.pk).payload==saved)
+            for gap in range(3):
+                saved_rows=[{**row_base,"ratio":1} for _ in range(3)];saved_rows[gap]["ratio"]=0
+                Case.objects.filter(pk=posted.pk).update(payload={**positive_base,"performanceInstallments":saved_rows})
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: zero effective weight at period {gap+1} blocked",response.status_code==409 and code(response)=="debit_installment_allocation_positive_required")
+            for kind in ("cover","endorsement"):
+                check(f"{kind} {structure}: no new positive allocation requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
+            Case.objects.filter(pk=posted.pk).update(payload={**positive_base,"installmentEnabled":False,"performanceInstallments":[{**row_base,"premium":0}]})
+            check(f"Debit {structure}: non-installment zero rows outside scope",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+        for fields,valid in positive_cases[:12]:
+            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":[{**row_base,**fields}]})
+            check("Treaty Draft: non-positive installment allocation exempt",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Treaty requirements are intentionally deferred, including reference/AE.
         Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure": "TREATY"})

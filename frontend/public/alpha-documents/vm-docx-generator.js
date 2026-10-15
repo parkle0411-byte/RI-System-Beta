@@ -114,10 +114,12 @@
   // the earliest date alongside the whole-case total would misstate the
   // schedule (implying the full amount is due that early), so instead this
   // returns one "<label>: <date> — <amount>" line per installment, with each
-  // installment's cedant amount allocated the same way Accounting/Dashboard
-  // do (weighted by installment premium/ratio, last installment absorbing
-  // any rounding remainder so the lines foot exactly to NET_DUE, using
-  // the same currency precision as the printed invoice amounts).
+  // installment's cedant amount weighted by its saved premium/ratio. The
+  // first installment in Case order absorbs any rounding remainder so the
+  // lines foot exactly to NET_DUE, using the same currency precision as
+  // the printed invoice amounts. When a positive total would make the first
+  // amount negative, the first is floored at zero and the remaining shortfall
+  // is deducted from following installments in Case order.
   function debitDueDate(c) {
     if (!c) return '';
     const validTerms = (value) => {
@@ -140,13 +142,27 @@
     if (weightSum <= 0) { weightSum = rawInstallments.length; w = rawInstallments.map(() => 1); }
     const total = financials(c).netDue;
     const roundMoney = (value) => roundedMoney(value, c);
-    let used = 0;
+    const installmentAmounts = w.map((weight, index) => index === 0 ? 0 : roundMoney(total * weight / weightSum));
+    const otherAmount = installmentAmounts.reduce((sum, amount) => roundMoney(sum + amount), 0);
+    installmentAmounts[0] = roundMoney(total - otherAmount);
+    if (total > 0 && installmentAmounts[0] < 0) {
+      let remainder = roundMoney(-installmentAmounts[0]);
+      installmentAmounts[0] = 0;
+      for (let index = 1; index < installmentAmounts.length && remainder > 0; index += 1) {
+        const deduction = Math.min(installmentAmounts[index], remainder);
+        installmentAmounts[index] = roundMoney(installmentAmounts[index] - deduction);
+        remainder = roundMoney(remainder - deduction);
+      }
+    }
+    // Mirrors build_payment_schedule: new (basis 'case') and AUW cases use the Cedant's own terms; older cases the shortest reinsurer terms.
+    const cedantOwnTerms = c.cedantTermsBasis === 'case' || reinsurers.some((reinsurer) => isAuwReinsurer(reinsurer && reinsurer.name));
     const rows = rawInstallments.map((installment, index) => {
       const terms = reinsurers.map((reinsurer, rIndex) => {
         const map = installment.reinsurerPaymentTerms && typeof installment.reinsurerPaymentTerms === 'object' ? installment.reinsurerPaymentTerms : {};
         return validTerms(map['r' + (rIndex + 1)]) ?? validTerms(reinsurer?.paymentTermsDays) ?? validTerms(installment.paymentTermsDays) ?? validTerms(c.paymentTermsDays);
       }).filter((value) => value != null);
-      const shortest = terms.length ? Math.min(...terms) : validTerms(installment.paymentTermsDays) ?? validTerms(c.paymentTermsDays);
+      const ownTerms = validTerms(installment.paymentTermsDays) ?? validTerms(c.paymentTermsDays);
+      const shortest = cedantOwnTerms ? ownTerms : (terms.length ? Math.min(...terms) : ownTerms);
       const baseDate = installment.paymentBaseDate || c.policyFrom;
       let dueDate = '';
       if (baseDate && shortest != null) {
@@ -156,8 +172,7 @@
           dueDate = date.toISOString().slice(0, 10);
         }
       }
-      const amount = index === rawInstallments.length - 1 ? roundMoney(total - used) : roundMoney(total * w[index] / weightSum);
-      if (index !== rawInstallments.length - 1) used = roundMoney(used + amount);
+      const amount = installmentAmounts[index];
       const label = installmentEnabled ? `Instalment ${index + 1}` : '';
       return { label, dueDate, amount };
     }).filter((row) => row.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
@@ -199,6 +214,10 @@
 
   function stripFacility(name) {
     return text(name).replace(/\s*\(Facility\)\s*$/i, '');
+  }
+
+  function isAuwReinsurer(name) {
+    return text(name).split(/\s+/).join(' ').toLowerCase() === "lloyd's underwriter syndicate no. 0609 auw (facility)";
   }
 
   function clauseRank(code) {

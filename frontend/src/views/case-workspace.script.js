@@ -210,6 +210,21 @@ export function useCaseWorkspace() {
       caseData?.paymentTermsDays
     ].some(valid)))
   }
+  function missingDebitInstallmentAllocation(caseData) {
+    if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
+    const installments = Array.isArray(caseData?.performanceInstallments) ? caseData.performanceInstallments : []
+    const filled = (value) => Boolean(String(value ?? '').trim())
+    return installments.length > 0 && installments.some(row => !filled(row?.premium) && !filled(row?.ratio))
+  }
+  function invalidDebitInstallmentAllocation(caseData) {
+    if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
+    const installments = Array.isArray(caseData?.performanceInstallments) ? caseData.performanceInstallments : []
+    return installments.some(row => {
+      const premium = Number(row?.premium)
+      const value = Number.isFinite(premium) && row?.premium !== '' && row?.premium != null ? premium : Number(row?.ratio)
+      return !Number.isFinite(value) || value <= 0
+    })
+  }
   const selectedReinsurers = computed(() => {
     const seen = new Set()
     return (Array.isArray(selectedPayload.value.reinsurers) ? selectedPayload.value.reinsurers : [])
@@ -574,6 +589,12 @@ export function useCaseWorkspace() {
       }
       if (kind === 'debit' && missingDebitInstallmentPaymentTerms(selectedPayload.value)) {
         return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
+      }
+      if (kind === 'debit' && missingDebitInstallmentAllocation(selectedPayload.value)) {
+        return ElMessage.warning('Complete Premium or Ratio for every installment before generating a Debit Note.')
+      }
+      if (kind === 'debit' && invalidDebitInstallmentAllocation(selectedPayload.value)) {
+        return ElMessage.warning('Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
       }
     }
     if (kind === 'cover' && !isTreatyDocumentCase.value && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
@@ -1210,7 +1231,8 @@ export function useCaseWorkspace() {
       resetDocumentForm()
       caseWorkflow.value = null
       activeView.value = 'case-detail'
-      await Promise.all([loadCaseWorkflow(), loadCaseDocuments()])
+      // Word 文件的 AE Email 要靠人員清單補；重新登入／F5／直接連結時清單尚未載入，文件會被擋
+      await Promise.all([loadCaseWorkflow(), loadCaseDocuments(), can('cases.write') ? loadPersonnelOptions() : null])
       window.scrollTo({ top: 0 })
     } catch (err) {
       shell.error = err instanceof Error ? err.message : String(err)
@@ -1617,7 +1639,7 @@ export function useCaseWorkspace() {
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
     claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
