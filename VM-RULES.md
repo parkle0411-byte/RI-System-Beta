@@ -549,3 +549,141 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - Accounting API 新增 ?view=list（畫面使用）：付款排程列（rows）只有 Swiss Facility 案件會在畫面上顯示，其他案件不再產生這些列；warnings、currencies 與其他欄位照常。不帶參數時輸出與以前逐位元組相同（其他用途與既有測試不受影響）。1 萬件資料：約 14.5 秒→約 11.6 秒，回應約 46 MB→30 MB（原估 9~10 秒，實測只省約 20%）。
 - 同一次登入中回到 Accounting 時，先顯示上次載入的清單並在背景重新載入（約 1.6 秒看到清單）；上方顯示「Showing the list loaded at HH:MM. Updating…」，更新完成前隱藏記收款與確認結清等操作。清單只存在該瀏覽器分頁的記憶體，登出或換人登入即清除。
 - 驗證：1 萬件資料完整模式新舊逐位元組相同、精簡模式除付款排程列外完全相同；Swiss 與一般案件各加對照測試；真實瀏覽器回到頁面 8 項、分頁 13 項檢查；部署版本（含另一個 session 當天已部署的內容）上重跑相關 11 組測試與 13 階段畫面測試皆通過。部署前已備份，回復用映像 before-lean-20261016_120011；部署後各表筆數相同。
+
+
+### 2026-10-15：經使用者確認退役第一批舊碼
+- 已確認移除：舊 Word 產生器 docx-generator.js、Alpha 畫面產生器與 frontend/alpha-reference 副本、rebuild_alpha_file.py、未使用的 ASGI 入口，以及兩份沒有測試案例的 tests.py。刪除前封存完整原檔及變更前版本，保留回滾映像。
+- CaseWorkspace.vue 與 case-workspace.script.js 直接維護；已移除要求重新產生 Alpha 模板的舊註解。Word 載入器仍使用 docx-templates.js 與 vm-docx-generator.js。
+- 不變更業務規則、資料庫結構與資料；保留搬遷管理命令及測試、conversion models/migrations、WSGI 入口、frontend/src/alpha 與 System Reference 資料。
+
+
+### 2026-10-15：啟用 Premium Installments 至少兩期（Case 儲存即檢查）
+
+- 業主選 A：只有一期屬於一般付款，不應啟用分期。所有 Case 新增／編輯儲存時，`installmentEnabled === true` 必須至少兩期；零期／一期均拒絕，提示補到兩期，單次付款則關閉 Premium Installments。只檢查期數，不新增草稿其他分期欄位的必填限制。
+- 前端儲存先提示並展開 Cedant Premium；分期狀態、Review／Announce 與後端草稿正規化／Announce 必填檢查使用相同最少兩期規則。API 不可繞過；不自動關閉、不改寫已存資料。分期關閉可維持一般付款；Endorsement 既有禁止分期規則保留。
+- 此項為 Case 儲存規則，Treaty 同樣適用；先前 Treaty 文件生成必填豁免不變。Word 付款日期、金額、期別順序、尾差與模板均未修改。
+- 驗證：隔離資料庫 API 新增／編輯零期、一期拒絕且無寫入，兩期以上與關閉分期接受；Review／Announce、既有案件回歸、畫面儲存／補第二期／關閉分期與建置檢查通過。
+
+
+### 2026-10-15：Announced／Confirmed 案件事後更新對帳號碼
+- 使用者選擇：Case 的 SoA / Transactions 與 Accounting 合併列表都提供 Edit references，僅 cases.write 可操作；accounting.write 本身不授權修改。
+- Statement No. 與各再保人 Reinsurer Ref. 可在 Announced／Confirmed 後直接更新、清空或重複填寫；部分收付款及人工結清後仍可改。現有 160 字元上限、案件可見範圍及 rowVersion 競爭保護沿用。
+- 專用 API /api/case-reconciliation-references 只更新 payload 的 statementNo／reinsurers[index].settlementRef，提升 rowVersion 並建立 Snapshot；Audit 暫停設定維持。原始交易、保費、付款、結清確認及 Production 紀錄不重新計算或重建。
+- Accounting 保費、理賠與尚未關帳的 Swiss 排程均讀取最新號碼；Case 的 Confirmed 一般欄位仍鎖定。
+- 隔離 API 61 項、既有 Accounting／Case／權限回歸及桌面／手機瀏覽器雙向同步、Finance 唯讀與競爭更新檢查通過；無 migration，正式 managed model（除 Session）部署前後筆數與雜湊一致。
+
+
+### 2026-10-15：QS／XOL Debit Note 收款帳戶僅開放 USD、TWD
+
+- 業主選 A：USD 使用既有美元銀行模板，TWD 使用既有臺幣銀行模板；其他幣別的 QS／XOL Debit Note 先阻擋生成，待另行確認對應收款帳戶。不得將其他外幣自動當作臺幣收款帳戶。
+- 依已儲存 Case 的 currency，trim 並轉大寫後只接受 USD／TWD；空白、缺漏及其他代碼也阻擋。前端 Debit Note 卡片提示且下載前攔截，後端 Word 生成紀錄 API 同步回 409／debit_bank_currency_unsupported，不接受請求中的幣別覆寫。
+- 既有必填檢查優先順序維持；Treaty 維持全部文件必填豁免。僅限制文件種類 debit，Cover Note、Endorsement Word、Case 儲存／Review／Announce 與會計不新增幣別限制。批單 Debit Note 的內容留待後續確認。
+- Word 模板、產生器、USD／TWD 帳戶資料、Original Premium Payment 文字、付款期限與「顯示期限前再提前 15 天收妥款項」英文均維持。
+- 驗證：隔離資料庫 API 測試、既有文件生成回歸、畫面攔截與實際 Word 下載檢查通過；其他幣別不得繞過儲存幣別檢查，Treaty 與其他文件保持可用，USD／TWD 銀行模板對應正確。
+
+
+### 2026-10-15：經使用者確認退役第二批 Alpha 搬遷工具
+- 第一批清理後另獲使用者同意，整組退役 import_alpha_reference、import_alpha_cutover、export_alpha_shape，及 conversion 的 importer／alpha_format／integrity／remap、qa/conversion 演練與 conversion_clause_remap 舊測試。刪除前完整封存原檔並保留回滾映像。
+- conversion 的 App 註冊、models、migrations 及既有資料表保留；沒有資料庫 migration 或資料清除。正式 Web 路由與帳號維運指令不變。前段第一批紀錄中的「保留搬遷管理命令及測試」由本段取代。
+- PendingView、舊版 AUW 說明檔、目前 System Guides、Document Templates、案件附件均保留。
+
+
+### 2026-10-15：經使用者確認清理第三批備援畫面與舊說明檔
+- 所有 10 個現行選單均有對應正式元件，移除 PendingView.vue 與 router 的 import／fallback；路由、權限與現行頁面保持。
+- 封存後移除 AUW_Facility_Accounting_Rules_2026-10-13.docx；MANUALS 已使用 AUW_Facility_Rules_2026-10-14.docx，現行四份 System Guides 與共享 volume 的 Document Templates 均保留。第二批記錄中的這兩項保留狀態由本段取代。
+- 原檔與變更前版本先封存並保留回滾映像；無 migration 或正式資料改寫。
+
+
+### 2026-10-15：Great American Facility 專屬規則確認問卷
+
+- 依業主確認，於 System Reference Data → System Guides 新增獨立 Word 問卷，標示「規則確認問卷／待決議」；200題、20主題、56頁，含可勾選選項、逐題共同決議／備註及待決追蹤。
+- 已確認前提為 Great American Insurance Company, Singapore Branch (Facility) 專屬、參照Swiss季結算、暫由人工對帳／沖帳／銷帳；具體季日、範圍及系統功能仍由同事共同討論決議。
+- Swiss對照來自查核當日正式程式及既有Swiss PD指南。僅新增下載登錄與文件，未實作Great American季結算規則或改寫業務資料；既有指南及權限沿用。
+- 驗證Word200題與欄位、56頁排版、隔離下載／角色限制、正式清單／檔案雜湊、其他指南及業務來源完整性。
+
+
+### 2026-10-15：Cover Note／Debit Note 每頁靠右顯示頁碼
+
+- 業主選 A：兩份 Word 每頁均於頁尾靠右顯示 Page X of Y，單頁同樣顯示 Page 1 of 1。Cover Note 保留既有 PAGE／NUMPAGES 欄位；Debit Note 新增相同功能，置於既有公司地址下方。
+- 使用 Word 自動欄位及開啟文件時更新欄位設定，依實際頁數顯示，不寫死總頁數。紙張、邊界、Logo 尺寸、內文字型字級、銀行及業務內容不變。原始模板與 Endorsement Word 產生流程不修改。
+- 驗證：11 份單頁／多頁合成 Word 套件比對、動態頁碼欄位與每頁預覽、隔離瀏覽器實際下載、前端建置與 Loss Record readiness 檢查通過；不改正式案件資料。
+
+
+### 2026-10-16：Debit Note 銀行資料表整組保持同頁
+
+- 業主選 A：銀行資料表空間不足時整組移至下一頁，不拆開表頭與帳戶資料。USD／TWD 銀行表頭與帳戶列禁止列內拆頁，表頭段落與下一列保持同頁；帳戶列不連帶綁定後續署名段落。
+- 僅調整 Debit Note 銀行區塊的 Word 分頁屬性；公司／帳戶資訊、付款日期金額、其他表格、字型字級、Logo、頁尾與頁碼均保留。Cover Note、Endorsement Word 與原始模板不修改。
+- 驗證：13 份單頁／多頁及 USD／TWD 合成文件套件比對、Word 分頁屬性、原先表頭／資料分頁案例的實際預覽、隔離瀏覽器下載與建置檢查通過。正式案件資料不改寫。
+
+
+### 2026-10-16：Debit Note 完整銀行帳號單行顯示、帳號字體 8 pt
+
+- 業主選 A 並指定帳號改為 8 pt：USD／TWD 的帳號數字採 Arial 8 pt、不換行。Account No. 表頭及其他銀行資料維持 10 pt；本項取代銀行帳號原先 10 pt 設定。
+- 銀行表頭與帳戶列同步將帳號欄加寬 6 pt，由相鄰英文收款人欄調整；整表總寬及其他內容列的分界不變。僅移動銀行區塊使用的共用格線分界，並同步更新兩列儲存格寬度。銀行資料表保持同頁的既有規則沿用。
+- 帳號文字、收款人、Swift Code、付款金額日期、字型、Logo、頁尾與頁碼均保留；Cover Note、Endorsement Word 及原始模板不修改。
+- 驗證：13 份 USD／TWD 與單頁／多頁文件套件、XML／欄位幾何比對，完整帳號單行與 8 pt 預覽，銀行同頁及頁碼回歸，隔離瀏覽器實際 Word 下載與建置檢查通過。正式業務資料不改寫。
+
+
+### 2026-10-16：Cover Note 移除章節換頁造成的多餘空白頁
+
+- 業主選 A：調整多餘空白與換頁，避免只有 Logo／頁尾的空白頁；Schedule of Security 與附加條款仍各另起新頁。
+- 原本位於頂層章節表格之間的獨立分頁符號及連續空白段落，改為單一緊湊分隔段落，設定段落前換頁與緊接下一段。避免空白段落自然溢到下一頁後又觸發一次分頁。只處理不含文字、圖片、欄位或書籤等內容的章節間空白。
+- 不刪減表格列、保額／地點／理賠資訊、條款、Security 或簽名；內文可依實際長度延伸。維持 A4、頁面邊界、Arial／標楷體、字級、Logo、每頁頁尾及 Page X of Y。原始模板、Debit Note 與 Endorsement Word 不修改。
+- 驗證：QS／XOL、長內容、多地點、選填留白與多再保人等合成 Word 套件／XML／預覽／瀏覽器下載；XOL 基準範例空白第 3 頁消除，5 頁變 4 頁，Security 與附加條款仍新頁開始。建置與 readiness 檢查通過；正式業務資料不改寫。
+
+
+### 2026-10-16：Cover Note／Debit Note 簽名區塊整組保持同頁
+
+- 業主選 A：簽名圖與公司署名整組保持同頁；Debit Note 再包含 E&OE。空間不足時整組移至下一頁。
+- 在兩份文件的簽名表格列至公司署名／E&OE 之間，逐列禁止拆頁，段落保持同頁並與後續列銜接，包含中間原有空白列；最後一列結束銜接，不綁定後續章節。保留原有圖片、文字、列高與間距。
+- 既有銀行資料表同頁、完整帳號 8 pt 單行、Cover 章節換頁、每頁 Logo／頁尾／頁碼與所有業務內容均保留。原始模板及 Endorsement Word 不修改。
+- 驗證：QS／XOL、USD／TWD、長內容、多地點、多再保人及接近頁尾的分期範例；套件／XML 僅分頁屬性改動，實際預覽簽名圖與署名／E&OE 位於同頁，瀏覽器下載、建置與 readiness 檢查通過。正式業務資料不改寫。
+
+
+### 2026-10-16：Cover Note／Debit Note 簽名圖前統一一行空白
+
+- 業主選 A：縮減簽名圖前的多餘空白，兩份文件均保留一行。僅處理簽名圖前連續的純空白表格列：Cover 原 6 列、Debit 原 4 列，改為單列 12 pt 的空白行；段落前後間距為 0、行距固定 12 pt、字級 10 pt。
+- 空白行不拆頁並跟隨簽名區塊，簽名圖、公司署名及 Debit Note 的 E&OE 仍整組同頁。圖片、署名與 E&OE 之間既有間距不變；含文字、圖片、欄位、合併、書籤或註解等內容的列不作為空白列刪除。
+- 其他內容、銀行資料表同頁、帳號 Arial 8 pt 單行、Cover 章節分頁、Logo、每頁頁尾與頁碼保留。原始模板與 Endorsement Word 不修改。本項取代前段「保留簽名前間距」的設定。
+- 驗證：20 份 QS／XOL、USD／TWD、長內容、多地點、多再保人與分期邊界範例，套件／XML 僅純空白列改動，預覽確認單行空白及簽名同頁、銀行／章節／頁碼正常；隔離瀏覽器下載、建置與 readiness 檢查通過。正式資料不改寫。
+
+
+### 2026-10-16：Cover Note 保額明細標題拼字修正
+
+- 業主選 A：保額明細標題統一為 BREAKDOWN OF SUM INSURED，修正 QS／XOL 模板中的 BREAKFOWN 拼字。
+- Word 包裝產生器在填入 Case 內容前只修正固定標題；不改寫已儲存 Case，Case 自填內容即使含同樣文字也維持原文。保額明細、地點、金額、字型字級及既有分頁設定保留。原始模板、Debit Note 與 Endorsement Word 不修改。
+- 驗證：QS／XOL、多地點、Facility、長內容與 literal Case 文字等 21 份 Word 套件比對，僅固定標題一字母不同；兩份模板預覽的標題正確且頁數保持。隔離瀏覽器實際下載、前端建置及 readiness 檢查通過。正式業務資料不改寫。
+
+
+### 2026-10-16：一般再保人 CGL Case Information
+- 依業主逐題決定，一般版 Commercial General Liability（QS／XOL；Facility、PWS、Swiss Re Asia 專屬組合維持原流程）以 Information 取代 Occupation & Construction、Breakdown of Sum Insured、Loss Record、Special Agreement；後兩項移入 Information 並保留小標題。其他 Risk Details／Terms 尚待後續整理。
+- Policy Form 必選且預設空白：Occurrence Form／Claims-Made Form。Claims-Made 顯示並必填 Retroactive Date；Extended Reporting Period 僅 Claims-Made 顯示，必選適用／不適用，適用時必填期間及說明。
+- Territorial / Jurisdiction Limits 必選且預設空白：範本三項或 Other；Other 必填說明。Insured’s Business／Products 均為必填多行文字。Website 選填文字，不檢查網址格式。
+- Estimated Turnover 可新增／刪除多筆，至少一筆，每筆區域、幣別、非負金額必填；幣別預填當時 Case 幣別，可逐筆另選。既有列的幣別不因後續 Case 幣別變更而覆寫；零金額可填。
+- Special Agreement 適用／不適用必選且預設空白，適用時必填多行內容。Policy Form／適用狀態切換會先提醒，取消保留選擇與內容，確認後清空相關內容；後端亦清除不適用的從屬資料，避免文件洩出舊文字。
+- 新增必填規則不阻擋未完成草稿儲存；Review／Announce 與 Cover Note 生成均檢查。Loss Record 欄位與原有儲存、年數、逐筆規則完整沿用。一般 CGL 不再要求已移除的 Occupation、Construction、Sum Insured；Property 規則維持。
+- 新資料保存在既有 Case payload.cglInformation，沿用 Snapshot／rowVersion，無 migration、無既有案件批次改寫。案件檢視、Review 與現有 Cover Note 的 Information 段讀取相同資料；其餘 CGL 文件格式留待後續整理。
+- 驗證：10 組隔離 API 回歸共 3,467 項、CGL 前後端 229 組、金額 3,000 組與密碼 20 組一致性、桌面／手機實際操作與 Word 內容檢查通過。部署前後正式 managed tables（除 Session）筆數及雜湊一致，Audit 暫停及寄信關閉維持；保留同步 Word 更新及其他正在編輯的原始碼。
+
+
+## 2026-10-16：92 項會計規則重新確認
+
+本節與 `backend/qa/accounting-review-92.json` 優先於前述舊會計規則；未涉及的規則及權限繼續沿用。這是供財務登錄與對帳的系統，不執行銀行收付款。
+
+- 保費在 Production 關帳後建立帳款；零收入仍不列業績，但在關帳建立帳款並轉 Confirmed。批單業績月份改取生效與 Announce 較晚月；分期尾差集中第一期。
+- 收付登錄、抵銷及銷帳全由財務逐筆操作。餘額歸零只顯示已收／已付，須再手動銷帳且填參考號／說明。保費每次須登錄整筆餘額；只有賠款可部分收付。
+- 未銷帳收付金額可填原因直接更正並保留前後歷史。曾銷帳金額永久鎖定；取消銷帳不解鎖金額。T3 須對應 T1／T2 人工銷帳後才可銷帳，T3 完成後整組都不能取消。
+- 每期 Cedant 及每期每家普通再保人的約定天數須獨立填寫，沒有預設繼承；缺漏列待確認，不得收付或銷帳。案件維護人員可補填缺漏天數並留原因／歷史；已有效天數不可藉此修改。固定 AUW／Swiss 天數依特殊規則。逾期以實際約定到期日判斷。
+- Swiss 收妥與 Cedant 逐筆銷帳合一；整期全部完成才放行付款，且付款前必填結算清單參考號。保留固定結算期、退費收齊先後限制；移除另設收妥勾選及銀行手續費／短款作業。人工抵銷擴大至 AUW／普通案件，限同原單直接退批、同幣別、同對象、退批整筆抵完；Swiss 另須同期且不得繞過原有限制。
+- 賠款建立即建帳，按出險日適用比例分攤，建立帳款台灣日期加15日到期且不可修改；付出不得超過該筆已登錄收到的金額。未經收付或抵銷可填原因更正義務金額並留歷史。保費 Reverse 不影響賠款，但保費有收付或抵銷歷史禁止 Reverse。
+- Dashboard 以 Accounting 已建所有應收應付餘額及上帳月匯率為準，含已到期保單。缺匯率不擋原幣作業，顯示待補及合計未完整；已關帳業績採正式報表，未關帳標示預估。
+- 財務提醒改用正式帳款實際到期日前7日、到期日及之後每7日，餘額零停止；寄 AE、AE主管、啟用中 Finance Staff。有效地址先寄，缺漏另提示。財務信件獨立以 `RI_PAYMENT_REMINDER_ENABLED` 控制；必須配置 `RI_EMAIL_HOST` 等 SMTP 設定才實際寄送，不變更 Signed Slip／忘記密碼總開關。
+- 舊帳修復：`python manage.py apply_accounting_review` 預覽，確認簽章後 `--apply --expected-signature <signature>`。只更正未處理金額，保留版本、快照及業務修改歷史，不改正式關帳報表；曾處理的分期分攤保留待人工核對，避免跨期尾差漂移。賠款建立日只用實際快照證據，無證據不猜日期；零收入補建遞延第一個未關帳月。
+
+驗證：`backend/qa/suites/accounting_review_92.py`、`accounting_review_edges.py`、`accounting_shared_compute.py`、`audit_pause.py`；僅在 `RI_DISPOSABLE_QA=true` 的隔離資料庫執行。舊 Alpha 對照及 Swiss／Facility 測試中關於部分保費、獨立收妥勾選、費用及自動鎖定解除的舊斷言，已由上述新規則取代。
+
+
+### 2026-10-16：Property Key In Information 合併
+- 使用者選定四項合為同一張 Information 卡片，保留 Occupation & Construction、Breakdown of Sum Insured、Loss Record、Special Agreement 四個小標題及原有欄位。適用 Property，包括 Facility；其餘 Class 沿用原版面。
+- 必填 Review 與 Loss Record 存檔檢查的定位改為展開 Information。資料仍使用既有 payload 欄位。
+- 前端建置與 17 項既有 readiness 檢查、桌面／手機瀏覽器、收合後驗證定位、新增刪除項目、模擬存檔重開與其他 Class 版面檢查通過。僅部署前端。
