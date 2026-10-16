@@ -30,6 +30,7 @@ from cases.models import Case, CaseDocument
 from personnel.models import Personnel
 
 from . import messages as msg
+from cases.accounting_rules import objects as msg_objects
 from .models import SUCCESS_STATUSES, PaymentAlert, SignedSlipAlert
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def display_names(case_data, keys):
 
 
 def _open_cases():
-    return Case.objects.filter(status__in=("posted", "closed"), recycled_at__isnull=True, is_archived=False).order_by("id")
+    return Case.objects.filter(status__in=("posted", "closed", "reversed"), recycled_at__isnull=True, is_archived=False).order_by("id")
 
 
 def _people(*extra):
@@ -170,7 +171,7 @@ def run_payment(today=None):
     people = _people("role_code")
     finance = msg.finance_emails(people)
     success = {}
-    for case_id, kind, keys, alert_date in PaymentAlert.objects.filter(status__in=SUCCESS_STATUSES).values_list(
+    for case_id, kind, keys, alert_date in PaymentAlert.objects.filter(status__in=("sent", "simulated")).values_list(
             "case_id", "alert_kind", "schedule_keys", "alert_date"):
         for key in keys if isinstance(keys, list) else []:
             index = f"{case_id}::{key}::{kind}"
@@ -182,8 +183,15 @@ def run_payment(today=None):
     for case in cases:
         case_data = {**case_payload(case), "id": case.pk, "caseUid": str(case.case_uid), "twRef": case.tw_ref or ""}
         grouped = {}
-        schedule_now = today + 'T01:30:00Z' if swiss_applies(case_data) else None
-        for item in build_payment_schedule(case_data, schedule_now)["items"]:
+        from cases.cash_ledger import transaction_details
+        stored = {t.get('txNo'): t for t in msg_objects(case_data.get('transactions'))}
+        for no, detail in transaction_details(case_data, today + 'T01:30:00Z').items():
+            tx = stored.get(no, {})
+            if tx.get('reversed') or tx.get('isReversalEntry') or detail.get('cashTracking') == 'derived':
+                continue
+            item = {**detail, 'scheduleKey': 'transaction:' + no, 'currency': case_data.get('currency'),
+                    'installmentLabel': tx.get('installmentLabel') or tx.get('lossNo') or 'Full',
+                    'returnPremium': tx.get('source') != 'claim' and bool(case_data.get('parentTwRef')) and (case_data.get('originalPremium') or 0) < 0}
             dates = {k: success.get(f"{case.pk}::{item.get('scheduleKey')}::{k}", "") for k in ("seven_days_before", "due_today", "weekly_overdue")}
             kind = msg.due_kind(item, today, dates)
             if kind:
@@ -194,6 +202,8 @@ def run_payment(today=None):
               "skipped": 0, "failed": 0, "configurationErrors": [], "moreWork": False}
     for case, case_data, kind, items in due:
         resolved = msg.resolve_recipients(case_data, people, finance)
+        if resolved.get("missing") and "error" not in resolved:
+            result["configurationErrors"].append({"caseUid": str(case.case_uid), "error": " ".join(resolved["missing"]), "partialDelivery": True})
         if "error" in resolved:
             error = {"caseUid": str(case.case_uid), "twRef": case.tw_ref or "", "error": resolved["error"]}
             result["configurationErrors"].append(error)
@@ -213,7 +223,7 @@ def run_payment(today=None):
         if any(is_reserved_test_email(r) for r in recipients):
             _finish(alert, "simulated", PAY_ACTOR, "simulate_payment_reminder", {"status": "simulated", "recipients": recipients}, meta, sent_at=now)
             result["simulated"] += 1
-        elif not settings.REMINDER_EMAIL_ENABLED:
+        elif not settings.PAYMENT_REMINDER_EMAIL_ENABLED:
             _finish(alert, "suppressed", PAY_ACTOR, "suppress_payment_reminder",
                     {"status": "suppressed", "recipients": recipients, "subject": mail["subject"],
                      "reason": "reminder e-mail is not enabled on the VM"}, meta, sent_at=now)
@@ -232,9 +242,8 @@ def run_payment(today=None):
 
 def _claim_payment(case, today, kind, keys, recipients, mail):
     """
-    Alpha：INSERT … ON CONFLICT (case_id, alert_date, alert_kind) DO UPDATE SET status = 'pending', error_message = NULL
-    WHERE status = 'failed' RETURNING id —— 同一天失敗過的可以重新佔位，其他狀態一律略過。
-    重新佔位時同 Alpha 保留原本的 recipients／schedule_keys；主旨與內文（VM 才有）更新成這次要寄的內容。
+    財務提醒同案、同日、同類型只寄一次；failed／suppressed 可重新取得佔位。
+    重試時更新有效收件人、帳款鍵及主旨內文；suppressed 不當作寄送成功。
     """
     try:
         with transaction.atomic():
@@ -244,8 +253,8 @@ def _claim_payment(case, today, kind, keys, recipients, mail):
         pass
     with transaction.atomic():
         alert = PaymentAlert.objects.select_for_update().filter(case=case, alert_date=today, alert_kind=kind).first()
-        if alert is None or alert.status != "failed":
+        if alert is None or alert.status not in ("failed", "suppressed"):
             return None
-        PaymentAlert.objects.filter(pk=alert.pk).update(status="pending", error_message=None, subject=mail["subject"], body_html=mail["html"])
+        PaymentAlert.objects.filter(pk=alert.pk).update(status="pending", recipients=recipients, schedule_keys=keys, error_message=None, subject=mail["subject"], body_html=mail["html"])
         alert.refresh_from_db()
         return alert

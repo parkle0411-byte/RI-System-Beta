@@ -217,11 +217,12 @@ class CasesView(NoStoreMixin, APIView):
         actor_info = actor_from(person)
         case_uid = uuid.uuid4()
         payload = normalized["value"]
-        from .calc.swiss_facility import applies as swiss_applies
-        if swiss_applies(payload):
-            for field in ("transactions", "paymentEntries", "claims"):
-                payload[field] = []
-            payload["swissAccounting"] = {}
+        # Draft creation never imports posting, receipt or settlement records.
+        # These are owned by Production / Claims / Accounting for every case type.
+        for field in ("transactions", "paymentEntries", "claims", "confirmedProductionKeys"):
+            payload[field] = []
+        payload["swissAccounting"] = {}
+        payload["facilityAccounting"] = {}
         payload["cedantTermsBasis"] = "case"
         columns = normalized["columns"]
         if not payload.get("ownerPersonnelId"):
@@ -333,19 +334,19 @@ class CasesView(NoStoreMixin, APIView):
                 from .endorsement_terms import apply_endorsement_terms
                 root = current.parent_case
                 from .calc.swiss_facility import applies as swiss_applies
-                expected_terms = 90 if swiss_applies(payload) else (root.payload or {}).get("paymentTermsDays")
-                if payload.get("paymentTermsDays") != expected_terms:
-                    return _error(400, "endorsement_cedant_terms_locked", "Endorsement Cedant payment terms must follow the original policy.")
                 apply_endorsement_terms(payload, root, announced_at=current.announced_at)
                 if "endorsementPerformanceMonth" in stored:
                     payload["endorsementPerformanceMonth"] = stored["endorsementPerformanceMonth"]
 
-            # #8：Claims 只能追加（用相反方向的付款更正，不刪除、不改寫），且只由 claims API 寫入；
+            # Claims 及其未收付更正只由 claims API 寫入；
             # transactions／paymentEntries 只由 claims、Reverse／Close、accounting 寫入。
             # 一般的案件編輯不得覆蓋它們，一律還原成資料庫目前的值，不管前端送了什麼。
             payload["claims"] = stored.get("claims") or []
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
+            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory"):
+                if key in stored:
+                    payload[key] = stored[key]
             if "facilityAccounting" in stored:
                 payload["facilityAccounting"] = stored["facilityAccounting"]
             from .calc.swiss_facility import applies as swiss_applies

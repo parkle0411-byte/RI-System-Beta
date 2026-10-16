@@ -32,7 +32,7 @@ def case_payload(case, copy_payload=True):
 
     copy_payload=False（只讀的 Accounting GET）：只複製最上層，省掉整份 deepcopy；呼叫端不得修改巢狀內容。"""
     payload = (copy.deepcopy(case.payload) if copy_payload else dict(case.payload)) if isinstance(case.payload, dict) else {}
-    if applies(payload) and case.case_kind == 'endorsement':
+    if case.case_kind == 'endorsement':
         if case.announced_at:
             payload['endorsementAnnouncedAt'] = case.announced_at.isoformat()
         if case.parent_case_id:
@@ -100,7 +100,7 @@ def fingerprint(payload, key):
     # Includes notes, dates, added records and reversals: every change requires re-confirmation.
     entries = incoming_entries(payload, key)
     facts = {'entries': entries, 'originalPremium': payload.get('originalPremium'),
-             'reinsurers': payload.get('reinsurers'), 'installments': payload.get('performanceInstallments')}
+             'reinsurers': [{k: v for k, v in r.items() if k not in ('settlementRef', 'clientKey')} for r in objects(payload.get('reinsurers'))], 'installments': payload.get('performanceInstallments')}
     return hashlib.sha256(json.dumps(facts, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
@@ -188,7 +188,7 @@ def apply_schedule(payload, items, now):
                         fullPaymentRequired=not refund)
             statement = _state(payload).get('statements', {}).get(item['scheduleKey'], {})
             item.update(statementDueDate=statement.get('dueDate') or '', statementReference=statement.get('reference') or '',
-                        statementNeedsRevision=bool(statement.get('dueDate') and statement['dueDate'] != item['dueDate'] and abs(item['outstanding']) > .004))
+                        statementNeedsRevision=False)
     if refund:
         required = [i for i in items if i['partyType'] == 'reinsurer' and i['amount'] < 0]
         ready = bool(required) and all(i.get('collectionConfirmed') for i in required)
@@ -221,12 +221,14 @@ def reset_after_changes(before, after, now):
 
 
 def payment_error(item, amount):
+    if item.get('fullPaymentRequired') and abs(amount - abs(item['outstanding'])) >= .005:
+        return 'Premium receipts and payments must cover the entire outstanding balance.'
     if not item.get('swissCase'):
         return ''
     if item.get('paymentAllowed') is False:
         return item.get('paymentBlockedReason') or 'Collection confirmation is required.'
     if item.get('fullPaymentRequired') and abs(amount - abs(item['outstanding'])) >= .005:
         return 'Pay the entire Swiss installment or Cedant refund in one allocation.'
-    if item.get('statementNeedsRevision'):
-        return 'The settlement statement changed period. Revise it and confirm the new period before payment.'
+    if item.get('swissFacility') and item.get('paymentDirection', 'payable') != 'receivable' and item.get('amount', 0) > 0 and not item.get('statementReference'):
+        return 'Enter the Swiss settlement statement reference after Cedant settlement before recording payment.'
     return ''

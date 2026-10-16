@@ -34,8 +34,9 @@ from .ledger import _objects, ledger_rows
 from .shared_compute import CaseCompute
 from .models import Case
 from .transaction_ledger import transaction_rows
+from .reference_views import schedule_reference_metadata
 from .cash_ledger import payment_batches
-from .transaction_payments import record_transaction_payments, reverse_batch_payment
+from .transaction_payments import record_transaction_payments, reverse_batch_payment, edit_payment
 from .calc.swiss_facility import applies as swiss_applies, DISPLAY_FIELDS, reset_after_changes, payment_error, case_payload
 from .swiss_accounting import swiss_action
 
@@ -98,7 +99,7 @@ class AccountingView(NoStoreMixin, APIView):
     def get(self, request):
         cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").order_by("tw_ref", "id")
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
-        case_views, rows, warnings, transactions, swiss_rows = [], [], [], [], []
+        case_views, rows, warnings, transactions, swiss_rows, schedule_rows = [], [], [], [], [], []
         now = datetime.now(dt_timezone.utc)   # 整個請求用同一個時間
         # ?view=list（Accounting 畫面用）：付款排程列（rows）只有 Swiss Facility 案件會顯示，其他案件不產生這些列
         # （約 1.5 萬列、17 MB），但 warnings 與 currencies 照常計算；不帶參數時輸出與以前完全相同。2026-10-16
@@ -117,11 +118,24 @@ class AccountingView(NoStoreMixin, APIView):
                         extra_currencies.append(c["currency"])
                 else:
                     case_rows, case_warnings = ledger_rows([c], now, shared) if c["status"] in LEDGER_STATUSES else ([], [])
+                for item in case_rows:
+                    if item.get('source') == 'premium':
+                        item.update(schedule_reference_metadata(c['payload'], item))
+                if lean and c["status"] in LEDGER_STATUSES and not swiss_applies(c["payload"]):
+                    # Compact metadata restores manual offsets / missing-term completion
+                    # without duplicating payment histories or claim schedule rows.
+                    fields = ('scheduleKey','installmentId','installmentLabel','partyKey','partyType','partyName',
+                              'currency','amount','paid','outstanding','termsDays','dueDate','contractDueDate','status',
+                              'paymentAllowed','paymentBlockedReason','paymentRule','source')
+                    for item in shared[c["caseUid"]].schedule("raw")["items"]:
+                        schedule_rows.append({**{k:item.get(k) for k in fields},'source':'premium',
+                            'key':c['caseUid']+':'+item['scheduleKey'],'caseUid':c['caseUid'],
+                            'rootCaseUid':c['rootCaseUid'],'caseRowVersion':c['rowVersion'],'twRef':c['twRef']})
                 case_transactions = transaction_rows([c], shared)
                 case_swiss = []
                 if c["status"] in LEDGER_STATUSES and swiss_applies(c["payload"]):
                     for item in shared[c["caseUid"]].schedule("raw")["items"]:
-                        case_swiss.append({**item, "key": c["caseUid"] + ":" + item["scheduleKey"], "caseUid": c["caseUid"],
+                        case_swiss.append({**item, **schedule_reference_metadata(c["payload"], item), "caseStatus": c["status"], "key": c["caseUid"] + ":" + item["scheduleKey"], "caseUid": c["caseUid"],
                                            "caseRowVersion": c["rowVersion"], "twRef": c["twRef"], "rootCaseUid": c["rootCaseUid"],
                                            "entries": [e for e in _objects(c["payload"].get("paymentEntries")) if e.get("scheduleKey") == item["scheduleKey"]]})
             except Exception:  # noqa: BLE001 - 單一案件資料損壞不能讓整個 Accounting 失敗
@@ -144,7 +158,7 @@ class AccountingView(NoStoreMixin, APIView):
         return Response(json_roundtrip({
             "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,
             "scope": {"canEdit": _can_edit(request.ri_principal)},
-            "cashBatches": payment_batches(case_views), "swissRows": swiss_rows,
+            "cashBatches": payment_batches(case_views), "swissRows": swiss_rows, "scheduleRows": schedule_rows,
         }))
 
     def post(self, request):
@@ -155,6 +169,10 @@ class AccountingView(NoStoreMixin, APIView):
                     "reverse_batch_payment": lambda r, b: reverse_batch_payment(self,r,b)}
         for swiss_handler in ("confirm_swiss_collection", "unconfirm_swiss_collection", "record_swiss_clearance", "record_swiss_offset", "mark_swiss_statement"):
             handlers[swiss_handler] = lambda r, b: swiss_action(self, r, b)
+        from .payment_terms_editor import complete_payment_terms
+        handlers["complete_payment_terms"] = lambda r, b: complete_payment_terms(self, r, b)
+        handlers["edit_payment"] = lambda r, b: edit_payment(self, r, b)
+        handlers["record_premium_offset"] = lambda r, b: swiss_action(self, r, b)
         from .facility_accounting import settlement_action
         for manual_action in ('confirm_facility_settlement', 'unconfirm_facility_settlement'):
             handlers[manual_action] = lambda r, b: settlement_action(self, r, b)
@@ -232,35 +250,14 @@ class AccountingView(NoStoreMixin, APIView):
         item = next((i for i in build_payment_schedule(payload)["items"] if i["scheduleKey"] == schedule_key), None)
         if item is None:
             return _error(400, "schedule_not_found", "The selected installment and party no longer exist.")
-        # Alpha 也檢查 item.reviewRequired，但排程項目沒有這個欄位；實際只靠「沒有到期日」擋下
-        if not item["dueDate"]:
-            return _error(400, "schedule_pending_review", "Confirm the installment payment base date before recording payment.")
-        if amount - abs(item["outstanding"]) > 0.004:
-            return _error(400, "overpayment", "Payment cannot exceed the selected installment balance.")
-        blocked = payment_error(item, amount)
-        if blocked:
-            return _error(400, "swiss_payment_blocked", blocked)
-        actor_info = actor_from(person)
-        entry = {
-            "id": str(uuid.uuid4()), "entryType": "payment", "scheduleKey": schedule_key,
-            "installmentId": item["installmentId"], "installmentLabel": item["installmentLabel"],
-            "partyType": item["partyType"], "partyName": item["partyName"],
-            "amount": -amount if item["amount"] < 0 else amount, "paymentDate": payment_date,
-            "note": js_slice(js_trim(_text(body.get("note"))), 0, 1000),
-            "createdAt": _iso_now(), "createdBy": actor_info["id"], "createdByName": actor_info["name"],
-        }
-        if item.get("swissFacility") and item["amount"] > 0:
-            entry["settlementDueDate"] = item["dueDate"]
-        if item.get("returnPremium"):
-            entry["paymentDirection"] = item["paymentDirection"]
-            entry["returnPremium"] = True
-        existing = payload.get("paymentEntries")
-        payload["paymentEntries"] = [*(existing if is_array(existing) else []), entry]
-        return self._save(request, body, case, payload, "record_payment", {
-            "paymentEntryId": entry["id"], "scheduleKey": schedule_key, "amount": entry["amount"], "paymentDate": payment_date,
-        })
+        from .cash_ledger import _matches
+        targets = [t for t in _objects(payload.get("transactions")) if t.get("source") != "claim" and not t.get("reversed") and not t.get("isReversalEntry") and _matches(item, t)]
+        if len(targets) != 1:
+            return _error(400, "individual_transaction_required", "Select each posted transaction and enter its amount; schedule payments cannot allocate automatically.")
+        return record_transaction_payments(self, request, {"paymentDate": payment_date, "amount": amount,
+            "reference": body.get("reference"), "note": body.get("note"), "allocations": [{"caseUid": case_uid,
+            "rowVersion": body.get("rowVersion"), "txNo": targets[0]["txNo"], "amount": amount}]})
 
-    # ---- 沖銷付款 ----
     def reverse_payment(self, request, body):
         person = request.ri_principal
         if not _can_edit(person):
@@ -299,6 +296,11 @@ class AccountingView(NoStoreMixin, APIView):
         for field in ("settlementDueDate", "nonCash", "entryKind"):
             if field in original:
                 reversal[field] = original[field]
+        from .accounting_rules import entry_locked, claim_balance_error
+        if entry_locked(payload, original):
+            return _error(409, "settled_amount_locked", "Previously settled receipt/payment records cannot be reversed.")
+        if not str(body.get("note") or "").strip():
+            return _error(400, "correction_reason_required", "Enter the reversal reason.")
         if original.get("offsetId"):
             return _error(400, "linked_offset_locked", "Offset records must remain linked to both policies; review them with Accounting.")
         payload["paymentEntries"] = json_roundtrip([*entries, reversal])

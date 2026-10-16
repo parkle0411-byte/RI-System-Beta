@@ -132,7 +132,7 @@ def _pad2(n):
     return f"{n:02d}"
 
 
-def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False):
+def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None):
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     today = now.strftime("%Y-%m-%d")
     year, month_number = now.year, now.month
@@ -177,11 +177,31 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             class_totals[class_name] = class_totals.get(class_name, 0.0) + amount
             name = js_or(strip_facility(get(reinsurer, "name"), production_rules), "Unnamed")
             reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
-    for r in in_force + active_endorsements:
-        rate = case_rate(r["payload"])
-        totals = build_payment_schedule(r["payload"], now)["totals"]
-        out1 += totals["cedantOutstanding"] * rate
-        out2 += totals["reinsurerOutstanding"] * rate
+    # Accounting obligations remain outstanding after policy expiry. Convert each
+    # at its own posting month; unknown FX stays visibly incomplete, never zero.
+    from cases.cash_ledger import transaction_details
+    rates = {(r['year_month'], r['currency']): float(r['rate']) for r in fx_rows}
+    missing_fx = []
+    for r in rows:
+        if r.get("status") not in ("posted", "closed", "reversed"):
+            continue
+        payload = r['payload']
+        currency = str(payload.get('currency') or 'TWD').upper()
+        stored = {t.get('txNo'): t for t in payload.get('transactions', []) if isinstance(t, dict)}
+        for no, detail in transaction_details(payload, now).items():
+            tx = stored.get(no, {})
+            if tx.get('reversed') or tx.get('isReversalEntry') or detail['cashTracking'] == 'derived' or abs(detail['outstanding']) < .005:
+                continue
+            posting_month = tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7]
+            rate = 1 if currency == 'TWD' else rates.get((posting_month, currency))
+            if rate is None:
+                missing_fx.append({'currency': currency, 'month': posting_month or None, 'caseId': r.get('id')})
+                continue
+            value = abs(detail['outstanding']) * rate
+            if detail['paymentDirection'] == 'receivable':
+                out1 += value
+            else:
+                out2 += value
 
     monthly = {f"{y}-{_pad2(m)}": 0.0 for y in (year - 1, year) for m in range(1, 13)}
     for r in rows:
@@ -192,6 +212,15 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         for entry in entries:
             if entry["performanceMonth"] in monthly:
                 monthly[entry["performanceMonth"]] += entry["income"] * rate
+
+    closed_months = set()
+    visible_ids = {str(r.get('id')) for r in rows}
+    for report in closed_reports or []:
+        report_month = report.get('year_month') or report.get('month')
+        if report_month in monthly:
+            closed_months.add(report_month)
+            monthly[report_month] = sum(number_or_zero(row.get('income')) for row in report.get('rows', [])
+                                        if str(row.get('caseId')) in visible_ids)
 
     targets_annual, targets_monthly = None, {}
     for t in target_rows:
@@ -211,9 +240,12 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
             "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
             "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2,
+            "accountingTotalIncomplete": bool(missing_fx), "missingPostingRates": missing_fx,
         },
         "brokerage": {
             "labels": months,
+            "currentStatus": ["closed" if f"{year}-{m}" in closed_months else "estimated" for m in months],
+            "priorStatus": ["closed" if f"{year-1}-{m}" in closed_months else "estimated" for m in months],
             "current": [monthly[f"{year}-{m}"] for m in months],
             "prior": [monthly[f"{year - 1}-{m}"] for m in months],
             "target": [js_or(targets_monthly.get(f"{year}-{m}"), 0) for m in months],

@@ -1,8 +1,8 @@
 // One Accounting list: posted transactions own their schedules; unposted schedules
-// remain actionable without inventing a transaction or counting the same entry twice.
+// remain visible for reference before Production close.
 export function accountingRows(body) {
   const transactions = body.transactionRows || []
-  const schedules = (body.swissRows || []).filter(row => row.partyType === 'cedant' || row.swissFacility || row.requiresCollectionConfirmation)
+  const schedules = [...new Map([...(body.scheduleRows || []), ...(body.rows || []).filter(row => row.source === 'premium'), ...(body.swissRows || [])].map(row => [row.key, row])).values()]
   const byKey = new Map(schedules.map(row => [row.key, row]))
   const ledger = new Map((body.rows || []).map(row => [row.key, row]))
   const covered = new Set()
@@ -14,7 +14,7 @@ export function accountingRows(body) {
     return {...row, schedules: associated}
   })
   for (const item of schedules) {
-    if (covered.has(item.key) || !(item.partyType === 'cedant' || item.swissFacility || item.requiresCollectionConfirmation)) continue
+    if (covered.has(item.key) || !(item.swissCase || item.swissFacility || item.requiresCollectionConfirmation)) continue
     const entries = (item.entries || []).map(entry => ({...entry,
       appliedAmount: Number(entry.amount || 0) * (entry.entryType === 'reversal' ? -1 : 1)}))
     const nonCashPaid = entries.reduce((sum, entry) => sum + (entry.nonCash ? entry.appliedAmount : 0), 0)
@@ -26,7 +26,7 @@ export function accountingRows(body) {
       paymentDirection: incoming ? 'receivable' : 'payable',
       cashPaid: item.paid - nonCashPaid, nonCashPaid, entries,
       paymentStatus: item.status, settlement: item.settlement || (Math.abs(item.outstanding) < .005 ? 'settled' : Math.abs(item.paid) > .004 ? 'partial' : 'open'),
-      canRecord: !!item.dueDate && Math.abs(item.outstanding) > .004})
+      canRecord: false, canConfirmSettlement: false})
   }
   return rows
 }

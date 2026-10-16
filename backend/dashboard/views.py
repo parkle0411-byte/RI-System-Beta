@@ -29,6 +29,7 @@ from cases.calc.jsnum import (
 )
 from cases.models import Case
 from fxrates.models import FxRate
+from production.models import ProductionReport
 from ri_system import result_cache
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
 
@@ -92,7 +93,7 @@ class DashboardView(NoStoreMixin, APIView):
             case_fingerprint = (result_cache.table_fingerprint(live.exclude(status="draft")), live.filter(status="draft", parent_case__isnull=True).count())
         else:
             case_fingerprint = result_cache.table_fingerprint(live)   # 只看自己的案件：可見範圍可能因草稿內容改變，用完整指紋
-        fingerprint = (case_fingerprint, result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()))
+        fingerprint = (case_fingerprint, result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()), result_cache.table_fingerprint(ProductionReport.objects.filter(status="closed"), stamp="closed_at"))   # 報表沒有 updated_at，用關帳時間
         key = ("dashboard", "all" if see_all else ("person", person.pk), local.strftime("%Y-%m-%d"), local.strftime("%H:%M") > "12:00")
 
         def compute():
@@ -104,7 +105,8 @@ class DashboardView(NoStoreMixin, APIView):
                        for t in DashboardTarget.objects.filter(is_active=True).order_by("period_key", "id")]
             fx = [{"year_month": f.year_month, "currency": f.currency, "rate": float(f.rate)}
                   for f in FxRate.objects.order_by("year_month", "id")]
-            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True)
+            closed = list(ProductionReport.objects.filter(status="closed").values("year_month", "rows"))
+            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed)
 
         return Response(json_roundtrip(result_cache.get_or_compute(key, fingerprint, compute)))
 

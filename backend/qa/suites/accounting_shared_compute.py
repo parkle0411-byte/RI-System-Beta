@@ -25,7 +25,7 @@ def client(tag, role='accounting', dept='finance'):
 def make(ref, status='closed', n=1, drop=(), **over):
     shares = [round(100 / n, 2)] * (n - 1) + [round(100 - round(100 / n, 2) * (n - 1), 2)]
     p = {'twRef': ref, 'currency': 'TWD', 'statementNo': 'SOA-' + ref, 'reinsured': 'QA Cedant', 'policyFrom': '2026-09-01', 'policyTo': '2027-09-01',
-         'paymentTermsDays': 30, 'originalPremium': 1000, 'riCommPct': 5, 'taxPct': 0, 'paymentEntries': [],
+         'paymentTermsDays': 30, 'originalPremium': 1000, 'riCommPct': 0, 'taxPct': 0, 'paymentEntries': [],
          'reinsurers': [{'name': f'QA RI {i + 1}', 'sharePct': shares[i], 'premium': 800, 'riCommPct': 0, 'taxPct': 0} for i in range(n)]}
     p.update(over)
     p['transactions'] = build_premium_transactions(p) if status in ('closed', 'reversed') else []
@@ -44,8 +44,8 @@ try:
         no_keys = make('SC-NOKEYS', drop=('currency', 'reinsured'))       # payload 沒有 currency／reinsured：改用資料表欄位，兩種呼叫的輸入不同
         empty_ccy = make('SC-EMPTY', currency='', reinsured='')
         # 對其中一件記收款（走真正的 API）
-        pay = fin.post('/api/accounting', data=json.dumps({'action': 'record_transaction_payments', 'paymentDate': '2026-10-07', 'amount': 400, 'reference': 'SC',
-              'allocations': [{'caseUid': str(paid.case_uid), 'txNo': tx_no(paid, 'Leg 1'), 'rowVersion': Case.objects.get(pk=paid.pk).row_version, 'amount': 400}]}), content_type='application/json')
+        pay = fin.post('/api/accounting', data=json.dumps({'action': 'record_transaction_payments', 'paymentDate': '2026-10-07', 'amount': 500, 'reference': 'SC',
+              'allocations': [{'caseUid': str(paid.case_uid), 'txNo': tx_no(paid, 'Leg 1'), 'rowVersion': Case.objects.get(pk=paid.pk).row_version, 'amount': 500}]}), content_type='application/json')
         check('fixture payment recorded through the API', pay.status_code == 200)
         # 一件有理賠交易的案件（理賠列在付款排程列裡會再讀一次交易明細）
         claim = make('SC-CLAIM')

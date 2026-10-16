@@ -39,7 +39,7 @@ def _eligible(transaction):
     if is_nullish(transaction):
         raise TransactionsCorrupt()
     return (get(transaction, "reversed") is True and get(transaction, "isReversalEntry") is not True
-            and get(transaction, "reversalOffsetApplied") is not True)
+            and get(transaction, "reversalOffsetApplied") is not True and get(transaction, "source") != "claim")
 
 
 def _is_live(transaction):
@@ -61,7 +61,7 @@ def transaction_batches(source, payload, confirmed, remaining, was_closed, base_
     有分期 = 每一期「所有 Production key 都確認」就產生該期的交易（每期只產生一次），回傳這些期的 plan 項目。"""
     plan = premium_installment_plan(transaction_case)
     if not plan:
-        return [None] if (not was_closed and not remaining) else []
+        return [None] if (not remaining and not any(_is_live(t) for t in base_transactions)) else []
     # 舊資料：整個案件全額的交易（沒有 installmentId）已經涵蓋所有期別，不再另外產生
     if any(_is_live(t) and not _has_installment_id(t) for t in base_transactions):
         return []
@@ -77,7 +77,7 @@ def transaction_batches(source, payload, confirmed, remaining, was_closed, base_
     return batches
 
 
-def confirm_case(source, report_rows):
+def confirm_case(source, report_rows, posting_month=None):
     """回傳 {payload, nextStatus, remaining, closedCases}（closedCases 是 0 或 1：這次讓案件全部確認（變成 closed））。"""
     closed_cases = 0
     payload = json_roundtrip(js_or(get(source, "payload"), {}))
@@ -113,9 +113,13 @@ def confirm_case(source, report_rows):
             appended = appended + reversal_entries
             base = [{**t, "reversalOffsetApplied": True} if _eligible(t) else t for t in base]
             payload["pendingReversalOffset"] = False
+        from datetime import datetime, timezone
+        created_at = datetime.now(timezone.utc).isoformat()
         new_transactions = [
             {**t, "txNo": f"{js_to_string(get(t, 'txNo'))}-C{js_num_str(cycle)}"} if cycle > 0 else t
             for entry in batches for t in build_premium_transactions(transaction_case, entry)
         ]
+        actual_month = posting_month or (str(report_rows[0].get("month") or "") if report_rows else "")
+        new_transactions = [{**t, "createdAt": created_at, "postedMonth": actual_month} for t in new_transactions]
         payload["transactions"] = base + appended + new_transactions
     return {"payload": payload, "nextStatus": next_status, "remaining": remaining, "closedCases": closed_cases}

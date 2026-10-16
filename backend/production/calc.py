@@ -83,7 +83,9 @@ def base_month(case_data):
         override = year_month(get(case_data, "endorsementPerformanceMonth"))
         if override:
             return override
-        return year_month(get(case_data, "endoEffectiveDate")) or year_month(get(case_data, "policyFrom"))
+        effective = year_month(get(case_data, "endoEffectiveDate")) or year_month(get(case_data, "policyFrom"))
+        announced = year_month(get(case_data, "announcedAt")) or year_month(get(case_data, "endorsementAnnouncedAt")) or year_month(get(case_data, "postedAt"))
+        return max(effective, announced)
     effective = year_month(get(case_data, "policyFrom"))
     activity_source = js_or(get(case_data, "announcedAt"), get(case_data, "postedAt"))
     activity = year_month(activity_source)
@@ -248,12 +250,13 @@ def production_key_groups_for_case(source):
     reinsurers = _reinsurers(case_data)
     for installment in installment_allocations(case_data):
         keys = []
-        if installment["income"] != 0 or any(_return_premium_activity(case_data, r, installment) for r in reinsurers):
-            key = f"{js_num_str(case_data['id'])}:{installment['id']}"
-            raw, tail = _income_split(case_data, reinsurers, installment)
-            for index in range(len(reinsurers)):
-                if raw[index] + (tail if index == 0 else 0) != 0 or _return_premium_activity(case_data, reinsurers[index], installment):
-                    keys.append(f"{key}:R{index}")
+        key = f"{js_num_str(case_data['id'])}:{installment['id']}"
+        raw, tail = _income_split(case_data, reinsurers, installment)
+        from cases.calc.accounting import calc_legs_for_reinsurer
+        for index, reinsurer in enumerate(reinsurers):
+            legs = calc_legs_for_reinsurer(case_data, reinsurer)
+            if raw[index] + (tail if index == 0 else 0) != 0 or any(legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):
+                keys.append(f"{key}:R{index}")
         groups.append({"id": installment["id"], "keys": keys})
     return groups
 
@@ -319,7 +322,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
         return {"errors": ["Report month must use YYYY-MM."], "rows": [], "excluded": [], "missingRateCurrencies": []}
     if links is UNDEFINED:  # 呼叫端沒給完整連結表時，只用傳進來的案件
         links = reference_links((data["twRef"], data) for data in map(normalize_source, case_rows if is_array(case_rows) else []))
-    rows, excluded_rows, missing_rates = [], [], []
+    rows, excluded_rows, missing_rates, accounting_rows = [], [], [], []
     for source in (case_rows if is_array(case_rows) else []):
         case_data = normalize_source(source)
         if case_data["status"] not in ("posted", "closed", "reversed") or not isinstance(case_data["status"], str):
@@ -342,6 +345,19 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                 source_premium = legs["cedantPremium"] * installment["ratio"]
                 source_income = raw[reinsurer_index] + (tail if reinsurer_index == 0 else 0)
                 if source_income == 0 and not _return_premium_activity(case_data, reinsurer, installment):
+                    from cases.calc.accounting import calc_legs_for_reinsurer
+                    account_legs = calc_legs_for_reinsurer(case_data, reinsurer)
+                    if not any(account_legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):
+                        continue
+                    currency = js_upper(_js(js_or(get(case_data, 'currency'), 'TWD')))
+                    rate = rate_for(case_data, month, fx_rates)
+                    if rate is None and currency not in missing_rates:
+                        missing_rates.append(currency)
+                    if exclusion is None:
+                        accounting_rows.append({'key': key, 'reinsurerKey': reinsurer_key, 'caseId': case_id,
+                            'caseUid': case_data['caseUid'], 'caseRowVersion': case_data['rowVersion'],
+                            'installmentId': installment['id'], 'month': month, 'currency': currency, 'rate': rate,
+                            'amounts': [account_legs[k] * installment['ratio'] for k in ('leg1', 'leg2')]})
                     continue
                 rate = rate_for(case_data, month, fx_rates)
                 currency = js_upper(_js(js_or(get(case_data, "currency"), "TWD")))
@@ -390,7 +406,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
     rows.sort(key=_row_sort_key)
     excluded_rows.sort(key=_row_sort_key)
     return {
-        "errors": [], "rows": rows, "excluded": excluded_rows,
+        "errors": [], "rows": rows, "excluded": excluded_rows, "accountingRows": accounting_rows,
         "missingRateCurrencies": sorted(missing_rates, key=_utf16),
-        "sourceSignature": production_source_signature(rows),
+        "sourceSignature": js_json_stringify([production_source_signature(rows), accounting_rows]),
     }

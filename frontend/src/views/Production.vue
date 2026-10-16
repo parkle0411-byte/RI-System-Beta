@@ -127,6 +127,7 @@ onMounted(loadProductionPreview)
       </div>
       <el-alert v-if="productionPreview.scope?.monthClosed" class="case-readiness-alert" type="success" :closable="false" show-icon :title="productionMonth + ' is closed'" description="The report version and source rows are fixed. The monthly FX rate is locked."></el-alert>
       <el-alert v-else-if="productionPreview.summary?.missingRateCurrencies?.length" class="case-readiness-alert" type="warning" :closable="false" show-icon :title="'Official ' + productionMonth + ' exchange rate required for ' + productionPreview.summary.missingRateCurrencies.join(', ')" description="Preview remains available, but report generation is blocked until the official monthly rate is stored in FX Rates."></el-alert>
+      <el-alert v-if="productionPreview.accountingRows?.length" type="info" :closable="false" :title="productionPreview.accountingRows.length+' zero-income accounting item(s) will be booked on close without appearing in Production performance rows.'" />
       <div class="document-summary production-summary">
         <article><span>Included rows</span><strong>{{ productionPreview.summary?.rowCount || 0 }}</strong></article>
         <article><span>Deferred rows</span><strong>{{ productionPreview.summary?.excludedRowCount || 0 }}</strong></article>

@@ -12,6 +12,7 @@ Reverse 與「通知會計」補寫 Snapshot、TW Reference 的流水號不截�
     所以檢查與寫入在同一個鎖之內，同時送出的兩個請求會依序處理。
 """
 import copy
+from .accounting_rules import premium_activity
 import uuid
 from datetime import datetime, timezone as dt_timezone
 
@@ -279,7 +280,7 @@ class WorkflowView(NoStoreMixin, APIView):
                 "canRenew": str(source.case_uid) == latest["caseUid"] and source.status == "closed",
                 "renewalNotice": renewal_notice,
                 "canEditAnnounced": source.status in ("posted", "reversed"),
-                "canReverse": source.status == "closed",
+                "canReverse": source.status == "closed" and not premium_activity(_payload(source)),
                 "canNotifyAccounting": source.status in ("posted", "reversed"),
             },
         }})
@@ -429,6 +430,8 @@ class WorkflowView(NoStoreMixin, APIView):
         before = {"status": source.status, "rowVersion": source.row_version, "payload": _payload(source)}
         try:
             payload = wf.build_reversed_payload(_payload(source))
+        except ValueError as error:
+            return _error(409, "accounting_activity_locked", str(error))
         except wf.TransactionsCorrupt:
             return _error(409, "transactions_corrupt",
                           "The transaction records of this case are damaged (an empty entry was found). Contact the system administrator.")

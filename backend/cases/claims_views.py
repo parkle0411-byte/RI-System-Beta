@@ -19,6 +19,7 @@ import uuid
 from datetime import date
 
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -33,9 +34,9 @@ from .calc.jsnum import (
 )
 from .models import Case
 
-ACTIONS = ("create_claim", "update_reserve", "record_payment")
-AUDIT_ACTIONS = {"create_claim": "create_claim", "update_reserve": "update_claim_reserve", "record_payment": "record_claim_payment"}
-SNAPSHOT_REASONS = {"create_claim": "claim_created", "update_reserve": "claim_reserve_updated", "record_payment": "claim_payment_recorded"}
+ACTIONS = ("create_claim", "update_reserve", "record_payment", "correct_payment")
+AUDIT_ACTIONS = {"create_claim": "create_claim", "update_reserve": "update_claim_reserve", "record_payment": "record_claim_payment", "correct_payment": "correct_claim_payment"}
+SNAPSHOT_REASONS = {"create_claim": "claim_created", "update_reserve": "claim_reserve_updated", "record_payment": "claim_payment_recorded", "correct_payment": "claim_payment_corrected"}
 _DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
 
@@ -97,22 +98,43 @@ def _root_and_chain(row, lock=False):
     return root, chain
 
 
-def _split_source(root, chain):
-    locked = [c for c in chain if c.parent_case_id and c.status in ("posted", "closed")]
-    return locked[-1] if locked else root
+def _split_source(root, chain, loss_date=None):
+    if not loss_date:
+        return root
+    candidates = []
+    for case in chain:
+        if case.parent_case_id and case.status not in ('posted', 'closed'):
+            continue
+        data = _payload(case)
+        effective = data.get('endoEffectiveDate') if case.parent_case_id else data.get('policyFrom')
+        expiry = data.get('policyTo')
+        if _real_date(effective) and effective <= loss_date and (not _real_date(expiry) or loss_date <= expiry):
+            candidates.append((effective, case.pk, case))
+    if not candidates:
+        raise ValueError('No effective policy or endorsement applies on this Date of Loss. Confirm the case dates.')
+    return max(candidates, key=lambda row: (row[0], row[1]))[2]
 
 
 def claims_view(root, chain):
     payload = _payload(root)
     split = _split_source(root, chain)
     split_reinsurers = _payload(split).get("reinsurers")
+    from .accounting_rules import objects, settled_once
+    display_claims = json_roundtrip(payload.get("claims") or [])
+    for claim in display_claims:
+        for payment in objects(claim.get("payments")):
+            affected = [t for t in objects(payload.get("transactions")) if t.get("source") == "claim" and t.get("claimId") == claim.get("id") and t.get("paymentId") == payment.get("id")]
+            numbers = {t.get("txNo") for t in affected}
+            payment["canCorrect"] = bool(affected) and bool(payment.get("createdAt") or any(t.get("createdAt") for t in affected)) and not any(e.get("transactionNo") in numbers for e in objects(payload.get("paymentEntries"))) and not any(settled_once(payload, n) for n in numbers)
+            payment["dueDate"] = next((t.get("dueDate") for t in affected if t.get("dueDate")), "")
     return {
         "rootCaseUid": str(root.case_uid),
         "rootTwRef": root.tw_ref or "",
         "rootStatus": root.status,
         "rootRowVersion": root.row_version,
         "currency": js_or(payload.get("currency"), ""),
-        "claims": payload["claims"] if is_array(payload.get("claims")) else [],
+        "claims": display_claims,
+        "correctionHistory": payload.get("claimCorrectionHistory") or [],
         "splitSource": {
             "caseUid": str(split.case_uid), "twRef": split.tw_ref or "", "status": split.status,
             "reinsurers": split_reinsurers if is_array(split_reinsurers) else [],
@@ -229,14 +251,42 @@ class ClaimsView(NoStoreMixin, APIView):
                 if not _real_date(payment_date):
                     return _error(400, "invalid_payment_date", "Enter the payment date as a valid date (YYYY-MM-DD).")
                 claim["payments"] = claim["payments"] if is_array(claim.get("payments")) else []
-                payment = {"id": _id_out(_next_id(claim["payments"])), "date": payment_date, "amount": amount,
+                created_at = timezone.now().isoformat()
+                if action == "correct_payment":
+                    reason = clean_text(body.get("reason"), 1000)
+                    existing = next((p for p in claim["payments"] if js_to_number(p.get("id")) == js_to_number(body.get("paymentId"))), None)
+                    if not existing or not reason:
+                        return _error(400, "correction_reason_required", "Select an existing claim payment and enter its correction reason.")
+                    affected = [t for t in payload.get("transactions", []) if isinstance(t, dict) and t.get("source") == "claim" and t.get("claimId") == claim.get("id") and t.get("paymentId") == existing.get("id")]
+                    from .accounting_rules import objects, settled_once
+                    numbers = {t.get("txNo") for t in affected}
+                    if any(e.get("transactionNo") in numbers for e in objects(payload.get("paymentEntries"))) or any(settled_once(payload, n) for n in numbers):
+                        return _error(409, "claim_accounting_locked", "Claims with receipt, payment, offset or settlement history require a separate adjustment.")
+                    created_at = existing.get("createdAt") or next((t.get("createdAt") for t in affected if t.get("createdAt")), "")
+                    if not created_at:
+                        return _error(409, "claim_creation_date_missing", "Recover the original claim creation date before correcting this legacy claim.")
+                    payload.setdefault("claimCorrectionHistory", []).append({"claimId": claim.get("id"), "paymentId": existing.get("id"), "before": json_roundtrip(existing), "transactionsBefore": json_roundtrip(affected), "reason": reason, "changedAt": timezone.now().isoformat(), "changedBy": actor_from(request.ri_principal)["id"]})
+                    claim["payments"].remove(existing)
+                    payload["transactions"] = [t for t in payload.get("transactions", []) if not isinstance(t, dict) or t.get("txNo") not in numbers]
+                    next_payment_id = existing["id"]
+                else:
+                    next_payment_id = _id_out(_next_id(claim["payments"]))
+                payment = {"id": next_payment_id, "createdAt": created_at, "date": payment_date, "amount": amount,
                            "note": clean_text(get(data, "note"), 1000)}
                 claim["payments"].append(payment)
-                split = _split_source(root, chain)
+                try:
+                    split = _split_source(root, chain, claim.get("dateOfLoss"))
+                except ValueError as error:
+                    return _error(400, "claim_split_pending_review", str(error))
                 payload["transactions"] = payload["transactions"] if is_array(payload.get("transactions")) else []
                 # Alpha 傳入的 payload 沒有 twRef（編號開頭會是 "undefined"）：補上根案件的 TW Ref
-                payload["transactions"].extend(build_claim_payment_transactions(
-                    {**payload, "twRef": root.tw_ref}, _payload(split), claim, payment))
+                from .calc.payment_terms import taipei_date, add_calendar_days
+                payment["splitSource"] = {"caseUid": str(split.case_uid), "twRef": split.tw_ref, "reinsurers": json_roundtrip(_payload(split).get("reinsurers") or [])}
+                built = build_claim_payment_transactions({**payload, "twRef": root.tw_ref}, _payload(split), claim, payment)
+                due = add_calendar_days(taipei_date(created_at), 15)
+                payload["transactions"].extend({**t, "createdAt": created_at, "postedMonth": taipei_date(created_at)[:7], "dueDate": due, "splitSource": payment["splitSource"]} for t in built)
+                if action == "correct_payment":
+                    payload["claimCorrectionHistory"][-1]["after"] = json_roundtrip(payment)
 
         payload = json_roundtrip(payload)
         claim_id = _id_out(js_or(get(claim, "id"), None))

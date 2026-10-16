@@ -155,13 +155,13 @@
       }
     }
     // Mirrors build_payment_schedule: new (basis 'case') and AUW cases use the Cedant's own terms; older cases the shortest reinsurer terms.
-    const cedantOwnTerms = c.cedantTermsBasis === 'case' || reinsurers.some((reinsurer) => isAuwReinsurer(reinsurer && reinsurer.name));
+    const cedantOwnTerms = true;
     const rows = rawInstallments.map((installment, index) => {
       const terms = reinsurers.map((reinsurer, rIndex) => {
         const map = installment.reinsurerPaymentTerms && typeof installment.reinsurerPaymentTerms === 'object' ? installment.reinsurerPaymentTerms : {};
-        return validTerms(map['r' + (rIndex + 1)]) ?? validTerms(reinsurer?.paymentTermsDays) ?? validTerms(installment.paymentTermsDays) ?? validTerms(c.paymentTermsDays);
+        return validTerms(map['r' + (rIndex + 1)]);
       }).filter((value) => value != null);
-      const ownTerms = validTerms(installment.paymentTermsDays) ?? validTerms(c.paymentTermsDays);
+      const ownTerms = validTerms(installment.paymentTermsDays);
       const shortest = cedantOwnTerms ? ownTerms : (terms.length ? Math.min(...terms) : ownTerms);
       const baseDate = installment.paymentBaseDate || c.policyFrom;
       let dueDate = '';
@@ -175,7 +175,7 @@
       const amount = installmentAmounts[index];
       const label = installmentEnabled ? `Instalment ${index + 1}` : '';
       return { label, dueDate, amount };
-    }).filter((row) => row.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    }).filter((row) => row.dueDate);
     if (!rows.length) return '';
     if (rows.length === 1) return longDate(rows[0].dueDate);
     return rows.map((row) => `${row.label}: ${longDate(row.dueDate)} — ${money(row.amount, c)}`).join('\n');

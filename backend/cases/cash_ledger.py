@@ -7,6 +7,7 @@ only computes cash balances; facility_accounting.apply_transactions turns a clea
 "Awaiting confirmation" and Accounting's manual confirmation into "Settled".
 """
 import copy
+from .accounting_rules import entry_locked
 import re
 from collections import Counter, defaultdict
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -126,8 +127,12 @@ def transaction_details(payload, now=None, schedule_result=None):
         elif not derived:
             parts[(no, 'transaction:' + no)] = {'capacity':abs(value),'paid':0,'entries':[]}
         dates = [i['dueDate'] for i in date_rows if i.get('dueDate')]
+        if source == 'claim' and tx.get('dueDate'):
+            dates = [tx['dueDate']]
         base_dates = [i['baseDate'] for i in date_rows if i.get('baseDate')]
         contract_dates = [i.get('contractDueDate') for i in date_rows if i.get('contractDueDate')]
+        if source == 'claim' and tx.get('dueDate'):
+            contract_dates = [tx['dueDate']]
         swiss_fields = {}
         for field in DISPLAY_FIELDS:
             values = [i[field] for i in matching if field in i]
@@ -139,12 +144,14 @@ def transaction_details(payload, now=None, schedule_result=None):
             'partyType':party_type,'partyName':party_name,'paymentDirection':cash_direction,
             'paymentGroup':group(payload.get('currency'),cash_direction,party_type,party_name),
             'cashTracking':'derived' if derived else 'cash','dueDate':min(dates) if dates else '',
-            'baseDate':min(base_dates) if base_dates else '', 'dueTime':'12:00' if dates else '',
+            'baseDate':min(base_dates) if base_dates else '', 'dueTime':'',
             'contractDueDate':min(contract_dates) if contract_dates else '',
             'paymentRule':next((i.get('paymentRule') for i in matching if i.get('paymentRule')),''),
             'termsDays':min((i['termsDays'] for i in matching if i['termsDays'] is not None),default=None),
             'cashDescription':('Brokerage retained from premium receipts and payments' if derived else
                                ('Receivable from ' if cash_direction == 'receivable' else 'Payable to ') + party_name),
+            'fullPaymentRequired':source == 'premium',
+            'postedMonth':tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7],
             'canRecord':bool(source and (source != 'claim' or leg in ('1','2')) and leg and not derived and not historic and value and party_name
                              and (source == 'claim' or (matching and len(dates) == len(matching)))),
             '_sign':sign,'_historic':historic,'_source':source,'_leg':leg,'_suffix':suffix,'_tx':tx,
@@ -205,8 +212,10 @@ def transaction_details(payload, now=None, schedule_result=None):
         detail['paid']=amount(paid*detail['_sign'])
         detail['outstanding']=amount((total-paid)*detail['_sign'])
         detail['settlement']='settled' if total==paid else 'partial' if paid else 'open'
-        detail['paymentStatus']=(_status_for(detail['dueDate'],amount(total-paid),amount(paid),today,now)
-                                 if detail['_source']=='premium' else detail['settlement'])
+        detail['paymentStatus']=_status_for(detail['contractDueDate'] or detail['dueDate'],amount(total-paid),amount(paid),today,now)
+        if detail['paymentStatus'] == 'upcoming' and detail['_source'] == 'premium' and detail['dueDate'] and today >= detail['dueDate']:
+            detail['paymentStatus'] = 'reminder'
+        detail['receiptStatus'] = ('received' if detail['paymentDirection'] == 'receivable' else 'paid') if total == paid else 'partial' if paid else 'unpaid'
         detail['cashParts']=[{'scheduleKey':key[1],'outstanding':amount(max(0,p['capacity']-max(0,p['paid'])))} for key,p in allocated]
         detail['entries']=[e for _,p in allocated for e in p['entries']]
         detail['nonCashPaid'] = sum(e.get('appliedAmount', 0) for e in detail['entries'] if e.get('nonCash'))
@@ -267,12 +276,16 @@ def payment_batches(cases):
                 'createdAt':entry.get('createdAt'),'createdByName':entry.get('createdByName'), 'allocations':[]})
             batch['allocations'].append({'caseUid':case['caseUid'],'caseRowVersion':case['rowVersion'],
                 'caseStatus':case['status'],'twRef':case['twRef'],'txNo':entry.get('transactionNo'),
+                'source':next((t.get('source', 'premium') for t in objects(case['payload'].get('transactions')) if t.get('txNo') == entry.get('transactionNo')), 'premium'),
                 'entryId':entry.get('id'),'amount':abs(number_or_zero(entry.get('amount'))),
+                'amountEditLocked':entry_locked(case['payload'], entry),
                 'reversed':entry.get('id') in reversed_ids})
     for batch in batches.values():
         allocations=batch['allocations']
         reversed_count=sum(a['reversed'] for a in allocations)
-        complete=sum(cents(a['amount']) for a in allocations)==cents(batch['amount'])
+        batch['originalAmount'] = batch['amount']
+        batch['amount'] = amount(sum(cents(a['amount']) for a in allocations))
+        complete = True
         batch['status']='reversed' if reversed_count==len(allocations) else 'partial_reversal' if reversed_count else 'recorded'
-        batch['canReverse']=not reversed_count and complete and all(a['caseStatus'] in ('posted','closed') for a in allocations)
+        batch['canReverse']=not reversed_count and complete and all((a['caseStatus'] in ('posted','closed') or (a['caseStatus'] == 'reversed' and a['source'] == 'claim')) and not a['amountEditLocked'] for a in allocations)
     return sorted(batches.values(),key=lambda b:str(b.get('createdAt') or ''),reverse=True)

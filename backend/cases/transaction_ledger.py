@@ -30,7 +30,7 @@ def transaction_rows(cases, shared=None):
                 "source": "claim" if tx.get("source") == "claim" else "premium",
                 "reconciliationRef": reconciliation_ref_for(payload, tx),
                 **cash.get(tx.get("txNo"), {"settlement":"not_tracked", "canRecord":False}),
-                "canRecord": case["status"] in ("posted", "closed") and cash.get(tx.get("txNo"), {}).get("canRecord", False),
+                "canRecord": (case["status"] in ("posted", "closed") or (case["status"] == "reversed" and tx.get("source") == "claim")) and cash.get(tx.get("txNo"), {}).get("canRecord", False),
                 **({"returnPremium": True} if payload.get("parentTwRef") and tx.get("source") != "claim"
                    and number_or_zero(payload.get("originalPremium")) < 0 else {}),
             })

@@ -1,4 +1,4 @@
-"""Accountant confirmation, pre-clearance adjustments and same-policy offsets."""
+"""Manual Swiss statement references and same-policy premium offsets."""
 import copy
 import uuid
 
@@ -14,7 +14,9 @@ def swiss_action(view, request, body):
     if not _can_edit(request.ri_principal):
         return _error(403, 'permission_denied', 'Accounting write access is required.')
     action = body['action']
-    if action == 'record_swiss_offset':
+    if action in ('confirm_swiss_collection', 'unconfirm_swiss_collection', 'record_swiss_clearance'):
+        return _error(400, 'manual_transaction_workflow', 'Use individual transaction settlement. Bank fees and shortfalls are handled outside this system.')
+    if action in ('record_swiss_offset', 'record_premium_offset'):
         return _offset(view, request, body)
     case = view._load_case_for_update(str(body.get('caseUid') or ''))
     if not case:
@@ -38,37 +40,11 @@ def swiss_action(view, request, body):
         state = {}; payload['swissAccounting'] = state
     key = item['scheduleKey']
     metadata = {'operation': action, 'scheduleKey': key}
-    if action in ('confirm_swiss_collection', 'unconfirm_swiss_collection'):
-        if not item.get('requiresCollectionConfirmation'):
-            return _error(400, 'confirmation_not_required', 'Select a Cedant premium receipt or Reinsurer refund receipt.')
-        if action == 'confirm_swiss_collection' and abs(item['outstanding']) > .004:
-            return _error(400, 'ledger_not_cleared', 'Record all receipts, fees or shortfall clearance before confirming collection.')
-        if 'confirmedAt' in body or 'confirmationDate' in body:
-            return _error(400, 'confirmation_date_locked', 'Confirmation uses the actual system date in Taiwan and cannot be backdated.')
-        confirmations = state.setdefault('confirmations', {})
-        previous = confirmations.get(key, {})
-        state.setdefault('confirmationHistory', []).append({'scheduleKey': key, **previous, 'changedAt': now, 'changedBy': actor['id']})
-        confirmations[key] = {'confirmed': action == 'confirm_swiss_collection', 'confirmedAt': now,
-                              'fingerprint': fingerprint(payload, key), 'source': 'manual', 'confirmedBy': actor['id']}
-    elif action == 'record_swiss_clearance':
-        if not item.get('requiresCollectionConfirmation') or abs(item['outstanding']) < .005:
-            return _error(400, 'clearance_not_allowed', 'Only an outstanding incoming premium or refund can receive a clearance adjustment.')
-        try:
-            value = cents(body.get('amount'))
-            if value <= 0 or value > abs(cents(item['outstanding'])):
-                raise ValueError()
-        except (ValueError, TypeError):
-            return _error(400, 'invalid_clearance', 'Enter a positive clearance amount within the outstanding balance.')
-        kind = body.get('clearingType')
-        reason = str(body.get('note') or '').strip()[:1000]
-        if kind not in ('bank_fee', 'shortfall') or not reason:
-            return _error(400, 'clearance_reason_required', 'Select bank fee or shortfall and enter its reason.')
-        entry = _entry(item, value, taipei_date(now), now, actor, kind, reason)
-        payload.setdefault('paymentEntries', []).append(entry)
-        metadata['paymentEntryId'] = entry['id']
-    elif action == 'mark_swiss_statement':
+    if action == 'mark_swiss_statement':
         if not item.get('swissFacility') or item['amount'] <= 0 or not item.get('dueDate'):
             return _error(400, 'statement_not_allowed', 'Select a Swiss premium payable with a settlement date.')
+        if not item.get('collectionConfirmed'):
+            return _error(409, 'cedant_settlement_required', 'Settle the entire Cedant installment before entering the Swiss statement reference.')
         reference = str(body.get('reference') or '').strip()[:200]
         if not reference:
             return _error(400, 'statement_reference_required', 'Enter the settlement statement reference.')
@@ -106,25 +82,38 @@ def _offset(view, request, body):
         return _error(409, 'version_conflict', 'A selected case changed. Refresh Accounting and try again.')
     if original.parent_case_id or refund.parent_case_id != original.pk or refund.case_kind != 'endorsement':
         return _error(400, 'same_policy_required', 'Offset only the original policy and its own refund endorsement.')
-    if not applies(original.payload) or not applies(refund.payload) or original.currency != refund.currency:
-        return _error(400, 'offset_scope_required', 'Both cases must be Swiss Facility Property in the same currency.')
+    if original.currency != refund.currency:
+        return _error(400, 'offset_scope_required', 'Both cases must use the same currency.')
     schedules = [build_payment_schedule(case_payload(c))['items'] for c in [original, refund]]
     selected = [next((i for i in items if i['scheduleKey'] == key), None) for items, key in zip(schedules, [body.get('originalKey'), body.get('refundKey')])]
     if not all(selected):
         return _error(400, 'schedule_not_found', 'Select an existing premium and corresponding refund.')
     premium, returned = selected
+    from .cash_ledger import _matches
+    for case, item in zip([original, refund], selected):
+        posted = [t for t in objects(case.payload.get('transactions'))
+                  if t.get('source') != 'claim' and not t.get('reversed') and not t.get('isReversalEntry')]
+        if not any(_matches(item, t) for t in posted):
+            return _error(400, 'posted_obligation_required', 'Close Production and create both premium obligations before offsetting.')
     if (premium['amount'] <= 0 or returned['amount'] >= 0 or premium['partyType'] != returned['partyType']
-            or (premium['partyType'] == 'reinsurer' and not (premium.get('swissFacility') and returned.get('swissFacility')))
             or premium['partyName'].strip().casefold() != returned['partyName'].strip().casefold()):
-        return _error(400, 'invalid_offset_pair', 'Select matching Cedant entries or matching Swiss entries.')
+        return _error(400, 'invalid_offset_pair', 'Select matching Cedant entries or matching reinsurer entries.')
     swiss_dates = []
-    for items, item in zip(schedules, selected):
-        dates = {i['dueDate'] for i in items if i.get('swissFacility') and i['installmentId'] == item['installmentId']}
-        if len(dates) != 1 or not next(iter(dates)):
-            return _error(400, 'swiss_period_required', 'Both entries require one identifiable Swiss settlement period.')
-        swiss_dates.append(next(iter(dates)))
-    if swiss_dates[0] != swiss_dates[1]:
-        return _error(400, 'cross_period_offset', 'Cross-period premiums and refunds must be received and paid separately.')
+    if applies(original.payload) or applies(refund.payload):
+        if not (applies(original.payload) and applies(refund.payload)):
+            return _error(400, 'offset_scope_required', 'Swiss offsets require two Swiss policies.')
+        for items, item in zip(schedules, selected):
+            dates = {i['dueDate'] for i in items if i.get('swissFacility') and i['installmentId'] == item['installmentId']}
+            if len(dates) != 1 or not next(iter(dates)):
+                return _error(400, 'swiss_period_required', 'Both entries require one identifiable Swiss settlement period.')
+            swiss_dates.append(next(iter(dates)))
+        if swiss_dates[0] != swiss_dates[1]:
+            return _error(400, 'cross_period_offset', 'Receive and pay cross-period premiums and refunds separately.')
+    else:
+        swiss_dates = ['', '']
+    if not premium.get('contractDueDate') or not returned.get('contractDueDate'):
+        return _error(400, 'terms_pending_review', 'Complete the independent payment terms before offsetting.')
+    # Both-ended Swiss netting must never bypass the collection prerequisites.
     if value != abs(cents(returned['outstanding'])) or value > abs(cents(premium['outstanding'])):
         return _error(400, 'invalid_offset_amount', 'Offset the entire refund balance without exceeding the original premium balance.')
     if premium['partyType'] == 'reinsurer' and premium.get('paymentAllowed') is False:
@@ -140,7 +129,7 @@ def _offset(view, request, body):
     now, offset_id = _iso_now(), str(uuid.uuid4())
     for case, item, other in zip([original, refund], selected, [refund, original]):
         payload = case_payload(case)
-        entry = _entry(item, value, body['paymentDate'], now, actor, 'offset', str(body.get('note') or 'Same-policy, same-period premium/refund offset')[:1000])
+        entry = _entry(item, value, body['paymentDate'], now, actor, 'offset', str(body.get('note') or 'Same-policy premium/refund offset')[:1000])
         entry.update(offsetId=offset_id, offsetCaseUid=str(other.case_uid), settlementDueDate=swiss_dates[0])
         payload.setdefault('paymentEntries', []).append(entry)
         view._save(request, {'rowVersion': case.row_version}, case, payload, 'record_swiss_offset', {'offsetId': offset_id})

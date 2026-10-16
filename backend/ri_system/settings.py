@@ -32,9 +32,8 @@ RESULT_CACHE_ENABLED = os.getenv("RI_RESULT_CACHE", "true").lower() == "true"
 RESULT_CACHE_TTL_SECONDS = int(os.getenv("RI_RESULT_CACHE_TTL", "60"))
 # 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
 DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
-# 提醒信（Signed Slip #10、付款 #9）：SMTP 尚未決定，VM 目前「不寄信」——提醒照常產生，記成 suppressed（reminders/runner.py）。
-# 決定 SMTP 後設定 RI_EMAIL_*（伺服器），再把 RI_EMAIL_ENABLED 設為 true（提醒信與忘記密碼一起啟用）。文件 API 的 signedSlipReminder.outboundEnabled 也據此如實回報。
-# 寄信的總開關（提醒信與忘記密碼共用）：RI_EMAIL_ENABLED；舊名 RI_REMINDER_EMAIL_ENABLED、RI_SIGNED_SLIP_OUTBOUND_ENABLED 仍可用
+# Signed Slip／忘記密碼沿用 RI_EMAIL_ENABLED；舊名仍相容。
+# 財務到期提醒另用 RI_PAYMENT_REMINDER_ENABLED + 已配置 SMTP（見下方），不連動其他寄信流程。
 EMAIL_ENABLED = os.getenv("RI_EMAIL_ENABLED", os.getenv("RI_REMINDER_EMAIL_ENABLED", os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false"))).lower() == "true"
 REMINDER_EMAIL_ENABLED = EMAIL_ENABLED
 SIGNED_SLIP_OUTBOUND_ENABLED = EMAIL_ENABLED
@@ -49,6 +48,13 @@ EMAIL_BACKEND = os.getenv("RI_EMAIL_BACKEND", "django.core.mail.backends.smtp.Em
 EMAIL_HOST = os.getenv("RI_EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.getenv("RI_EMAIL_PORT", "25"))
 EMAIL_USE_TLS = os.getenv("RI_EMAIL_USE_TLS", "false").lower() == "true"
+EMAIL_USE_SSL = os.getenv("RI_EMAIL_USE_SSL", "false").lower() == "true"
+EMAIL_HOST_USER = os.getenv("RI_EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = (read_secret("RI_EMAIL_PASSWORD_FILE", "") if os.getenv("RI_EMAIL_PASSWORD_FILE")
+                       else os.getenv("RI_EMAIL_HOST_PASSWORD", ""))
+PAYMENT_REMINDER_REQUESTED = os.getenv("RI_PAYMENT_REMINDER_ENABLED", "false").lower() == "true"
+PAYMENT_SMTP_READY = bool(os.getenv("RI_EMAIL_HOST")) and not (EMAIL_USE_SSL and EMAIL_USE_TLS)
+PAYMENT_REMINDER_EMAIL_ENABLED = PAYMENT_REMINDER_REQUESTED and PAYMENT_SMTP_READY
 EMAIL_TIMEOUT = 30
 DEFAULT_FROM_EMAIL = os.getenv("RI_EMAIL_FROM", "ri-system@tw-insure.com")
 EMAIL_FILE_PATH = os.getenv("RI_EMAIL_FILE_PATH", "/tmp/ri-mail")   # 只有 filebased 後端（畫面測試）會用到

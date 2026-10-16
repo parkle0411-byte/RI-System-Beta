@@ -71,6 +71,7 @@ onMounted(loadDashboard)
 
 <template>
 <div class="rdash" v-loading="dashboardLoading">
+  <el-alert v-if="dashboard.metrics?.accountingTotalIncomplete" type="warning" :closable="false" show-icon title="Accounting TWD totals are incomplete — posting-month FX required" :description="dashboard.metrics.missingPostingRates.map(item=>item.currency+' / '+(item.month||'posting month pending')).filter((v,i,a)=>a.indexOf(v)===i).join(', ')" />
   <div class="row3">
     <section class="card">
       <div class="card-head"><h3>Total Bound YTD</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
@@ -120,7 +121,7 @@ onMounted(loadDashboard)
       </svg>
     </div>
     <div v-else class="empty-note">No performance months yet.</div>
-    <div class="legend"><span class="legend-item"><i style="background:#AF2D41"></i>Current year</span><span class="legend-item"><i style="background:#5F5F5F"></i>Prior year</span><span class="legend-item"><i style="background:#4A3AA7"></i>Monthly target</span></div>
+    <p class="empty-note">Closed months use official Production amounts; other months are estimates. {{ (dashboard.brokerage?.labels||[]).map((month,index)=>month+': '+(dashboard.brokerage?.currentStatus?.[index]||'estimated')).join(' · ') }}</p><div class="legend"><span class="legend-item"><i style="background:#AF2D41"></i>Current year</span><span class="legend-item"><i style="background:#5F5F5F"></i>Prior year</span><span class="legend-item"><i style="background:#4A3AA7"></i>Monthly target</span></div>
   </section>
 
   <section class="card">
@@ -131,7 +132,7 @@ onMounted(loadDashboard)
       <div class="kpi"><div class="label">Open Quotes</div><div class="val">{{ dashboard.metrics?.openQuotes || 0 }}</div></div>
       <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val">{{ dashboard.metrics?.retentionRatio == null ? 'N/A' : formatAmount(dashboard.metrics.retentionRatio) }}<small v-if="dashboard.metrics?.retentionRatio != null">%</small></div></div>
       <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
-      <div class="kpi"><div class="label">Outstanding · Cedant / Reinsurer</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div></div>
+      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.accountingTotalIncomplete">Awaiting FX — subtotal only</small></div>
     </div>
   </section>
 

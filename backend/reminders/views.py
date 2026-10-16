@@ -57,5 +57,11 @@ class CaseRemindersView(NoStoreMixin, APIView):
             "alertKind": (e.metadata or {}).get("alertKind"), "error": (e.after_data or {}).get("error"),
         } for e in AuditLog.objects.filter(entity_type="case", entity_id=str(case.case_uid), action__in=list(CONFIG_ACTIONS))
                               .order_by("-occurred_at", "-id")[:60]]
-        return Response({"ok": True, "caseUid": str(case.case_uid), "emailEnabled": settings.REMINDER_EMAIL_ENABLED,
+        from .messages import resolve_recipients, finance_emails
+        from .runner import _people
+        people = _people('role_code')
+        contact = resolve_recipients(case.payload or {}, people, finance_emails(people))
+        if contact.get('missing'):
+            errors.insert(0, {'at': None, 'reminder': 'payment', 'alertDate': None, 'alertKind': 'contact_missing', 'error': ' '.join(contact['missing'])})
+        return Response({"ok": True, "caseUid": str(case.case_uid), "emailEnabled": settings.PAYMENT_REMINDER_EMAIL_ENABLED, "paymentEmailRequested": settings.PAYMENT_REMINDER_REQUESTED, "smtpReady": settings.PAYMENT_SMTP_READY,
                          "signedSlip": slip, "payment": payment, "configurationErrors": errors})

@@ -168,7 +168,7 @@ class ProductionReportView(NoStoreMixin, APIView):
         preview = state["preview"]
         return Response(json_roundtrip({
             "ok": True, "displayVersion": DISPLAY_VERSION, "month": month, "headers": calc.PRODUCTION_REPORT_HEADERS,
-            "rows": preview["rows"], "excluded": preview["excluded"], "sourceSignature": preview["sourceSignature"],
+            "rows": preview["rows"], "excluded": preview["excluded"], "accountingRows": preview.get("accountingRows", []), "sourceSignature": preview["sourceSignature"],
             "versions": [report_view(r) for r in state["reports"]],
             "summary": summary(preview),
             "scope": {
@@ -306,7 +306,7 @@ class ProductionReportView(NoStoreMixin, APIView):
             return _error(409, "source_changed", "Production source data changed. Generate a new version before closing.")
 
         rows_by_case = {}
-        for row in (report.rows if is_array(report.rows) else []):
+        for row in [*(report.rows if is_array(report.rows) else []), *state["preview"].get("accountingRows", [])]:
             rows_by_case.setdefault(js_to_number(get(row, "caseId")), []).append(row)
         sources = {float(s["id"]): s for s in state["sources"]}
         cases = {float(c.pk): c for c in state["cases"]}
@@ -316,7 +316,7 @@ class ProductionReportView(NoStoreMixin, APIView):
             if source is None:
                 return _error(409, "case_changed", "A case in this report is no longer available.")
             try:
-                result = confirm_case(source, report_rows)
+                result = confirm_case(source, report_rows, posting_month=month)
             except TransactionsCorrupt:
                 return _error(409, "transactions_corrupt",
                               "The transaction records of a case in this report are damaged (an empty entry was found). Contact the system administrator.")
@@ -352,7 +352,7 @@ class ProductionReportView(NoStoreMixin, APIView):
                 request_id = request_id_from(request)
                 for case, source, result in plans:
                     locked = Case.objects.select_for_update().filter(
-                        pk=case.pk, row_version=source["row_version"], status__in=("posted", "reversed"),
+                        pk=case.pk, row_version=source["row_version"], status__in=("posted", "reversed", "closed"),
                         recycled_at__isnull=True, is_archived=False).first()
                     if locked is None:
                         raise _Conflict()

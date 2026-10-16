@@ -142,16 +142,8 @@ def allocate(total, installments):
     if total_weight <= 0:
         total_weight = float(len(installments))
         weights = [1.0] * len(installments)
-    used = 0.0
-    result = []
-    last = len(installments) - 1
-    for index, _row in enumerate(installments):
-        if index == last:
-            result.append(money(total - used))
-        else:
-            amount = money(total * weights[index] / total_weight)
-            used = money(used + amount)
-            result.append(amount)
+    result = [money(total * weight / total_weight) for weight in weights]
+    result[0] = money(result[0] + money(total - sum(result)))
     return result
 
 
@@ -208,16 +200,14 @@ def _resolved_terms(case_data, installment, reinsurer, reinsurer_index):
     key = "r" + str(reinsurer_index + 1)
     raw = get(installment, "reinsurerPaymentTerms")
     mapping = raw if (js_truthy_object(raw)) else {}
-    for candidate in (
-        get(mapping, key) if isinstance(mapping, dict) else UNDEFINED,
-        get(reinsurer, "paymentTermsDays"),
-        get(installment, "paymentTermsDays"),
-        get(case_data, "paymentTermsDays"),
-    ):
-        terms = valid_terms(candidate)
-        if terms is not None:
-            return terms
-    return None
+    from .swiss_facility import is_swiss_facility
+    if is_auw_reinsurer(get(reinsurer, "name")):
+        return AUW_PAYMENT_TERMS_DAYS
+    if is_swiss_facility(get(reinsurer, "name")):
+        return 90
+    if get(case_data, "installmentEnabled") is True:
+        return valid_terms(get(mapping, key))
+    return valid_terms(get(reinsurer, "paymentTermsDays"))
 
 
 def _or_zero(value):
@@ -256,8 +246,7 @@ def _status_for(due_date, outstanding, paid, today, now):
     if delta is not None and delta > 0:
         return "overdue"
     if delta == 0:
-        time = _as_utc(now).astimezone(TAIPEI).strftime("%H:%M")
-        return "overdue" if time > "12:00" else "due_today"
+        return "due_today"
     return "partially_paid" if paid > 0.004 else "upcoming"
 
 
@@ -294,8 +283,6 @@ def build_payment_schedule(case_data, now=None):
             return {}
         return {"returnPremium": True, "paymentDirection": "payable" if party_type == "cedant" else "receivable"}
 
-    if valid_terms(get(case_data, "paymentTermsDays")) is None:
-        issues.append("Case Payment Terms must be at least 15 calendar days.")
 
     for installment_index, installment in enumerate(installments):
         base_date = installment["baseDate"] if valid_date(installment["baseDate"]) else ""
@@ -303,27 +290,16 @@ def build_payment_schedule(case_data, now=None):
             issues.append(installment["label"] + ": payment base date is required.")
 
         resolved = [_resolved_terms(case_data, installment, r, i) for i, r in enumerate(reinsurers)]
-        all_terms = [t for t in resolved if t is not None]
-        if len(all_terms) < len(resolved):
-            issues.append(installment["label"] + ": Cedant due date calculation excludes Reinsurer(s) with invalid Payment Terms.")
-        if all_terms:
-            cedant_terms = js_min(*all_terms)
-        else:
-            cedant_terms = valid_terms(get(installment, "paymentTermsDays"))
-            if cedant_terms is None:
-                cedant_terms = valid_terms(get(case_data, "paymentTermsDays"))
-        # New cases use the Cedant's own contract terms. AUW's fixed 120-day
-        # settlement must never become the Cedant's collection term. Ordinary
-        # historical payloads retain their previous minimum-reinsurer rule.
-        if get(case_data, "cedantTermsBasis") == "case" or any(is_auw_reinsurer(get(r, "name")) for r in reinsurers):
-            cedant_terms = valid_terms(get(installment, "paymentTermsDays"))
-            if cedant_terms is None:
-                cedant_terms = valid_terms(get(case_data, "paymentTermsDays"))
+        from ..accounting_rules import period_terms
+        from .swiss_facility import applies as swiss_applies
+        cedant_terms = 90 if swiss_applies(case_data) else period_terms(case_data, installment)
+        if cedant_terms is None:
+            issues.append(installment["label"] + ": Cedant collection days must be explicitly entered (at least 15).")
         cedant_base = base_date
-        cedant_rule = {}
+        cedant_rule = {"contractDueDate": add_calendar_days(cedant_base, cedant_terms) if cedant_base and cedant_terms is not None else "", "accountingLeadDays": 15}
         if js_truthy(get(case_data, "parentTwRef")) and get(case_data, "installmentEnabled") is not True:
             cedant_base = endorsement_base_date(case_data)
-            cedant_terms = valid_terms(get(case_data, "paymentTermsDays"))
+            cedant_terms = 90 if swiss_applies(case_data) else valid_terms(get(case_data, "paymentTermsDays"))
             cedant_rule = {"paymentRule": "endorsement_later_announce_effective",
                            "contractDueDate": add_calendar_days(cedant_base, cedant_terms) if cedant_base and cedant_terms is not None else "",
                            "accountingLeadDays": 15}
@@ -336,8 +312,7 @@ def build_payment_schedule(case_data, now=None):
         items.append({
             "scheduleKey": cedant_key, "installmentId": installment["id"], "installmentLabel": installment["label"],
             "partyType": "cedant", "partyKey": "cedant",
-            "partyName": js_to_string(js_or(get(case_data, "reinsured"), get(case_data, "reinsuredName"), get(case_data, "cedantName"), "Cedant"))
-                         if cedant_amount < 0 else js_to_string(js_or(get(case_data, "reinsuredName"), get(case_data, "cedantName"), "Cedant")),
+            "partyName": js_to_string(js_or(get(case_data, "reinsured"), get(case_data, "reinsuredName"), get(case_data, "cedantName"), "Cedant")),
             "currency": js_to_string(js_or(get(case_data, "currency"), "")), "baseDate": cedant_base, "termsDays": cedant_terms,
             "dueDate": cedant_due, "dueTime": "12:00", "amount": cedant_amount, "paid": cedant_paid,
             "outstanding": cedant_outstanding, "status": _status_for(cedant_due, abs(cedant_outstanding), abs(cedant_paid), today, now),
@@ -376,6 +351,8 @@ def build_payment_schedule(case_data, now=None):
                     if not row_base_date:
                         issues.append(installment["label"] + ": ordinary Reinsurer payment base date requires a valid endorsement effective date and, for payables, Announce.")
                 due_date = add_calendar_days(row_base_date, terms - 10) if row_base_date and terms is not None else ""
+            rule_fields.setdefault("contractDueDate", add_calendar_days(row_base_date, terms) if row_base_date and terms is not None else "")
+            rule_fields.setdefault("accountingLeadDays", 10)
             items.append({
                 "scheduleKey": key, "installmentId": installment["id"], "installmentLabel": installment["label"],
                 "partyType": "reinsurer", "partyKey": "r" + str(reinsurer_index + 1),
@@ -391,6 +368,12 @@ def build_payment_schedule(case_data, now=None):
 
     from .swiss_facility import apply_schedule
     items = apply_schedule(case_data, items, now)
+    for item in items:
+        item["fullPaymentRequired"] = True
+        item["dueTime"] = ""
+        item["status"] = _status_for(item.get("contractDueDate", ""), abs(item["outstanding"]), abs(item["paid"]), today, now)
+        if item["status"] == "upcoming" and item.get("dueDate") and today >= item["dueDate"]:
+            item["status"] = "reminder"
     from ..facility_accounting import apply_schedules
     items = apply_schedules(case_data, items)
 

@@ -21,7 +21,7 @@ def defer_closed_production(case, actor, request_id=None):
     deferred = []
     for month in sorted(months & closed):
         preview = calc.build_production_preview([source], month, {}, [])
-        keys = sorted({row['key'] for row in preview['rows']})
+        keys = sorted({row['key'] for row in [*preview['rows'], *preview.get('accountingRows', [])]})
         if not keys:
             continue
         candidate = month

@@ -561,7 +561,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         if not _filled(get(row, "lossPaid")):
             add(f"lossRecord.{index}.lossPaid", f"Loss {n} Loss Paid")
 
-    for field, label in (("originalPremium", "100% Premium"), ("paymentTermsDays", "Payment terms")):
+    for field, label in (("originalPremium", "100% Premium"),):
         if not _filled(get(value, field)):
             add(field, label)
     if _filled(get(value, "paymentTermsDays")) and js_to_number(get(value, "paymentTermsDays")) < 15:

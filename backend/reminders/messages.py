@@ -78,7 +78,7 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
     reference = tw_ref if js_truthy(tw_ref) else "Case #" + _s(get(case_data, "id"))
     rows = []
     for item in items:
-        amount = to_locale_2(js_or(get(item, "outstanding"), 0))
+        amount = to_locale_2(abs(js_to_number(js_or(get(item, "outstanding"), 0))))
         if get(item, "returnPremium") is True:
             direction = "應退分保人" if get(item, "paymentDirection") == "payable" else "應向再保人／再保經紀人收回"
             amount = direction + " " + amount
@@ -87,7 +87,8 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
         elif get(item, 'swissFacility') is True:
             timing = f"Swiss結算日 {_s(get(item, 'dueDate'))} (Taiwan)"
         else:
-            timing = f"{_s(get(item, 'dueDate'))} 12:00 (Taiwan)"
+            timing = f"{_s(get(item, 'dueDate'))} (Taiwan)"
+        amount = ("應收 " if get(item, "paymentDirection") == "receivable" else "應付 ") + amount
         rows.append(f"{_s(get(item, 'installmentLabel'))} · {_s(get(item, 'partyName'))} · {_s(get(item, 'currency'))} {amount} · " + timing)
     heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') == 'swiss_cedant_75_90' for i in items) else label(kind))
     return {
@@ -108,55 +109,46 @@ def _name_matches(case_data, personnel):
 
 def resolve_recipients(case_data, personnel, finance_emails):
     ae, error = _name_matches(case_data, personnel)
+    missing, recipients = [], []
     if error:
-        return {"error": error}
-    ae_email = js_lower(js_trim(_or_text(get(ae, "email"))))
-    supervisor_name = js_trim(_or_text(get(ae, "supervisor_name")))
-    supervisor_email = js_lower(js_trim(_or_text(get(ae, "supervisor_email"))))
-    if not valid_email(ae_email) or not supervisor_name or not valid_email(supervisor_email):
-        return {"error": "AE or supervisor contact fields are incomplete or invalid."}
+        missing.append(error)
+    else:
+        for field, label_ in [('email', 'AE email'), ('supervisor_email', 'AE supervisor email')]:
+            value = js_lower(js_trim(_or_text(get(ae, field))))
+            if valid_email(value):
+                recipients.append(value)
+            else:
+                missing.append(label_ + ' is missing or invalid.')
+    recipients.extend(finance_emails)
     if not finance_emails:
-        return {"error": "No active Finance Staff or Finance Manager has a valid e-mail."}
-    return {"recipients": list(dict.fromkeys([ae_email, supervisor_email, *finance_emails]))}
+        missing.append('No active Finance Staff has a valid email.')
+    result = {'recipients': list(dict.fromkeys(recipients)), 'missing': missing}
+    if not result['recipients']:
+        result['error'] = 'No valid designated internal reminder recipients. ' + ' '.join(missing)
+    return result
 
 
 def finance_emails(personnel):
     return [row.get("email") for row in personnel
-            if js_lower(_or_text(get(row, "role_code"))) in ("accounting", "accounting_manager") and valid_email(row.get("email"))]
+            if js_lower(_or_text(get(row, "role_code"))) in ("accounting",) and valid_email(row.get("email"))]
 
 
 def due_kind(item, today, success_dates):
-    due_date = get(item, "dueDate") if isinstance(item, dict) else UNDEFINED
-    outstanding = get(item, "outstanding") if isinstance(item, dict) else UNDEFINED
-    if isinstance(item, dict) and item.get("returnPremium") is True:
-        outstanding = abs(js_to_number(outstanding))
-    if not js_truthy(due_date) or _le(outstanding, 0.004):
-        return ""
-    days = days_between_dates(today, due_date)
-    if days is None:
-        return ""
-    if item.get('paymentRule') == 'swiss_cedant_75_90':
-        contract = item.get('contractDueDate')
-        if contract and today > contract:
-            last = get(success_dates, 'weekly_overdue')
-            return 'weekly_overdue' if not js_truthy(last) or today >= add_calendar_days(last, 7) else ''
-        if 1 <= days <= 7 and not js_truthy(get(success_dates, 'seven_days_before')):
-            return 'seven_days_before'
-        if -6 <= days <= 0 and not js_truthy(get(success_dates, 'due_today')):
-            return 'due_today'
+    due_date = item.get('contractDueDate') or item.get('dueDate')
+    if not due_date or abs(js_to_number(item.get('outstanding') or 0)) <= .004:
         return ''
-    sd = lambda k: get(success_dates, k)
-    truthy = js_truthy
-    if 1 <= days <= 7 and not truthy(sd("seven_days_before")):
-        return "seven_days_before"
-    if -6 <= days <= 0 and not truthy(sd("due_today")) and not truthy(sd("weekly_overdue")):
-        return "due_today"
+    days = days_between_dates(today, due_date)
+    if days is None or days != days:
+        return ''
+    if days == 7 and not success_dates.get('seven_days_before'):
+        return 'seven_days_before'
+    if days == 0 and not success_dates.get('due_today'):
+        return 'due_today'
     if days < 0:
-        anchor = sd("weekly_overdue") if truthy(sd("weekly_overdue")) else due_date
-        due_since = add_calendar_days(anchor, 7)
-        if due_since and _s(today) >= due_since:
-            return "weekly_overdue"
-    return ""
+        anchor = success_dates.get('weekly_overdue') or due_date
+        if today >= add_calendar_days(anchor, 7):
+            return 'weekly_overdue'
+    return ''
 
 
 def _le(value, limit):

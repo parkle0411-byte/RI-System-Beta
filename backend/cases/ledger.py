@@ -32,12 +32,13 @@ def ledger_rows(cases, now=None, shared=None):
             cedant = item["partyType"] == "cedant"
             rows.append({
                 "key": c["caseUid"] + ":" + item["scheduleKey"],
-                "caseUid": c["caseUid"], "caseRowVersion": c["rowVersion"],
+                "caseUid": c["caseUid"], "rootCaseUid": c.get("rootCaseUid", c["caseUid"]), "caseRowVersion": c["rowVersion"],
                 **manual_tw_ref_fields(payload),
                 "twRef": c["twRef"], "caseStatus": c["status"], "announcedAt": c["announcedAt"],
                 "source": "premium", "scheduleKey": item["scheduleKey"],
                 "installmentId": item["installmentId"], "installmentLabel": item["installmentLabel"],
-                "partyType": item["partyType"], "partyName": item["partyName"],
+                "partyType": item["partyType"], "partyName": item["partyName"], "partyKey": item["partyKey"],
+                "contractDueDate": item.get("contractDueDate", ""), "fullPaymentRequired": True,
                 "legType": "Cedant" if cedant else "Reinsurer",
                 "reinsured": c["reinsured"],
                 "reinsurer": item["partyName"] if item["partyType"] == "reinsurer" else "",
@@ -66,7 +67,7 @@ def ledger_rows(cases, now=None, shared=None):
             amount = js_to_number(js_or(get(tx, "amount"), 0))
             rows.append({
                 "key": c["caseUid"] + ":" + js_to_string(get(tx, "txNo")),
-                "caseUid": c["caseUid"], "caseRowVersion": c["rowVersion"],
+                "caseUid": c["caseUid"], "rootCaseUid": c.get("rootCaseUid", c["caseUid"]), "caseRowVersion": c["rowVersion"],
                 **manual_tw_ref_fields(payload),
                 "twRef": c["twRef"], "caseStatus": c["status"], "announcedAt": c["announcedAt"],
                 "source": "claim", "txNo": _text(get(tx, "txNo")),

@@ -11,7 +11,7 @@ from .models import Case
 def apply_endorsement_terms(payload, root, *, announced_at=None):
     """The original policy owns Cedant days; the server owns Announce time."""
     from .calc.swiss_facility import applies as swiss_applies
-    payload["paymentTermsDays"] = 90 if swiss_applies(payload) else (root.payload or {}).get("paymentTermsDays")
+    payload["paymentTermsDays"] = 90 if swiss_applies(payload) else payload.get("paymentTermsDays")
     payload["cedantTermsBasis"] = "case"
     payload["installmentEnabled"] = False
     payload["performanceInstallments"] = []

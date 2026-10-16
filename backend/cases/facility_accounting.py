@@ -64,9 +64,7 @@ def apply_schedules(payload, items):
             continue
         cleared = abs(item['outstanding']) < .005
         fingerprint = schedule_signature(payload, item)
-        # Swiss Confirm collected is already an explicit, current accountant action.
-        collected = bool(item.get('requiresCollectionConfirmation') and item.get('collectionConfirmed'))
-        confirmed = cleared and (collected or is_confirmed(payload, 'schedule:' + item['scheduleKey'], fingerprint))
+        confirmed = cleared and is_confirmed(payload, 'schedule:' + item['scheduleKey'], fingerprint)
         item.update(manualSettlementRequired=True, manualSettlementConfirmed=confirmed,
                     canConfirmSettlement=cleared and not confirmed,
                     settlement='settled' if confirmed else 'pending_confirmation' if cleared else 'partial' if abs(item['paid']) > .004 else 'open')
@@ -107,16 +105,18 @@ def apply_transactions(payload, details, schedule_items=None):
             cleared = abs(detail['outstanding']) < .005
         fingerprint = tx_signature(detail)
         schedule_keys = [p['scheduleKey'] for p in detail.get('cashParts', [])]
-        schedule_confirmed = (not derived and bool(schedule_keys) and
-                              all(schedule.get(key, {}).get('manualSettlementConfirmed') for key in schedule_keys))
-        confirmed = cleared and (is_confirmed(payload, 'tx:' + no, fingerprint) or
-                                 schedule_confirmed)
+        confirmed = cleared and is_confirmed(payload, 'tx:' + no, fingerprint)
         state = state_for(payload, 'tx:' + no)
         detail.update(manualSettlementRequired=True, manualSettlementConfirmed=confirmed,
                       canConfirmSettlement=cleared and not confirmed, settlementFingerprint=fingerprint,
                       settlementConfirmedAt=(state.get('confirmedAt', '') or max((state_for(payload, 'schedule:' + key).get('confirmedAt', '') or schedule.get(key, {}).get('collectionConfirmedAt', '') for key in schedule_keys), default='')) if confirmed else '',
                       settlementConfirmedBy=state.get('confirmedByName', '') if confirmed else '',
                       settlementHistory=(payload.get('facilityAccounting') or {}).get('history', []))
+        from .accounting_rules import finalized, settled_once
+        detail['canCancelSettlement'] = confirmed and not finalized(payload, no)
+        detail['amountEditLocked'] = settled_once(payload, no)
+        detail['settlementFinalized'] = finalized(payload, no)
+        detail['paymentEditHistory'] = [h for h in objects(payload.get('paymentEditHistory')) if h.get('transactionNo') == no]
         detail['settlementHistory'] = [e for e in detail['settlementHistory'] if e.get('key') == 'tx:' + no]
         detail['settlement'] = 'settled' if confirmed else 'pending_confirmation' if cleared else 'partial' if abs(detail['paid']) > .004 else 'open'
         if confirmed and derived:
@@ -139,7 +139,9 @@ def settlement_action(view, request, body):
         return _error(404, 'case_not_found', 'Case not found.')
     locked = view._status_error(case, 'confirmed')
     if locked:
-        return locked
+        raw = next((t for t in objects(case.payload.get('transactions')) if t.get('txNo') == body.get('txNo')), {})
+        if case.status != 'reversed' or raw.get('source') != 'claim':
+            return locked
     if case.row_version != body.get('rowVersion'):
         return _error(409, 'version_conflict', 'This case changed. Refresh Accounting and try again.')
     payload = case_payload(case)
@@ -147,6 +149,8 @@ def settlement_action(view, request, body):
     # 2026-10-14：非文字的編號（陣列、數字…）回 400，不讓查表時出錯
     if any(value is not None and not isinstance(value, str) for value in (no, schedule_key)):
         return _error(400, 'invalid_settlement_target', 'Select one transaction or schedule entry.')
+    if schedule_key:
+        return _error(400, 'individual_transaction_required', 'Settle each posted transaction individually; no separate Swiss collection action is required.')
     if bool(no) == bool(schedule_key):
         return _error(400, 'invalid_settlement_target', 'Select one transaction or schedule entry.')
     if no:
@@ -159,9 +163,16 @@ def settlement_action(view, request, body):
         fingerprint = schedule_signature(payload, detail) if detail else None
     if not detail or not detail.get('manualSettlementRequired'):
         return _error(400, 'facility_scope_required', 'Select a current premium, claim or schedule entry.')
+    if 'confirmedAt' in body or 'confirmationDate' in body:
+        return _error(400, 'confirmation_date_locked', 'Settlement confirmation uses the actual operation time in Taiwan.')
     confirm = body['action'] == 'confirm_facility_settlement'
+    if confirm and detail.get('cashTracking') != 'derived' and not detail.get('contractDueDate'):
+        return _error(400, 'terms_pending_review', 'Confirm the contract days and due date before settlement.')
     if confirm and not detail.get('canConfirmSettlement'):
         return _error(400, 'settlement_not_ready', 'Clear the balance first; brokerage requires manually settled T1 and T2.')
+    from .accounting_rules import finalized
+    if not confirm and no and finalized(payload, no):
+        return _error(409, 'final_settlement_locked', 'T3 is final: the matching T1, T2 and T3 settlements cannot be cancelled.')
     if not confirm and not detail.get('manualSettlementConfirmed'):
         return _error(400, 'settlement_not_confirmed', 'This entry has no current settlement confirmation.')
     if not confirm and not no and detail.get('requiresCollectionConfirmation'):
@@ -175,23 +186,32 @@ def settlement_action(view, request, body):
              'confirmedAt': now, 'confirmedBy': actor['id'], 'confirmedByName': actor['name'], 'note': note}
     state.setdefault('confirmations', {})[key] = entry
     state.setdefault('history', []).append(copy.deepcopy(entry))
-    # The two Accounting views act on the same ledger, so explicit confirmation
-    # of a cleared cash transaction also confirms its fully cleared schedules.
+    if confirm and detail.get('cashTracking') == 'derived':
+        finalized = set(state.get('finalizedTransactions', []))
+        finalized.add(no)
+        finalized.update(d['txNo'] for d in detail.get('settlementDependencies', []))
+        state['finalizedTransactions'] = sorted(finalized)
+    # A schedule/Swiss collection is confirmed only when EVERY corresponding
+    # transaction was explicitly settled. One checkbox never settles another row.
     if no and detail.get('cashTracking') != 'derived':
-        items = {i['scheduleKey']: i for i in build_payment_schedule(payload)['items']}
-        for part in detail.get('cashParts', []):
-            item = items.get(part['scheduleKey'])
-            if not item or not schedule_scope(payload, item) or abs(item['outstanding']) >= .005:
+        from .cash_ledger import _matches
+        live = [t for t in objects(payload.get('transactions')) if t.get('source') != 'claim'
+                and not t.get('reversed') and not t.get('isReversalEntry')]
+        for item in build_payment_schedule(payload)['items']:
+            if item['scheduleKey'] not in {p['scheduleKey'] for p in detail.get('cashParts', [])}:
                 continue
-            schedule_entry = {**entry, 'key': 'schedule:' + item['scheduleKey'],
-                              'fingerprint': schedule_signature(payload, item)}
-            state['confirmations'][schedule_entry['key']] = schedule_entry
-            state['history'].append(copy.deepcopy(schedule_entry))
+            matched = [t for t in live if _matches(item, t)]
+            complete = (abs(item['outstanding']) < .005 and bool(matched) and
+                        all(state_for(payload, 'tx:' + t['txNo']).get('confirmed') for t in matched))
+            aggregate = {**entry, 'key': 'schedule:' + item['scheduleKey'], 'confirmed': complete,
+                         'fingerprint': schedule_signature(payload, item)}
+            state['confirmations'][aggregate['key']] = aggregate
+            state['history'].append(copy.deepcopy(aggregate))
             if item.get('requiresCollectionConfirmation'):
                 from .calc.swiss_facility import fingerprint as swiss_fingerprint
                 collection = payload.setdefault('swissAccounting', {}).setdefault('confirmations', {})
-                collection[item['scheduleKey']] = {'confirmed': confirm, 'confirmedAt': now,
-                                                   'confirmedBy': actor['id'], 'source': 'manual',
+                collection[item['scheduleKey']] = {'confirmed': complete, 'confirmedAt': now,
+                                                   'confirmedBy': actor['id'], 'source': 'manual settlement',
                                                    'fingerprint': swiss_fingerprint(payload, item['scheduleKey'])}
     payload.setdefault('paymentEntries', [])
     return view._save(request, body, case, payload, body['action'], {'settlementKey': key, 'note': note})

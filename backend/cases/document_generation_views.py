@@ -180,10 +180,10 @@ def _check_case(request, body):
         if isinstance(reinsurers, list) and any(not isinstance(row, dict) or not _text(row, "name") for row in reinsurers):
             return None, kind, _error(409, "reinsurer_name_required", "Complete the Reinsurer name for every Schedule of Security entry in the case before generating a Cover Note.")
     if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is not True:
-        default_valid = _valid_payment_terms(get(payload, "paymentTermsDays"))
         reinsurers = get(payload, "reinsurers")
-        if any(not _valid_payment_terms(get(row, "paymentTermsDays")) and not default_valid for row in reinsurers):
-            return None, kind, _error(409, "debit_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
+        from .calc.payment_terms import _resolved_terms
+        if any(not _valid_payment_terms(_resolved_terms(payload, {}, row, index)) for index, row in enumerate(reinsurers)):
+            return None, kind, _error(409, "debit_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) independently for every Reinsurer, before generating a Debit Note.')
     if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:
         installments = get(payload, "performanceInstallments")
         if not isinstance(installments, list) or not installments or any(not _valid_installment_base_date(get(row, "paymentBaseDate")) for row in installments):
@@ -191,12 +191,8 @@ def _check_case(request, body):
     if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:
         for installment in get(payload, "performanceInstallments"):
             for index, reinsurer in enumerate(get(payload, "reinsurers")):
-                sources = (
-                    get(get(installment, "reinsurerPaymentTerms"), f"r{index + 1}"),
-                    get(reinsurer, "paymentTermsDays"),
-                    get(installment, "paymentTermsDays"),
-                    get(payload, "paymentTermsDays"),
-                )
+                from .calc.payment_terms import _resolved_terms
+                sources = (_resolved_terms(payload, installment, reinsurer, index),)
                 if not any(_valid_payment_terms(value) for value in sources):
                     return None, kind, _error(409, "debit_installment_payment_terms_required", 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
     if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:

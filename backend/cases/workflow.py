@@ -131,6 +131,7 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     payload["statementNo"] = ""
     payload["claims"] = []
     payload["reinsurers"] = [{**js_spread(row), "premium": None, "settlementRef": ""} for row in _rows(payload.get("reinsurers"))]
+    payload["paymentTermsDays"] = None
     return payload
 
 
@@ -160,9 +161,12 @@ def build_reversed_payload(source_payload):
     payload = copy.deepcopy(source_payload)
     if any(t is None for t in _rows(payload.get("transactions"))):
         raise TransactionsCorrupt()
+    from .accounting_rules import premium_activity
+    if premium_activity(payload):
+        raise ValueError("Premium receipts, payments, offsets or settlement history prohibit Case Reverse. Use an endorsement.")
     payload["reversalCycle"] = js_number_out(js_to_number(js_or(payload.get("reversalCycle", UNDEFINED), 0)) + 1)
     payload["transactions"] = [
-        t if get(t, "isReversalEntry") is True else {**js_spread(t), "reversed": True}
+        t if get(t, "isReversalEntry") is True or get(t, "source") == "claim" else {**js_spread(t), "reversed": True}
         for t in _rows(payload.get("transactions"))
     ]
     payload["pendingReversalOffset"] = True

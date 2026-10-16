@@ -7,6 +7,61 @@ from .calc.payment_terms import taipei_date, build_payment_schedule
 from .calc.swiss_facility import payment_error, case_payload
 
 
+def edit_payment(view, request, body):
+    from .accounting_views import _can_edit, _error, _iso_now
+    from .accounting_rules import entry_locked, claim_balance_error
+    from ri_system.authz import actor_from
+    if not _can_edit(request.ri_principal):
+        return _error(403, 'permission_denied', 'Accounting write access is required.')
+    case = view._load_case_for_update(str(body.get('caseUid') or ''))
+    if not case:
+        return _error(404, 'case_not_found', 'Case not found.')
+    locked = view._status_error(case, 'edited')
+    if locked:
+        raw_entry = next((e for e in objects(case.payload.get('paymentEntries')) if e.get('id') == body.get('entryId')), {})
+        raw_tx = next((t for t in objects(case.payload.get('transactions')) if t.get('txNo') == raw_entry.get('transactionNo')), {})
+        if case.status != 'reversed' or raw_tx.get('source') != 'claim':
+            return locked
+    if case.row_version != body.get('rowVersion'):
+        return _error(409, 'version_conflict', 'Reload Accounting before editing this record.')
+    reason = str(body.get('reason') or '').strip()[:1000]
+    if not reason:
+        return _error(400, 'correction_reason_required', 'Enter the reason for changing the recorded amount.')
+    payload = case_payload(case)
+    entries = objects(payload.get('paymentEntries'))
+    entry = next((e for e in entries if e.get('id') == body.get('entryId')), None)
+    if (not entry or entry.get('entryType') != 'payment' or entry.get('nonCash') or
+            any(e.get('reversalOf') == entry.get('id') for e in entries)):
+        return _error(400, 'payment_not_editable', 'Select an active receipt/payment record.')
+    if entry_locked(payload, entry):
+        return _error(409, 'settled_amount_locked', 'Previously settled amounts remain locked even after cancelling settlement.')
+    detail = transaction_details(payload).get(entry.get('transactionNo'))
+    if not detail:
+        return _error(409, 'individual_transaction_required', 'Review the transaction mapping before editing a legacy payment.')
+    try:
+        value = cents(body.get('amount'))
+        before_amount = abs(cents(entry['amount']))
+        capacity = before_amount + abs(cents(detail['outstanding']))
+        if value <= 0 or value > capacity:
+            raise ValueError()
+    except (ValueError, TypeError):
+        return _error(400, 'invalid_payment', 'Enter a positive amount within the original obligation balance.')
+    if detail.get('fullPaymentRequired') and value != capacity:
+        return _error(400, 'full_premium_required', 'Premium receipts/payments must cover the complete balance.')
+    before = copy.deepcopy(entry)
+    entry['amount'] = amount(value * (-1 if cents(entry['amount']) < 0 else 1))
+    problem = claim_balance_error(payload)
+    if problem:
+        return _error(409, 'claim_collection_limit', problem)
+    actor = actor_from(request.ri_principal)
+    payload.setdefault('paymentEditHistory', []).append({
+        'entryId': entry['id'], 'transactionNo': entry.get('transactionNo'),
+        'before': before, 'after': copy.deepcopy(entry), 'reason': reason,
+        'changedAt': _iso_now(), 'changedBy': actor['id'], 'changedByName': actor['name'],
+    })
+    return view._save(request, body, case, payload, 'payment_amount_edited', {'entryId': entry['id'], 'reason': reason})
+
+
 def record_transaction_payments(view, request, body):
     from .accounting_views import _can_edit, _error, _real_date, _iso_now
     from ri_system.authz import actor_from
@@ -39,7 +94,8 @@ def record_transaction_payments(view, request, body):
         case=cases.get(row['caseUid'])
         if not case or case.recycled_at or case.is_archived:
             return _error(404,'case_not_found','Case not found.')
-        if case.status not in ('posted','closed'):
+        is_claim = any(t.get('txNo') == row['txNo'] and t.get('source') == 'claim' for t in objects(case.payload.get('transactions')))
+        if case.status not in ('posted','closed') and not (case.status == 'reversed' and is_claim):
             return _error(409,'accounting_status_locked','Only posted transactions can receive payments.')
         if case.row_version!=row['rowVersion']:
             return _error(409,'version_conflict','A selected case changed. Refresh Accounting and try again.')
@@ -85,6 +141,11 @@ def record_transaction_payments(view, request, body):
                 'createdAt':timestamp,'createdBy':actor['id'],'createdByName':actor['name'],
                 **({'settlementDueDate':schedule_dates[part['scheduleKey']]['dueDate']}
                    if schedule_dates.get(part['scheduleKey'],{}).get('swissFacility') and detail['amount'] > 0 else {})})
+    from .accounting_rules import claim_balance_error
+    for payload in payloads.values():
+        problem = claim_balance_error(payload)
+        if problem:
+            return _error(400, 'claim_collection_limit', problem)
     results=[]
     for uid,case in cases.items():
         view._save(request,{'rowVersion':case.row_version},case,payloads[uid],'record_payment',
@@ -115,7 +176,10 @@ def reverse_batch_payment(view, request, body):
         return _error(400,'incomplete_batch','Provide all affected case versions to reverse the whole remittance.')
     originals=[]
     for case in cases:
-        if case.is_archived or case.recycled_at or case.status not in ('posted','closed'):
+        batch_entries = [e for e in objects(case.payload.get('paymentEntries')) if e.get('batchId') == bid and e.get('entryType') == 'payment']
+        claims = {t['txNo'] for t in objects(case.payload.get('transactions')) if t.get('source') == 'claim'}
+        claim_only = bool(batch_entries) and all(e.get('transactionNo') in claims for e in batch_entries)
+        if case.is_archived or case.recycled_at or (case.status not in ('posted','closed') and not (case.status == 'reversed' and claim_only)):
             return _error(409,'accounting_status_locked','All affected cases must be active and posted.')
         if expected[str(case.case_uid)]!=case.row_version:
             return _error(409,'version_conflict','An affected case changed. Refresh and try again.')
@@ -124,9 +188,18 @@ def reverse_batch_payment(view, request, body):
         ids={e['id'] for e in payments}
         if any(e.get('entryType')=='reversal' and e.get('reversalOf') in ids for e in entries):
             return _error(409,'already_reversed','This remittance has already been reversed.')
+        from .accounting_rules import entry_locked
+        if any(entry_locked(case.payload, p) for p in payments):
+            return _error(409, 'settled_amount_locked', 'Previously settled receipt/payment amounts cannot be edited or reversed.')
+        probe = copy.deepcopy(case.payload)
+        probe.setdefault('paymentEntries', []).extend({**p, 'entryType': 'reversal'} for p in payments)
+        from .accounting_rules import claim_balance_error
+        problem = claim_balance_error(probe)
+        if problem:
+            return _error(409, 'claim_collection_limit', problem)
         originals.extend(payments)
-    if sum(abs(cents(e['amount'])) for e in originals)!=cents(originals[0]['batchAmount']):
-        return _error(409,'incomplete_batch','The complete remittance is required for reversal.')
+    if not str(body.get('note') or '').strip():
+        return _error(400, 'correction_reason_required', 'Enter the reason for reversing these receipt/payment records.')
     actor=actor_from(request.ri_principal);timestamp=_iso_now();reversal_batch=str(uuid.uuid4())
     for case in cases:
         payload=copy.deepcopy(case.payload)
