@@ -209,6 +209,7 @@ try:
         pt = copy.deepcopy(cur["payload"]); pt["reinsurers"][0]["paymentTermsDays"] = 60
         check("posted: changing a reinsurer's payment terms -> locked", code(put(sales, uid, cur["rowVersion"], pt)) == "payment_terms_locked")
         pt = copy.deepcopy(cur["payload"]); pt["installmentEnabled"] = True
+        pt["performanceInstallments"] = [{"id": "I1"}, {"id": "I2"}]
         check("posted: turning installments on -> locked", code(put(sales, uid, cur["rowVersion"], pt)) == "payment_terms_locked")
         pt = copy.deepcopy(cur["payload"]); pt["remark"] = "posted edit"
         r = put(sales, uid, cur["rowVersion"], pt)

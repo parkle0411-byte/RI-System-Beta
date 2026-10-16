@@ -23,6 +23,8 @@ from .calc.jsnum import (
     js_num_str, js_number_out, js_or, js_slice, js_to_number, js_to_string, js_trim, js_truthy, js_upper, json_roundtrip,
 )
 
+MINIMUM_INSTALLMENTS_MESSAGE = 'Premium Installments requires at least two installments. Turn it off for a single payment.'
+
 MAX_ROWS = 50
 STRUCTURE_SUFFIX = {
     "QS": "Facultative Reinsurance",
@@ -319,6 +321,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
         value["cedantTermsBasis"] = "case"
     value["installmentEnabled"] = get(inp, "installmentEnabled") is True
     value["performanceInstallments"] = performance_installments
+    if value["installmentEnabled"] and len(performance_installments) < 2:
+        errors.append(MINIMUM_INSTALLMENTS_MESSAGE)
     if allow_negative_premiums and (value["installmentEnabled"] or performance_installments):
         errors.append("Endorsements must use a single premium settlement; installments are not allowed.")
     if allow_negative_premiums and value["installmentEnabled"] and value["originalPremium"] is not None:
@@ -558,8 +562,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     if js_truthy(get(value, "installmentEnabled")):
         installment_rows = get(value, "performanceInstallments")
         installment_rows = installment_rows if is_array(installment_rows) else []
-        if not installment_rows:
-            add("performanceInstallments", "At least one Premium Installment")
+        if len(installment_rows) < 2:
+            add("performanceInstallments", MINIMUM_INSTALLMENTS_MESSAGE)
         else:
             for index, row in enumerate(installment_rows):
                 n = index + 1
