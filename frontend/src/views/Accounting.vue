@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiFetch } from '../api'
 import { can } from '../auth'
+import { recall, remember } from './accountingMemory'
 import { formatMoney, formatMoneyInput, parseMoneyInput, reportWriteError } from '../alpha/format'
 import { shell } from '../alpha/shell'
 import { displayTwRef } from '../alpha/manualTwRef'
@@ -16,6 +17,7 @@ const router=useRouter()
 const loading=ref(false), saving=ref(false), rows=ref([]), batches=ref([]), currencies=ref([]), canEdit=ref(false), selected=ref([])
 const filters=reactive({reference:'',party:'',currency:'',leg:'',settlement:'',source:'',from:'',to:''})
 const swissRows=ref([])
+const refreshing=ref(false), shownAt=ref('')
 const dataWarnings=ref([])
 const entryActions=ref(null)
 const paymentVisible=ref(false), historyRow=ref(null), batchVisible=ref(false), activeBatch=ref(null)
@@ -44,11 +46,21 @@ const statementAllowed=item=>item.swissFacility&&item.amount>0&&item.outstanding
 const hasEntryActions=row=>row.schedules?.some(item=>feeAllowed(item)||offsetAllowed(item)||statementAllowed(item))
 function toggle(row,value){selected.value=value?[...selected.value,row]:selected.value.filter(r=>r.key!==row.key)}
 async function load(){
- loading.value=true;shell.error=''
- try{const response=await apiFetch('/api/accounting');const body=await response.json();if(!response.ok)throw new Error(body.message||body.error);swissRows.value=body.swissRows||[];dataWarnings.value=(body.warnings||[]).filter(w=>w.dataError);rows.value=accountingRows(body);batches.value=body.cashBatches||[];currencies.value=[...new Set([...(body.currencies||[]),...rows.value.map(row=>row.currency).filter(Boolean)])].sort();canEdit.value=!!body.scope?.canEdit;selected.value=[]
+ loading.value=!refreshing.value;shell.error=''
+ try{const response=await apiFetch('/api/accounting?view=list');const body=await response.json();if(!response.ok)throw new Error(body.message||body.error);apply(body);remember(body)
+ }catch(err){shell.error=err.message;ElMessage.error(err.message)}finally{loading.value=false;refreshing.value=false}
+}
+// ?view=list：只有 Swiss Facility 案件的付款排程列會顯示，後端不再準備其他案件的那部分（2026-10-16）
+function apply(body){
+ swissRows.value=body.swissRows||[];dataWarnings.value=(body.warnings||[]).filter(w=>w.dataError);rows.value=accountingRows(body);batches.value=body.cashBatches||[];currencies.value=[...new Set([...(body.currencies||[]),...rows.value.map(row=>row.currency).filter(Boolean)])].sort();canEdit.value=!!body.scope?.canEdit;selected.value=[]
  if(historyRow.value)historyRow.value=rows.value.find(r=>r.key===historyRow.value.key)||null
  if(activeBatch.value)activeBatch.value=batches.value.find(b=>b.batchId===activeBatch.value.batchId)||null
- }catch(err){shell.error=err.message;ElMessage.error(err.message)}finally{loading.value=false}
+}
+// 回到這一頁：先顯示上次的清單（更新完成前不能記收款或確認），背景重新載入
+function start(){
+ const saved=recall()
+ if(saved){apply(saved.body);canEdit.value=false;refreshing.value=true;shownAt.value=saved.at.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}
+ load()
 }
 async function post(body){const response=await apiFetch('/api/accounting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok){const err=new Error(result.message||result.error);err.status=response.status;throw err}return result}
 function openPayment(targets){if(!targets.length)return;payment.date=today();payment.reference='';payment.note='';payment.amount=targets.every(r=>r.fullPaymentRequired)?targets.reduce((s,r)=>s+Math.abs(r.outstanding),0):targets.length===1?Math.abs(targets[0].outstanding):null;payment.allocations=targets.map(row=>({row,amount:row.fullPaymentRequired||targets.length===1?Math.abs(row.outstanding):null}));paymentVisible.value=true}
@@ -79,10 +91,11 @@ async function confirmSettlement(row,undo=false){
  try{await post({action:undo?'unconfirm_facility_settlement':'confirm_facility_settlement',caseUid:row.caseUid,rowVersion:row.caseRowVersion,...(row.scheduleOnly?{scheduleKey:row.scheduleKey}:{txNo:row.txNo}),note});ElMessage.success(undo?'Settlement confirmation cancelled':'Settlement confirmed by Accounting');await load()}catch(err){reportWriteError(err,()=>load());await load()}finally{saving.value=false}
 }
 function openCase(row){router.push({path:'/cases',query:{case:row.caseUid,tab:'soa'}})}
-onMounted(load)
+onMounted(start)
 </script>
 <template>
 <div class="overview-stack">
+<el-alert v-if="refreshing" type="info" :closable="false" show-icon data-testid="accounting-refreshing" :title="'Showing the list loaded at '+shownAt+'. Updating… Recording and confirmations are available after the update.'" />
 <el-alert v-if="dataWarnings.length" type="error" :closable="false" show-icon title="Some cases could not be read and are not shown" :description="dataWarnings.map(w=>(w.twRef||w.caseUid)).join(', ')+'. Contact the System Administrator.'" />
 <section class="table-card">
  <div class="section-heading"><div><h2>Accounting · SoA / Transactions</h2><p>Transactions, announced premium entries, due dates and cash balances in one list. Receipts, payments, reversals, clearance and offsets are entered manually by Accounting. Nothing settles automatically: every premium and claim entry needs Accounting to confirm settlement, even at a zero balance.</p></div><el-button :loading="loading" @click="load">Refresh</el-button></div>

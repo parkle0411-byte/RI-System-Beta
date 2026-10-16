@@ -200,6 +200,14 @@ try:
             check('collection controls and fee/offset metadata are returned to Accounting',any(r.get('nonCashPaid') for r in result['transactionRows']) and any(r.get('requiresCollectionConfirmation') for r in result['swissRows']))
             view=readonly.get('/api/accounting').json()
             check('readonly Accounting receives dates but has no write authority',view['scope']['canEdit'] is False)
+            # 2026-10-16 畫面用的精簡模式（?view=list）：只少了非 Swiss 案件的付款排程列，其餘完全相同
+            from cases.calc.swiss_facility import applies as _swiss_applies, case_payload as _case_payload
+            lean=finance.get('/api/accounting?view=list').json();_swiss={}
+            def _is_swiss(uid):
+                if uid not in _swiss:_swiss[uid]=_swiss_applies(_case_payload(Case.objects.get(case_uid=uid)))
+                return _swiss[uid]
+            check('screen list mode returns the same transactions, Swiss schedules, batches, warnings and currencies',all(lean[k]==result[k] for k in ('transactionRows','swissRows','cashBatches','warnings','currencies','scope')))
+            check('screen list mode keeps every Swiss schedule row and drops only non-Swiss ones',lean['rows']==[r for r in result['rows'] if _is_swiss(r['caseUid'])] and len(lean['rows'])>0)
             if os.environ.get('SWISS_EXPORT_FIXTURE'):
                 uids={str(c.case_uid) for c in [original,net,returned,alien,cross,late,pending,moved,*batch_cases]}
                 for field in ['rows','transactionRows','swissRows']:result[field]=[r for r in result[field] if r['caseUid'] in uids]

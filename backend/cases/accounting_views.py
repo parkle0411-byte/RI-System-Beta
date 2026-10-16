@@ -100,11 +100,23 @@ class AccountingView(NoStoreMixin, APIView):
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
         case_views, rows, warnings, transactions, swiss_rows = [], [], [], [], []
         now = datetime.now(dt_timezone.utc)   # 整個請求用同一個時間
+        # ?view=list（Accounting 畫面用）：付款排程列（rows）只有 Swiss Facility 案件會顯示，其他案件不產生這些列
+        # （約 1.5 萬列、17 MB），但 warnings 與 currencies 照常計算；不帶參數時輸出與以前完全相同。2026-10-16
+        lean = request.query_params.get("view") == "list"
+        extra_currencies = []
         for case in cases:
             try:
                 c = _case_view(case)
                 shared = {c["caseUid"]: CaseCompute(c, now)}   # 付款排程與交易明細每件案件只算一次，三處共用
-                case_rows, case_warnings = ledger_rows([c], now, shared) if c["status"] in LEDGER_STATUSES else ([], [])
+                if lean and c["status"] in LEDGER_STATUSES and not swiss_applies(c["payload"]):
+                    schedule = shared[c["caseUid"]].schedule("raw")   # 與 ledger_rows 同一份（共用），所以 warnings 相同
+                    case_rows = []
+                    case_warnings = [{"caseUid": c["caseUid"], "twRef": c["twRef"], "issues": schedule["issues"]}] if schedule["reviewRequired"] else []
+                    extra_currencies.extend(item["currency"] for item in schedule["items"])
+                    if any(t.get("source") == "claim" for t in _objects(c["payload"].get("transactions"))):
+                        extra_currencies.append(c["currency"])
+                else:
+                    case_rows, case_warnings = ledger_rows([c], now, shared) if c["status"] in LEDGER_STATUSES else ([], [])
                 case_transactions = transaction_rows([c], shared)
                 case_swiss = []
                 if c["status"] in LEDGER_STATUSES and swiss_applies(c["payload"]):
@@ -125,9 +137,9 @@ class AccountingView(NoStoreMixin, APIView):
         # 與 ledger_rows 相同的排序（twRef，再依到期日；穩定排序）
         rows.sort(key=lambda r: (js_locale_key_cached(r["twRef"]), js_locale_key_cached(_text(r.get("dueDate")))))
         currencies = []
-        for row in [*rows, *transactions]:  # Include currencies in historical transactions.
-            if js_truthy(row["currency"]) and row["currency"] not in currencies:
-                currencies.append(row["currency"])
+        for currency in [*(row["currency"] for row in [*rows, *transactions]), *extra_currencies]:  # Include currencies in historical transactions.
+            if js_truthy(currency) and currency not in currencies:
+                currencies.append(currency)
         currencies.sort(key=js_to_string)
         return Response(json_roundtrip({
             "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,

@@ -89,6 +89,11 @@ try:
         check('GET /api/accounting schedule rows equal the unshared computation', slim(expected_rows) == slim([{k: v for k, v in r.items()} for r in got_rows]))
         check('every fixture case that has transactions is present in the response', {r['caseUid'] for r in got_tx} == {str(c.case_uid) for c in cases if Case.objects.get(pk=c.pk).payload['transactions']} and len(got_tx) == len(expected_tx))
 
+        # 2026-10-16 畫面用的精簡模式（?view=list）：這些都不是 Swiss 案件，所以付款排程列不出現，其餘完全相同
+        lean = fin.get('/api/accounting?view=list').json()
+        check('screen list mode: same transactions, batches, warnings and currencies as the full response',
+              all(lean[k] == response[k] for k in ('transactionRows', 'swissRows', 'cashBatches', 'warnings', 'currencies', 'scope')))
+        check('screen list mode: no schedule rows for non-Swiss cases', not [r for r in lean['rows'] if r['caseUid'] in mine] and got_rows)
         # 只讀路徑不得改到資料庫裡的案件內容
         fresh = {c.pk: copy.deepcopy(Case.objects.get(pk=c.pk).payload) for c in cases}
         fin.get('/api/accounting')
