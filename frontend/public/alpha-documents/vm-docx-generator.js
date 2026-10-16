@@ -457,6 +457,124 @@
     return frames;
   }
 
+  // The bank block is two rows within the Debit Note's larger layout table.
+  // Keep its header with the account row without binding the entire document.
+  function keepDebitBankDetailsTogether(xml) {
+    const edits = [];
+    scanTableFrames(xml).forEach(frame => {
+      frame.rows.forEach((row, index) => {
+        const header = xml.slice(row.start, row.end).replace(/<[^>]+>/g, '');
+        const account = frame.rows[index + 1];
+        if (!header.includes('Beneficiary Name') || !header.includes('Account No.') || !header.includes('Swift Code') || !account) return;
+        if (!xml.slice(account.start, account.end).includes('TPBKTWTP')) return;
+        [row, account].forEach((part, partIndex) => {
+          let updated = xml.slice(part.start, part.end);
+          updated = updated.replace(/<w:cantSplit\b[^>]*\/>/g, '');
+          updated = updated.replace(/<w:trPr\b[^>]*>/, '$&<w:cantSplit/>');
+          updated = updated.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, paragraph => {
+            const properties = `${partIndex === 0 ? '<w:keepNext/>' : ''}<w:keepLines/>`;
+            const cleaned = paragraph.replace(/<w:(?:keepNext|keepLines)\b[^>]*\/>/g, '');
+            return /<w:pPr\b/.test(cleaned)
+              ? cleaned.replace(/<w:pPr\b[^>]*>/, '$&' + properties)
+              : cleaned.replace(/<w:p\b[^>]*>/, '$&<w:pPr>' + properties + '</w:pPr>');
+          });
+          edits.push({ start: part.start, end: part.end, xml: updated });
+        });
+      });
+    });
+    edits.sort((a, b) => b.start - a.start).forEach(edit => {
+      xml = xml.slice(0, edit.start) + edit.xml + xml.slice(edit.end);
+    });
+    return xml;
+  }
+
+  // A standalone page-break run can overflow onto an empty page before
+  // breaking again. Keep each chapter break on its compact separator instead.
+  function normalizeCoverPageBreaks(xml) {
+    const frames = scanTableFrames(xml);
+    const tables = frames.filter(frame => !frames.some(parent =>
+      parent.tblStart < frame.tblStart && parent.tblEnd > frame.tblEnd))
+      .sort((a, b) => a.tblStart - b.tblStart);
+    const edits = [];
+    tables.slice(1).forEach((table, index) => {
+      const start = tables[index].tblEnd;
+      const gap = xml.slice(start, table.tblStart);
+      if (!/<w:br\b[^>]*w:type="page"/.test(gap) || !isBlankRowText(gap)) return;
+      if (/<w:(?:tbl|drawing|pict|object|fldChar|instrText|sectPr|bookmarkStart|commentRangeStart|footnoteReference|endnoteReference)\b/.test(gap)) return;
+      const separator = '<w:p><w:pPr><w:keepNext/><w:pageBreakBefore/><w:spacing w:before="0" w:after="0" w:line="1" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr></w:p>';
+      edits.push({ start, end: table.tblStart, xml: separator });
+    });
+    edits.reverse().forEach(edit => {
+      xml = xml.slice(0, edit.start) + edit.xml + xml.slice(edit.end);
+    });
+    return xml;
+  }
+
+  // Replace only the consecutive empty rows immediately before a signature
+  // with one 12 pt line; keep that line with the signature on the next page.
+  function normalizeSignatureSpacing(xml) {
+    const edits = [];
+    const blankParagraph = '<w:p><w:pPr><w:keepNext/><w:keepLines/><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="exact"/><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="標楷體" w:cs="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr></w:p>';
+    scanTableFrames(xml).forEach(frame => {
+      frame.rows.forEach((row, index) => {
+        if (!/<w:drawing\b/.test(xml.slice(row.start, row.end))) return;
+        if (!frame.rows.slice(index + 1).some(part =>
+          xml.slice(part.start, part.end).replace(/<[^>]+>/g, '').includes('TW Insurance Brokers Ltd.'))) return;
+        let first = index;
+        while (first > 0) {
+          const previous = frame.rows[first - 1];
+          const value = xml.slice(previous.start, previous.end);
+          if (!isBlankRowText(value) || /<w:(?:drawing|pict|object|tbl|vMerge|fldChar|instrText|br|sectPr|bookmarkStart|bookmarkEnd|commentRangeStart|commentRangeEnd|footnoteReference|endnoteReference)\b/.test(value)) break;
+          first -= 1;
+        }
+        if (first === index) return;
+        const last = frame.rows[index - 1];
+        let spacer = xml.slice(last.start, last.end)
+          .replace(/<w:(?:trHeight|cantSplit)\b[^>]*\/>/g, '')
+          .replace(/<w:trPr\b[^>]*>/, '$&<w:cantSplit/><w:trHeight w:val="240" w:hRule="exact"/>');
+        spacer = spacer.replace(/<w:p\b[^>]*\/>|<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, blankParagraph);
+        edits.push({ start: frame.rows[first].start, end: last.end, xml: spacer });
+      });
+    });
+    edits.sort((a, b) => b.start - a.start).forEach(edit => {
+      xml = xml.slice(0, edit.start) + edit.xml + xml.slice(edit.end);
+    });
+    return xml;
+  }
+
+  // Keep the signature image and closing text together, including the
+  // intervening blank rows and the Debit Note's E&OE line.
+  function keepSignatureBlockTogether(xml) {
+    const edits = [];
+    scanTableFrames(xml).forEach(frame => {
+      frame.rows.forEach((row, signatureIndex) => {
+        if (!/<w:drawing\b/.test(xml.slice(row.start, row.end))) return;
+        const companyIndex = frame.rows.findIndex((part, index) => index > signatureIndex
+          && xml.slice(part.start, part.end).replace(/<[^>]+>/g, '').includes('TW Insurance Brokers Ltd.'));
+        if (companyIndex < 0) return;
+        const eoeIndex = frame.rows.findIndex((part, index) => index > companyIndex
+          && /E(?:&amp;|&)OE/.test(xml.slice(part.start, part.end).replace(/<[^>]+>/g, '')));
+        const endIndex = eoeIndex < 0 ? companyIndex : eoeIndex;
+        frame.rows.slice(signatureIndex, endIndex + 1).forEach((part, offset) => {
+          let updated = xml.slice(part.start, part.end).replace(/<w:cantSplit\b[^>]*\/>/g, '');
+          updated = updated.replace(/<w:trPr\b[^>]*>/, '$&<w:cantSplit/>');
+          updated = updated.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, paragraph => {
+            const properties = `${signatureIndex + offset < endIndex ? '<w:keepNext/>' : ''}<w:keepLines/>`;
+            const cleaned = paragraph.replace(/<w:(?:keepNext|keepLines)\b[^>]*\/>/g, '');
+            return /<w:pPr\b/.test(cleaned)
+              ? cleaned.replace(/<w:pPr\b[^>]*>/, '$&' + properties)
+              : cleaned.replace(/<w:p\b[^>]*>/, '$&<w:pPr>' + properties + '</w:pPr>');
+          });
+          edits.push({ start: part.start, end: part.end, xml: updated });
+        });
+      });
+    });
+    edits.sort((a, b) => b.start - a.start).forEach(edit => {
+      xml = xml.slice(0, edit.start) + edit.xml + xml.slice(edit.end);
+    });
+    return xml;
+  }
+
   function findFrameForToken(xml, frames, token) {
     const idx = xml.indexOf(token);
     if (idx === -1) return null;
@@ -764,6 +882,14 @@
     return `${before}${addressBlock}${sdtBlock}${after}`;
   }
 
+  // Use live Word fields on every page; preserve an existing page-number footer.
+  function ensureFooterPageNumber(xml) {
+    const hasPageField = /<w:instrText\b[^>]*>\s*PAGE\b|<w:fldSimple\b[^>]*\bw:instr=["']\s*PAGE\b/.test(xml);
+    if (hasPageField) return xml;
+    const paragraph = '<w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r><w:t xml:space="preserve">Page </w:t></w:r><w:fldSimple w:instr="PAGE \\* Arabic"><w:r><w:t>1</w:t></w:r></w:fldSimple><w:r><w:t xml:space="preserve"> of </w:t></w:r><w:fldSimple w:instr="NUMPAGES \\* Arabic"><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p>';
+    return xml.replace('</w:ftr>', paragraph + '</w:ftr>');
+  }
+
   // Locates the <w:p ...> that contains character offset `idx` by scanning
   // backward for the nearest paragraph-opening tag (works for both
   // "<w:p>" and "<w:p w14:paraId=...>" forms; OOXML paragraphs never
@@ -818,6 +944,57 @@
   // identically whether it runs before or after `{{TOKEN}}` substitution,
   // and is a no-op wherever a given block doesn't exist in the template
   // (e.g. the Debit Note templates have no Schedule of Security section).
+  // Only the bank rows use grid boundary 8 in the Debit templates.
+  // Shift it left by 6 pt; all other row boundaries and table width stay fixed.
+  function formatDebitBankAccount(xml) {
+    const edits = [];
+    scanTableFrames(xml).forEach(frame => {
+      const headerIndex = frame.rows.findIndex(row => {
+        const value = xml.slice(row.start, row.end).replace(/<[^>]+>/g, '');
+        return value.includes('Beneficiary Name') && value.includes('Account No.') && value.includes('Swift Code');
+      });
+      if (headerIndex < 0 || !frame.rows[headerIndex + 1]) return;
+      const account = frame.rows[headerIndex + 1];
+      if (!xml.slice(account.start, account.end).includes('TPBKTWTP')) return;
+      const prefix = xml.slice(frame.tblStart, frame.rows[0].start);
+      const grid = prefix.match(/<w:tblGrid\b[^>]*>[\s\S]*?<\/w:tblGrid>/);
+      if (!grid) return;
+      const columns = [...grid[0].matchAll(/<w:gridCol\b[^>]*w:w="(\d+)"[^>]*\/>/g)];
+      if (columns.length !== 12) return;
+      const widths = columns.map(column => Number(column[1]));
+      const shift = 120;
+      const preferredShift = Math.round(shift * 5000 / widths.reduce((sum, width) => sum + width, 0));
+      let columnIndex = 0;
+      const resizedGrid = grid[0].replace(/<w:gridCol\b[^>]*w:w="(\d+)"[^>]*\/>/g, (column, width) => {
+        const adjustment = columnIndex === 7 ? -shift : columnIndex === 8 ? shift : 0;
+        columnIndex += 1;
+        return column.replace(`w:w="${width}"`, `w:w="${Number(width) + adjustment}"`);
+      });
+      const gridStart = frame.tblStart + grid.index;
+      edits.push({ start: gridStart, end: gridStart + grid[0].length, xml: resizedGrid });
+      [frame.rows[headerIndex], account].forEach((row, rowIndex) => {
+        let cellIndex = 0;
+        const updated = xml.slice(row.start, row.end).replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, cell => {
+          const index = cellIndex++;
+          if (index === 2 || index === 3) {
+            cell = cell.replace(/<w:tcW\b[^>]*w:w="(\d+)"[^>]*\/>/, (tag, width) =>
+              tag.replace(`w:w="${width}"`, `w:w="${Number(width) + (index === 3 ? preferredShift : -preferredShift)}"`));
+          }
+          if (rowIndex === 1 && index === 3) {
+            cell = setSizeInRange(cell, 0, cell.length, 16);
+            if (!/<w:noWrap\b/.test(cell)) cell = cell.replace('<w:vAlign', '<w:noWrap/><w:vAlign');
+          }
+          return cell;
+        });
+        edits.push({ start: row.start, end: row.end, xml: updated });
+      });
+    });
+    edits.sort((a, b) => b.start - a.start).forEach(edit => {
+      xml = xml.slice(0, edit.start) + edit.xml + xml.slice(edit.end);
+    });
+    return xml;
+  }
+
   function applyFontSizeOverrides(xml) {
     // Main Cover Note title, e.g. "COVER NOTE NO. TWPF2609014" — but not
     // the smaller "(continued)" repeats of the title used on later
@@ -847,6 +1024,7 @@
     const debitTitleIdx = xml.indexOf(debitTitleNeedle);
     if (debitTitleIdx !== -1) {
       xml = setSizeInRange(xml, paragraphStartAt(xml, debitTitleIdx), paragraphEndAt(xml, debitTitleIdx), 24);
+      xml = formatDebitBankAccount(xml);
     }
 
     // Schedule of Security page: the reinsurance-warranties notice
@@ -862,7 +1040,37 @@
     return xml;
   }
 
-  async function fillTemplate(base64, c, values, outputType, includeLossNotes = false) {
+  // The Case supplies the standard CGL Information rows through its shared
+  // scope/formatting module. Only the Property Information rows are replaced;
+  // Loss Record and Special Agreement keep their existing Word formatting.
+  function applyCglInformation(xml, c) {
+    if (!Array.isArray(c && c.cglInformationRows)) return xml;
+    const edits = [];
+    const frames = scanTableFrames(xml);
+    ['{{OCCUPATION}}', '{{CONSTRUCTION}}', '{{SUM_INSURED_LABELS}}'].forEach(token => {
+      // Use the outer row in the INFORMATION table for the nested sum table.
+      const matches = frames.flatMap(frame => frame.rows.map((row, index) => ({ frame, row, index })))
+        .filter(item => xml.slice(item.row.start, item.row.end).includes(token))
+        .sort((a, b) => (b.row.end - b.row.start) - (a.row.end - a.row.start));
+      if (!matches.length) return;
+      const { frame, row, index } = matches[0];
+      const next = frame.rows[index + 1];
+      const spacer = next && isBlankRowText(xml.slice(next.start, next.end)) ? xml.slice(next.start, next.end) : '';
+      let replacement = '';
+      if (token === '{{OCCUPATION}}') {
+        const templateRow = xml.slice(row.start, row.end);
+        replacement = c.cglInformationRows.filter(item => item.value && item.value !== '—').map(item => {
+          const value = xmlValue(item.value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+          return templateRow.split(token).join(value).replace(/>OCCUPATION</, '>' + xmlEscape(item.label.toUpperCase()) + '<') + spacer;
+        }).join('');
+      }
+      edits.push({ start: row.start, end: spacer ? next.end : row.end, replacement });
+    });
+    edits.sort((a, b) => b.start - a.start).forEach(edit => { xml = xml.slice(0, edit.start) + edit.replacement + xml.slice(edit.end); });
+    return xml;
+  }
+
+  async function fillTemplate(base64, c, values, outputType, includeLossNotes = false, keepBankDetails = false) {
     const zip = await JSZip.loadAsync(base64, { base64: true });
     const names = Object.keys(zip.files).filter(name => /\.xml$/i.test(name));
     await Promise.all(names.map(async name => {
@@ -871,6 +1079,16 @@
       let xml = await file.async('string');
       let changed = false;
       if (/^word\/document\.xml$/i.test(name)) {
+        // Correct the Cover template heading before inserting any Case text.
+        if (includeLossNotes) {
+          const corrected = xml.replace('<w:t>BREAKFOWN OF SUM INSURED</w:t>', '<w:t>BREAKDOWN OF SUM INSURED</w:t>');
+          if (corrected !== xml) {
+            xml = corrected;
+            changed = true;
+          }
+        }
+        const information = applyCglInformation(xml, c);
+        if (information !== xml) { xml = information; changed = true; }
         const stripped = stripEmptyOptionalRows(xml, values);
         if (stripped !== xml) {
           xml = stripped;
@@ -882,6 +1100,13 @@
           changed = true;
         }
       }
+      if (keepBankDetails && /^word\/document\.xml$/i.test(name)) {
+        const keptTogether = keepDebitBankDetailsTogether(xml);
+        if (keptTogether !== xml) {
+          xml = keptTogether;
+          changed = true;
+        }
+      }
       if (includeLossNotes && /^word\/document\.xml$/i.test(name)) {
         const annotated = appendLossRecordNotes(xml, c);
         if (annotated !== xml) {
@@ -890,9 +1115,19 @@
         }
       }
       if (/^word\/footer\d+\.xml$/i.test(name)) {
-        const reordered = reorderFooterPageNumber(xml);
+        const reordered = ensureFooterPageNumber(reorderFooterPageNumber(xml));
         if (reordered !== xml) {
           xml = reordered;
+          changed = true;
+        }
+      }
+      if (/^word\/settings\.xml$/i.test(name)) {
+        // Refresh PAGE / NUMPAGES when Word opens the generated document.
+        const updated = /<w:updateFields\b/.test(xml)
+          ? xml.replace(/<w:updateFields\b[^>]*\/>/, '<w:updateFields w:val="true"/>')
+          : xml.replace('</w:settings>', '<w:updateFields w:val="true"/></w:settings>');
+        if (updated !== xml) {
+          xml = updated;
           changed = true;
         }
       }
@@ -913,6 +1148,20 @@
         const resized = applyFontSizeOverrides(xml);
         if (resized !== xml) {
           xml = resized;
+          changed = true;
+        }
+      }
+      if (includeLossNotes && /^word\/document\.xml$/i.test(name)) {
+        const paginated = normalizeCoverPageBreaks(xml);
+        if (paginated !== xml) {
+          xml = paginated;
+          changed = true;
+        }
+      }
+      if (/^word\/document\.xml$/i.test(name)) {
+        const signatureKept = keepSignatureBlockTogether(normalizeSignatureSpacing(xml));
+        if (signatureKept !== xml) {
+          xml = signatureKept;
           changed = true;
         }
       }
@@ -946,7 +1195,7 @@
   async function generateDebit(c, templates, outputType) {
     const key = debitTemplateKey(c);
     if (!templates || !templates[key]) throw new Error(`Missing Word template: ${key}`);
-    return fillTemplate(templates[key], c, commonValues(c), outputType);
+    return fillTemplate(templates[key], c, commonValues(c), outputType, false, true);
   }
 
   function endorsementReference(c) {

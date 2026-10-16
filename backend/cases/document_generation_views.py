@@ -199,6 +199,8 @@ def _check_case(request, body):
             return None, kind, _error(409, "debit_installment_allocation_required", 'Complete Premium or Ratio for every installment before generating a Debit Note.')
         if any(not _valid_debit_installment_allocation(row) for row in get(payload, "performanceInstallments")):
             return None, kind, _error(409, "debit_installment_allocation_positive_required", 'Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
+    if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and _text(payload, "currency").upper() not in ("USD", "TWD"):
+        return None, kind, _error(409, "debit_bank_currency_unsupported", 'Debit Note generation is available only for USD and TWD. The receiving bank account for other currencies is pending confirmation.')
     return case, kind, None
 
 
