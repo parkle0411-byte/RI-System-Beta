@@ -2,8 +2,9 @@
 // UMD scripts load lazily after JSZip; the API checks access and records metadata.
 import JSZip from 'jszip'
 import { apiFetch } from '../../api'
+import { isStandardCgl, cglInformationRows } from '../cglInformation'
 
-// 與 Alpha public/index.html 的 <script> 順序相同（jszip 之後）
+// Load shared templates before the current VM Word generator.
 const SCRIPTS = ['docx-templates.js', 'vm-docx-generator.js']
 
 function addScript(name) {
@@ -47,6 +48,8 @@ export async function generateDocx(kind, documentCase) {
     debit: ['generateDebit', 'debitFilename'],
     endorsement: ['generateEndorsement', 'endorsementFilename']
   }[kind]
-  const blob = await window.RIDocx[generator[0]](documentCase, window.RI_DOCX_TEMPLATES)
+  const renderCase = kind === 'cover' && isStandardCgl(documentCase)
+    ? { ...documentCase, cglInformationRows: cglInformationRows(documentCase) } : documentCase
+  const blob = await window.RIDocx[generator[0]](renderCase, window.RI_DOCX_TEMPLATES)
   window.RIDocx.downloadBlob(blob, window.RIDocx[generator[1]](documentCase))
 }

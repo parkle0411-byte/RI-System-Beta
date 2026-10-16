@@ -1,3 +1,4 @@
+import { emptyCglInformation } from './cglInformation'
 // 移植自 Alpha public/app.js 第 1–158 行（常數與共用小工具），內容逐項相同；只改成 ES module 的 export。
 export const FIXED_TEXT = {
   interest: "The Reinsured's Insurance Interest in the Real and Personal Property of the Insured including Property whilst in their Care, Custody or Control.",
@@ -138,6 +139,7 @@ export function emptyDraft() {
     conditionsPrecedent: FIXED_TEXT.standardNone,
     subjectivities: FIXED_TEXT.standardNone,
     occupation: '', construction: '', lossPayee: '', notices: '', specialAgreement: '',
+    cglInformation: emptyCglInformation(),
     ae: '', newOrRenew: '', exchRate: null, remark: '', postedAt: '',
     confirmedProductionKeys: [], productionExclusions: {}, endorsements: [], transactions: [], claims: [],
     statementNo: '', reversalCycle: 0, pendingReversalOffset: false, accountingNotifications: []

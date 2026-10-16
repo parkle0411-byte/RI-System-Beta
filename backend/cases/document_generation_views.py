@@ -1,3 +1,4 @@
+from .cgl_information import is_standard_cgl, information_issues
 """Word-only Cover Note, Debit Note and Endorsement generation authorization.
 
 Word files are assembled in the browser. This API validates access and the
@@ -118,6 +119,10 @@ def _check_case(request, body):
         return None, kind, _error(409, "ae_required", "Select an AE in the case before generating a document.")
     if not _ae_email(payload):
         return None, kind, _error(409, "ae_email_required", "Complete the AE Email in the case or Personnel before generating a document.")
+    if kind == "cover":
+        cgl_issues = information_issues(payload)
+        if cgl_issues:
+            return None, kind, _error(409, "cgl_information_required", "Complete Information before generating a Cover Note: " + "; ".join(row["label"] for row in cgl_issues))
     if kind == "cover" and not _text(payload, "interest"):
         return None, kind, _error(409, "interest_required", "Complete Interest in the case before generating a Cover Note.")
     if kind == "cover" and not _text(payload, "limitOfLiability"):
@@ -140,15 +145,15 @@ def _check_case(request, body):
         reinsurers = get(payload, "reinsurers")
         if not isinstance(reinsurers, list) or not reinsurers or any(not isinstance(row, dict) or not _text(row, "sharePct") for row in reinsurers):
             return None, kind, _error(409, "order_hereon_required", "Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.")
-    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+    if kind == "cover" and not is_standard_cgl(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         sums = get(payload, "sumInsured")
         if not isinstance(sums, list) or not sums or any(not isinstance(row, dict) or not _text(row, "category") for row in sums):
             return None, kind, _error(409, "sum_insured_name_required", "Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.")
-    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+    if kind == "cover" and not is_standard_cgl(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         sums = get(payload, "sumInsured")
         if any(not js_is_finite(js_to_number(get(row, "amount"))) or js_to_number(get(row, "amount")) <= 0 for row in sums):
             return None, kind, _error(409, "sum_insured_amount_required", "Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.")
-    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+    if kind == "cover" and not is_standard_cgl(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         issues = placement_issues(payload)
         if any(issue["kind"] == "location" for issue in issues):
             return None, kind, _error(409, "sum_insured_locations_required", "Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.")

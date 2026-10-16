@@ -14,6 +14,7 @@ const context = {
   requiresManualTwRef: () => false, isAuwReinsurer: () => false,
 };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglInformation.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/sumInsured.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(extract('  function validSumInsuredAmount(value)', '\n  function validPostcode')
   + extract('  function validLossRecordYears(value, caseData)', '\n  function fieldInvalid'), context);
@@ -54,3 +55,13 @@ check('Renew cannot use zero years', {lossRecordYears: 0, newOrRenew: 'Renew'}, 
 check('renewal linkage prevents zero-year New bypass', {lossRecordYears: 0, renewedFromTwRef: 'QA-ROOT'},
   ['Loss history years']);
 console.log(`${count}/${count} Loss Record readiness regression checks passed`);
+
+const cgl = {classOfBusiness: 'Commercial General Liability', occupation: '', construction: '', sumInsured: [],
+  cglInformation: {policyForm: 'Occurrence Form', territorialLimits: 'USA/Canada Only', insuredBusiness: 'Manufacturing', insuredProducts: 'Products',
+    estimatedTurnover: [{region: 'USA/Canada', currency: 'USD', amount: 1000000}], specialAgreementApplies: 'notApplicable'}};
+check('CGL replaces removed Property requirements', cgl, []);
+check('CGL requires Business', {...cgl, cglInformation: {...cgl.cglInformation, insuredBusiness: ''}}, ['Insured’s Business']);
+check('CGL requires Products', {...cgl, cglInformation: {...cgl.cglInformation, insuredProducts: ''}}, ['Insured’s Products']);
+check('CGL Claims-Made requires retroactive date and ERP choice', {...cgl, cglInformation: {...cgl.cglInformation, policyForm: 'Claims-Made Form'}}, ['Retroactive Date', 'Extended Reporting Period applicability']);
+check('CGL requires selected agreement content', {...cgl, cglInformation: {...cgl.cglInformation, specialAgreementApplies: 'applicable'}}, ['Special Agreement']);
+console.log(`${count}/${count} total readiness checks passed`);

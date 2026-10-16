@@ -15,6 +15,7 @@ VM 2026-10-06：只有已驗證的批單編輯可透過 allow_negative_premiums 
 import re
 
 from .sum_insured import placement_issues
+from .cgl_information import is_standard_cgl, normalize_information, information_issues
 from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
 from .manual_reference import AUW_FOREIGN_BROKER, is_auw_reinsurer, normalize_manual_tw_ref, requires_manual_tw_ref
 
@@ -398,6 +399,11 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
             if len(signs) > 1:
                 errors.append("Swiss Facility Property endorsements cannot mix additional and return premiums; use separate endorsements.")
 
+    if is_standard_cgl(value) or "cglInformation" in inp:
+        value["cglInformation"] = normalize_information(inp, errors, text=text, number=nullable_number, date_value=nullable_date, rows=rows)
+        if is_standard_cgl(value) and value["cglInformation"]["specialAgreementApplies"] == "notApplicable":
+            value["specialAgreement"] = ""
+
     if requires_manual_tw_ref(value):
         value["manualTwRef"], manual_errors = normalize_manual_tw_ref(inp.get("manualTwRef"))
         errors.extend(manual_errors)
@@ -514,24 +520,26 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         add("originalConditions", "Original Conditions")
     if get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
         add("basisOfValuationOther", "Basis of Valuation — Other")
-    if not _filled(get(value, "occupation")):
-        add("occupation", "Occupation")
-    if not _filled(get(value, "construction")):
-        add("construction", "Construction")
+    if not is_standard_cgl(value):
+        if not _filled(get(value, "occupation")):
+            add("occupation", "Occupation")
+        if not _filled(get(value, "construction")):
+            add("construction", "Construction")
 
-    sum_insured = get(value, "sumInsured")
-    sum_insured = sum_insured if is_array(sum_insured) else []
-    if not sum_insured:
-        add("sumInsured", "Breakdown of Sum Insured")
-    for index, row in enumerate(sum_insured):
-        n = index + 1
-        if not _filled(get(row, "category")):
-            add(f"sumInsured.{index}.category", f"Sum insured {n} Interest insured")
-        amount = js_to_number(get(row, "amount"))
-        if not _filled(get(row, "amount")) or not js_is_finite(amount) or amount <= 0:
-            add(f"sumInsured.{index}.amount", f"Sum insured {n} Amount must be greater than 0")
-    for issue in placement_issues(value):
-        add(issue["field"], issue["label"])
+        sum_insured = get(value, "sumInsured")
+        sum_insured = sum_insured if is_array(sum_insured) else []
+        if not sum_insured:
+            add("sumInsured", "Breakdown of Sum Insured")
+        for index, row in enumerate(sum_insured):
+            n = index + 1
+            if not _filled(get(row, "category")):
+                add(f"sumInsured.{index}.category", f"Sum insured {n} Interest insured")
+            amount = js_to_number(get(row, "amount"))
+            if not _filled(get(row, "amount")) or not js_is_finite(amount) or amount <= 0:
+                add(f"sumInsured.{index}.amount", f"Sum insured {n} Amount must be greater than 0")
+        for issue in placement_issues(value):
+            add(issue["field"], issue["label"])
+    issues.extend(information_issues(value))
     if not _filled(get(value, "lossAdvisedDate")):
         add("lossAdvisedDate", "Loss record advised by broker on")
     raw_years = get(value, "lossRecordYears")

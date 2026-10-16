@@ -102,6 +102,9 @@ def prepare_transition(previous, incoming):
 
 def limit_warning(payload):
     """Compare Word-displayed totals; this is never an Announce readiness issue."""
+    from .cgl_information import is_standard_cgl
+    if is_standard_cgl(payload):
+        return None
     rows, raw_limit = get(payload, "sumInsured"), get(payload, "limitOfLiability")
     if not is_array(rows) or not rows or is_nullish(raw_limit) or not item_name(raw_limit):
         return None

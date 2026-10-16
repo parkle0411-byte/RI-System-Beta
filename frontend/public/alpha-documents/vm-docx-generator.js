@@ -357,7 +357,7 @@
       LOSS_DATES: losses.dates,
       LOSS_CAUSES: losses.causes,
       LOSS_PAID: losses.paid,
-      SPECIAL_AGREEMENT: text(c && c.specialAgreement),
+      SPECIAL_AGREEMENT: c && Array.isArray(c.cglInformationRows) && c.cglInformation?.specialAgreementApplies !== 'applicable' ? '' : text(c && c.specialAgreement),
       SECURITY_NAMES: reinsurers.map(row => stripFacility(row.name) || '(Reinsurer)').join('\n'),
       SECURITY_SHARES: reinsurers.map(row => percentTrim(row.sharePct, shareDecimals)).join('\n'),
       LOSS_LIMIT: money(c && c.limitOfLiability, c),
