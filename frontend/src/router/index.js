@@ -15,7 +15,6 @@ import AuditLog from '../views/AuditLog.vue'
 import Accounting from '../views/Accounting.vue'
 import Production from '../views/Production.vue'
 import Dashboard from '../views/Dashboard.vue'
-import PendingView from '../views/PendingView.vue'
 import SystemStatus from '../views/SystemStatus.vue'
 import NoAccess from '../views/NoAccess.vue'
 import SystemReference from '../views/SystemReference.vue'
@@ -61,7 +60,7 @@ const routes = [
   { path: '/forgot-password', name: 'forgot-password', component: ForgotPassword, meta: { public: true } },
   { path: '/reset-password', name: 'reset-password', component: ResetPassword, meta: { public: true } },
   { path: '/', name: 'home', redirect: () => (allNavigation.find(navAllowed) || { path: can('foundation.read') ? '/system-status' : '/no-access' }).path },
-  ...allNavigation.map((item) => ({ path: item.path, name: item.id, component: component[item.id] || PendingView, meta: { nav: item } })),
+  ...allNavigation.map((item) => ({ path: item.path, name: item.id, component: component[item.id], meta: { nav: item } })),
   // System status：只有 System Administrator（foundation.read；後端 /health/ 同樣檢查）
   { path: '/system-status', name: 'system-status', component: SystemStatus, meta: { permission: 'foundation.read' } },
   { path: '/no-access', name: 'no-access', component: NoAccess },

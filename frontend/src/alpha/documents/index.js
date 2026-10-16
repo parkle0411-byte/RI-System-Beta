@@ -20,7 +20,7 @@ function addScript(name) {
 let loading = null
 function load() {
   if (!loading) {
-    window.JSZip = window.JSZip || JSZip   // docx-generator.js 載入當下就讀 window.JSZip（npm 套件 jszip 3.10.1，與 Alpha 同版）
+    window.JSZip = window.JSZip || JSZip   // The VM generator reads JSZip when its script loads.
     loading = SCRIPTS.reduce((chain, name) => chain.then(() => addScript(name)), Promise.resolve())
       .catch((err) => { loading = null; throw err })
   }
