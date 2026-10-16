@@ -1,5 +1,5 @@
-// 案件工作區的邏輯：逐函式移植自 Alpha public/app.js（名稱、順序、內容盡量相同，方便之後對照同步）。
-// 模板在 CaseWorkspace.vue（由 scripts/build_case_workspace.py 從 Alpha index.html 切出）。
+// 案件工作區邏輯直接在此維護；現行規則以 VM-RULES.md 為準。
+// 模板直接維護於 CaseWorkspace.vue。
 //
 // 與 Alpha 不同的地方（都記在 VM-RULES.md）：
 //   - fetch() → apiFetch()（補上 CSRF 與同源 cookie；回傳一樣的 Response）
@@ -29,9 +29,10 @@ import { allSumInsuredFacility, sumLocationIndex, sumInsuredPlacementIssues, mer
 import { transactionNumber } from '../alpha/transactionNumber'
 import { isSwissFacility, isSwissPropertyCase } from '../alpha/swissFacility'
 import { transactionParty, transactionRecipient, paymentDirection } from '../alpha/transactionParty'
+import { isStandardCgl, emptyCglInformation, cglInformationIssues } from '../alpha/cglInformation'
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024 // VM：10 MB（Alpha 5 MB）
-const OPEN_SECTIONS = ['risk', 'security', 'terms', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'reinsurerPremium', 'split', 'conditions']
+const OPEN_SECTIONS = ['risk', 'security', 'terms', 'information', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'reinsurerPremium', 'split', 'conditions']
 const headers = {
   cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All outward cases' },
   'case-create': { kicker: 'Placement · Draft', title: 'Account', subtitle: 'Draft — not yet saved' },
@@ -81,6 +82,7 @@ export function useCaseWorkspace() {
   const summary = ref({ total: 0, draft: 0, posted: 0, closed: 0, reversed: 0 })
   const filters = reactive({ search: '', status: 'all', year: 'all', className: 'all', reinsurer: 'all', reinsured: 'all', aeName: 'all' })
   const draft = reactive(emptyDraft())
+  const isCglInformation = computed(() => isStandardCgl(draft))
   const isSwissProperty = computed(() => isSwissPropertyCase(draft))
   watchEffect(() => {
     if (!isSwissProperty.value) return
@@ -90,6 +92,12 @@ export function useCaseWorkspace() {
       row.paymentTermsDays = 90
       draft.reinsurers.forEach((r,index) => { if (isSwissFacility(r.name)) row.reinsurerPaymentTerms["r" + (index+1)] = 90 })
     })
+  })
+  watchEffect(() => {
+    if (!isCglInformation.value) return
+    const info = draft.cglInformation
+    if (!info.estimatedTurnover.length) info.estimatedTurnover.push({ clientKey: clientKey(), region: '', currency: draft.currency || '', amount: null })
+    info.estimatedTurnover.forEach(row => { if (!row.currency && draft.currency) row.currency = draft.currency })
   })
   let autoPolicyTo = ''
   let sumInsuredFacilityMode = null
@@ -126,7 +134,7 @@ export function useCaseWorkspace() {
   }
   const hasNonFacilityReinsurer = computed(() => selectedDraftReinsurers.value.some((row) => !isFacilityName(row.name)))
   const totalSumInsured = computed(() => RICaseCalculations.totalSumInsured(draft))
-  const draftSumInsuredWarning = computed(() => sumInsuredLimitWarning(draft))
+  const draftSumInsuredWarning = computed(() => isStandardCgl(draft) ? null : sumInsuredLimitWarning(draft))
   const lossRecordSummary = computed(() => lossRecordSummaryFor(draft))
   const lossRecordYearsMin = computed(() => validLossRecordYears(0, draft) ? 0 : 1)
   const installmentAllocations = computed(() => installmentAllocationsFor(draft))
@@ -138,7 +146,7 @@ export function useCaseWorkspace() {
   const auwRefLocked = computed(() => isEditing.value && editingOriginalStatus.value !== 'draft' && draft.twRefSource === 'auw_manual')
   const selectedPayload = computed(() => selectedCase.value?.payload || {})
   const selectedSumInsuredIssues = computed(() => sumInsuredPlacementIssues(selectedPayload.value))
-  const selectedSumInsuredWarning = computed(() => sumInsuredLimitWarning(selectedPayload.value))
+  const selectedSumInsuredWarning = computed(() => isStandardCgl(selectedPayload.value) ? null : sumInsuredLimitWarning(selectedPayload.value))
   const selectedOverview = computed(() => {
     const payload = selectedPayload.value
     const legs = RICaseCalculations.totals(payload)
@@ -181,12 +189,16 @@ export function useCaseWorkspace() {
       clauseDetails: selectedOverview.value.clauseDetails
     }
   })
+  function unsupportedDebitBankCurrency(caseData) {
+    return ['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())
+      && !['USD', 'TWD'].includes(String(caseData?.currency ?? '').trim().toUpperCase())
+  }
   function missingDebitPaymentTerms(caseData) {
     if (caseData?.installmentEnabled === true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
     const valid = (value) => Number.isInteger(Number(value)) && Number(value) >= 15
     const defaultValid = valid(caseData?.paymentTermsDays)
     const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
-    return reinsurers.some(row => !valid(row?.paymentTermsDays) && !defaultValid)
+    return reinsurers.some(row => !isAuwReinsurer(row?.name) && !(isSwissPropertyCase(caseData) && isSwissFacility(row?.name)) && !valid(row?.paymentTermsDays))
   }
   function missingDebitInstallmentBaseDates(caseData) {
     if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
@@ -203,12 +215,7 @@ export function useCaseWorkspace() {
     const valid = (value) => Number.isInteger(Number(value)) && Number(value) >= 15
     const installments = Array.isArray(caseData?.performanceInstallments) ? caseData.performanceInstallments : []
     const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
-    return installments.some(installment => reinsurers.some((reinsurer, index) => ![
-      installment?.reinsurerPaymentTerms?.[`r${index + 1}`],
-      reinsurer?.paymentTermsDays,
-      installment?.paymentTermsDays,
-      caseData?.paymentTermsDays
-    ].some(valid)))
+    return installments.some(installment => !valid(installment.paymentTermsDays) || reinsurers.some((reinsurer, index) => !isAuwReinsurer(reinsurer?.name) && !(isSwissPropertyCase(caseData) && isSwissFacility(reinsurer?.name)) && !valid(installment?.reinsurerPaymentTerms?.[`r${index + 1}`])))
   }
   function missingDebitInstallmentAllocation(caseData) {
     if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
@@ -322,10 +329,17 @@ export function useCaseWorkspace() {
     return allocations
   }
 
+  function installmentCountErrorFor(caseData) {
+    if (caseData?.installmentEnabled !== true) return ''
+    const rows = Array.isArray(caseData.performanceInstallments) ? caseData.performanceInstallments : []
+    return rows.length < 2 ? 'Premium Installments requires at least two installments. Turn it off for a single payment.' : ''
+  }
+
   function installmentValidationFor(caseData) {
     if (!caseData?.installmentEnabled) return { valid: true, message: '' }
     const rows = Array.isArray(caseData.performanceInstallments) ? caseData.performanceInstallments : []
-    if (!rows.length) return { valid: false, message: 'Add at least one installment.' }
+    const countError = installmentCountErrorFor(caseData)
+    if (countError) return { valid: false, message: countError }
     if (rows.some((row) => !/^\d{4}-\d{2}$/.test(String(row?.performanceMonth || '')))) return { valid: false, message: 'Every installment needs a performance month.' }
     if (rows.some((row) => !/^\d{4}-\d{2}-\d{2}$/.test(String(row?.paymentBaseDate || '')))) return { valid: false, message: 'Every installment needs a payment base date.' }
     const totalPremium = Number(caseData.originalPremium || 0)
@@ -525,6 +539,7 @@ export function useCaseWorkspace() {
       if (!String(generatedDocumentCase.value.aeEmail || '').trim()) {
         return ElMessage.warning('Complete the Account Executive Email in the case or Personnel before generating a document.')
       }
+      if (kind === 'cover' && cglInformationIssues(selectedPayload.value).length) return ElMessage.warning('Complete Information: ' + cglInformationIssues(selectedPayload.value).map(issue => issue.label).join('; '))
       if (kind === 'cover' && !String(selectedPayload.value.interest || '').trim()) {
         return ElMessage.warning('Complete Interest in the case before generating a Cover Note.')
       }
@@ -552,13 +567,13 @@ export function useCaseWorkspace() {
       if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.reinsurers) || !selectedPayload.value.reinsurers.length || selectedPayload.value.reinsurers.some(row => !String(row?.sharePct ?? '').trim()))) {
         return ElMessage.warning('Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.')
       }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
+      if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
         return ElMessage.warning('Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.')
       }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
+      if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
         return ElMessage.warning('Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.')
       }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
+      if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
         const issues = sumInsuredPlacementIssues(selectedPayload.value)
         if (issues.some(issue => issue.kind === 'location')) return ElMessage.warning('Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.')
         if (issues.some(issue => issue.kind === 'duplicate')) return ElMessage.warning('Use unique Interest insured names within each Location or the Facility items before generating a Cover Note.')
@@ -595,6 +610,9 @@ export function useCaseWorkspace() {
       }
       if (kind === 'debit' && invalidDebitInstallmentAllocation(selectedPayload.value)) {
         return ElMessage.warning('Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
+      }
+      if (kind === 'debit' && unsupportedDebitBankCurrency(selectedPayload.value)) {
+        return ElMessage.warning('Debit Note generation is available only for USD and TWD. The receiving bank account for other currencies is pending confirmation.')
       }
     }
     if (kind === 'cover' && !isTreatyDocumentCase.value && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
@@ -842,19 +860,20 @@ export function useCaseWorkspace() {
     if (saved) ElMessage.success('Outstanding reserve updated')
   }
 
-  function openClaimPayment(claim) {
+  function openClaimPayment(claim, payment = null) {
     activeClaimId.value = claim.id
-    Object.assign(paymentForm, { date: '', amount: null, note: '' })
+    Object.assign(paymentForm, { date: payment?.date || '', amount: payment?.amount ?? null, note: payment?.note || '', paymentId: payment?.id ?? null, reason: '' })
     paymentDialogVisible.value = true
   }
 
   async function recordClaimPayment() {
     // 理賠付款可以是負數（追償、自負額沖抵等），只擋 0 與無效輸入（同 Alpha）
     if (!Number(paymentForm.amount)) return ElMessage.error('Enter a non-zero payment amount.')
-    const saved = await submitClaimAction('record_payment', { claimId: activeClaimId.value, payment: { ...paymentForm } })
+    if (paymentForm.paymentId != null && !paymentForm.reason?.trim()) return ElMessage.error('Enter the correction reason.')
+    const saved = await submitClaimAction(paymentForm.paymentId == null ? 'record_payment' : 'correct_payment', { claimId: activeClaimId.value, paymentId: paymentForm.paymentId, reason: paymentForm.reason, payment: { ...paymentForm } })
     if (!saved) return
     paymentDialogVisible.value = false
-    ElMessage.success('Claim obligations created; record actual cash in Accounting')
+    ElMessage.success('Claim obligations saved; Accounting records receipts and payments separately')
   }
 
   function claimTotalPaid(claim) {
@@ -1163,6 +1182,10 @@ export function useCaseWorkspace() {
       .map((row) => ({ ...row, clientKey: clientKey() }))
     fresh.sumInsured = (Array.isArray(payload?.sumInsured) && payload.sumInsured.length ? payload.sumInsured : fresh.sumInsured)
       .map((row) => ({ ...row, clientKey: clientKey() }))
+    fresh.cglInformation = { ...emptyCglInformation(), ...(payload?.cglInformation || {}) }
+    fresh.cglInformation.estimatedTurnover = (Array.isArray(payload?.cglInformation?.estimatedTurnover) ? payload.cglInformation.estimatedTurnover : [])
+      .map(row => ({ ...row, clientKey: clientKey() }))
+    if (!payload?.cglInformation && fresh.specialAgreement) fresh.cglInformation.specialAgreementApplies = 'applicable'
     fresh.performanceInstallments = (Array.isArray(payload?.performanceInstallments) ? payload.performanceInstallments : [])
       .map((row) => ({ ...row, paymentBaseDate: row?.paymentBaseDate || '', paymentTermsDays: row?.paymentTermsDays ?? null, reinsurerPaymentTerms: row?.reinsurerPaymentTerms && typeof row.reinsurerPaymentTerms === 'object' ? row.reinsurerPaymentTerms : {}, clientKey: clientKey() }))
     fresh.lossRecord = (Array.isArray(payload?.lossRecord) ? payload.lossRecord : [])
@@ -1284,9 +1307,10 @@ export function useCaseWorkspace() {
         if (filled(row?.taxPct) && Number(row.taxPct) !== 0) add(`Reinsurer ${index + 1} Tax must be 0% for AUW`)
       }
     });
-    [['limitOfLiability', 'Limit of Liability'], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ['occupation', 'Occupation'], ['construction', 'Construction']]
+    [['limitOfLiability', 'Limit of Liability'], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ...(isStandardCgl(value) ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
       .forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
     if (value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
+    if (!isStandardCgl(value)) {
     const sumInsured = Array.isArray(value?.sumInsured) ? value.sumInsured : []
     if (!sumInsured.length) add('Breakdown of Sum Insured')
     sumInsured.forEach((row, index) => {
@@ -1294,6 +1318,8 @@ export function useCaseWorkspace() {
       if (!validSumInsuredAmount(row?.amount)) add(`Sum insured ${index + 1} Amount must be greater than 0`)
     })
     sumInsuredPlacementIssues(value).forEach(issue => add(issue.label))
+    }
+    cglInformationIssues(value).forEach(issue => add(issue.label))
     if (!filled(value?.lossAdvisedDate)) add('Loss record advised by broker on')
     if (!validLossRecordYears(value?.lossRecordYears, value)) add('Loss history years')
     const lossRecord = Array.isArray(value?.lossRecord) ? value.lossRecord : []
@@ -1303,7 +1329,7 @@ export function useCaseWorkspace() {
       if (!filled(row?.cause)) add(`Loss ${index + 1} Cause`)
       if (!filled(row?.lossPaid)) add(`Loss ${index + 1} Loss Paid`)
     });
-    [['originalPremium', '100% Premium'], ['paymentTermsDays', 'Payment terms']]
+    [['originalPremium', '100% Premium']]
       .forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
     if (value?.installmentEnabled) {
       const installmentResult = installmentValidationFor(value)
@@ -1370,7 +1396,12 @@ export function useCaseWorkspace() {
 
   function collectRequiredIssues() {
     const issues = []
-    const add = (section, label) => issues.push({ section, label });
+    const add = (section, label) => {
+      const combined = draft.classOfBusiness === 'Property'
+        ? ['occupation', 'sumInsured', 'loss', 'specialAgreement'].includes(section)
+        : isCglInformation.value && ['loss', 'specialAgreement'].includes(section)
+      issues.push({ section: combined ? 'information' : section, label })
+    }
     if (hasManualTwRefReinsurer.value && !filled(draft.manualTwRef)) add('security', 'TW Ref. (for AUW)')
     [
       ['reinsuranceStructure', 'Reinsurance structure'], ['ae', 'Account Executive'], ['currency', 'Currency'],
@@ -1399,6 +1430,7 @@ export function useCaseWorkspace() {
     if (!filled(draft.deductibles)) add('terms', 'Deductibles')
     if (!filled(draft.originalConditions)) add('terms', 'Original Conditions')
     if (draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
+    if (!isCglInformation.value) {
     if (!filled(draft.occupation)) add('occupation', 'Occupation')
     if (!filled(draft.construction)) add('occupation', 'Construction')
 
@@ -1408,6 +1440,8 @@ export function useCaseWorkspace() {
       if (!validSumInsuredAmount(row.amount)) add('sumInsured', `Sum insured ${index + 1} Amount must be greater than 0`)
     })
     sumInsuredPlacementIssues(draft).forEach(issue => add('sumInsured', issue.label))
+    }
+    cglInformationIssues(draft).forEach(issue => add('information', issue.label))
     if (!filled(draft.lossAdvisedDate)) add('loss', 'Loss record advised by broker on')
     if (!validLossRecordYears(draft.lossRecordYears, draft)) add('loss', 'Loss history years')
     if (filled(draft.lossRecordYears) && Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) add('loss', 'Loss Record must be empty when loss history years is 0')
@@ -1418,7 +1452,7 @@ export function useCaseWorkspace() {
     });
 
     [
-      ['originalPremium', '100% Premium'], ['paymentTermsDays', 'Payment terms'],
+      ['originalPremium', '100% Premium'],
     ].forEach(([key, label]) => { if (!filled(draft[key])) add('cedantPremium', label) })
     if (draft.installmentEnabled) {
       const installmentResult = installmentValidationFor(draft)
@@ -1536,6 +1570,12 @@ export function useCaseWorkspace() {
   }
 
   async function saveDraft() {
+    const installmentCountError = installmentCountErrorFor(draft)
+    if (installmentCountError) {
+      openSections.value = [...new Set([...openSections.value, 'cedantPremium'])]
+      ElMessage.error(installmentCountError)
+      return
+    }
     lossSaveAttempted.value = true
     const lossError = !filled(draft.lossAdvisedDate)
       ? 'Loss record advised by broker on is required before saving.'
@@ -1544,7 +1584,7 @@ export function useCaseWorkspace() {
         : Number(draft.lossRecordYears) === 0 && draft.lossRecord.length
           ? 'Loss Record must be empty when loss history years is 0.' : ''
     if (lossError) {
-      openSections.value = [...new Set([...openSections.value, 'loss'])]
+      openSections.value = [...new Set([...openSections.value, isCglInformation.value || draft.classOfBusiness === 'Property' ? 'information' : 'loss'])]
       ElMessage.error(lossError)
       return
     }
@@ -1630,16 +1670,16 @@ export function useCaseWorkspace() {
 
   return {
     can, activeView, currentHeader, loading, saving, saveMessage,
-    displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange,
+    isCglInformation, isStandardCgl, cglInformationIssues, displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange,
     recycleSaving, recycleDraft,
     addSituation, removeSituation, addReinsurer, removeReinsurer, addSumInsured, removeSumInsured,
     isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, endorsementFieldsUnlocked, startEditCase, startViewCase,
     casePreviewVisible, casePreview, openCasePreview, openPreviewFullCase, formatPolicyDateTime, formatPolicyPeriod,
-    selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarning, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
+    refreshSelectedCase, selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarning, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
     claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, unsupportedDebitBankCurrency, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,

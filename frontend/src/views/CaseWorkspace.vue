@@ -1,12 +1,17 @@
 <script setup>
-// 由 scripts/build_case_workspace.py 產生：模板按行號切自 Alpha public/index.html（v63）；請勿直接修改模板，
-// 要改就改產生程式（或 Alpha 更新後重新產生）。邏輯在 case-workspace.script.js。
+// Case workspace template is maintained directly in this file.
+// Form state and actions are maintained in case-workspace.script.js.
+import { ref } from 'vue'
+import ReconciliationReferences from '../components/ReconciliationReferences.vue'
+import CglInformation from '../components/CglInformation.vue'
+import CaseInformationSections from '../components/CaseInformationSections.vue'
+import CglInformationSummary from '../components/CglInformationSummary.vue'
 import { useCaseWorkspace } from './case-workspace.script'
 import vSyncInputNumberAria from '../directives/syncInputNumberAria'
 import { displayAccountExecutiveText } from '../alpha/format'
 
 const {
-  can, activeView, currentHeader, loading, saving, saveMessage,
+  refreshSelectedCase, can, activeView, currentHeader, loading, saving, saveMessage,
   displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange,
   recycleSaving, recycleDraft,
   addSituation, removeSituation, addReinsurer, removeReinsurer, addSumInsured, removeSumInsured,
@@ -16,7 +21,7 @@ const {
   caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
   accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
   claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
-  documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+  documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, unsupportedDebitBankCurrency, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
   downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
   toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
   announceDialogVisible, announceConfirmed, announcing, openAnnounceReview, announceSelectedCase,
@@ -24,7 +29,7 @@ const {
   masterOptions, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected,
   caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel,
   reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,
-  isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
+  isCglInformation, isStandardCgl, cglInformationIssues, isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
   addInstallment, removeInstallment, onInstallmentToggle, installmentRowInvalid,
   splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
   formatAmount, formatMoney, formatCurrency, formatMoneyInput, parseMoneyInput, saveReviewedDraft,
@@ -32,6 +37,8 @@ const {
   statusLabel, loadData, saveDraft,
   caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel
 } = useCaseWorkspace()
+const referenceEditor = ref(null)
+async function refreshReferences() { await refreshSelectedCase(); await loadData() }
 </script>
 
 <template>
@@ -176,7 +183,7 @@ const {
                         <dt>Situation</dt><dd><div v-for="(row,index) in selectedPayload.situations || []" :key="'detail-situation-' + index">{{ row.address || '—' }}<span v-if="row.postcode"> · {{ row.postcode }}</span></div><span v-if="!(selectedPayload.situations || []).length">—</span></dd>
                         <dt>Case owner</dt><dd>{{ selectedPayload.ownerPersonnelName || '—' }}</dd>
                         <dt>Account Executive</dt><dd>{{ selectedPayload.ae || '—' }}</dd>
-                        <dt>Total Sum Insured</dt><dd>{{ selectedPayload.currency || '—' }} {{ formatCurrency(selectedOverview.totalSumInsured, selectedPayload.currency) }}</dd>
+                        <dt v-if="!isStandardCgl(selectedPayload)">Total Sum Insured</dt><dd v-if="!isStandardCgl(selectedPayload)">{{ selectedPayload.currency || '—' }} {{ formatCurrency(selectedOverview.totalSumInsured, selectedPayload.currency) }}</dd>
                         <dt>Avg. Rate</dt><dd class="overview-emphasis" data-testid="avg-rate">{{ selectedOverview.avgRate }}</dd>
                       </dl>
                     </section>
@@ -190,7 +197,8 @@ const {
                       </div>
                     </section>
 
-                    <section class="overview-card">
+                    <section v-if="isStandardCgl(selectedPayload)" class="overview-card"><h2>Information</h2><CglInformationSummary :payload="selectedPayload" /></section>
+                    <section v-else class="overview-card">
                       <div class="section-heading"><div><h2>Loss Record</h2><p>Advised by broker on {{ selectedPayload.lossAdvisedDate || '—' }}</p></div><span class="pending-badge">{{ selectedOverview.lossRecordSummary }}</span></div>
                       <div v-if="(selectedPayload.lossRecord || []).length" class="review-list"><div v-for="(row,index) in selectedPayload.lossRecord" :key="'overview-loss-' + index"><strong>Loss {{ index + 1 }} · {{ row.date || '—' }}</strong><span>{{ row.cause || '—' }} · {{ selectedPayload.currency || '—' }} {{ formatAmount(row.lossPaid) }}</span></div></div>
                       <p v-else class="document-help">Clean — no losses recorded.</p>
@@ -274,6 +282,7 @@ const {
                             <strong>Cover Note</strong>
                             <span>{{ selectedCase.twRef || (isTreatyDocumentCase ? 'DRAFT' : 'Awaiting TW Reference') }} · {{ selectedPayload.reinsuranceStructure || 'Property' }}</span>
                           </div>
+                          <el-alert v-if="cglInformationIssues(selectedPayload).length" type="warning" :closable="false" show-icon title="Complete Information before generating a Cover Note." :description="cglInformationIssues(selectedPayload).map(issue => issue.label).join('; ')" />
                           <el-alert v-if="!isTreatyDocumentCase &amp;&amp; !selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; selectedSumInsuredWarning" class="sum-limit-warning" type="warning" :closable="false" show-icon title="Total Sum Insured differs from Limit of Liability" :description="selectedSumInsuredWarning.message"></el-alert>
                       <div class="generated-document-actions">
                             <el-button class="primary-button" :loading="documentGenerating === 'cover-docx'" :disabled="Boolean(documentGenerating) || (!isTreatyDocumentCase &amp;&amp; !selectedCase.twRef)" @click="downloadGeneratedDocument('cover', 'docx')">Download Word (.docx)</el-button>
@@ -292,6 +301,7 @@ const {
                           <div>
                             <strong>Debit Note</strong>
                             <span>{{ displayTwRef(selectedCase) }} · {{ selectedPayload.currency || '—' }}</span>
+                            <el-alert v-if="unsupportedDebitBankCurrency(selectedPayload)" type="warning" :closable="false" show-icon title="Debit Note generation is available only for USD and TWD. The receiving bank account for other currencies is pending confirmation."></el-alert>
                           </div>
                           <div class="generated-document-actions">
                             <el-button class="primary-button" :loading="documentGenerating === 'debit-docx'" :disabled="Boolean(documentGenerating)" @click="downloadGeneratedDocument('debit', 'docx')">Download Word (.docx)</el-button>
@@ -313,10 +323,10 @@ const {
                       <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.situations) || !selectedPayload.situations.length || selectedPayload.situations.some(row =&gt; !/^[0-9]{3,6}$/.test(String(row?.postcode ?? '').trim()))))" type="warning" :closable="false" show-icon title="Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note."></el-alert>
                       <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !String(selectedPayload.originalPremium ?? '').trim())" type="warning" :closable="false" show-icon title="Complete 100% Premium in the case before generating a Cover Note or Debit Note."></el-alert>
                       <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.reinsurers) || !selectedPayload.reinsurers.length || selectedPayload.reinsurers.some(row =&gt; !String(row?.sharePct ?? '').trim())))" type="warning" :closable="false" show-icon title="Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note."></el-alert>
-                      <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.sumInsured) || !selectedPayload.sumInsured.length || selectedPayload.sumInsured.some(row =&gt; !String(row?.category ?? '').trim())))" type="warning" :closable="false" show-icon title="Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note."></el-alert>
-                      <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.sumInsured) || !selectedPayload.sumInsured.length || selectedPayload.sumInsured.some(row =&gt; !Number.isFinite(Number(row?.amount)) || Number(row?.amount) &lt;= 0)))" type="warning" :closable="false" show-icon title="Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note."></el-alert>
-                      <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; selectedSumInsuredIssues.some(issue =&gt; issue.kind === 'location'))" type="warning" :closable="false" show-icon title="Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note."></el-alert>
-                      <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; selectedSumInsuredIssues.some(issue =&gt; issue.kind === 'duplicate'))" type="warning" :closable="false" show-icon title="Use unique Interest insured names within each Location or the Facility items before generating a Cover Note."></el-alert>
+                      <el-alert v-if="!isStandardCgl(selectedPayload) &amp;&amp; !isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.sumInsured) || !selectedPayload.sumInsured.length || selectedPayload.sumInsured.some(row =&gt; !String(row?.category ?? '').trim())))" type="warning" :closable="false" show-icon title="Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note."></el-alert>
+                      <el-alert v-if="!isStandardCgl(selectedPayload) &amp;&amp; !isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.sumInsured) || !selectedPayload.sumInsured.length || selectedPayload.sumInsured.some(row =&gt; !Number.isFinite(Number(row?.amount)) || Number(row?.amount) &lt;= 0)))" type="warning" :closable="false" show-icon title="Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note."></el-alert>
+                      <el-alert v-if="!isStandardCgl(selectedPayload) &amp;&amp; !isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; selectedSumInsuredIssues.some(issue =&gt; issue.kind === 'location'))" type="warning" :closable="false" show-icon title="Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note."></el-alert>
+                      <el-alert v-if="!isStandardCgl(selectedPayload) &amp;&amp; !isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; selectedSumInsuredIssues.some(issue =&gt; issue.kind === 'duplicate'))" type="warning" :closable="false" show-icon title="Use unique Interest insured names within each Location or the Facility items before generating a Cover Note."></el-alert>
                       <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !String(selectedPayload.lossAdvisedDate ?? '').trim())" type="warning" :closable="false" show-icon title="Complete the Loss Record advised date in the case before generating a Cover Note."></el-alert>
                       <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !String(selectedPayload.lossRecordYears ?? '').trim())" type="warning" :closable="false" show-icon title="Complete Past year(s) in the Loss Record section of the case before generating a Cover Note."></el-alert>
                       <el-alert v-if="!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; Array.isArray(selectedPayload.lossRecord) &amp;&amp; selectedPayload.lossRecord.some(row =&gt; !String(row?.date ?? '').trim()))" type="warning" :closable="false" show-icon title="Complete Date of Loss for every Loss Record entry in the case before generating a Cover Note."></el-alert>
@@ -425,11 +435,12 @@ const {
                 <div class="overview-stack">
                   <section class="overview-card">
                     <div class="section-heading">
-                      <div><span class="pending-badge">Read-only case statement</span><h2>Statement of Account — {{ displayTwRef(selectedCase, 'Draft') }}</h2><p>Settlement changes are made only from the consolidated Accounting ledger.</p></div>
-                      <span class="status-badge" :class="'status-' + selectedCase.status">{{ statusLabel(selectedCase.status) }}</span>
+                      <div><span class="pending-badge">Case statement</span><h2>Statement of Account — {{ displayTwRef(selectedCase, 'Draft') }}</h2><p>Settlement changes are made only from the consolidated Accounting ledger.</p></div>
+                      <div><span class="status-badge" :class="'status-' + selectedCase.status">{{ statusLabel(selectedCase.status) }}</span><el-button v-if="can('cases.write') && ['posted', 'closed'].includes(selectedCase.status)" class="secondary-button" data-testid="case-edit-references" @click="referenceEditor.open(selectedCase.caseUid)">Edit references</el-button></div>
                     </div>
                     <dl class="overview-kv" style="margin-bottom:18px;">
                       <dt>Statement No.</dt><dd>{{ selectedPayload.statementNo || '—' }}</dd>
+                      <dt>Reinsurer Ref.</dt><dd><div v-for="(row,index) in selectedPayload.reinsurers || []" :key="'soa-reference-' + index">{{ row.name || '—' }}: {{ row.settlementRef || '—' }}</div></dd>
                       <dt>Currency</dt><dd>{{ selectedPayload.currency || '—' }}</dd>
                       <dt>Transactions</dt><dd>{{ selectedCaseTransactions.length }}</dd>
                     </dl>
@@ -462,7 +473,7 @@ const {
                     <dl v-else class="overview-kv">
                       <dt>Root TW Reference</dt><dd>{{ claimsState.rootTwRef }}</dd>
                       <dt>Currency</dt><dd>{{ claimsState.currency || '—' }}</dd>
-                      <dt>Current split source</dt><dd>{{ claimsState.splitSource?.twRef || claimsState.rootTwRef }} · {{ (claimsState.splitSource?.reinsurers || []).length }} reinsurer line(s)</dd>
+                      <dt>Allocation rule</dt><dd>Policy / endorsement effective on the Date of Loss; the source is retained with each obligation.</dd>
                     </dl>
                   </section>
 
@@ -498,7 +509,7 @@ const {
                       <el-table :data="claim.payments || []" row-key="id" empty-text="No claim obligations recorded.">
                         <el-table-column prop="date" label="Obligation date" min-width="140"><template #default="{ row }">{{ row.date || '—' }}</template></el-table-column>
                         <el-table-column label="Amount" min-width="170" align="right"><template #default="{ row }">{{ claimsState.currency || '—' }} {{ formatMoney(row.amount) }}</template></el-table-column>
-                        <el-table-column prop="note" label="Note" min-width="260"><template #default="{ row }">{{ row.note || '—' }}</template></el-table-column>
+                        <el-table-column prop="dueDate" label="Due date (fixed)" min-width="140" /><el-table-column label="Split version" min-width="160"><template #default="{row}">{{ row.splitSource?.twRef || '—' }}</template></el-table-column><el-table-column prop="note" label="Note" min-width="200" /><el-table-column v-if="can('cases.write')" label="Action" min-width="150"><template #default="{row}"><el-button v-if="row.canCorrect" text type="primary" @click="openClaimPayment(claim,row)">Correct obligation</el-button><small v-else>Adjustment required</small></template></el-table-column>
                       </el-table>
                     </div>
                   </section>
@@ -530,7 +541,7 @@ const {
                       <div><span class="pending-badge">Automated reminders</span><h2>Reminders — {{ displayTwRef(selectedCase, 'Draft') }}</h2><p>Signed Slip reminders run every day at 09:00 and payment reminders at 09:30 (Taiwan time) for Announced and Confirmed cases.</p></div>
                       <el-button class="secondary-button" :loading="remindersLoading" @click="loadCaseReminders">Refresh</el-button>
                     </div>
-                    <el-alert v-if="caseReminders && !caseReminders.emailEnabled" type="warning" :closable="false" show-icon title="Reminder e-mail is not enabled on the VM" description="Reminders are still generated on schedule and recorded as Suppressed; no e-mail is sent. The preview shows exactly what would be sent."></el-alert>
+                    <el-alert v-if="caseReminders && !caseReminders.emailEnabled" type="warning" :closable="false" show-icon title="Reminder e-mail is not enabled on the VM" description="Financial reminders are requested but delivery is waiting for SMTP configuration. The stored preview shows the reminder content."></el-alert>
                   </section>
                   <section class="overview-card">
                     <div class="section-heading"><div><h2>Signed Slip reminders</h2><p>Sent to the Account Executive and the Account Executive's supervisor while Reinsurer Signed Slips remain missing (from day 60, then every 7 days).</p></div></div>
@@ -585,11 +596,11 @@ const {
             </div>
 
             <el-dialog v-model="paymentDialogVisible" class="review-dialog" width="min(620px, 94vw)" :close-on-click-modal="false">
-              <template #header><div class="review-heading"><span class="pending-badge">Claim receivable / payable</span><h2>Record claim obligation</h2><p>This creates Claim Leg 1/2 receivable and payable transactions. Record actual cash receipts and payments separately in Accounting. Correct an obligation with an offsetting entry; history is retained.</p></div></template>
+              <template #header><div class="review-heading"><span class="pending-badge">Claim receivable / payable</span><h2>Record claim obligation</h2><p>This creates Claim Leg 1/2 receivable and payable transactions. Record actual cash receipts and payments separately in Accounting. Unprocessed obligations can be corrected with a reason. Obligations with receipt/payment history require a separate adjustment. Due dates are fixed at creation + 15 days.</p></div></template>
               <el-form label-position="top">
                 <el-form-item label="Obligation date" required><el-date-picker v-model="paymentForm.date" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
                 <el-form-item label="Amount"><el-input-number :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="paymentForm.amount" :controls="false" style="width:100%"></el-input-number><div class="document-help">A non-zero negative amount may be used as an offsetting correction.</div></el-form-item>
-                <el-form-item label="Note"><el-input v-model="paymentForm.note" maxlength="1000"></el-input></el-form-item>
+                <el-form-item label="Note"><el-input v-model="paymentForm.note" maxlength="1000"></el-input></el-form-item><el-form-item v-if="paymentForm.paymentId != null" label="Correction reason" required><el-input v-model="paymentForm.reason" type="textarea" maxlength="1000" /></el-form-item>
               </el-form>
               <template #footer><el-button @click="paymentDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="claimsSaving" @click="recordClaimPayment">Record obligation</el-button></template>
             </el-dialog>
@@ -696,7 +707,7 @@ const {
                       <el-form-item label="Order Hereon (%)" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'sharePct') }"><el-input-number v-model="row.sharePct" :min="0" :max="100" :precision="4" :controls="false" placeholder="Empty by default"></el-input-number></el-form-item>
                       <el-form-item label="Foreign RI Broker"><el-select v-model="row.foreignBroker" :disabled="isAuwReinsurer(row.name)" filterable clearable placeholder="Select foreign RI broker"><el-option v-for="item in masterOptions('foreign_broker', row.foreignBroker)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : item.name" :value="item.name"></el-option></el-select><small v-if="isAuwReinsurer(row.name)">AUW is bound to Howden Specialty Limited.</small></el-form-item>
                       <el-form-item label="Reinsurer Ref."><el-input v-model="row.settlementRef" maxlength="160" placeholder="Settlement reference"></el-input></el-form-item>
-                      <el-form-item :label="isAuwReinsurer(row.name) ? 'AUW payment terms (days)' : 'Payment Terms Override (Days)'"><el-input-number v-model="row.paymentTermsDays" :disabled="isAuwReinsurer(row.name) || (isSwissProperty && isSwissFacility(row.name))" :min="15" :precision="0" :controls="false" placeholder="Use Case default"></el-input-number><small v-if="isAuwReinsurer(row.name)">Month-end + 120 calendar days. Accounting date is 10 days earlier.</small><small v-else-if="isSwissProperty && isSwissFacility(row.name)">Swiss settlement dates: 02/14, 05/14, 08/14 and 11/14.</small></el-form-item>
+                      <el-form-item :label="isAuwReinsurer(row.name) ? 'AUW payment terms (days)' : 'Payment Terms (Days)'"><el-input-number v-model="row.paymentTermsDays" :disabled="isAuwReinsurer(row.name) || (isSwissProperty && isSwissFacility(row.name))" :min="15" :precision="0" :controls="false" placeholder="Required for this period"></el-input-number><small v-if="isAuwReinsurer(row.name)">Month-end + 120 calendar days. Accounting date is 10 days earlier.</small><small v-else-if="isSwissProperty && isSwissFacility(row.name)">Swiss settlement dates: 02/14, 05/14, 08/14 and 11/14.</small></el-form-item>
                     </div>
                   </div>
                   <el-button class="secondary-button" @click="addReinsurer">+ Add reinsurer</el-button>
@@ -723,11 +734,30 @@ const {
                   <el-form-item label="Subjectivities"><el-input v-model="draft.subjectivities" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                 </el-collapse-item>
 
-                <el-collapse-item name="occupation" title="Occupation & Construction">
-                  <div class="form-grid cols-2"><el-form-item label="Occupation" required :class="{ 'is-required-error': fieldInvalid('occupation') }"><el-input v-model="draft.occupation" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item><el-form-item label="Construction" required :class="{ 'is-required-error': fieldInvalid('construction') }"><el-input v-model="draft.construction" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item></div>
+                <el-collapse-item v-if="isCglInformation" name="information" title="Information">
+                  <CglInformation :payload="draft" :review-attempted="reviewAttempted"><template #loss>
+                  <div class="form-grid cols-2"><el-form-item label="Loss record advised by broker on" required :class="{ 'is-required-error': fieldInvalid('lossAdvisedDate') }"><el-date-picker v-model="draft.lossAdvisedDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD"></el-date-picker></el-form-item><el-form-item label="Past Year(s)" required :class="{ 'is-required-error': fieldInvalid('lossRecordYears', 'lossRecordYears') }"><el-input-number v-model="draft.lossRecordYears" :min="lossRecordYearsMin" :precision="0" :controls="false"></el-input-number><small>{{ lossRecordYearsMin === 0 ? 'New cases may use 0 only when no losses are recorded.' : 'Renewal cases require at least 1 year.' }}</small></el-form-item></div>
+                  <el-alert class="case-readiness-alert" :title="lossRecordSummary" type="info" :closable="false" show-icon></el-alert>
+                  <p v-if="draft.lossRecord.length === 0" class="document-help">Clean — No losses recorded.</p>
+                  <div v-for="(row,index) in draft.lossRecord" :key="row.clientKey" class="repeat-card">
+                    <div class="repeat-heading"><h3>Loss {{ index + 1 }}</h3><el-button text type="danger" @click="removeLossRecord(index)">Remove</el-button></div>
+                    <div class="form-grid cols-3">
+                      <el-form-item label="Date of Loss" required :class="{ 'is-required-error': lossRowInvalid(index, 'date') }"><el-date-picker v-model="row.date" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD"></el-date-picker></el-form-item>
+                      <el-form-item label="Cause" required :class="{ 'is-required-error': lossRowInvalid(index, 'cause') }"><el-input v-model="row.cause" maxlength="1000" placeholder="Cause of loss"></el-input></el-form-item>
+                      <el-form-item label="Loss Paid" required :class="{ 'is-required-error': lossRowInvalid(index, 'lossPaid') }"><el-input-number :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="row.lossPaid" :min="0" :controls="false"></el-input-number></el-form-item>
+                    </div>
+                  </div>
+                  <el-button class="secondary-button" @click="addLossRecord">+ Add loss</el-button>
+                  <el-form-item label="Additional Loss Record Notes"><el-input v-model="draft.lossRecordText" type="textarea" :rows="3" maxlength="5000" placeholder="Optional notes"></el-input><small>Included below Loss Record in the Cover Note when completed.</small></el-form-item>
+                  </template></CglInformation>
                 </el-collapse-item>
 
-                <el-collapse-item name="sumInsured" title="Breakdown of Sum Insured">
+                <CaseInformationSections v-if="!isCglInformation" :combined="draft.classOfBusiness === 'Property'">
+                <template #occupation>
+                  <div class="form-grid cols-2"><el-form-item label="Occupation" required :class="{ 'is-required-error': fieldInvalid('occupation') }"><el-input v-model="draft.occupation" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item><el-form-item label="Construction" required :class="{ 'is-required-error': fieldInvalid('construction') }"><el-input v-model="draft.construction" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item></div>
+                </template>
+
+                <template #sumInsured>
                   <section v-if="unassignedSumInsured.length" class="sum-insured-group pending-sum-items">
                     <el-alert type="warning" :closable="false" show-icon title="Unassigned items" description="Assign every item to a Location. Split the amount between Locations when needed."></el-alert>
                     <div v-for="item in unassignedSumInsured" :key="item.row.clientKey" class="repeat-row sum-row">
@@ -751,9 +781,9 @@ const {
                   </section>
                   <div class="sum-insured-total"><strong>Total</strong><span>{{ draft.currency }} {{ formatAmount(totalSumInsured) }}</span></div>
                   <el-alert v-if="draftSumInsuredWarning" class="sum-limit-warning" type="warning" :closable="false" show-icon title="Total Sum Insured differs from Limit of Liability" :description="draftSumInsuredWarning.message"></el-alert>
-                </el-collapse-item>
+                </template>
 
-                <el-collapse-item name="loss" title="Loss Record">
+                <template #loss>
                   <div class="form-grid cols-2"><el-form-item label="Loss record advised by broker on" required :class="{ 'is-required-error': fieldInvalid('lossAdvisedDate') }"><el-date-picker v-model="draft.lossAdvisedDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD"></el-date-picker></el-form-item><el-form-item label="Past Year(s)" required :class="{ 'is-required-error': fieldInvalid('lossRecordYears', 'lossRecordYears') }"><el-input-number v-model="draft.lossRecordYears" :min="lossRecordYearsMin" :precision="0" :controls="false"></el-input-number><small>{{ lossRecordYearsMin === 0 ? 'New cases may use 0 only when no losses are recorded.' : 'Renewal cases require at least 1 year.' }}</small></el-form-item></div>
                   <el-alert class="case-readiness-alert" :title="lossRecordSummary" type="info" :closable="false" show-icon></el-alert>
                   <p v-if="draft.lossRecord.length === 0" class="document-help">Clean — No losses recorded.</p>
@@ -767,18 +797,19 @@ const {
                   </div>
                   <el-button class="secondary-button" @click="addLossRecord">+ Add loss</el-button>
                   <el-form-item label="Additional Loss Record Notes"><el-input v-model="draft.lossRecordText" type="textarea" :rows="3" maxlength="5000" placeholder="Optional notes"></el-input><small>Included below Loss Record in the Cover Note when completed.</small></el-form-item>
-                </el-collapse-item>
+                </template>
 
-                <el-collapse-item name="specialAgreement" title="Special Agreement">
+                <template #specialAgreement>
                   <el-form-item label="Special Agreement"><el-input v-model="draft.specialAgreement" type="textarea" :rows="5" maxlength="5000" placeholder="Optional special agreement"></el-input></el-form-item>
-                </el-collapse-item>
+                </template>
+                </CaseInformationSections>
 
               </el-collapse>
               </fieldset>
               <el-collapse v-model="openSections">
                 <el-collapse-item name="cedantPremium" title="Cedant Premium">
                   <p v-if="isEndorsementDraft" class="document-help">Enter this endorsement's premium change: positive for additional premium, negative for return premium. The original policy premium remains unchanged.</p>
-                  <div class="form-grid cols-4"><el-form-item label="100% Premium" required :class="{ 'is-required-error': fieldInvalid('originalPremium') }"><el-input-number :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="draft.originalPremium" :min="isEndorsementDraft ? undefined : 0" :controls="false"></el-input-number></el-form-item><el-form-item label="Payment Terms (Days)" required :class="{ 'is-required-error': fieldInvalid('paymentTermsDays') }"><el-input-number v-model="draft.paymentTermsDays" :disabled="isEndorsementDraft || isSwissProperty" :min="15" :precision="0" :controls="false"></el-input-number><small v-if="isSwissProperty">Fixed 90 calendar days; Accounting displays day 75. Swiss uses quarterly settlement dates and month-end confirmation cutoffs.</small><small v-else>Calendar days. Cedant accounting date is 15 days before collection. AUW payment is month-end + 120 days, with accounting 10 days earlier; other reinsurers use Terms − 10.</small></el-form-item><el-form-item label="Ceding Commission (%)"><el-input-number v-model="draft.riCommPct" :min="0" :max="100" :precision="4" :controls="false"></el-input-number></el-form-item><el-form-item label="Tax (%)"><el-input-number v-model="draft.taxPct" :min="0" :max="100" :precision="4" :controls="false"></el-input-number></el-form-item></div>
+                  <div class="form-grid cols-4"><el-form-item label="100% Premium" required :class="{ 'is-required-error': fieldInvalid('originalPremium') }"><el-input-number :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="draft.originalPremium" :min="isEndorsementDraft ? undefined : 0" :controls="false"></el-input-number></el-form-item><el-form-item label="Cedant Collection Days" :required="!draft.installmentEnabled" :class="{ 'is-required-error': fieldInvalid('paymentTermsDays') }"><el-input-number v-model="draft.paymentTermsDays" :disabled="isSwissProperty" :min="15" :precision="0" :controls="false"></el-input-number><small v-if="isSwissProperty">Fixed 90 calendar days; Accounting displays day 75. Swiss uses quarterly settlement dates and month-end confirmation cutoffs.</small><small v-else>Calendar days. Cedant accounting date is 15 days before collection. AUW payment is month-end + 120 days, with accounting 10 days earlier; other reinsurers use Terms − 10.</small></el-form-item><el-form-item label="Ceding Commission (%)"><el-input-number v-model="draft.riCommPct" :min="0" :max="100" :precision="4" :controls="false"></el-input-number></el-form-item><el-form-item label="Tax (%)"><el-input-number v-model="draft.taxPct" :min="0" :max="100" :precision="4" :controls="false"></el-input-number></el-form-item></div>
                   <el-form-item label="Statement No."><el-input v-model="draft.statementNo" maxlength="160" placeholder="Cedant reconciliation reference"></el-input></el-form-item>
                   <div class="repeat-card">
                     <p v-if="isEndorsementDraft" class="document-help">Endorsements use one premium settlement. Cedant payment terms follow the original policy; the collection base date is the later of Announce and endorsement effective dates.</p><div class="repeat-heading"><div><h3>Premium Installments</h3><p>Optionally assign Production Report performance months. Calculated Income uses the current brokerage amount; rounding difference goes to the first installment.</p></div><el-switch v-model="draft.installmentEnabled" :disabled="isEndorsementDraft" data-testid="premium-installments-toggle" inline-prompt active-text="On" inactive-text="Off" @change="onInstallmentToggle"></el-switch></div>
@@ -789,13 +820,13 @@ const {
                         <div class="form-grid cols-3">
                           <el-form-item label="Performance Month" required :class="{ 'is-required-error': installmentRowInvalid(index, 'performanceMonth') }"><el-date-picker v-model="row.performanceMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM"></el-date-picker></el-form-item>
                           <el-form-item label="Payment Base Date" required :class="{ 'is-required-error': installmentRowInvalid(index, 'paymentBaseDate') }"><el-date-picker v-model="row.paymentBaseDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD"></el-date-picker></el-form-item>
-                          <el-form-item label="Installment Terms Override"><el-input-number v-model="row.paymentTermsDays" :disabled="isSwissProperty" :min="15" :precision="0" :controls="false" placeholder="Use Case default"></el-input-number></el-form-item>
+                          <el-form-item label="Cedant Collection Days"><el-input-number v-model="row.paymentTermsDays" :disabled="isSwissProperty" :min="15" :precision="0" :controls="false" placeholder="Required for this period"></el-input-number></el-form-item>
                           <el-form-item v-if="Number(draft.originalPremium || 0) === 0" label="Ratio (%)" required :class="{ 'is-required-error': installmentRowInvalid(index, 'ratio') }"><el-input-number v-model="row.ratio" :min="0" :max="100" :precision="4" :controls="false"></el-input-number></el-form-item>
                           <el-form-item v-else label="Premium" required :class="{ 'is-required-error': installmentRowInvalid(index, 'premium') }"><el-input-number :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="row.premium" :min="isEndorsementDraft ? undefined : 0" :controls="false"></el-input-number></el-form-item>
                           <el-form-item label="Income (calculated)"><strong>{{ draft.currency || '—' }} {{ formatMoney((installmentAllocations[index] || {}).income) }}</strong></el-form-item>
                         </div>
                         <div class="form-grid cols-3">
-                          <el-form-item v-for="(reinsurer,reinsurerIndex) in draft.reinsurers" :key="'terms-' + row.clientKey + '-' + reinsurerIndex" :label="(reinsurer.name || ('Reinsurer ' + (reinsurerIndex + 1))) + ' Terms Override'"><el-input-number v-if="isAuwReinsurer(reinsurer.name)" :model-value="120" disabled :controls="false"></el-input-number><el-input-number v-else-if="isSwissProperty && isSwissFacility(reinsurer.name)" :model-value="90" disabled :controls="false"></el-input-number><el-input-number v-else v-model="row.reinsurerPaymentTerms['r' + (reinsurerIndex + 1)]" :min="15" :precision="0" :controls="false" placeholder="Use higher-level default"></el-input-number></el-form-item>
+                          <el-form-item v-for="(reinsurer,reinsurerIndex) in draft.reinsurers" :key="'terms-' + row.clientKey + '-' + reinsurerIndex" :label="(reinsurer.name || ('Reinsurer ' + (reinsurerIndex + 1))) + ' Payment Days'"><el-input-number v-if="isAuwReinsurer(reinsurer.name)" :model-value="120" disabled :controls="false"></el-input-number><el-input-number v-else-if="isSwissProperty && isSwissFacility(reinsurer.name)" :model-value="90" disabled :controls="false"></el-input-number><el-input-number v-else v-model="row.reinsurerPaymentTerms['r' + (reinsurerIndex + 1)]" :min="15" :precision="0" :controls="false" placeholder="Required for this reinsurer / period"></el-input-number></el-form-item>
                         </div>
                       </div>
                       <el-button class="secondary-button" @click="addInstallment">+ Add installment</el-button>
@@ -877,8 +908,10 @@ const {
               <section class="review-section">
                 <h3>Situation & coverage</h3>
                 <div class="review-list"><div v-for="(row,index) in draft.situations" :key="'review-situation-' + row.clientKey"><strong>Situation {{ index + 1 }}</strong><span>{{ row.address }} · {{ row.postcode }}</span></div></div>
-                <dl class="review-grid review-grid-single"><div><dt>Interest</dt><dd>{{ draft.interest }}</dd></div><div v-if="draft.subLimits"><dt>Sub-Limits</dt><dd>{{ draft.subLimits }}</dd></div><div><dt>Deductibles</dt><dd>{{ draft.deductibles }}</dd></div><div v-if="draft.reinstatementProvisions"><dt>Reinstatement Provisions</dt><dd>{{ draft.reinstatementProvisions }}</dd></div><div v-if="draft.indemnityPeriod"><dt>Indemnity Period</dt><dd>{{ draft.indemnityPeriod }}</dd></div><div><dt>Occupation</dt><dd>{{ draft.occupation }}</dd></div><div><dt>Construction</dt><dd>{{ draft.construction }}</dd></div></dl>
+                <dl class="review-grid review-grid-single"><div><dt>Interest</dt><dd>{{ draft.interest }}</dd></div><div v-if="draft.subLimits"><dt>Sub-Limits</dt><dd>{{ draft.subLimits }}</dd></div><div><dt>Deductibles</dt><dd>{{ draft.deductibles }}</dd></div><div v-if="draft.reinstatementProvisions"><dt>Reinstatement Provisions</dt><dd>{{ draft.reinstatementProvisions }}</dd></div><div v-if="draft.indemnityPeriod"><dt>Indemnity Period</dt><dd>{{ draft.indemnityPeriod }}</dd></div><template v-if="!isCglInformation"><div><dt>Occupation</dt><dd>{{ draft.occupation }}</dd></div><div><dt>Construction</dt><dd>{{ draft.construction }}</dd></div></template></dl>
               </section>
+
+              <section v-if="isCglInformation" class="review-section"><h3>Information</h3><CglInformationSummary :payload="draft" /></section>
 
               <section class="review-section">
                 <div class="review-section-heading"><h3>Schedule of security</h3><span v-if="hasManualTwRefReinsurer">TW Ref. (for AUW): {{ draft.manualTwRef }}</span><span>Total order: {{ formatAmount(totalOrderHereon) }}%</span></div>
@@ -886,22 +919,23 @@ const {
               </section>
 
               <section class="review-section">
-                <div class="review-section-heading"><h3>Sum insured & premium</h3><span>Total sum insured: {{ draft.currency }} {{ formatAmount(totalSumInsured) }}</span></div>
+                <div class="review-section-heading"><h3>{{ isCglInformation ? 'Premium' : 'Sum insured & premium' }}</h3><span v-if="!isCglInformation">Total sum insured: {{ draft.currency }} {{ formatAmount(totalSumInsured) }}</span></div>
                 <el-alert v-if="draftSumInsuredWarning" class="sum-limit-warning" type="warning" :closable="false" show-icon title="Total Sum Insured differs from Limit of Liability" :description="draftSumInsuredWarning.message"></el-alert>
-                <div class="review-list"><section v-for="group in sumInsuredGroups" :key="'review-sum-' + group.key" class="sum-review-group"><div class="sum-location-heading"><strong>{{ group.label }}</strong><span v-if="!allFacilityReinsurers">{{ [group.address, group.postcode].filter(Boolean).join(' · ') }}</span></div><div v-for="item in group.rows" :key="item.row.clientKey"><strong>{{ item.row.category }}</strong><span>{{ draft.currency }} {{ formatAmount(item.row.amount) }}</span></div></section></div>
+                <div v-if="!isCglInformation" class="review-list"><section v-for="group in sumInsuredGroups" :key="'review-sum-' + group.key" class="sum-review-group"><div class="sum-location-heading"><strong>{{ group.label }}</strong><span v-if="!allFacilityReinsurers">{{ [group.address, group.postcode].filter(Boolean).join(' · ') }}</span></div><div v-for="item in group.rows" :key="item.row.clientKey"><strong>{{ item.row.category }}</strong><span>{{ draft.currency }} {{ formatAmount(item.row.amount) }}</span></div></section></div>
                 <dl class="review-grid"><div><dt>100% Premium</dt><dd>{{ draft.currency }} {{ formatAmount(draft.originalPremium) }}</dd></div><div><dt>Payment terms</dt><dd>{{ formatAmount(draft.paymentTermsDays) }} days</dd></div><div><dt>Ceding commission</dt><dd>{{ formatAmount(draft.riCommPct) }}%</dd></div><div><dt>Cedant tax</dt><dd>{{ formatAmount(draft.taxPct) }}%</dd></div></dl>
                 <div v-if="draft.installmentEnabled" class="review-list"><div v-for="(row,index) in installmentAllocations" :key="'review-installment-' + row.id"><strong>Installment {{ index + 1 }} · {{ row.performanceMonth }}</strong><span>{{ Number(draft.originalPremium || 0) === 0 ? formatAmount(row.ratio * 100) + '%' : draft.currency + ' ' + formatAmount(row.premium) }} · Income {{ draft.currency }} {{ formatMoney(row.income) }}</span></div></div>
               </section>
 
               <section v-if="draft.splitEnabled" class="review-section"><div class="review-section-heading"><h3>Performance Split</h3><span>Internal only</span></div><div class="review-list"><div v-for="(row,index) in draft.splitParties" :key="'review-split-' + row.clientKey"><strong>Party {{ index === 0 ? 'A' : 'B' }} · {{ row.name }}</strong><span>{{ formatAmount(row.pct) }}%</span></div></div></section>
 
-              <section class="review-section"><h3>Loss record</h3><dl class="review-grid"><div><dt>Advised by broker on</dt><dd>{{ draft.lossAdvisedDate }}</dd></div><div><dt>Summary</dt><dd>{{ lossRecordSummary }}</dd></div><div v-if="draft.lossRecordText" class="review-wide"><dt>Additional notes</dt><dd>{{ draft.lossRecordText }}</dd></div></dl><div v-if="draft.lossRecord.length" class="review-list"><div v-for="(row,index) in draft.lossRecord" :key="'review-loss-' + row.clientKey"><strong>Loss {{ index + 1 }} · {{ row.date }}</strong><span>{{ row.cause }} · {{ draft.currency || '—' }} {{ formatAmount(row.lossPaid) }}</span></div></div><p v-else class="document-help">Clean — no losses recorded.</p></section>
+              <section v-if="!isCglInformation" class="review-section"><h3>Loss record</h3><dl class="review-grid"><div><dt>Advised by broker on</dt><dd>{{ draft.lossAdvisedDate }}</dd></div><div><dt>Summary</dt><dd>{{ lossRecordSummary }}</dd></div><div v-if="draft.lossRecordText" class="review-wide"><dt>Additional notes</dt><dd>{{ draft.lossRecordText }}</dd></div></dl><div v-if="draft.lossRecord.length" class="review-list"><div v-for="(row,index) in draft.lossRecord" :key="'review-loss-' + row.clientKey"><strong>Loss {{ index + 1 }} · {{ row.date }}</strong><span>{{ row.cause }} · {{ draft.currency || '—' }} {{ formatAmount(row.lossPaid) }}</span></div></div><p v-else class="document-help">Clean — no losses recorded.</p></section>
 
               <section class="review-section"><h3>Reinsurance conditions</h3><div class="review-list"><div v-for="clause in draft.clauseDetails" :key="'review-clause-' + clause.code"><strong>{{ clause.code }}</strong><span>{{ clause.title }}</span></div></div></section>
 
               <template #footer><div class="review-footer"><p>Saving keeps this case as Draft. Announce and Confirm remain unavailable.</p><div><el-button class="secondary-button" @click="reviewDialogVisible = false">Back to edit</el-button><el-button class="primary-button" :loading="saving" @click="saveReviewedDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button></div></div></template>
             </el-dialog>
           </template>
+<ReconciliationReferences ref="referenceEditor" @saved="refreshReferences" @refresh="refreshReferences" />
 </template>
 
 <style scoped>
