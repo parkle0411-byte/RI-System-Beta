@@ -163,7 +163,8 @@ def collection_change_error(before, after):
         if guarded and abs(item['paid']) > .004 and item.get('paymentAllowed') is False:
             old = prior.get(item['scheduleKey'], {})
             if old.get('paymentAllowed') or abs(item['paid']) > abs(old.get('paid', 0)) + .004:
-                return 'Full cash receipts and individual manual settlement must remain valid while the corresponding premium payment or Cedant refund is recorded.'
+                # 2026-10-21：優先顯示具體原因（例如「先收齊並銷帳所有再保人退款」），沒有才用通用說明
+                return item.get('paymentBlockedReason') or 'Full cash receipts and individual manual settlement must remain valid while the corresponding premium payment or Cedant refund is recorded.'
     return ''
 
 

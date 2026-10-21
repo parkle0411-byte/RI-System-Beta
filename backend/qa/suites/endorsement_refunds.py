@@ -119,6 +119,8 @@ def leg(name):
 # 2026-10-20 四類統一：須先收到所有再保人退款並逐筆人工銷帳，才可一次全額退清 Cedant
 r=pay(cedant,890)
 check('Cedant refund is blocked until every reinsurer refund is received and settled',r.status_code==400 and next(x for x in rows(child) if x['partyType']=='cedant')['paid']==0)
+# 2026-10-21：錯誤訊息要具體說明原因（先收齊並銷帳所有再保人退款）
+check('the block message tells the user to settle every reinsurer refund first','reinsurer refund' in r.json().get('message','').lower())
 check('refund recovery still rejects overpayment',pay(ri,752.01).status_code==400)
 # 2026-10-16 92 項規則（第 52 項）：保費（含退費）每次須登錄整筆餘額，不得部分收付（取代舊的部分退款情境）
 check('partial reinsurer refund receipt is rejected',pay(ri,100).status_code==400)

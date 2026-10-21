@@ -45,7 +45,7 @@ def complete_payment_terms(view, request, body):
         except (ValueError, KeyError, IndexError, TypeError):
             return _error(400, 'party_not_found', 'Select an existing reinsurer.')
         if ga_target(payload, row.get('name')):
-            return _error(409, 'fixed_terms_locked', 'Great American Property uses fixed quarterly 90/75-day rules.')
+            return _error(409, 'fixed_terms_locked', 'Great American Property uses fixed quarterly rules (reminder at 80 days, due at 90 days).')
         if is_auw_reinsurer(row.get('name')) or is_allianz(row.get('name')) or is_swiss_facility(row.get('name')):
             return _error(409, 'fixed_terms_locked', 'AUW, Allianz and Swiss fixed terms cannot be changed here.')
         target, field = ((installment.setdefault('reinsurerPaymentTerms', {}), party)

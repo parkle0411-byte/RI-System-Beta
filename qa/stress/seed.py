@@ -97,7 +97,7 @@ def build_body(n_reinsurers, start_lo, start_hi, endorsement_of=None):
     cls_code, cls_name = random.choice(CLASSES)
     cedant = random.choice(masters["reinsured"]).name
     currency = random.choice(CURRENCIES)
-    premium = round(random.lognormvariate(11.5 if currency in ("TWD", "JPY") else 9.5, 0.9), 2)
+    premium = round(random.lognormvariate(11.5 if currency in ("TWD", "JPY") else 9.5, 0.9), 0 if currency == "TWD" else 2)   # 2026-10-20：TWD 保費只准整數
     pf, pt = policy_dates(start_lo, start_hi)
     chosen = random.sample(masters["reinsurer"], n_reinsurers)
     share = round(100 / n_reinsurers, 2)
@@ -240,7 +240,8 @@ def post(body):
     return client.post("/api/accounting", data=json.dumps(body), content_type="application/json")
 
 
-closed_cases = list(Case.objects.filter(status="closed").order_by("id"))
+# 2026-10-20：退保批單須先收齊並銷帳再保人退款才能退 Cedant；造資料只對正保費案件記收款
+closed_cases = [c for c in Case.objects.filter(status="closed").order_by("id") if (c.payload.get("originalPremium") or 0) >= 0]
 random.shuffle(closed_cases)
 n_pay = int(len(closed_cases) * PAID_FRACTION)
 print(f"用 API 記 {n_pay} 件案件的收款…", flush=True)
