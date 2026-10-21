@@ -18,6 +18,7 @@ from audit.services import record_audit, record_snapshot, request_id_from
 from ri_system.authz import NoStoreMixin, RIPermission, actor_from, object_body
 
 from .models import MasterRecord
+from .lloyds_market import effective_payload, is_lloyds_market, market_profile, market_ratings
 from .serializers import MasterRecordSerializer
 
 ALLOWED_TYPES = {"ae", "reinsurer", "reinsured", "class", "foreign_broker", "clause"}
@@ -40,7 +41,7 @@ def _reject_constant(name):
     raise ValueError(name)  # JSON.parse 不接受 NaN / Infinity
 
 
-def validate_payload(entity_type, supplied, fallback=None):
+def validate_payload(entity_type, supplied, fallback=None, name=""):
     """
     對應 Alpha 的 masterPayload()：
       - 沒有送 payload（_MISSING）→ 沿用 fallback
@@ -49,7 +50,7 @@ def validate_payload(entity_type, supplied, fallback=None):
     """
     fallback = fallback if isinstance(fallback, dict) else {}
     if supplied is _MISSING:
-        return fallback, None
+        return effective_payload(entity_type, name, fallback), None
     if isinstance(supplied, str):
         try:
             supplied = json.loads(supplied, parse_constant=_reject_constant)
@@ -79,7 +80,8 @@ def validate_payload(entity_type, supplied, fallback=None):
     if err:
         return None, err
 
-    ratings_in = supplied.get("ratings", [])
+    # A syndicate uses the common market profile, regardless of a client override.
+    ratings_in = market_ratings() if is_lloyds_market(name) else supplied.get("ratings", [])
     if not isinstance(ratings_in, list):
         return None, "Ratings must be a list."
     if len(ratings_in) > 50:
@@ -107,7 +109,7 @@ def validate_payload(entity_type, supplied, fallback=None):
 
     value["fixedClauses"] = fixed_clauses
     value["ratings"] = ratings
-    return value, None
+    return effective_payload(entity_type, name, value), None
 
 
 def _is_positive_integer(value):
@@ -227,13 +229,14 @@ class MasterDataView(NoStoreMixin, APIView):
             qs = qs.filter(entity_type=requested_type)
         qs = qs.order_by("entity_type", "-is_active", "name", "id")
 
-        records = [serialize_record(r) for r in qs]
+        profile = market_profile()
+        records = MasterRecordSerializer(qs, many=True, context={"lloydsRatings": profile["ratings"]}).data
         counts = {t: 0 for t in ["ae", "reinsurer", "reinsured", "class", "foreign_broker", "clause"]}
         for r in qs:
             if r.is_active and r.entity_type in counts:
                 counts[r.entity_type] += 1
 
-        return Response({"ok": True, "displayVersion": "V 0.003", "records": records, "counts": counts})
+        return Response({"ok": True, "displayVersion": "V 0.003", "records": records, "counts": counts, "reinsurerMarkets": {"lloyds": profile}})
 
     def post(self, request):
         body = object_body(request)
@@ -258,7 +261,7 @@ class MasterDataView(NoStoreMixin, APIView):
                 status=400,
             )
 
-        payload, err = validate_payload(entity_type, body.get("payload", _MISSING), {})
+        payload, err = validate_payload(entity_type, body.get("payload", _MISSING), {}, name=name)
         if err:
             return Response({"error": "invalid_fixed_clauses", "message": err}, status=400)
 
@@ -372,6 +375,7 @@ class MasterDataView(NoStoreMixin, APIView):
                 entity_type,
                 body.get("payload", _MISSING),
                 current.payload or {},
+                name=name,
             )
             if err:
                 return Response({"error": "invalid_fixed_clauses", "message": err}, status=400)

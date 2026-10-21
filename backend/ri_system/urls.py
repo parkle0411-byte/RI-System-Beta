@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.urls import include, path
+from masterdata.market_views import LloydsRatingsView
 
 from personnel.account_views import CreateAccountView, DisableAccountView, EnableAccountView, ResetPasswordView
 from cases.accounting_views import AccountingView
@@ -34,6 +35,7 @@ urlpatterns = [
     path("api/auth/password-reset/confirm", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
     path("api/app-context", AppContextView.as_view(), name="app-context"),
     path("api/fx-rates", include("fxrates.urls")),
+    path("api/master-data/lloyds-ratings", LloydsRatingsView.as_view(), name="lloyds-ratings"),
     path("api/master-data", include("masterdata.urls")),
     path("api/audit-log", include("audit.urls")),
     path("api/cases", CasesView.as_view(), name="cases"),

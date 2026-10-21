@@ -55,3 +55,20 @@ class MasterRecord(models.Model):
 
     def __str__(self):
         return f"{self.entity_type}:{self.name}"
+
+
+class MarketRatingProfile(models.Model):
+    """One versioned financial strength rating profile shared by a market."""
+    market_code = models.CharField(max_length=40, primary_key=True)
+    ratings = models.JSONField(default=list)
+    row_version = models.BigIntegerField(default=1)
+    created_by = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.CharField(max_length=120)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ri_market_rating_profiles"
+
+    def __str__(self):
+        return self.market_code
