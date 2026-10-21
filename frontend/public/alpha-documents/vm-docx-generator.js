@@ -35,7 +35,7 @@
   }
 
   function formatMoney(value, c) {
-    const decimals = currencyLabel(c) === 'USD' ? 2 : 0;
+    const decimals = currencyLabel(c) === 'USD' || (currencyLabel(c) === 'TWD' && c?.premiumRounding === 'legacy-cents') ? 2 : 0;
     return number(value).toLocaleString('en-US', {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
@@ -50,6 +50,27 @@
   function money(value, c) {
     if (value === '' || value === null || value === undefined) return '';
     return `${currencyLabel(c)}${formatMoney(value, c)}`;
+  }
+
+  function premiumRound(value, c) {
+    const scale = currencyLabel(c) === 'TWD' && c?.premiumRounding !== 'legacy-cents' ? 1 : 100;
+    return Math.round((Number(value) + Number.EPSILON) * scale) / scale;
+  }
+
+  function premiumAllocation(total, weights, c) {
+    const sum = weights.reduce((a, b) => a + b, 0);
+    const result = weights.map(weight => premiumRound(total * weight / sum, c));
+    result[0] = premiumRound(result[0] + premiumRound(total - result.reduce((a, b) => a + b, 0), c), c);
+    if (total > 0 && result[0] < 0 && c?.premiumRounding !== 'legacy-cents') {
+      let remainder = premiumRound(-result[0], c);
+      result[0] = 0;
+      for (let i = 1; i < result.length && remainder > 0; i += 1) {
+        const deduction = Math.min(result[i], remainder);
+        result[i] = premiumRound(result[i] - deduction, c);
+        remainder = premiumRound(remainder - deduction, c);
+      }
+    }
+    return result;
   }
 
   function percent(value, decimals) {
@@ -120,8 +141,8 @@
   // the printed invoice amounts. When a positive total would make the first
   // amount negative, the first is floored at zero and the remaining shortfall
   // is deducted from following installments in Case order.
-  function debitDueDate(c) {
-    if (!c) return '';
+  function debitPaymentRows(c) {
+    if (!c) return [];
     const validTerms = (value) => {
       const number = Number(value);
       return Number.isInteger(number) && number >= 15 ? number : null;
@@ -129,7 +150,7 @@
     const reinsurers = Array.isArray(c.reinsurers) ? c.reinsurers : [];
     const installmentEnabled = c.installmentEnabled === true;
     const rawInstallments = installmentEnabled && Array.isArray(c.performanceInstallments) && c.performanceInstallments.length
-      ? c.performanceInstallments : [{ performanceMonth: '', paymentBaseDate: c.policyFrom }];
+      ? c.performanceInstallments : [{ performanceMonth: '', paymentBaseDate: c.policyFrom, paymentTermsDays: c.paymentTermsDays }];
     const weights = rawInstallments.map((row) => {
       if (!installmentEnabled) return 1;
       const premium = Number(row.premium);
@@ -140,20 +161,11 @@
     let weightSum = weights.reduce((a, b) => a + b, 0);
     let w = weights;
     if (weightSum <= 0) { weightSum = rawInstallments.length; w = rawInstallments.map(() => 1); }
-    const total = financials(c).netDue;
-    const roundMoney = (value) => roundedMoney(value, c);
-    const installmentAmounts = w.map((weight, index) => index === 0 ? 0 : roundMoney(total * weight / weightSum));
-    const otherAmount = installmentAmounts.reduce((sum, amount) => roundMoney(sum + amount), 0);
-    installmentAmounts[0] = roundMoney(total - otherAmount);
-    if (total > 0 && installmentAmounts[0] < 0) {
-      let remainder = roundMoney(-installmentAmounts[0]);
-      installmentAmounts[0] = 0;
-      for (let index = 1; index < installmentAmounts.length && remainder > 0; index += 1) {
-        const deduction = Math.min(installmentAmounts[index], remainder);
-        installmentAmounts[index] = roundMoney(installmentAmounts[index] - deduction);
-        remainder = roundMoney(remainder - deduction);
-      }
-    }
+    // Allocate each reinsurer's T1 using the same plan as posted transactions.
+    // Rounding a combined Net Due instead can move cents between periods.
+    const t1s = financials(c).t1s;
+    const allocations = t1s.map(total => premiumAllocation(total, w, c));
+    const installmentAmounts = rawInstallments.map((_, i) => premiumRound(allocations.reduce((sum, row) => sum + row[i], 0), c));
     // Mirrors build_payment_schedule: new (basis 'case') and AUW cases use the Cedant's own terms; older cases the shortest reinsurer terms.
     const cedantOwnTerms = true;
     const rows = rawInstallments.map((installment, index) => {
@@ -176,6 +188,11 @@
       const label = installmentEnabled ? `Instalment ${index + 1}` : '';
       return { label, dueDate, amount };
     }).filter((row) => row.dueDate);
+    return rows;
+  }
+
+  function debitDueDate(c) {
+    const rows = debitPaymentRows(c);
     if (!rows.length) return '';
     if (rows.length === 1) return longDate(rows[0].dueDate);
     return rows.map((row) => `${row.label}: ${longDate(row.dueDate)} — ${money(row.amount, c)}`).join('\n');
@@ -250,8 +267,13 @@
 
   function clauseLine(item) {
     if (!item) return '';
-    if (item.code === 'INTERMEDIARY') return LEGACY_CLAUSE_TITLES.INTERMEDIARY;
     return text(item.title) || item.code;
+  }
+
+  function documentReference(c) {
+    const refs = [text(c && c.twRef), text(c && c.manualTwRef)]
+      .flatMap(value => value.split(/\s+&\s+/)).filter(Boolean);
+    return Array.from(new Set(refs)).join(' & ') || 'DRAFT';
   }
 
   function sumInsuredRows(c) {
@@ -287,15 +309,17 @@
   function financials(c) {
     const reinsurers = Array.isArray(c && c.reinsurers) ? c.reinsurers : [];
     const order = reinsurers.reduce((total, row) => total + number(row.sharePct), 0);
-    const originalPremium = number(c && c.originalPremium);
-    const cededPremium = originalPremium * order / 100;
-    const commission = cededPremium * number(c && c.riCommPct) / 100;
-    const tax = cededPremium * number(c && c.taxPct) / 100;
-    // The invoice total must equal the amounts actually shown in its rows.
-    const netDue = roundedMoney(
-      roundedMoney(cededPremium, c) - roundedMoney(commission, c) - roundedMoney(tax, c), c
-    );
-    return { order, originalPremium, cededPremium, commission, tax, netDue };
+    const rawPremium = number(c && c.originalPremium);
+    const originalPremium = ['TWD', 'USD'].includes(currencyLabel(c)) && c?.premiumRounding !== 'legacy-cents' ? premiumRound(rawPremium, c) : rawPremium;
+    const components = reinsurers.map(row => {
+      const cp = premiumRound(originalPremium * number(row.sharePct) / 100, c);
+      const commission = premiumRound(cp * number(c && c.riCommPct) / 100, c);
+      const tax = premiumRound(cp * number(c && c.taxPct) / 100, c);
+      return { cp, commission, tax, t1: premiumRound(cp - commission - tax, c) };
+    });
+    const sum = key => premiumRound(components.reduce((total, row) => total + row[key], 0), c);
+    const cededPremium = sum('cp'), commission = sum('commission'), tax = sum('tax'), netDue = sum('t1');
+    return { order, originalPremium, cededPremium, commission, tax, netDue, t1s: components.map(row => row.t1) };
   }
 
   function commonValues(c) {
@@ -313,7 +337,7 @@
     return {
       RECIPIENT_BLOCK: addressLines.join('\n'),
       CONTACT_BLOCK: contactBlock(c),
-      TW_REF: text(c && c.twRef) || 'DRAFT',
+      TW_REF: documentReference(c),
       TYPE: text(c && c.type),
       ORIGINAL_INSURED: text(c && c.originalInsured),
       REINSURED: text(c && c.reinsured),
@@ -321,27 +345,27 @@
       PERIOD_SHORT: period(c, false),
       INTEREST: text(c && c.interest),
       LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c),
-      AGGREGATE_LIMIT: money(c && c.aggregateLimit, c),
-      UNDERLYING_LIMITS: text(c && c.underlyingLimits),
+      AGGREGATE_LIMIT: Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
+      UNDERLYING_LIMITS: Array.isArray(c && c.cglInformationRows) && text(c && c.reinsuranceStructure).toUpperCase() !== 'XOL' ? '' : text(c && c.underlyingLimits),
       SUB_LIMITS: text(c && c.subLimits),
       DEDUCTIBLES: text(c && c.deductibles),
       REINSURED_RETENTION: text(c && c.reinsuredRetention),
       REINSTATEMENT_PROVISIONS: text(c && c.reinstatementProvisions),
-      INDEMNITY_PERIOD: text(c && c.indemnityPeriod),
+      INDEMNITY_PERIOD: Array.isArray(c && c.cglInformationRows) ? '' : text(c && c.indemnityPeriod),
       ORIGINAL_EXCLUSIONS: originalExclusions,
       LOCATION: situations.map((item, index) => `${index + 1}. ${situationAddress(item)}`).join('\n'),
       SITUATION: situations.map((item, index) => `${index + 1}. ${situationAddress(item)}`).join('\n'),
       TOTAL_SUM_INSURED: money(sums.reduce((total, row) => total + row.numericAmount, 0), c),
-      POLICY_LIMIT: money(c && c.aggregateLimit, c),
-      BASIS_OF_VALUATION: basisOfValuation(c),
+      POLICY_LIMIT: Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
+      BASIS_OF_VALUATION: Array.isArray(c && c.cglInformationRows) ? '' : basisOfValuation(c),
       ORIGINAL_CONDITIONS: originalConditions,
       REINSURANCE_CONDITIONS: reinsuranceConditions,
-      LOSS_PAYEE: text(c && c.lossPayee),
+      LOSS_PAYEE: Array.isArray(c && c.cglInformationRows) ? '' : text(c && c.lossPayee),
       NOTICES: text(c && c.notices),
       EXPRESS_WARRANTIES: text(c && c.expressWarranties),
       CONDITIONS_PRECEDENT: text(c && c.conditionsPrecedent),
       SUBJECTIVITIES: text(c && c.subjectivities),
-      PREMIUM: money(c && c.originalPremium, c),
+      PREMIUM: money(c && c.originalPremium, c) + (Array.isArray(c && c.cglInformationRows) && c.cglAnnual !== false ? ' (Annual)' : ''),
       ORDER_HEREON: `${percentTrim(fin.order, shareDecimals)} of 100%`,
       ORDER_HEREON_DEBIT: percentTrim(fin.order, shareDecimals),
       CEDING_COMMISSION: text(c && c.riCommPct) ? percent(c && c.riCommPct, 2) : '',
@@ -380,6 +404,26 @@
 
   function xmlValue(value) {
     return xmlEscape(value).replace(/\r?\n/g, '</w:t><w:br/><w:t xml:space="preserve">');
+  }
+
+  // Reserve the inline logo's actual height explicitly instead of relying on
+  // inherited paragraph spacing in Word-compatible renderers.
+  function reserveHeaderLogoSpace(xml) {
+    return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, paragraph => {
+      const extent = paragraph.match(/<wp:inline\b[\s\S]*?<wp:extent\b[^>]*\bcy="(\d+)"/);
+      if (!extent) return paragraph;
+      const line = Math.ceil(Number(extent[1]) / 635); // EMU to twips.
+      if (!Number.isFinite(line) || line <= 0) return paragraph;
+      return paragraph.replace(/<w:pPr>([\s\S]*?)<\/w:pPr>/, (tag, properties) => {
+        let content = properties.replace(/<w:keepLines\b[^>]*\/>/g, '')
+          .replace(/<w:spacing\b[^>]*\/>/g, '');
+        content = content.replace(/(<w:pStyle\b[^>]*\/>|^)/, '$1<w:keepLines/>');
+        const spacing = `<w:spacing w:before="0" w:after="0" w:line="${line}" w:lineRule="atLeast"/>`;
+        const alignment = content.search(/<w:(?:jc|rPr)\b/);
+        content = alignment < 0 ? content + spacing : content.slice(0, alignment) + spacing + content.slice(alignment);
+        return `<w:pPr>${content}</w:pPr>`;
+      });
+    });
   }
 
   function normalizeRunTypography(xml) {
@@ -488,6 +532,25 @@
     return xml;
   }
 
+  // Apply the chapter break to INFORMATION's first paragraph, before Case
+  // values are inserted, so literal Case text cannot select another table.
+  function startCoverInformationPage(xml) {
+    const frames = scanTableFrames(xml);
+    const table = frames.find(frame => !frames.some(parent =>
+      parent.tblStart < frame.tblStart && parent.tblEnd > frame.tblEnd)
+      && /<w:t\b[^>]*>INFORMATION<\/w:t>/.test(xml.slice(frame.tblStart, frame.tblEnd)));
+    if (!table) return xml;
+    const content = xml.slice(table.tblStart, table.tblEnd).replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/, paragraph => {
+      if (/<w:pageBreakBefore\b/.test(paragraph)) {
+        return paragraph.replace(/<w:pageBreakBefore\b[^>]*\/>/, '<w:pageBreakBefore/>');
+      }
+      return /<w:pPr\b/.test(paragraph)
+        ? paragraph.replace(/<w:pPr\b[^>]*>/, '$&<w:pageBreakBefore/>')
+        : paragraph.replace(/<w:p\b[^>]*>/, '$&<w:pPr><w:pageBreakBefore/></w:pPr>');
+    });
+    return xml.slice(0, table.tblStart) + content + xml.slice(table.tblEnd);
+  }
+
   // A standalone page-break run can overflow onto an empty page before
   // breaking again. Keep each chapter break on its compact separator instead.
   function normalizeCoverPageBreaks(xml) {
@@ -586,9 +649,69 @@
     return null;
   }
 
+  // Use a separate table so Word can repeat the heading across pages.
+  // Split only the template payment row; dates and amounts share the same
+  // calculation as the legacy DEBIT_PAYMENT_TERMS value.
+  function renderDebitInstalments(xml, c) {
+    if (!c || c.installmentEnabled !== true) return xml;
+    const rows = debitPaymentRows(c);
+    if (rows.length < 2) return xml;
+    const found = findFrameForToken(xml, scanTableFrames(xml), '{{DEBIT_PAYMENT_TERMS}}');
+    if (!found) return xml;
+    const frame = found.frame;
+    const target = frame.rows[found.rowIndex];
+    const prefix = xml.slice(frame.tblStart, frame.rows[0].start);
+    const page = xml.match(/<w:pgSz\b[^>]*w:w="(\d+)"/);
+    const margins = xml.match(/<w:pgMar\b[^>]*>/);
+    const margin = name => Number((margins && margins[0].match(new RegExp('w:' + name + '="(\\d+)"')) || [0, 1080])[1]);
+    const width = Math.max(1, Number(page ? page[1] : 11906) - margin('left') - margin('right'));
+    const widths = [Math.round(width * 0.25), Math.round(width * 0.40)];
+    widths.push(width - widths[0] - widths[1]);
+    const paragraph = (value, align, heading) => '<w:p><w:pPr>'
+      + (heading ? '<w:keepNext/>' : '')
+      + '<w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>'
+      + '<w:jc w:val="' + align + '"/></w:pPr><w:r><w:rPr>'
+      + '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="標楷體"/>'
+      + (heading ? '<w:b/>' : '') + '<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>'
+      + '<w:t xml:space="preserve">' + xmlEscape(value) + '</w:t></w:r></w:p>';
+    const tableRow = (values, heading) => '<w:tr><w:trPr><w:cantSplit/>'
+      + (heading ? '<w:tblHeader/>' : '') + '</w:trPr>'
+      + values.map((value, index) => '<w:tc><w:tcPr><w:tcW w:w="' + widths[index]
+        + '" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>'
+        + paragraph(value, heading ? 'center' : ['left', 'center', 'right'][index], heading) + '</w:tc>').join('') + '</w:tr>';
+    const border = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(name => '<w:' + name + ' w:val="single" w:sz="4" w:color="000000"/>').join('');
+    const table = '<w:tbl><w:tblPr><w:tblW w:w="' + width + '" w:type="dxa"/><w:jc w:val="center"/>'
+      + '<w:tblBorders>' + border + '</w:tblBorders><w:tblLayout w:type="fixed"/>'
+      + '<w:tblCellMar><w:top w:w="20" w:type="dxa"/><w:left w:w="100" w:type="dxa"/>'
+      + '<w:bottom w:w="20" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>'
+      + '<w:tblGrid>' + widths.map(value => '<w:gridCol w:w="' + value + '"/>').join('') + '</w:tblGrid>'
+      + tableRow(['Instalment', 'Payment Due Date', 'Amount'], true)
+      + rows.map(row => tableRow([row.label, longDate(row.dueDate), money(row.amount, c)], false)).join('') + '</w:tbl>';
+    const separator = '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="1" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>';
+    return xml.slice(0, target.start) + '</w:tbl>' + separator + table + separator
+      + prefix + xml.slice(target.end);
+  }
+
   function isBlankRowText(rowXml) {
     const runs = rowXml.match(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g) || [];
     return !runs.some(run => run.replace(/^<w:t\b[^>]*>/, '').replace(/<\/w:t>$/, '').trim().length > 0);
+  }
+
+  // Property XOL lists the same Case addresses under SITUATION. Remove only
+  // the duplicate template row before any user-provided text is inserted.
+  function stripPropertyXolLocation(xml, c) {
+    if (text(c && c.classOfBusiness).toLowerCase() !== 'property'
+      || coverTemplateKey(c) !== 'propertyCoverXol') return xml;
+    const found = findFrameForToken(xml, scanTableFrames(xml), '{{LOCATION}}');
+    if (!found) return xml;
+    const { frame, rowIndex } = found;
+    const row = frame.rows[rowIndex];
+    const next = frame.rows[rowIndex + 1];
+    const spacer = next ? xml.slice(next.start, next.end) : '';
+    const end = next && isBlankRowText(spacer)
+      && !/<w:(?:tbl|drawing|pict|object|fldChar|instrText|br|sectPr)\b/.test(spacer)
+      ? next.end : row.end;
+    return xml.slice(0, row.start) + xml.slice(end);
   }
 
   function stripEmptyOptionalRows(xml, values) {
@@ -798,12 +921,36 @@
   // Sum Insured, Loss Record and Schedule of Security — into one table
   // row per actual entry instead of cramming every entry's text into the
   // template's single first data row.
+  function renderSumInsuredLocation(rowXml) {
+    const cells = rowXml.match(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g) || [];
+    if (cells.length !== 2) return rowXml;
+    const widths = cells.map(cell => Number((cell.match(/<w:tcW\b[^>]*w:w="(\d+)"/) || [])[1]));
+    if (!widths.every(Number.isFinite)) return rowXml;
+    let merged = cells[0].replace(/<w:tcW\b[^>]*\/>/, `<w:tcW w:w="${widths[0] + widths[1]}" w:type="dxa"/><w:gridSpan w:val="2"/>`);
+    merged = merged.replace(/<w:pPr>([\s\S]*?)<\/w:pPr>/g, (tag, properties) => {
+      let content = properties.replace(/<w:jc\b[^>]*\/>/g, '');
+      content = content.includes('<w:rPr>')
+        ? content.replace('<w:rPr>', '<w:jc w:val="center"/><w:rPr>')
+        : content + '<w:jc w:val="center"/>';
+      return `<w:pPr>${content}</w:pPr>`;
+    }).replace(/<w:rPr>/g, '<w:rPr><w:b/>');
+    return rowXml.replace(cells[0] + cells[1], merged);
+  }
+
+  // Currency spacing is a Cover display rule; saved Case prose stays intact.
+  function compactCoverCurrencyAmounts(xml, c) {
+    const codes = ['USD', 'TWD', 'NTD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR', 'CNY', 'AUD', 'CAD', 'CHF', 'SGD', 'NZD', text(c && c.currency).toUpperCase()]
+      .filter(code => /^[A-Z]{3}$/.test(code));
+    const pattern = new RegExp(`\\b(${[...new Set(codes)].join('|')})[ \t\u00a0\u202f]+(?=[+-]?\\d)`, 'g');
+    return xml.replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g, node => node.replace(pattern, '$1'));
+  }
+
   function expandDocumentRepeatingRows(xml, c) {
     const sums = sumInsuredRows(c);
     xml = expandRepeatingRows(xml, '{{SUM_INSURED_LABELS}}', sums, row => ({
       '{{SUM_INSURED_LABELS}}': row.label,
       '{{SUM_INSURED_AMOUNTS}}': row.amount,
-    }), { renderRow: (rowXml, row) => row.heading ? rowXml.replace(/<w:rPr>/g, '<w:rPr><w:b/>') : rowXml });
+    }), { renderRow: (rowXml, row) => row.heading ? renderSumInsuredLocation(rowXml) : rowXml });
 
     const lossRows = Array.isArray(c && c.lossRecord) ? c.lossRecord : [];
     xml = expandRepeatingRows(xml, '{{LOSS_DATES}}', lossRows, row => ({
@@ -848,12 +995,12 @@
 
     const originalConditionsText = appendRequiredTail(c && c.originalConditions, ORIGINAL_CONDITIONS_TAIL);
     xml = expandListParagraph(xml, '{{ORIGINAL_CONDITIONS}}', originalConditionsText.split('\n').filter(Boolean), {
-      numId: DECIMAL_LIST_NUM_ID,
+      numId: text(c && c.originalConditions) ? DECIMAL_LIST_NUM_ID : null,
     });
 
     const originalExclusionsText = appendRequiredTail(c && c.originalExclusions, ORIGINAL_CONDITIONS_TAIL);
     xml = expandListParagraph(xml, '{{ORIGINAL_EXCLUSIONS}}', originalExclusionsText.split('\n').filter(Boolean), {
-      numId: DECIMAL_LIST_NUM_ID,
+      numId: text(c && c.originalExclusions) ? DECIMAL_LIST_NUM_ID : null,
     });
 
     return xml;
@@ -880,6 +1027,21 @@
     const after = xml.slice(closeIdx);
     if (!addressBlock.trim()) return xml;
     return `${before}${addressBlock}${sdtBlock}${after}`;
+  }
+
+  // Keep the company, address and contacts on separate centered lines.
+  function separateFooterContacts(xml) {
+    return xml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, paragraph => {
+      if (!paragraph.includes('Taiwan.')) return paragraph;
+      const contact = [...paragraph.matchAll(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g)]
+        .find(run => run[0].replace(/<[^>]+>/g, '').trim() === 'T: +886-2-8772-2277 F: +886-2-8772-2748');
+      if (!contact) return paragraph;
+      const properties = (paragraph.match(/<w:pPr>[\s\S]*?<\/w:pPr>/) || [''])[0];
+      const contactRun = contact[0].replace(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g,
+        (tag, attrs, value) => `<w:t${attrs}>${value.split('-').join(`</w:t><w:noBreakHyphen/><w:t${attrs}>`)}</w:t>`);
+      return paragraph.slice(0, contact.index) + paragraph.slice(contact.index + contact[0].length)
+        + `<w:p>${properties}${contactRun}</w:p>`;
+    });
   }
 
   // Use live Word fields on every page; preserve an existing page-number footer.
@@ -972,6 +1134,12 @@
       });
       const gridStart = frame.tblStart + grid.index;
       edits.push({ start: gridStart, end: gridStart + grid[0].length, xml: resizedGrid });
+      const notice = frame.rows.slice(0, headerIndex).find(row =>
+        xml.slice(row.start, row.end).replace(/<[^>]+>/g, '').includes('Please arrange payment to our'));
+      if (notice) {
+        const noticeXml = xml.slice(notice.start, notice.end);
+        edits.push({ start: notice.start, end: notice.end, xml: setSizeInRange(noticeXml, 0, noticeXml.length, 18) });
+      }
       [frame.rows[headerIndex], account].forEach((row, rowIndex) => {
         let cellIndex = 0;
         const updated = xml.slice(row.start, row.end).replace(/<w:tc\b[^>]*>[\s\S]*?<\/w:tc>/g, cell => {
@@ -980,8 +1148,8 @@
             cell = cell.replace(/<w:tcW\b[^>]*w:w="(\d+)"[^>]*\/>/, (tag, width) =>
               tag.replace(`w:w="${width}"`, `w:w="${Number(width) + (index === 3 ? preferredShift : -preferredShift)}"`));
           }
+          cell = setSizeInRange(cell, 0, cell.length, 18);
           if (rowIndex === 1 && index === 3) {
-            cell = setSizeInRange(cell, 0, cell.length, 16);
             if (!/<w:noWrap\b/.test(cell)) cell = cell.replace('<w:vAlign', '<w:noWrap/><w:vAlign');
           }
           return cell;
@@ -1045,9 +1213,16 @@
   // Loss Record and Special Agreement keep their existing Word formatting.
   function applyCglInformation(xml, c) {
     if (!Array.isArray(c && c.cglInformationRows)) return xml;
+    // Rename the fixed heading before inserting any user-provided address text.
+    xml = xml.replace('<w:t>SITUATION</w:t>', '<w:t>PRINCIPAL ADDRESS</w:t>');
+    xml = xml.replace('<w:t>LIMIT OF LIABILITY</w:t>', '<w:t>LIMIT OF INDEMNITY</w:t>');
+    xml = xml.replace('<w:t>POLICY LIMIT</w:t>', '<w:t>AGGREGATE LIMIT</w:t>');
+    xml = xml.replace('<w:t>ORIGINAL POLICY PERIOD</w:t>', '<w:t>PERIOD</w:t>');
+    // The QS template splits this fixed heading across two Word runs.
+    xml = xml.replace('<w:t xml:space="preserve">ORIGINAL POLICY </w:t>', '<w:t xml:space="preserve"></w:t>');
     const edits = [];
     const frames = scanTableFrames(xml);
-    ['{{OCCUPATION}}', '{{CONSTRUCTION}}', '{{SUM_INSURED_LABELS}}'].forEach(token => {
+    ['{{LOCATION}}', '{{TOTAL_SUM_INSURED}}', '{{OCCUPATION}}', '{{CONSTRUCTION}}', '{{SUM_INSURED_LABELS}}'].forEach(token => {
       // Use the outer row in the INFORMATION table for the nested sum table.
       const matches = frames.flatMap(frame => frame.rows.map((row, index) => ({ frame, row, index })))
         .filter(item => xml.slice(item.row.start, item.row.end).includes(token))
@@ -1070,6 +1245,29 @@
     return xml;
   }
 
+  // Reuse the adjacent template row typography and spacing for CGL Risk Details.
+  // Render escaped text before normal placeholders, protecting literal braces.
+  function applyCglRiskDetails(xml, c) {
+    if (!Array.isArray(c && c.cglInformationRows)) return xml;
+    [
+      { token: '{{INTEREST}}', heading: 'INTEREST', label: 'COVERAGES', value: c.cglCoveragesText },
+      { token: '{{DEDUCTIBLES}}', heading: 'DEDUCTIBLES', label: 'SELF-INSURED RETENTION', value: c.selfInsuredRetention },
+    ].forEach(item => {
+      if (!text(item.value)) return;
+      const found = findFrameForToken(xml, scanTableFrames(xml), item.token);
+      if (!found) return;
+      const row = found.frame.rows[found.rowIndex];
+      const next = found.frame.rows[found.rowIndex + 1];
+      const spacer = next && isBlankRowText(xml.slice(next.start, next.end)) ? xml.slice(next.start, next.end) : '';
+      const value = xmlValue(item.value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+      const added = xml.slice(row.start, row.end).replace('>' + item.heading + '<', '>' + item.label + '<')
+        .split(item.token).join(value) + spacer;
+      const at = spacer ? next.end : row.end;
+      xml = xml.slice(0, at) + added + xml.slice(at);
+    });
+    return xml;
+  }
+
   async function fillTemplate(base64, c, values, outputType, includeLossNotes = false, keepBankDetails = false) {
     const zip = await JSZip.loadAsync(base64, { base64: true });
     const names = Object.keys(zip.files).filter(name => /\.xml$/i.test(name));
@@ -1081,7 +1279,7 @@
       if (/^word\/document\.xml$/i.test(name)) {
         // Correct the Cover template heading before inserting any Case text.
         if (includeLossNotes) {
-          const corrected = xml.replace('<w:t>BREAKFOWN OF SUM INSURED</w:t>', '<w:t>BREAKDOWN OF SUM INSURED</w:t>');
+          const corrected = stripPropertyXolLocation(startCoverInformationPage(xml.replace('<w:t>BREAKFOWN OF SUM INSURED</w:t>', '<w:t>BREAKDOWN OF SUM INSURED</w:t>')), c);
           if (corrected !== xml) {
             xml = corrected;
             changed = true;
@@ -1089,6 +1287,8 @@
         }
         const information = applyCglInformation(xml, c);
         if (information !== xml) { xml = information; changed = true; }
+        const riskDetails = applyCglRiskDetails(xml, c);
+        if (riskDetails !== xml) { xml = riskDetails; changed = true; }
         const stripped = stripEmptyOptionalRows(xml, values);
         if (stripped !== xml) {
           xml = stripped;
@@ -1101,6 +1301,12 @@
         }
       }
       if (keepBankDetails && /^word\/document\.xml$/i.test(name)) {
+        if (currencyLabel(c) === 'TWD') {
+          const labelled = xml.replace(/(<w:t\b[^>]*>)NTD(<\/w:t>)/g, '$1TWD$2');
+          if (labelled !== xml) { xml = labelled; changed = true; }
+        }
+        const schedule = renderDebitInstalments(xml, c);
+        if (schedule !== xml) { xml = schedule; changed = true; }
         const keptTogether = keepDebitBankDetailsTogether(xml);
         if (keptTogether !== xml) {
           xml = keptTogether;
@@ -1114,8 +1320,15 @@
           changed = true;
         }
       }
+      if (/^word\/header\d+\.xml$/i.test(name)) {
+        const reserved = reserveHeaderLogoSpace(xml);
+        if (reserved !== xml) {
+          xml = reserved;
+          changed = true;
+        }
+      }
       if (/^word\/footer\d+\.xml$/i.test(name)) {
-        const reordered = ensureFooterPageNumber(reorderFooterPageNumber(xml));
+        const reordered = separateFooterContacts(ensureFooterPageNumber(reorderFooterPageNumber(xml)));
         if (reordered !== xml) {
           xml = reordered;
           changed = true;
@@ -1152,7 +1365,7 @@
         }
       }
       if (includeLossNotes && /^word\/document\.xml$/i.test(name)) {
-        const paginated = normalizeCoverPageBreaks(xml);
+        const paginated = normalizeCoverPageBreaks(compactCoverCurrencyAmounts(xml, c));
         if (paginated !== xml) {
           xml = paginated;
           changed = true;
@@ -1274,8 +1487,8 @@
     generateDebit,
     generateEndorsement,
     downloadBlob,
-    coverFilename: c => `CoverNote_${safeRef(c && c.twRef)}.docx`,
+    coverFilename: c => `CoverNote_${safeRef(documentReference(c))}.docx`,
     endorsementFilename: c => `Endorsement_${safeRef(endorsementReference(c))}.docx`,
-    debitFilename: c => `DebitNote_${safeRef(c && c.twRef)}.docx`,
+    debitFilename: c => `DebitNote_${safeRef(documentReference(c))}.docx`,
   };
 }));

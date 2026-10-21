@@ -1,3 +1,4 @@
+import { premiumInputErrors, premiumPeriodAmounts } from '../alpha/lib/accounting.js'
 // 案件工作區邏輯直接在此維護；現行規則以 VM-RULES.md 為準。
 // 模板直接維護於 CaseWorkspace.vue。
 //
@@ -9,15 +10,16 @@
 //   - 從 Accounting 點 TW Ref 會帶 ?case=…&tab=soa 過來（Alpha 是同一頁切換）：載入後直接開該案件的 SOA 分頁
 //   - 理賠：出險日與付款日期必填（後端檢查，錯誤訊息照常顯示）
 //   - 產生 Word／PDF 文件的程式尚未移植：產生文件的按鈕停用
-import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '../api'
 import { generateDocx } from '../alpha/documents'
+import { resolveClauseTitles } from '../alpha/clauseTitles'
 import { auth, can } from '../auth'
 import { RICaseCalculations } from '../alpha/caseCalculations'
 import {
-  STRUCTURE_SUFFIX, UNIVERSAL_CLAUSES, clientKey, compareClauses, emptyDraft, normalizeClauseCode, normalizeClauseList
+  FIXED_TEXT, STRUCTURE_SUFFIX, UNIVERSAL_CLAUSES, clientKey, compareClauses, emptyDraft, normalizeClauseCode, normalizeClauseList
 } from '../alpha/constants'
 import {
   departmentLabel, filled, formatAmount, formatCurrency, formatDateTime, formatFileSize, formatMoney, formatMoneyInput, parseMoneyInput,
@@ -25,11 +27,14 @@ import {
 } from '../alpha/format'
 import { setHeader, shell } from '../alpha/shell'
 import { AUW_FOREIGN_BROKER, displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef } from '../alpha/manualTwRef'
+import { isAllianzReinsurer, hasAllianz } from '../alpha/allianzFacility'
+import { isGreatAmericanTarget, hasGreatAmerican } from '../alpha/greatAmericanFacility'
 import { allSumInsuredFacility, sumLocationIndex, sumInsuredPlacementIssues, mergeFacilitySumItems, sumInsuredLimitWarning } from '../alpha/sumInsured'
 import { transactionNumber } from '../alpha/transactionNumber'
 import { isSwissFacility, isSwissPropertyCase } from '../alpha/swissFacility'
 import { transactionParty, transactionRecipient, paymentDirection } from '../alpha/transactionParty'
 import { isStandardCgl, emptyCglInformation, cglInformationIssues } from '../alpha/cglInformation'
+import { CGL_INTEREST, cglTypePrefix, cglType, cglTypeIssues, cglUnderlyingIssues, liabilityLimitLabel, cglRiskDetailsIssues, CGL_CLAUSE_PRESETS, cglAnnual } from '../alpha/cglRiskDetails'
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024 // VM：10 MB（Alpha 5 MB）
 const OPEN_SECTIONS = ['risk', 'security', 'terms', 'information', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'reinsurerPremium', 'split', 'conditions']
@@ -83,6 +88,43 @@ export function useCaseWorkspace() {
   const filters = reactive({ search: '', status: 'all', year: 'all', className: 'all', reinsurer: 'all', reinsured: 'all', aeName: 'all' })
   const draft = reactive(emptyDraft())
   const isCglInformation = computed(() => isStandardCgl(draft))
+  const gaBoundRows = new WeakMap()
+  watchEffect(() => {
+    draft.reinsurers.forEach((row,index) => {
+      const bound = gaBoundRows.get(row)
+      if (isGreatAmericanTarget(draft,row.name)) {
+        const prior = bound || {days:row.paymentTermsDays,periods:new WeakMap()}
+        gaBoundRows.set(row,prior)
+        row.paymentTermsDays = 90
+        draft.performanceInstallments.forEach(period => {
+          if (!period.reinsurerPaymentTerms || typeof period.reinsurerPaymentTerms !== 'object') period.reinsurerPaymentTerms = {}
+          if (!prior.periods.has(period)) prior.periods.set(period,period.reinsurerPaymentTerms['r'+(index+1)])
+          period.reinsurerPaymentTerms['r'+(index+1)] = 90
+        })
+      } else if (bound) {
+        if (!isAuwReinsurer(row.name) && !isAllianzReinsurer(row.name) && !(isSwissPropertyCase(draft)&&isSwissFacility(row.name))) {
+          row.paymentTermsDays = bound.days ?? null
+          draft.performanceInstallments.forEach(period => {
+            const key='r'+(index+1),prior=bound.periods.get(period)
+            if (period.reinsurerPaymentTerms) { if(prior==null) delete period.reinsurerPaymentTerms[key]; else period.reinsurerPaymentTerms[key]=prior }
+          })
+        }
+        gaBoundRows.delete(row)
+      }
+    })
+  })
+  const allianzBoundRows = new WeakSet()
+  watchEffect(() => {
+    draft.reinsurers.forEach((row,index) => {
+      if (!isAllianzReinsurer(row.name)) return
+      row.paymentTermsDays = 90
+      allianzBoundRows.add(row)
+      draft.performanceInstallments.forEach(period => {
+        if (!period.reinsurerPaymentTerms || typeof period.reinsurerPaymentTerms !== "object") period.reinsurerPaymentTerms = {}
+        period.reinsurerPaymentTerms["r" + (index+1)] = 90
+      })
+    })
+  })
   const isSwissProperty = computed(() => isSwissPropertyCase(draft))
   watchEffect(() => {
     if (!isSwissProperty.value) return
@@ -143,8 +185,17 @@ export function useCaseWorkspace() {
 
   const isEditing = computed(() => Boolean(editingCaseUid.value))
   const isEndorsementDraft = computed(() => Boolean(draft.parentTwRef))
+  watch(isCglInformation, (standardCgl) => {
+    if (activeView.value !== 'case-create') return
+    if (!isEditing.value && !draft.parentTwRef && !draft.renewedFromTwRef
+      && [FIXED_TEXT.interest, CGL_INTEREST].includes(draft.interest)) {
+      draft.interest = standardCgl ? CGL_INTEREST : FIXED_TEXT.interest
+    }
+    recomputeType()
+  })
   const auwRefLocked = computed(() => isEditing.value && editingOriginalStatus.value !== 'draft' && draft.twRefSource === 'auw_manual')
   const selectedPayload = computed(() => selectedCase.value?.payload || {})
+  const draftClauseDetails = computed(() => resolveClauseTitles(draft.clauseDetails, mdmRecords.value, draft))
   const selectedSumInsuredIssues = computed(() => sumInsuredPlacementIssues(selectedPayload.value))
   const selectedSumInsuredWarning = computed(() => isStandardCgl(selectedPayload.value) ? null : sumInsuredLimitWarning(selectedPayload.value))
   const selectedOverview = computed(() => {
@@ -166,7 +217,7 @@ export function useCaseWorkspace() {
       },
       installments: installmentAllocationsFor(payload),
       lossRecordSummary: lossRecordSummaryFor(payload),
-      clauseDetails: normalizeClauseList(payload.clauseDetails?.length ? payload.clauseDetails : UNIVERSAL_CLAUSES).sort(compareClauses)
+      clauseDetails: resolveClauseTitles(payload.clauseDetails?.length ? payload.clauseDetails : UNIVERSAL_CLAUSES, mdmRecords.value, payload).sort(compareClauses)
     }
   })
   const isTreatyDocumentCase = computed(() => String(selectedPayload.value.reinsuranceStructure || '').trim() === 'TREATY')
@@ -198,7 +249,7 @@ export function useCaseWorkspace() {
     const valid = (value) => Number.isInteger(Number(value)) && Number(value) >= 15
     const defaultValid = valid(caseData?.paymentTermsDays)
     const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
-    return reinsurers.some(row => !isAuwReinsurer(row?.name) && !(isSwissPropertyCase(caseData) && isSwissFacility(row?.name)) && !valid(row?.paymentTermsDays))
+    return reinsurers.some(row => !isAuwReinsurer(row?.name) && !isAllianzReinsurer(row?.name) && !isGreatAmericanTarget(caseData,row?.name) && !(isSwissPropertyCase(caseData) && isSwissFacility(row?.name)) && !valid(row?.paymentTermsDays))
   }
   function missingDebitInstallmentBaseDates(caseData) {
     if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
@@ -215,7 +266,7 @@ export function useCaseWorkspace() {
     const valid = (value) => Number.isInteger(Number(value)) && Number(value) >= 15
     const installments = Array.isArray(caseData?.performanceInstallments) ? caseData.performanceInstallments : []
     const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []
-    return installments.some(installment => !valid(installment.paymentTermsDays) || reinsurers.some((reinsurer, index) => !isAuwReinsurer(reinsurer?.name) && !(isSwissPropertyCase(caseData) && isSwissFacility(reinsurer?.name)) && !valid(installment?.reinsurerPaymentTerms?.[`r${index + 1}`])))
+    return installments.some(installment => !valid(installment.paymentTermsDays) || reinsurers.some((reinsurer, index) => !isAuwReinsurer(reinsurer?.name) && !isAllianzReinsurer(reinsurer?.name) && !isGreatAmericanTarget(caseData,reinsurer?.name) && !(isSwissPropertyCase(caseData) && isSwissFacility(reinsurer?.name)) && !valid(installment?.reinsurerPaymentTerms?.[`r${index + 1}`])))
   }
   function missingDebitInstallmentAllocation(caseData) {
     if (caseData?.installmentEnabled !== true || !['QS', 'XOL'].includes(String(caseData?.reinsuranceStructure || '').trim())) return false
@@ -312,20 +363,13 @@ export function useCaseWorkspace() {
     if (!caseData?.installmentEnabled) return []
     const rows = Array.isArray(caseData.performanceInstallments) ? caseData.performanceInstallments : []
     const totalPremium = Number(caseData.originalPremium || 0)
-    const income = Number(RICaseCalculations.totals(caseData).brokerage || 0)
-    const allocations = rows.map((row) => {
-      const ratio = totalPremium === 0 ? Number(row?.ratio || 0) / 100 : Number(row?.premium || 0) / totalPremium
-      return {
-        ...row,
-        premium: totalPremium === 0 ? 0 : Number(row?.premium || 0),
-        ratio,
-        income: round2(income * ratio)
-      }
-    })
-    if (allocations.length) {
-      const tail = round2(income - allocations.reduce((sum, row) => sum + row.income, 0))
-      allocations[0].income = round2(allocations[0].income + tail)
-    }
+    const periodAmounts = premiumPeriodAmounts(caseData)
+    const allocations = rows.map((row, i) => ({
+      ...row,
+      premium: totalPremium === 0 ? 0 : Number(row?.premium || 0),
+      ratio: totalPremium === 0 ? Number(row?.ratio || 0) / 100 : Number(row?.premium || 0) / totalPremium,
+      income: periodAmounts[i]?.leg3 || 0
+    }))
     return allocations
   }
 
@@ -539,12 +583,14 @@ export function useCaseWorkspace() {
       if (!String(generatedDocumentCase.value.aeEmail || '').trim()) {
         return ElMessage.warning('Complete the Account Executive Email in the case or Personnel before generating a document.')
       }
+      if (kind === 'cover' && cglTypeIssues(selectedPayload.value).length) return ElMessage.warning(cglTypeIssues(selectedPayload.value)[0].label)
+      if (kind === 'cover' && cglRiskDetailsIssues(selectedPayload.value).length) return ElMessage.warning('Complete Coverages: ' + cglRiskDetailsIssues(selectedPayload.value).map(issue => issue.label).join('; '))
       if (kind === 'cover' && cglInformationIssues(selectedPayload.value).length) return ElMessage.warning('Complete Information: ' + cglInformationIssues(selectedPayload.value).map(issue => issue.label).join('; '))
       if (kind === 'cover' && !String(selectedPayload.value.interest || '').trim()) {
         return ElMessage.warning('Complete Interest in the case before generating a Cover Note.')
       }
       if (kind === 'cover' && !String(selectedPayload.value.limitOfLiability ?? '').trim()) {
-        return ElMessage.warning('Complete Limit of Liability in the case before generating a Cover Note.')
+        return ElMessage.warning(`Complete ${liabilityLimitLabel(selectedPayload.value)} in the case before generating a Cover Note.`)
       }
       if (kind === 'cover' && String(selectedPayload.value.reinsuranceStructure || '').trim() === 'XOL' && !String(selectedPayload.value.underlyingLimits || '').trim()) {
         return ElMessage.warning('Complete Underlying Limits in the case before generating a Cover Note.')
@@ -556,10 +602,10 @@ export function useCaseWorkspace() {
         return ElMessage.warning('Complete Reinsured’s Retention in the case before generating a Cover Note.')
       }
       if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !String(row?.address || '').trim()))) {
-        return ElMessage.warning('Complete Risk Address for every Situation in the case before generating a Cover Note.')
+        return ElMessage.warning(isStandardCgl(selectedPayload.value) ? 'Complete Principal Address in the case before generating a Cover Note.' : 'Complete Risk Address for every Situation in the case before generating a Cover Note.')
       }
       if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !/^[0-9]{3,6}$/.test(String(row?.postcode ?? '').trim())))) {
-        return ElMessage.warning('Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.')
+        return ElMessage.warning(isStandardCgl(selectedPayload.value) ? 'Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note.' : 'Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.')
       }
       if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.originalPremium ?? '').trim()) {
         return ElMessage.warning('Complete 100% Premium in the case before generating a Cover Note or Debit Note.')
@@ -622,6 +668,7 @@ export function useCaseWorkspace() {
     const key = `${kind}-${format}`
     documentGenerating.value = key
     try {
+      await loadMasterData({ required: true })
       const documentCase = generatedDocumentCase.value
       await generateDocx(kind, documentCase)
       ElMessage.success(`${kind === 'cover' ? 'Cover Note' : kind === 'endorsement' ? 'Endorsement' : 'Debit Note'} ${format.toUpperCase()} saved.`)
@@ -1010,7 +1057,7 @@ export function useCaseWorkspace() {
     const situation = draft.situations[index]
     const linked = allFacilityReinsurers.value ? 0 : draft.sumInsured.filter(row => sumLocationIndex(row, draft.situations.length) === index).length
     try {
-      await ElMessageBox.confirm(`Delete Location ${index + 1}${situation.address ? ' — ' + situation.address : ''}?${linked ? ` Its ${linked} Sum Insured item(s) will also be deleted.` : ''}`, 'Delete Location', { type: 'warning', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' })
+      await ElMessageBox.confirm(`Delete ${isCglInformation.value ? 'Principal Address' : 'Location'} ${index + 1}${situation.address ? ' — ' + situation.address : ''}?${linked ? ` Its ${linked} Sum Insured item(s) will also be deleted.` : ''}`, isCglInformation.value ? 'Delete Principal Address' : 'Delete Location', { type: 'warning', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' })
     } catch { return }
     if (draft.situations[index] !== situation) return
     if (!allFacilityReinsurers.value) {
@@ -1088,7 +1135,7 @@ export function useCaseWorkspace() {
       normalizeClauseList(fixed.filter(appliesToCaseClass)).forEach((row) => details.push(row))
     })
     normalizeClauseList(draft.manualClauses).forEach((row) => details.push(row))
-    const unique = normalizeClauseList(details).sort(compareClauses)
+    const unique = resolveClauseTitles(details, mdmRecords.value, draft).sort(compareClauses)
     draft.clauseDetails = unique
     draft.clauses = unique.map((row) => row.code)
     const manualCodes = new Set(normalizeClauseList(draft.manualClauses).map((row) => row.code))
@@ -1105,6 +1152,11 @@ export function useCaseWorkspace() {
     })
   }
   function onReinsurerSelected(row) {
+    if (row && !isAllianzReinsurer(row.name) && allianzBoundRows.has(row)) {
+      row.paymentTermsDays = null
+      draft.performanceInstallments.forEach(period => { delete period.reinsurerPaymentTerms?.["r" + (draft.reinsurers.indexOf(row)+1)] })
+      allianzBoundRows.delete(row)
+    }
     if (row && !isAuwReinsurer(row.name) && auwBoundRows.has(row)) {
       row.foreignBroker = ''
       row.riCommPct = null
@@ -1127,6 +1179,16 @@ export function useCaseWorkspace() {
     Object.assign(caseClauseDraft, { code: '', title: '' })
     syncCaseClauses()
   }
+  function toggleCglTemplateClause(code, selected) {
+    if (!isCglInformation.value || !hasNonFacilityReinsurer.value) return
+    const clause = CGL_CLAUSE_PRESETS.find(row => row.code === code)
+    if (!clause) return
+    if (selected) {
+      if (draft.clauses.includes(code)) return
+      draft.manualClauses.push({ ...clause })
+      syncCaseClauses()
+    } else if (isManualClause(code)) removeCaseClause(code)
+  }
   function removeCaseClause(code) {
     draft.manualClauses = normalizeClauseList(draft.manualClauses).filter((row) => row.code !== code)
     syncCaseClauses()
@@ -1139,6 +1201,10 @@ export function useCaseWorkspace() {
   }
 
   function recomputeType() {
+    if (isStandardCgl(draft)) {
+      draft.type = cglType({ ...draft, type: '' })
+      return
+    }
     const suffix = STRUCTURE_SUFFIX[draft.reinsuranceStructure] || ''
     const prefix = String(draft.typePrefix || '').trim()
     draft.type = suffix ? (prefix ? `${prefix} ${suffix}` : suffix) : prefix
@@ -1149,13 +1215,19 @@ export function useCaseWorkspace() {
     recomputeType()
   }
 
-  async function loadMasterData() {
-    try {
+  let masterDataQueue = Promise.resolve()
+  async function loadMasterData({ required = false, quiet = false } = {}) {
+    const request = masterDataQueue.catch(() => {}).then(async () => {
       const response = await apiFetch('/api/master-data', { headers: { Accept: 'application/json' } })
       const body = await response.json()
       if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
       mdmRecords.value = Array.isArray(body.records) ? body.records : []
-    } catch (err) {
+    })
+    masterDataQueue = request
+    try { await request }
+    catch (err) {
+      if (required) throw err
+      if (quiet) return
       shell.error = err instanceof Error ? err.message : String(err)
       ElMessage.error(shell.error)
     }
@@ -1176,12 +1248,20 @@ export function useCaseWorkspace() {
     fresh.type = suffix
       ? (fresh.typePrefix ? `${fresh.typePrefix} ${suffix}` : suffix)
       : fresh.typePrefix
+    if (isStandardCgl(fresh)) {
+      fresh.typePrefix = cglTypePrefix(payload || {})
+      fresh.type = cglType({ ...fresh, type: '' })
+      fresh.interest = String(payload?.interest ?? '')
+    }
     fresh.situations = (Array.isArray(payload?.situations) && payload.situations.length ? payload.situations : fresh.situations)
       .map((row) => ({ ...row, clientKey: clientKey() }))
     fresh.reinsurers = (Array.isArray(payload?.reinsurers) && payload.reinsurers.length ? payload.reinsurers : fresh.reinsurers)
       .map((row) => ({ ...row, clientKey: clientKey() }))
     fresh.sumInsured = (Array.isArray(payload?.sumInsured) && payload.sumInsured.length ? payload.sumInsured : fresh.sumInsured)
       .map((row) => ({ ...row, clientKey: clientKey() }))
+    fresh.coverages = Array.isArray(payload?.coverages) ? [...payload.coverages] : []
+    fresh.coveragesOther = String(payload?.coveragesOther || '')
+    fresh.selfInsuredRetention = String(payload?.selfInsuredRetention || '')
     fresh.cglInformation = { ...emptyCglInformation(), ...(payload?.cglInformation || {}) }
     fresh.cglInformation.estimatedTurnover = (Array.isArray(payload?.cglInformation?.estimatedTurnover) ? payload.cglInformation.estimatedTurnover : [])
       .map(row => ({ ...row, clientKey: clientKey() }))
@@ -1207,7 +1287,7 @@ export function useCaseWorkspace() {
     if (!row?.caseUid || !['draft', 'posted', 'reversed'].includes(row.status)) return
     loading.value = true; shell.error = ''
     try {
-      if (!mdmRecords.value.length) await loadMasterData()
+      await loadMasterData({ required: true })
       if (!personnelRecords.value.length) await loadPersonnelOptions()
       const response = await apiFetch('/api/cases?caseUid=' + encodeURIComponent(row.caseUid), { headers: { Accept: 'application/json' } })
       const body = await response.json()
@@ -1247,6 +1327,7 @@ export function useCaseWorkspace() {
       const body = await response.json()
       if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
       selectedCase.value = body.case
+      await loadMasterData({ required: true })
       caseDetailTab.value = 'overview'
       caseDocuments.value = []
       documentCoverage.value = { offer: false, required: [], covered: [], missing: [], ready: false, selected: [] }
@@ -1282,17 +1363,17 @@ export function useCaseWorkspace() {
       ['classOfBusiness', 'Class'], ['newOrRenew', 'New / Renew'], ['type', 'Type'],
       ['reinsured', 'Reinsured'], ['originalInsured', 'Original insured (EN)'],
       ['policyFrom', 'Effective date'], ['policyTo', 'Expiration date'], ['interest', 'Interest']
-    ].forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
+    ].forEach(([field, label]) => { if (field === 'type' && isStandardCgl(value)) return; if (!filled(value?.[field])) add(label) })
     if (filled(value?.parentTwRef)) {
       if (!filled(value?.endoEffectiveDate)) add('Endorsement effective date')
       if (!Array.isArray(value?.endoTypes) || !value.endoTypes.length) add('At least one endorsement type')
       if (!filled(value?.endoText)) add('Endorsement wording')
     }
     const situations = Array.isArray(value?.situations) ? value.situations : []
-    if (!situations.length) add('Situation')
+    if (!situations.length) add(isStandardCgl(value) ? 'Principal Address' : 'Situation')
     situations.forEach((row, index) => {
-      if (!filled(row?.address)) add(`Situation ${index + 1} Risk Address`)
-      if (!/^\d{3,6}$/.test(String(row?.postcode || '').trim())) add(`Situation ${index + 1} Postcode`)
+      if (!filled(row?.address)) add(isStandardCgl(value) ? `Principal Address ${index + 1}` : `Situation ${index + 1} Risk Address`)
+      if (!/^\d{3,6}$/.test(String(row?.postcode || '').trim())) add(`${isStandardCgl(value) ? 'Principal Address' : 'Situation'} ${index + 1} Postcode`)
     })
     const reinsurers = Array.isArray(value?.reinsurers) ? value.reinsurers : []
     if (!reinsurers.length) add('Schedule of Security')
@@ -1307,9 +1388,9 @@ export function useCaseWorkspace() {
         if (filled(row?.taxPct) && Number(row.taxPct) !== 0) add(`Reinsurer ${index + 1} Tax must be 0% for AUW`)
       }
     });
-    [['limitOfLiability', 'Limit of Liability'], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ...(isStandardCgl(value) ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
+    [['limitOfLiability', liabilityLimitLabel(value)], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ...(isStandardCgl(value) ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
       .forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
-    if (value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
+    if (!isStandardCgl(value) && value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
     if (!isStandardCgl(value)) {
     const sumInsured = Array.isArray(value?.sumInsured) ? value.sumInsured : []
     if (!sumInsured.length) add('Breakdown of Sum Insured')
@@ -1319,6 +1400,9 @@ export function useCaseWorkspace() {
     })
     sumInsuredPlacementIssues(value).forEach(issue => add(issue.label))
     }
+    cglUnderlyingIssues(value).forEach(issue => add(issue.label))
+    cglTypeIssues(value).forEach(issue => add(issue.label))
+    cglRiskDetailsIssues(value).forEach(issue => add(issue.label))
     cglInformationIssues(value).forEach(issue => add(issue.label))
     if (!filled(value?.lossAdvisedDate)) add('Loss record advised by broker on')
     if (!validLossRecordYears(value?.lossRecordYears, value)) add('Loss history years')
@@ -1408,16 +1492,16 @@ export function useCaseWorkspace() {
       ['classOfBusiness', 'Class'], ['newOrRenew', 'New / Renew'], ['type', 'Type'],
       ['reinsured', 'Reinsured'], ['originalInsured', 'Original insured (EN)'],
       ['policyFrom', 'Effective date'], ['policyTo', 'Expiration date'], ['interest', 'Interest']
-    ].forEach(([key, label]) => { if (!filled(draft[key])) add('risk', label) })
+    ].forEach(([key, label]) => { if (key === 'type' && isCglInformation.value) return; if (!filled(draft[key])) add('risk', label) })
     if (draft.parentTwRef) {
       if (!filled(draft.endoEffectiveDate)) add('risk', 'Endorsement effective date')
       if (!Array.isArray(draft.endoTypes) || !draft.endoTypes.length) add('risk', 'At least one endorsement type')
       if (!filled(draft.endoText)) add('risk', 'Endorsement wording')
     }
-    if (!draft.situations.length) add('risk', 'Situation')
+    if (!draft.situations.length) add('risk', isCglInformation.value ? 'Principal Address' : 'Situation')
     draft.situations.forEach((row, index) => {
-      if (!filled(row.address)) add('risk', `Situation ${index + 1} Risk Address`)
-      if (!validPostcode(row.postcode)) add('risk', `Situation ${index + 1} Postcode`)
+      if (!filled(row.address)) add('risk', isCglInformation.value ? `Principal Address ${index + 1}` : `Situation ${index + 1} Risk Address`)
+      if (!validPostcode(row.postcode)) add('risk', `${isCglInformation.value ? 'Principal Address' : 'Situation'} ${index + 1} Postcode`)
     })
 
     if (!draft.reinsurers.length) add('security', 'Schedule of Security')
@@ -1426,10 +1510,10 @@ export function useCaseWorkspace() {
       if (!filled(row.sharePct)) add('security', `Reinsurer ${index + 1} Order hereon`)
     })
 
-    if (!filled(draft.limitOfLiability)) add('terms', 'Limit of Liability')
+    if (!filled(draft.limitOfLiability)) add('terms', liabilityLimitLabel(draft))
     if (!filled(draft.deductibles)) add('terms', 'Deductibles')
     if (!filled(draft.originalConditions)) add('terms', 'Original Conditions')
-    if (draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
+    if (!isCglInformation.value && draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
     if (!isCglInformation.value) {
     if (!filled(draft.occupation)) add('occupation', 'Occupation')
     if (!filled(draft.construction)) add('occupation', 'Construction')
@@ -1441,6 +1525,9 @@ export function useCaseWorkspace() {
     })
     sumInsuredPlacementIssues(draft).forEach(issue => add('sumInsured', issue.label))
     }
+    cglUnderlyingIssues(draft).forEach(issue => add('terms', issue.label))
+    cglTypeIssues(draft).forEach(issue => add('risk', issue.label))
+    cglRiskDetailsIssues(draft).forEach(issue => add('risk', issue.label))
     cglInformationIssues(draft).forEach(issue => add('information', issue.label))
     if (!filled(draft.lossAdvisedDate)) add('loss', 'Loss record advised by broker on')
     if (!validLossRecordYears(draft.lossRecordYears, draft)) add('loss', 'Loss history years')
@@ -1471,6 +1558,8 @@ export function useCaseWorkspace() {
   }
 
   async function reviewAndConfirm() {
+    try { await loadMasterData({ required: true }) }
+    catch (err) { ElMessage.error(err instanceof Error ? err.message : String(err)); return }
     reviewAttempted.value = true
     const issues = collectRequiredIssues()
     if (!issues.length) {
@@ -1498,6 +1587,8 @@ export function useCaseWorkspace() {
     syncSumInsuredMode()
     applyAuwReinsurerRules()
     const value = JSON.parse(JSON.stringify(draft))
+    value.clauseDetails = draftClauseDetails.value.map(row => ({ ...row }))
+    value.manualClauses = resolveClauseTitles(value.manualClauses, mdmRecords.value, draft)
     value.situations.forEach((row) => delete row.clientKey)
     value.reinsurers.forEach((row) => delete row.clientKey)
     value.sumInsured.forEach((row) => delete row.clientKey)
@@ -1570,6 +1661,12 @@ export function useCaseWorkspace() {
   }
 
   async function saveDraft() {
+    const premiumError = premiumInputErrors(draft, selectedPayload.value)[0]
+    if (premiumError) {
+      openSections.value = [...new Set([...openSections.value, 'cedantPremium', 'reinsurerPremium'])]
+      ElMessage.error(premiumError)
+      return
+    }
     const installmentCountError = installmentCountErrorFor(draft)
     if (installmentCountError) {
       openSections.value = [...new Set([...openSections.value, 'cedantPremium'])]
@@ -1609,6 +1706,7 @@ export function useCaseWorkspace() {
     }
     saving.value = true; shell.error = ''; saveMessage.value = ''
     try {
+      await loadMasterData({ required: true })
       const body = await jsonOrThrow(await apiFetch('/api/cases', {
         method: updating ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(updating
@@ -1668,9 +1766,28 @@ export function useCaseWorkspace() {
     await openFromQuery()
   })
 
+  let clauseTitleRefresh = null
+  let refreshingClauseTitles = false
+  async function refreshVisibleClauseTitles() {
+    if (document.visibilityState === 'hidden' || refreshingClauseTitles || !['case-create', 'case-detail'].includes(activeView.value)) return
+    refreshingClauseTitles = true
+    try { await loadMasterData({ quiet: true }) }
+    finally { refreshingClauseTitles = false }
+  }
+  onMounted(() => {
+    window.addEventListener('focus', refreshVisibleClauseTitles)
+    document.addEventListener('visibilitychange', refreshVisibleClauseTitles)
+    clauseTitleRefresh = window.setInterval(refreshVisibleClauseTitles, 30000)
+  })
+  onBeforeUnmount(() => {
+    window.removeEventListener('focus', refreshVisibleClauseTitles)
+    document.removeEventListener('visibilitychange', refreshVisibleClauseTitles)
+    window.clearInterval(clauseTitleRefresh)
+  })
+
   return {
     can, activeView, currentHeader, loading, saving, saveMessage,
-    isCglInformation, isStandardCgl, cglInformationIssues, displayTwRef, isAuwReinsurer, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange,
+    isCglInformation, isStandardCgl, cglInformationIssues, displayTwRef, isAuwReinsurer, isAllianzReinsurer, hasAllianz, isGreatAmericanTarget, hasGreatAmerican, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange,
     recycleSaving, recycleDraft,
     addSituation, removeSituation, addReinsurer, removeReinsurer, addSumInsured, removeSumInsured,
     isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, endorsementFieldsUnlocked, startEditCase, startViewCase,
@@ -1686,7 +1803,7 @@ export function useCaseWorkspace() {
     announceDialogVisible, announceConfirmed, announcing, openAnnounceReview, announceSelectedCase,
     personnelRecords, onOwnerSelected, departmentLabel,
     masterOptions, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected,
-    caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel,
+    draftClauseDetails, caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel, CGL_CLAUSE_PRESETS, toggleCglTemplateClause, cglAnnual,
     reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,
     isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
     addInstallment, removeInstallment, onInstallmentToggle, installmentRowInvalid,
