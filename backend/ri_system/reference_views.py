@@ -32,8 +32,8 @@ MANUALS = {
     'schema': 'Schema_資料庫結構說明.docx',
     'swiss-pd': 'Swiss_Re_Asia_Facility_PD_Rules_2026-10-14.docx',
     'auw-accounting': 'AUW_Facility_Rules_2026-10-14.docx',
-    'great-american-questionnaire': 'Great_American_Facility_Questionnaire_2026-10-15.docx',
-    'allianz-questionnaire': 'Allianz_Facility_Settlement_Dates_Questionnaire_2026-10-16.docx',
+    'great-american-questionnaire': 'Great_American_Facility_Property_Rules_Peer_Review_v2_2_2026-10-20.docx',
+    'allianz-questionnaire': 'Allianz_Facility_Settlement_Rules_Peer_Review_2026-10-19.docx',
 }
 OFFICE = {
     'docx': ('word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
@@ -64,12 +64,12 @@ MANUAL_DOWNLOAD_NAMES = {
     'schema': 'Schema_Database_Structure.docx',
     'swiss-pd': 'Swiss_Re_Asia_Facility_PD_Rules_2026-10-14.docx',
     'auw-accounting': 'AUW Facility 專屬規則_2026-10-14.docx',
-    'great-american-questionnaire': 'Great American Facility 專屬規則確認問卷_待決議_2026-10-15.docx',
-    'allianz-questionnaire': 'Allianz Facility 再保人結算日邏輯確認問卷_待核定_2026-10-16.docx',
+    'great-american-questionnaire': 'Great American Facility Property 結算規則摘要及同仁覆核問卷_v2.2_2026-10-20.docx',
+    'allianz-questionnaire': 'Allianz Facility 結算日規則摘要及同仁覆核問卷_2026-10-19.docx',
 }
 
 
-MANUAL_RELEASE_DATES = {'mdm': '2026-10-13', 'schema': '2026-10-13', 'auw-accounting': '2026-10-14', 'swiss-pd': '2026-10-14', 'great-american-questionnaire': '2026-10-15', 'allianz-questionnaire': '2026-10-16'}
+MANUAL_RELEASE_DATES = {'mdm': '2026-10-21', 'schema': '2026-10-21', 'auw-accounting': '2026-10-14', 'swiss-pd': '2026-10-14', 'great-american-questionnaire': '2026-10-20', 'allianz-questionnaire': '2026-10-19'}
 
 def manual_row(key):
     return {'id': key, 'filename': MANUAL_DOWNLOAD_NAMES[key], 'release_date': MANUAL_RELEASE_DATES[key], 'kind': 'manual'}
