@@ -16,6 +16,9 @@ import re
 
 from .sum_insured import placement_issues
 from .cgl_information import is_standard_cgl, normalize_information, information_issues
+from .cgl_risk_details import RISK_KEYS, TYPE_PREFIXES, cgl_type_prefix, cgl_type, type_issues, underlying_issues, liability_limit_label, normalize_risk_details, risk_details_issues
+from .allianz_accounting import is_allianz
+from .great_american_accounting import target as ga_target
 from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
 from .manual_reference import AUW_FOREIGN_BROKER, is_auw_reinsurer, normalize_manual_tw_ref, requires_manual_tw_ref
 
@@ -169,19 +172,20 @@ def _texts(items, max_len):
     return [t for t in (text(item, max_len) for item in items) if t]
 
 
-def normalize_draft(input_, *, allow_negative_premiums=False):
+def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=None):
     errors = []
     if not isinstance(input_, dict):
         return {"errors": ["case must be an object."], "value": None}
     inp = input_
     premium_minimum = None if allow_negative_premiums else 0
 
+    address_label = 'Principal Address' if is_standard_cgl(inp) else 'Situation'
     situations = []
-    for index, row in enumerate(rows(get(inp, "situations"), "Situation", errors)):
+    for index, row in enumerate(rows(get(inp, "situations"), address_label, errors)):
         address = text(get(row, "address"), 500)
         postcode = text(get(row, "postcode"), 6)
         if postcode and not _POSTCODE_RE.match(postcode):
-            errors.append(f"Situation {index + 1} postcode must be 3–6 digits.")
+            errors.append(f"{address_label} {index + 1} postcode must be 3–6 digits.")
         situations.append({"address": address, "postcode": postcode})
 
     reinsurers = []
@@ -195,7 +199,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
             "premium": nullable_number(get(row, "premium"), f"Reinsurer {n} Premium", errors, min=premium_minimum),
             "riCommPct": nullable_number(get(row, "riCommPct"), f"Reinsurer {n} Deductions", errors, min=0, max=100),
             "taxPct": 0 if auw else nullable_number(get(row, "taxPct"), f"Reinsurer {n} Tax", errors, min=0, max=100),
-            "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS if auw else nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
+            "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS if auw else 90 if is_allianz(name) or ga_target(inp, name) else nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
             "foreignBroker": AUW_FOREIGN_BROKER if auw else text(get(row, "foreignBroker"), 240),
             "settlementRef": text(get(row, "settlementRef"), 160),
         })
@@ -223,6 +227,13 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
             "premium": nullable_number(get(row, "premium"), f"Installment {n} Premium", errors, min=premium_minimum),
             "ratio": nullable_number(get(row, "ratio"), f"Installment {n} ratio", errors, min=0, max=100),
         })
+
+    for installment in performance_installments:
+        for index, reinsurer in enumerate(reinsurers):
+            if is_allianz(reinsurer.get("name")) or ga_target(inp, reinsurer.get("name")):
+                mapping=installment.get("reinsurerPaymentTerms")
+                if not isinstance(mapping,dict):mapping={};installment["reinsurerPaymentTerms"]=mapping
+                mapping["r"+str(index+1)]=90
 
     raw_split_parties = rows(get(inp, "splitParties"), "Performance Split", errors)
     if len(raw_split_parties) > 2:
@@ -269,6 +280,12 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
         else:
             type_prefix = js_slice(stored_type, 0, 120)
     type_ = text((f"{type_prefix} {suffix}" if type_prefix else suffix) if suffix else type_prefix, 200)
+
+    if is_standard_cgl(inp):
+        type_prefix = text(cgl_type_prefix(inp), 120)
+        if type_prefix and type_prefix not in TYPE_PREFIXES:
+            errors.append('Type must be Products Liability or Commercial General Liability.')
+        type_ = text(cgl_type({**inp, 'typePrefix': type_prefix, 'reinsuranceStructure': reinsurance_structure}), 200)
 
     currency = js_upper(text(get(inp, "currency"), 3))
     if currency and not _CURRENCY_RE.match(currency):
@@ -346,7 +363,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
     value["manualClauses"] = manual_clauses
     value["status"] = "draft"
     value["interest"] = text(get(inp, "interest"), 3000)
-    value["limitOfLiability"] = nullable_number(get(inp, "limitOfLiability"), "Limit of Liability", errors, min=0)
+    value["limitOfLiability"] = nullable_number(get(inp, "limitOfLiability"), liability_limit_label(inp), errors, min=0)
     value["aggregateLimit"] = nullable_number(get(inp, "aggregateLimit"), "Aggregate Limit", errors, min=0)
     value["underlyingLimits"] = "" if reinsurance_structure == "QS" else text(get(inp, "underlyingLimits"), 3000)
     value["subLimits"] = text(get(inp, "subLimits"), 3000)
@@ -365,6 +382,11 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
     value["construction"] = text(get(inp, "construction"), 3000)
     value["lossPayee"] = text(get(inp, "lossPayee"), 3000)
     value["notices"] = text(get(inp, "notices"), 5000)
+    if is_standard_cgl(inp) or 'cglAnnual' in inp:
+        annual = inp.get('cglAnnual')
+        if annual is not None and not isinstance(annual, bool):
+            errors.append('Annual must be a boolean.')
+        value['cglAnnual'] = annual is not False
     value["specialAgreement"] = text(get(inp, "specialAgreement"), 5000)
     value["ae"] = text(get(inp, "ae"), 160)
     value["newOrRenew"] = text(get(inp, "newOrRenew"), 20)
@@ -399,6 +421,9 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
             if len(signs) > 1:
                 errors.append("Swiss Facility Property endorsements cannot mix additional and return premiums; use separate endorsements.")
 
+    if is_standard_cgl(value) or any(key in inp for key in RISK_KEYS):
+        value.update(normalize_risk_details(inp, errors, text=text))
+
     if is_standard_cgl(value) or "cglInformation" in inp:
         value["cglInformation"] = normalize_information(inp, errors, text=text, number=nullable_number, date_value=nullable_date, rows=rows)
         if is_standard_cgl(value) and value["cglInformation"]["specialAgreementApplies"] == "notApplicable":
@@ -408,6 +433,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False):
         value["manualTwRef"], manual_errors = normalize_manual_tw_ref(inp.get("manualTwRef"))
         errors.extend(manual_errors)
 
+    from .calc.premium_money import premium_input_errors
+    errors.extend(premium_input_errors(value, existing_premiums))
     return {
         "errors": errors,
         "value": value,
@@ -465,6 +492,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         ("reinsured", "Reinsured"), ("originalInsured", "Original insured (EN)"),
         ("policyFrom", "Effective date"), ("policyTo", "Expiration date"), ("interest", "Interest"),
     ):
+        if field == "type" and is_standard_cgl(value):
+            continue
         if not _filled(get(value, field)):
             add(field, label)
 
@@ -480,15 +509,16 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         if not _filled(get(value, "endoText")):
             add("endoText", "Endorsement wording")
 
+    address_label = 'Principal Address' if is_standard_cgl(value) else 'Situation'
     situations = get(value, "situations")
     situations = situations if is_array(situations) else []
     if not situations:
-        add("situations", "Situation")
+        add("situations", address_label)
     for index, row in enumerate(situations):
         if not _filled(get(row, "address")):
-            add(f"situations.{index}.address", f"Situation {index + 1} Risk Address")
+            add(f"situations.{index}.address", f"Principal Address {index + 1}" if is_standard_cgl(value) else f"Situation {index + 1} Risk Address")
         if not _POSTCODE_RE.match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
-            add(f"situations.{index}.postcode", f"Situation {index + 1} Postcode")
+            add(f"situations.{index}.postcode", f"{address_label} {index + 1} Postcode")
 
     reinsurers = get(value, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
@@ -513,12 +543,12 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
                 add(f"reinsurers.{index}.taxPct", f"Reinsurer {n} Tax must be 0% for AUW")
 
     if not _filled(get(value, "limitOfLiability")):
-        add("limitOfLiability", "Limit of Liability")
+        add("limitOfLiability", liability_limit_label(value))
     if not _filled(get(value, "deductibles")):
         add("deductibles", "Deductibles")
     if not _filled(get(value, "originalConditions")):
         add("originalConditions", "Original Conditions")
-    if get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
+    if not is_standard_cgl(value) and get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
         add("basisOfValuationOther", "Basis of Valuation — Other")
     if not is_standard_cgl(value):
         if not _filled(get(value, "occupation")):
@@ -539,6 +569,9 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
                 add(f"sumInsured.{index}.amount", f"Sum insured {n} Amount must be greater than 0")
         for issue in placement_issues(value):
             add(issue["field"], issue["label"])
+    issues.extend(underlying_issues(value))
+    issues.extend(type_issues(value))
+    issues.extend(risk_details_issues(value))
     issues.extend(information_issues(value))
     if not _filled(get(value, "lossAdvisedDate")):
         add("lossAdvisedDate", "Loss record advised by broker on")

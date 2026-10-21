@@ -89,6 +89,16 @@ def _offset(view, request, body):
     if not all(selected):
         return _error(400, 'schedule_not_found', 'Select an existing premium and corresponding refund.')
     premium, returned = selected
+    from .payment_policy import row_kind, kind
+    if premium['partyType'] == 'reinsurer' and row_kind(case_payload(refund), returned):
+        return _error(400, 'refund_cash_receipt_required', 'Record the original premium payment and the reinsurer refund receipt separately in full; a refund offset does not count as received.')
+    if premium['partyType'] == 'cedant' and any(kind(original.payload, r.get('name')) == 'auw' for r in objects(original.payload.get('reinsurers'))):
+        return _error(400, 'cedant_cash_receipt_required', 'AUW requires the complete Cedant cash receipt; record the original premium and refund separately in full.')
+    from .great_american_accounting import applies as ga_applies
+    if any(ga_applies(case_payload(c)) for c in (original, refund)):
+        return _error(400, "great_american_offset_not_allowed", "Receive refunds and pay Great American premiums separately; no premium/refund offset is allowed.")
+    if any(i.get("offsetAllowed") is False for i in selected):
+        return _error(400,"allianz_offset_not_allowed","Receive Allianz refunds and pay premiums separately; no premium/refund offset is allowed.")
     from .cash_ledger import _matches
     for case, item in zip([original, refund], selected):
         posted = [t for t in objects(case.payload.get('transactions'))
@@ -127,11 +137,21 @@ def _offset(view, request, body):
         return _error(400, 'statement_revision_required', 'Revise the settlement statement before offsetting.')
     actor = actor_from(request.ri_principal)
     now, offset_id = _iso_now(), str(uuid.uuid4())
+    changes = []
     for case, item, other in zip([original, refund], selected, [refund, original]):
         payload = case_payload(case)
         entry = _entry(item, value, body['paymentDate'], now, actor, 'offset', str(body.get('note') or 'Same-policy premium/refund offset')[:1000])
         entry.update(offsetId=offset_id, offsetCaseUid=str(other.case_uid), settlementDueDate=swiss_dates[0])
         payload.setdefault('paymentEntries', []).append(entry)
-        view._save(request, {'rowVersion': case.row_version}, case, payload, 'record_swiss_offset', {'offsetId': offset_id})
+        from .payment_policy import collection_change_error
+        problem = collection_change_error(case_payload(case), payload)
+        if problem:return _error(409, 'collection_settlement_required', problem)
+        changes.append((case, payload))
+    for case, payload in changes:
+        saved = view._save(request, {'rowVersion': case.row_version}, case, payload, 'record_swiss_offset', {'offsetId': offset_id})
+        if saved.status_code != 200:
+            from django.db import transaction
+            transaction.set_rollback(True)
+            return saved
     from rest_framework.response import Response
     return Response({'ok': True, 'offsetId': offset_id, 'cases': [{'caseUid': str(c.case_uid), 'rowVersion': c.row_version} for c in [original, refund]]})

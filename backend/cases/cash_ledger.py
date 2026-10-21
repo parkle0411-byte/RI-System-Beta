@@ -255,8 +255,14 @@ def transaction_details(payload, now=None, schedule_result=None):
         detail['outstanding']=detail['amount']
         detail['cashParts']=[]
         detail['settlementDependencies']=[{'txNo':p['_tx']['txNo'],'settlement':p['settlement']} for p in paired]
+    from .allianz_accounting import apply_details
+    apply_details(payload, details, schedule, now)
     from .facility_accounting import apply_transactions
     apply_transactions(payload, details, schedule)
+    from .great_american_accounting import apply_details as ga_details
+    ga_details(payload, details, schedule, now)
+    from .payment_policy import apply_details as shared_policies
+    shared_policies(payload, details, schedule, now)
     return {no:{k:v for k,v in d.items() if not k.startswith('_')} for no,d in details.items()}
 
 

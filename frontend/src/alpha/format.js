@@ -30,9 +30,11 @@ export function formatFxRate(value) {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(number);
 }
 
-export function formatMoney(value) {
+export function formatMoney(value, currency) {
   const number = Number(value);
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number.isFinite(number) ? number : 0);
+  // Never hide fractional historical TWD or claim/cash amounts.
+  const digits = String(currency || '').toUpperCase() === 'TWD' && Number.isInteger(number) ? 0 : 2;
+  return new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Number.isFinite(number) ? number : 0);
 }
 
 export function formatCurrency(value, currency) {

@@ -120,13 +120,15 @@ def claims_view(root, chain):
     split = _split_source(root, chain)
     split_reinsurers = _payload(split).get("reinsurers")
     from .accounting_rules import objects, settled_once
+    from .cash_ledger import transaction_details
+    cash_details = transaction_details(payload)
     display_claims = json_roundtrip(payload.get("claims") or [])
     for claim in display_claims:
         for payment in objects(claim.get("payments")):
             affected = [t for t in objects(payload.get("transactions")) if t.get("source") == "claim" and t.get("claimId") == claim.get("id") and t.get("paymentId") == payment.get("id")]
             numbers = {t.get("txNo") for t in affected}
             payment["canCorrect"] = bool(affected) and bool(payment.get("createdAt") or any(t.get("createdAt") for t in affected)) and not any(e.get("transactionNo") in numbers for e in objects(payload.get("paymentEntries"))) and not any(settled_once(payload, n) for n in numbers)
-            payment["dueDate"] = next((t.get("dueDate") for t in affected if t.get("dueDate")), "")
+            payment["dueDate"] = next((cash_details.get(t.get("txNo"), {}).get("contractDueDate") or t.get("dueDate") for t in affected if cash_details.get(t.get("txNo"), {}).get("contractDueDate") or t.get("dueDate")), "")
     return {
         "rootCaseUid": str(root.case_uid),
         "rootTwRef": root.tw_ref or "",
@@ -285,6 +287,24 @@ class ClaimsView(NoStoreMixin, APIView):
                 built = build_claim_payment_transactions({**payload, "twRef": root.tw_ref}, _payload(split), claim, payment)
                 due = add_calendar_days(taipei_date(created_at), 15)
                 payload["transactions"].extend({**t, "createdAt": created_at, "postedMonth": taipei_date(created_at)[:7], "dueDate": due, "splitSource": payment["splitSource"]} for t in built)
+                # The successful obligation-posting operation is Claim Announce.
+                # Its timestamp is server-owned and retained on correction.
+                from .allianz_accounting import claim_is_allianz
+                announced_at = (existing.get("claimAnnouncedAt") or created_at) if action == "correct_payment" else created_at
+                allianz_transactions = [t for t in payload["transactions"]
+                    if t.get("source")=="claim" and t.get("claimId")==claim.get("id") and t.get("paymentId")==payment.get("id")
+                    and claim_is_allianz(payload,t)]
+                if allianz_transactions:
+                    payment["claimAnnouncedAt"]=announced_at
+                    for tx in allianz_transactions:tx.update(allianzFacility=True,claimAnnouncedAt=announced_at)
+                from .great_american_accounting import claim_is_great_american
+                payment['splitSource']['classOfBusiness'] = _payload(split).get('classOfBusiness')
+                ga_transactions = [t for t in payload['transactions'] if t.get('source')=='claim'
+                    and t.get('claimId')==claim.get('id') and t.get('paymentId')==payment.get('id')
+                    and claim_is_great_american(payload,t)]
+                if ga_transactions:
+                    payment['claimAnnouncedAt'] = announced_at
+                    for tx in ga_transactions:tx.update(claimAnnouncedAt=announced_at)
                 if action == "correct_payment":
                     payload["claimCorrectionHistory"][-1]["after"] = json_roundtrip(payment)
 

@@ -36,7 +36,7 @@ def ready(**over):
     b = dict(reinsuranceStructure="QS", ae="ZZ AE", currency="USD", classOfBusiness="ZZ Class", classCode="PAR", newOrRenew="New", typePrefix="ZZ Type",
              reinsured="ZZ Cedant", originalInsured="ZZ Insured", policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
              situations=[dict(address="1 ZZ Road", postcode="100")],
-             reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0), dict(name="ZZ Re B (Facility)", sharePct=40, premium=400, riCommPct=5, taxPct=0)],
+             reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0, paymentTermsDays=30), dict(name="ZZ Re B (Facility)", sharePct=40, premium=400, riCommPct=5, taxPct=0, paymentTermsDays=30)],
              limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)

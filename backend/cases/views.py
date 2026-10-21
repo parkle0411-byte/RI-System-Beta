@@ -217,6 +217,8 @@ class CasesView(NoStoreMixin, APIView):
         actor_info = actor_from(person)
         case_uid = uuid.uuid4()
         payload = normalized["value"]
+        if payload.get("currency") == "TWD":
+            payload["premiumRounding"] = "currency-stepwise-v1"
         # Draft creation never imports posting, receipt or settlement records.
         # These are owned by Production / Claims / Accounting for every case type.
         for field in ("transactions", "paymentEntries", "claims", "confirmedProductionKeys"):
@@ -303,7 +305,8 @@ class CasesView(NoStoreMixin, APIView):
                               currentRowVersion=current.row_version)
 
             normalized = normalize_draft(prepare_transition(current.payload, body.get("case")),
-                                         allow_negative_premiums=current.case_kind == "endorsement" and current.parent_case_id is not None)
+                                         allow_negative_premiums=current.case_kind == "endorsement" and current.parent_case_id is not None,
+                                         existing_premiums=current.payload)
             if normalized["errors"]:
                 return _error(400, "validation_failed", normalized["errors"][0], errors=normalized["errors"])
             payload = normalized["value"]
@@ -312,6 +315,11 @@ class CasesView(NoStoreMixin, APIView):
                 return _error(400, "validation_failed", loss_errors[0], errors=loss_errors)
             columns = normalized["columns"]
             stored = current.payload if isinstance(current.payload, dict) else {}
+            if stored.get("premiumRounding") == "legacy-cents":
+                payload["premiumRounding"] = "legacy-cents"
+            elif payload.get("currency") == "TWD":
+                payload["premiumRounding"] = "currency-stepwise-v1"
+
             ref_error = manual_reference_error(payload, exclude_case_uid=current.case_uid)
             if ref_error:
                 return _error(409, "manual_reference_conflict", ref_error)
@@ -344,7 +352,7 @@ class CasesView(NoStoreMixin, APIView):
             payload["claims"] = stored.get("claims") or []
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
-            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory"):
+            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory", "allianzClaimTracking", "greatAmericanClaimTracking"):
                 if key in stored:
                     payload[key] = stored[key]
             if "facilityAccounting" in stored:

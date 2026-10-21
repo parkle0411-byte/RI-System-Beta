@@ -13,26 +13,45 @@ function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
+export function premiumMoney(value, caseData) {
+  return String(caseData?.currency || '').trim().toUpperCase() === 'TWD' && caseData?.premiumRounding !== 'legacy-cents'
+    ? Math.round(Number(value) + Number.EPSILON) : money(value);
+}
+
+export function premiumInputErrors(payload, existing = null) {
+  if (String(payload?.currency || '').trim().toUpperCase() !== 'TWD') return [];
+  const fields = c => [['originalPremium', '100% Premium', c?.originalPremium],
+    ...['reinsurers', 'performanceInstallments'].flatMap(key => (c?.[key] || []).map((r, i) =>
+      [`${key}.${i}.premium`, `${key === 'reinsurers' ? 'Reinsurer' : 'Installment'} ${i + 1} Premium`, r?.premium]))];
+  const old = new Map(existing?.premiumRounding === 'legacy-cents' ? fields(existing).map(([path, , value]) => [path, value]) : []);
+  return fields(payload).filter(([path, , value]) => value != null && String(value).trim() !== ''
+    && Number.isFinite(Number(String(value).replace(/,/g, ''))) && !Number.isInteger(Number(String(value).replace(/,/g, '')))
+    && !(old.has(path) && old.get(path) === value)).map(([, label]) => `${label} must be a whole number for TWD; decimals are not allowed.`);
+}
+
 export function stripFacilityTag(value) {
   return String(value || '').replace(/\s*[[(]Facility[\])]\s*$/i, '').trim();
 }
 
 export function calcLegsForReinsurer(caseData, reinsurer) {
+  const roundMoney = value => premiumMoney(value, caseData);
+  const source = value => ['TWD', 'USD'].includes(String(caseData?.currency || '').toUpperCase()) && caseData?.premiumRounding !== 'legacy-cents' ? roundMoney(value) : value;
   const orderPct = numberOrZero(reinsurer?.sharePct);
-  const caseCp = money(numberOrZero(caseData?.originalPremium) * orderPct / 100);
-  const caseRi = money(caseCp * numberOrZero(caseData?.riCommPct) / 100);
-  const caseTax = money(caseCp * numberOrZero(caseData?.taxPct) / 100);
-  const leg1 = money(caseCp - caseRi - caseTax);
+  const caseCp = roundMoney(source(numberOrZero(caseData?.originalPremium)) * orderPct / 100);
+  const caseRi = roundMoney(caseCp * numberOrZero(caseData?.riCommPct) / 100);
+  const caseTax = roundMoney(caseCp * numberOrZero(caseData?.taxPct) / 100);
+  const leg1 = roundMoney(caseCp - caseRi - caseTax);
 
-  const reinsurerCp = money(numberOrZero(reinsurer?.premium) * orderPct / 100);
-  const reinsurerRi = money(reinsurerCp * numberOrZero(reinsurer?.riCommPct) / 100);
-  const reinsurerTax = money(reinsurerCp * numberOrZero(reinsurer?.taxPct) / 100);
-  const leg2 = money(reinsurerCp - reinsurerRi - reinsurerTax);
-  const leg3 = money(leg1 - leg2);
+  const reinsurerCp = roundMoney(source(numberOrZero(reinsurer?.premium)) * orderPct / 100);
+  const reinsurerRi = roundMoney(reinsurerCp * numberOrZero(reinsurer?.riCommPct) / 100);
+  const reinsurerTax = roundMoney(reinsurerCp * numberOrZero(reinsurer?.taxPct) / 100);
+  const leg2 = roundMoney(reinsurerCp - reinsurerRi - reinsurerTax);
+  const leg3 = roundMoney(leg1 - leg2);
   return { cp: caseCp, ri: caseRi, tax: caseTax, leg1, reinsurerCp, reinsurerRi, reinsurerTax, leg2, leg3, brokerage: leg3 };
 }
 
 export function buildPremiumTransactions(caseData) {
+  const roundMoney = value => premiumMoney(value, caseData);
   const transactions = [];
   const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : [];
   reinsurers.forEach((reinsurer, reinsurerIdx) => {
@@ -61,7 +80,9 @@ export function buildPremiumTransactions(caseData) {
           txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${legIdx + 1}${suffix}`,
           legType: `${leg.legType}${suffix}`,
           label: `${leg.label} (${party?.name || 'Unassigned'}, ${pct}%)`,
-          amount: money(leg.amount * pct / 100),
+          amount: partyIdx === 1 && Math.abs(caseData.splitParties.reduce((n, p) => n + numberOrZero(p.pct), 0) - 100) < 1e-9
+            ? roundMoney(leg.amount - roundMoney(leg.amount * numberOrZero(caseData.splitParties[0].pct) / 100))
+            : roundMoney(leg.amount * pct / 100),
           splitParty: party?.name || `Party ${suffix.toUpperCase()}`,
           reinsurer: settlementLabel,
           viaForeignBroker: settlementLabel !== reinsurerLabel,
@@ -140,4 +161,33 @@ export function reconciliationRefFor(caseData, transaction) {
     return index >= 0 ? String(caseData?.reinsurers?.[index]?.settlementRef || '') : '';
   }
   return '';
+}
+
+
+// Premium period amounts use the same per-RI allocation as accounting T1/T2.
+export function premiumPeriodAmounts(caseData) {
+  const rows = caseData?.performanceInstallments || [];
+  if (!rows.length) return [];
+  let weights = rows.map(row => Math.max(0, Number(row.premium != null && row.premium !== '' ? row.premium : row.ratio) || 0));
+  let sum = weights.reduce((a, b) => a + b, 0);
+  if (sum <= 0) { weights = rows.map(() => 1); sum = rows.length; }
+  const round = value => premiumMoney(value, caseData);
+  const allocate = total => {
+    const amounts = weights.map(w => round(total * w / sum));
+    amounts[0] = round(amounts[0] + round(total - amounts.reduce((a, b) => a + b, 0)));
+    if (total > 0 && amounts[0] < 0 && caseData?.premiumRounding !== 'legacy-cents') {
+      let remainder = round(-amounts[0]); amounts[0] = 0;
+      for (let i = 1; i < amounts.length && remainder > 0; i += 1) {
+        const deduction = Math.min(amounts[i], remainder);
+        amounts[i] = round(amounts[i] - deduction); remainder = round(remainder - deduction);
+      }
+    }
+    return amounts;
+  };
+  const sums = rows.map(() => ({ leg1: 0, leg2: 0, leg3: 0 }));
+  (caseData?.reinsurers || []).forEach(row => {
+    const legs = calcLegsForReinsurer(caseData, row), a = allocate(legs.leg1), b = allocate(legs.leg2);
+    sums.forEach((total, i) => { total.leg1 = round(total.leg1 + a[i]); total.leg2 = round(total.leg2 + b[i]); });
+  });
+  return sums.map(row => ({ ...row, leg3: round(row.leg1 - row.leg2) }));
 }

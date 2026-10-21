@@ -101,6 +101,7 @@ def reset_shared_payload(payload):
     """Endorsement / Renewal 的新 Draft：清掉屬於「舊案件實際發生過的事」的欄位。"""
     return {
         **payload,
+        **({"premiumRounding": "currency-stepwise-v1"} if payload.get("currency") == "TWD" else {}),
         **({"manualTwRef": ""} if "manualTwRef" in payload else {}),
         "twRefSource": "", "previousTwRefs": [],
         "status": "draft", "postedAt": "", "endorsementAnnouncedAt": "", "endorsementPerformanceMonth": "", "confirmedProductionKeys": [], "productionExclusions": {},
@@ -110,6 +111,8 @@ def reset_shared_payload(payload):
         "paymentEntries": [], "paymentScheduleReviewRequired": False,
         **({"swissAccounting": {}} if "swissAccounting" in payload else {}),
         **({"facilityAccounting": {}} if "facilityAccounting" in payload else {}),
+        **({"greatAmericanClaimTracking": []} if "greatAmericanClaimTracking" in payload else {}),
+        **({"allianzClaimTracking": []} if "allianzClaimTracking" in payload else {}),
     }
 
 

@@ -171,6 +171,8 @@ def settlement_action(view, request, body):
     if confirm and not detail.get('canConfirmSettlement'):
         return _error(400, 'settlement_not_ready', 'Clear the balance first; brokerage requires manually settled T1 and T2.')
     from .accounting_rules import finalized
+    if not confirm and detail.get('greatAmericanFacility') and detail.get('amount',0)>0:
+        return _error(409, 'great_american_payment_completed', 'Retain Great American payment completion; track bank returns and re-payment externally.')
     if not confirm and no and finalized(payload, no):
         return _error(409, 'final_settlement_locked', 'T3 is final: the matching T1, T2 and T3 settlements cannot be cancelled.')
     if not confirm and not detail.get('manualSettlementConfirmed'):

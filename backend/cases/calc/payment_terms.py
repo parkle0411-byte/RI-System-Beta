@@ -14,7 +14,10 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from ..manual_reference import is_auw_reinsurer
+from ..allianz_accounting import is_allianz
+from ..great_american_accounting import target as ga_target
 from .accounting import calc_legs_for_reinsurer, strip_facility_tag
+from .premium_money import premium_money
 from .jsnum import (
     UNDEFINED, at, civil_from_days, get, is_array, js_spread, is_nullish, iso_date_prefix, js_is_finite, js_is_integer, js_or,
     js_max, js_min, js_round, js_string_to_number, js_to_number, js_to_string, js_truthy, js_trim, money,
@@ -129,7 +132,8 @@ def days_between_dates(date_from, date_to):
     return js_round((b - a) * 86400000 / 86400000)
 
 
-def allocate(total, installments):
+def allocate(total, installments, case_data=None):
+    round_money = lambda value: premium_money(value, case_data) if case_data is not None else money(value)
     if not installments:
         return []
     weights = []
@@ -142,8 +146,17 @@ def allocate(total, installments):
     if total_weight <= 0:
         total_weight = float(len(installments))
         weights = [1.0] * len(installments)
-    result = [money(total * weight / total_weight) for weight in weights]
-    result[0] = money(result[0] + money(total - sum(result)))
+    result = [round_money(total * weight / total_weight) for weight in weights]
+    result[0] = round_money(result[0] + round_money(total - sum(result)))
+    if total > 0 and result[0] < 0 and (not isinstance(case_data, dict) or case_data.get("premiumRounding") != "legacy-cents"):
+        remainder = round_money(-result[0])
+        result[0] = 0
+        for index in range(1, len(result)):
+            deduction = min(result[index], remainder)
+            result[index] = round_money(result[index] - deduction)
+            remainder = round_money(remainder - deduction)
+            if remainder <= 0:
+                break
     return result
 
 
@@ -186,12 +199,12 @@ def premium_installment_plan(case_data):
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
     legs = [calc_legs_for_reinsurer(case_data, r) for r in reinsurers]
-    leg1s = [allocate(row["leg1"], installments) for row in legs]
-    leg2s = [allocate(row["leg2"], installments) for row in legs]
+    leg1s = [allocate(row["leg1"], installments, case_data) for row in legs]
+    leg2s = [allocate(row["leg2"], installments, case_data) for row in legs]
     return [{
         "id": row["id"], "label": row["label"], "number": index + 1,
         "amounts": [{
-            "leg1": leg1s[r][index], "leg2": leg2s[r][index], "leg3": money(leg1s[r][index] - leg2s[r][index]),
+            "leg1": leg1s[r][index], "leg2": leg2s[r][index], "leg3": premium_money(leg1s[r][index] - leg2s[r][index], case_data),
         } for r in range(len(legs))],
     } for index, row in enumerate(installments)]
 
@@ -203,6 +216,8 @@ def _resolved_terms(case_data, installment, reinsurer, reinsurer_index):
     from .swiss_facility import is_swiss_facility
     if is_auw_reinsurer(get(reinsurer, "name")):
         return AUW_PAYMENT_TERMS_DAYS
+    if is_allianz(get(reinsurer, "name")) or ga_target(case_data, get(reinsurer, "name")):
+        return 90
     if is_swiss_facility(get(reinsurer, "name")):
         return 90
     if get(case_data, "installmentEnabled") is True:
@@ -263,8 +278,12 @@ def build_payment_schedule(case_data, now=None):
     leg1_total = 0.0
     for row in legs:
         leg1_total += row["leg1"]
-    cedant_amounts = allocate(leg1_total, weights)
-    reinsurer_amounts = [allocate(row["leg2"], weights) for row in legs]
+    # Match the period T1 transactions: allocate each RI leg first, then add.
+    t1_amounts = [allocate(row["leg1"], weights, case_data) for row in legs]
+    cedant_amounts = [premium_money(sum(row[i] for row in t1_amounts), case_data) for i in range(len(weights))]
+    if get(case_data, "premiumRounding") == "legacy-cents":
+        cedant_amounts = allocate(leg1_total, weights)  # preserve historical schedule/cash balances
+    reinsurer_amounts = [allocate(row["leg2"], weights, case_data) for row in legs]
     items = []
     signed_premiums = js_truthy(get(case_data, "parentTwRef"))
 
@@ -323,6 +342,7 @@ def build_payment_schedule(case_data, now=None):
 
         for reinsurer_index, reinsurer in enumerate(reinsurers):
             auw = is_auw_reinsurer(get(reinsurer, "name"))
+            allianz = is_allianz(get(reinsurer, "name"))
             terms = AUW_PAYMENT_TERMS_DAYS if auw else _resolved_terms(case_data, installment, reinsurer, reinsurer_index)
             if terms is None:
                 issues.append(installment["label"] + ": invalid Payment Terms for Reinsurer " + str(reinsurer_index + 1) + ".")
@@ -338,6 +358,20 @@ def build_payment_schedule(case_data, now=None):
                                "contractDueDate": actual_due, "accountingLeadDays": AUW_ACCOUNTING_LEAD_DAYS}
                 if not row_base_date:
                     issues.append(installment["label"] + ": AUW payment base date must be a valid effective or installment date.")
+            elif ga_target(case_data, get(reinsurer, "name")):
+                from ..great_american_accounting import payment_dates
+                source_date, row_base_date, actual_due, due_date = payment_dates(case_data, installment)
+                rule_fields = {"paymentRule":"great_american_quarter_end_90", "greatAmericanFacility":True,
+                               "sourceBaseDate":source_date, "contractDueDate":actual_due, "accountingLeadDays":10}
+                if not row_base_date:
+                    issues.append(installment["label"] + ": Great American payment base date requires an effective date and, for endorsements, actual Announce.")
+            elif allianz:
+                from ..allianz_accounting import payment_dates
+                source_date, row_base_date, actual_due, due_date = payment_dates(case_data, installment)
+                rule_fields = {"paymentRule":"allianz_month_end_90", "allianzFacility":True,
+                               "sourceBaseDate":source_date, "contractDueDate":actual_due, "accountingLeadDays":10}
+                if not row_base_date:
+                    issues.append(installment["label"] + ": Allianz payment base date requires an effective date and, for endorsements, actual Announce.")
             else:
                 if signed_premiums and get(case_data, "installmentEnabled") is not True:
                     # Each RI leg may have its own direction in a mixed endorsement.
@@ -376,6 +410,12 @@ def build_payment_schedule(case_data, now=None):
             item["status"] = "reminder"
     from ..facility_accounting import apply_schedules
     items = apply_schedules(case_data, items)
+    from ..allianz_accounting import apply_schedules as allianz_schedules
+    items = allianz_schedules(case_data, items)
+    from ..great_american_accounting import apply_schedules as ga_schedules
+    items = ga_schedules(case_data, items, now)
+    from ..payment_policy import apply_schedules as shared_policies
+    items = shared_policies(case_data, items, now)
 
     cedant_out = 0.0
     reinsurer_out = 0.0

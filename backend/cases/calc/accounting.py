@@ -16,6 +16,7 @@ from .jsnum import (
 )
 
 import re
+from .premium_money import premium_money, premium_source
 
 _FACILITY_TAG = strip_ws_regex(r"\s*[\[(]Facility[\])]\s*\Z", re.IGNORECASE | re.ASCII)
 _WS_RUN = re.compile(WS_CLASS + "+")
@@ -34,17 +35,18 @@ def strip_facility_tag(value):
 
 
 def calc_legs_for_reinsurer(case_data, reinsurer):
+    round_money = lambda value: premium_money(value, case_data)
     order_pct = number_or_zero(get(reinsurer, "sharePct"))
-    case_cp = money(number_or_zero(get(case_data, "originalPremium")) * order_pct / 100)
-    case_ri = money(case_cp * number_or_zero(get(case_data, "riCommPct")) / 100)
-    case_tax = money(case_cp * number_or_zero(get(case_data, "taxPct")) / 100)
-    leg1 = money(case_cp - case_ri - case_tax)
+    case_cp = round_money(premium_source(number_or_zero(get(case_data, "originalPremium")), case_data) * order_pct / 100)
+    case_ri = round_money(case_cp * number_or_zero(get(case_data, "riCommPct")) / 100)
+    case_tax = round_money(case_cp * number_or_zero(get(case_data, "taxPct")) / 100)
+    leg1 = round_money(case_cp - case_ri - case_tax)
 
-    reinsurer_cp = money(number_or_zero(get(reinsurer, "premium")) * order_pct / 100)
-    reinsurer_ri = money(reinsurer_cp * number_or_zero(get(reinsurer, "riCommPct")) / 100)
-    reinsurer_tax = money(reinsurer_cp * number_or_zero(get(reinsurer, "taxPct")) / 100)
-    leg2 = money(reinsurer_cp - reinsurer_ri - reinsurer_tax)
-    leg3 = money(leg1 - leg2)
+    reinsurer_cp = round_money(premium_source(number_or_zero(get(reinsurer, "premium")), case_data) * order_pct / 100)
+    reinsurer_ri = round_money(reinsurer_cp * number_or_zero(get(reinsurer, "riCommPct")) / 100)
+    reinsurer_tax = round_money(reinsurer_cp * number_or_zero(get(reinsurer, "taxPct")) / 100)
+    leg2 = round_money(reinsurer_cp - reinsurer_ri - reinsurer_tax)
+    leg3 = round_money(leg1 - leg2)
     return {
         "cp": case_cp, "ri": case_ri, "tax": case_tax, "leg1": leg1,
         "reinsurerCp": reinsurer_cp, "reinsurerRi": reinsurer_ri, "reinsurerTax": reinsurer_tax,
@@ -56,6 +58,7 @@ def build_premium_transactions(case_data, installment=None):
     """installment（可省略）：每期關帳只產生「該期」的交易，形狀 {id, label, number, amounts: [{leg1, leg2, leg3}]}，
     由 payment_terms.premium_installment_plan 提供；沒給就是整個案件全額（沒有分期的案件）。"""
     installment = None if is_nullish(installment) else installment
+    round_money = lambda value: premium_money(value, case_data)
     transactions = []
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
@@ -95,9 +98,9 @@ def build_premium_transactions(case_data, installment=None):
                 pct = number_or_zero(get(party, "pct"))
                 for leg_idx, leg in enumerate(base):
                     party_name = get(party, "name")
-                    amount = money(leg["amount"] * pct / 100)
+                    amount = round_money(leg["amount"] * pct / 100)
                     if complete and party_idx == 1:
-                        amount = money(leg["amount"] - money(leg["amount"] * pct_a / 100))
+                        amount = round_money(leg["amount"] - round_money(leg["amount"] * pct_a / 100))
                     transactions.append({
                         "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg_idx + 1}{suffix}{tag}",
                         "legType": f"{leg['legType']}{suffix}",

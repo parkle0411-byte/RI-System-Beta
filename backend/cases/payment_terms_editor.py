@@ -3,6 +3,8 @@ import copy
 from .calc.payment_terms import valid_terms
 from .calc.swiss_facility import case_payload, is_swiss_facility
 from .manual_reference import is_auw_reinsurer
+from .allianz_accounting import is_allianz
+from .great_american_accounting import target as ga_target
 
 
 def complete_payment_terms(view, request, body):
@@ -42,8 +44,10 @@ def complete_payment_terms(view, request, body):
                 raise ValueError()
         except (ValueError, KeyError, IndexError, TypeError):
             return _error(400, 'party_not_found', 'Select an existing reinsurer.')
-        if is_auw_reinsurer(row.get('name')) or is_swiss_facility(row.get('name')):
-            return _error(409, 'fixed_terms_locked', 'AUW and Swiss fixed terms cannot be changed here.')
+        if ga_target(payload, row.get('name')):
+            return _error(409, 'fixed_terms_locked', 'Great American Property uses fixed quarterly 90/75-day rules.')
+        if is_auw_reinsurer(row.get('name')) or is_allianz(row.get('name')) or is_swiss_facility(row.get('name')):
+            return _error(409, 'fixed_terms_locked', 'AUW, Allianz and Swiss fixed terms cannot be changed here.')
         target, field = ((installment.setdefault('reinsurerPaymentTerms', {}), party)
                          if installment is not None else (row, 'paymentTermsDays'))
     before = target.get(field)

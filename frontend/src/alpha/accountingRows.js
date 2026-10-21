@@ -14,7 +14,7 @@ export function accountingRows(body) {
     return {...row, schedules: associated}
   })
   for (const item of schedules) {
-    if (covered.has(item.key) || !(item.swissCase || item.swissFacility || item.requiresCollectionConfirmation)) continue
+    if (covered.has(item.key) || !(item.swissCase || item.swissFacility || item.requiresCollectionConfirmation || item.greatAmericanCase)) continue
     const entries = (item.entries || []).map(entry => ({...entry,
       appliedAmount: Number(entry.amount || 0) * (entry.entryType === 'reversal' ? -1 : 1)}))
     const nonCashPaid = entries.reduce((sum, entry) => sum + (entry.nonCash ? entry.appliedAmount : 0), 0)

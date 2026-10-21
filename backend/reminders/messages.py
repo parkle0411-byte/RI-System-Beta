@@ -134,6 +134,9 @@ def finance_emails(personnel):
 
 
 def due_kind(item, today, success_dates):
+    # Special premium reminders remain on screen; reviewed claims use claim_created_15.
+    if str(item.get('paymentRule') or '').startswith(('allianz_', 'great_american_')):
+        return ''
     due_date = item.get('contractDueDate') or item.get('dueDate')
     if not due_date or abs(js_to_number(item.get('outstanding') or 0)) <= .004:
         return ''

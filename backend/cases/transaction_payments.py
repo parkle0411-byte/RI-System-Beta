@@ -50,7 +50,8 @@ def edit_payment(view, request, body):
         return _error(400, 'full_premium_required', 'Premium receipts/payments must cover the complete balance.')
     before = copy.deepcopy(entry)
     entry['amount'] = amount(value * (-1 if cents(entry['amount']) < 0 else 1))
-    problem = claim_balance_error(payload)
+    from .allianz_accounting import collection_change_error
+    problem = collection_change_error(case.payload,payload) or claim_balance_error(payload)
     if problem:
         return _error(409, 'claim_collection_limit', problem)
     actor = actor_from(request.ri_principal)
@@ -104,14 +105,30 @@ def record_transaction_payments(view, request, body):
         detail=details[row['caseUid']].get(row['txNo'])
         if not detail or not detail['canRecord']:
             return _error(400,'transaction_not_payable','This transaction cannot receive a cash allocation.')
+        if (detail.get('greatAmericanFacility') or detail.get('greatAmericanCase')) and detail.get('paymentAllowed') is False:
+            return _error(400, 'great_american_collection_required', detail['paymentBlockedReason'])
+        if detail.get("allianzFacility") and detail.get("paymentAllowed") is False:
+            return _error(400,"allianz_collection_required",detail["paymentBlockedReason"])
         blocked = payment_error(detail, amount(row['value']))
         if blocked:
             return _error(400, 'swiss_payment_blocked', blocked)
         if row['value']>abs(cents(detail['outstanding'])):
             return _error(400,'overpayment','Allocation cannot exceed the transaction balance.')
         if payment_group is not None and detail['paymentGroup']!=payment_group:
-            return _error(400,'incompatible_allocations','Use the same currency, cash direction and counterparty in one remittance.')
+            return _error(400,'incompatible_allocations','Use the same currency, cash direction and counterparty in one receipt/payment record.')
         payment_group=detail['paymentGroup']
+    chosen=[details[r['caseUid']][r['txNo']] for r in parsed]
+    if any(d.get('allianzFacility') or d.get('allianzCaseClaim') for d in chosen):
+        sources={next(t.get('source','premium') for t in objects(cases[r['caseUid']].payload.get('transactions')) if t.get('txNo')==r['txNo']) for r in parsed}
+        if len(sources)>1:return _error(400,'allianz_separate_claim_payment','Record Allianz claims separately from premiums and refunds.')
+        if 'claim' not in sources and len({d.get('contractDueDate') for d in chosen})>1:
+            return _error(400,'allianz_separate_due_dates','Record Allianz premiums with different contract due dates in separate remittances.')
+    from .great_american_accounting import allocation_error
+    ga_problem = allocation_error(chosen, parsed, cases, details)
+    if ga_problem:return _error(400, 'great_american_payment_rule', ga_problem)
+    from .payment_policy import allocation_error
+    problem = allocation_error(parsed, chosen, details)
+    if problem:return _error(400, 'whole_refund_required', problem)
     batch_id=str(uuid.uuid4())
     actor=actor_from(request.ri_principal)
     timestamp=_iso_now()
@@ -142,14 +159,18 @@ def record_transaction_payments(view, request, body):
                 **({'settlementDueDate':schedule_dates[part['scheduleKey']]['dueDate']}
                    if schedule_dates.get(part['scheduleKey'],{}).get('swissFacility') and detail['amount'] > 0 else {})})
     from .accounting_rules import claim_balance_error
-    for payload in payloads.values():
-        problem = claim_balance_error(payload)
-        if problem:
-            return _error(400, 'claim_collection_limit', problem)
+    from .payment_policy import collection_change_error
+    for uid, payload in payloads.items():
+        problem = collection_change_error(case_payload(cases[uid]), payload) or claim_balance_error(payload)
+        if problem:return _error(400, 'collection_settlement_required', problem)
     results=[]
     for uid,case in cases.items():
-        view._save(request,{'rowVersion':case.row_version},case,payloads[uid],'record_payment',
+        saved = view._save(request,{'rowVersion':case.row_version},case,payloads[uid],'record_payment',
                    {'operation':'record_transaction_payments','batchId':batch_id,'batchAmount':amount(total)})
+        if saved.status_code != 200:
+            from django.db import transaction
+            transaction.set_rollback(True)
+            return saved
         results.append({'caseUid':uid,'rowVersion':case.row_version})
     from rest_framework.response import Response
     return Response({'ok':True,'batchId':batch_id,'amount':amount(total),'cases':results})
@@ -194,7 +215,8 @@ def reverse_batch_payment(view, request, body):
         probe = copy.deepcopy(case.payload)
         probe.setdefault('paymentEntries', []).extend({**p, 'entryType': 'reversal'} for p in payments)
         from .accounting_rules import claim_balance_error
-        problem = claim_balance_error(probe)
+        from .allianz_accounting import collection_change_error
+        problem = collection_change_error(case.payload,probe) or claim_balance_error(probe)
         if problem:
             return _error(409, 'claim_collection_limit', problem)
         originals.extend(payments)
@@ -212,6 +234,10 @@ def reverse_batch_payment(view, request, body):
                 'paymentDate':payment_date,'note':str(body.get('note') or 'Correction reversal').strip()[:1000],
                 'createdAt':timestamp,'createdBy':actor['id'],'createdByName':actor['name']})
         payload['paymentEntries']=[*entries,*reversals]
-        view._save(request,{'rowVersion':case.row_version},case,payload,'reverse_payment',{'batchId':bid,'reversalBatchId':reversal_batch})
+        saved = view._save(request,{'rowVersion':case.row_version},case,payload,'reverse_payment',{'batchId':bid,'reversalBatchId':reversal_batch})
+        if saved.status_code != 200:
+            from django.db import transaction
+            transaction.set_rollback(True)
+            return saved
     from rest_framework.response import Response
     return Response({'ok':True,'batchId':bid,'reversalBatchId':reversal_batch})

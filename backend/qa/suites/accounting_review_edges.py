@@ -42,7 +42,7 @@ try:
   peer=make('PEER');check('same-party batch retains independent full allocations',batch([(b,'Leg 1',1000),(peer,'Leg 1',1000)]).status_code==200)
   u=make('AUW',reinsurers=[{'name':MANUAL_TW_REF_REINSURER,'foreignBroker':'Howden Specialty Limited','sharePct':100,'premium':800,'riCommPct':0,'taxPct':0}])
   ur=make('AUWREF',parent=u,originalPremium=-200,reinsurers=[{'name':MANUAL_TW_REF_REINSURER,'foreignBroker':'Howden Specialty Limited','sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0}])
-  check('AUW full refund offset is allowed manually',offset(fin,u,ur,'reinsurer').status_code==200)
+  check('AUW reinsurer refund requires cash receipt instead of offset',offset(fin,u,ur,'reinsurer').status_code==400)
   unposted=make('PREPOST',status='posted');unposted.payload['transactions']=[];unposted.save()
   unposted_refund=make('PREPOSTREF',parent=unposted,originalPremium=-200,reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
   check('unposted premium schedules cannot be manually offset',offset(fin,unposted,unposted_refund).status_code==400)

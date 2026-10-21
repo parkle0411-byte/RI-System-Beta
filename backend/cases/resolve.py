@@ -8,6 +8,8 @@
 from django.db.models import Q
 
 from .manual_reference import is_auw_reinsurer
+from .allianz_accounting import is_allianz
+from .great_american_accounting import target as ga_target
 from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
 from masterdata.models import MasterRecord
 from personnel.models import Personnel
@@ -136,6 +138,14 @@ def payment_terms_signature(payload):
     """
     from .calc.swiss_facility import applies as swiss_applies, is_swiss_facility
     swiss = swiss_applies(payload)
+    def installment_mapping(row,reinsurers):
+        value=get(row,"reinsurerPaymentTerms")
+        if not any((is_allianz(get(r,"name")) or ga_target(payload,get(r,"name"))) for r in (reinsurers if is_array(reinsurers) else [])):
+            return js_or(value,{})
+        mapping=dict(value) if isinstance(value,dict) else {}
+        for i,r in enumerate(reinsurers if is_array(reinsurers) else []):
+            if (is_allianz(get(r,"name")) or ga_target(payload,get(r,"name"))):mapping["r"+str(i+1)]=90
+        return mapping
     installments = get(payload, "performanceInstallments")
     reinsurers = get(payload, "reinsurers")
     return {
@@ -150,13 +160,13 @@ def payment_terms_signature(payload):
                 "paymentTermsDays": 90 if swiss else _nn(get(row, "paymentTermsDays")),
                 "reinsurerPaymentTerms": ({**(get(row, "reinsurerPaymentTerms") if isinstance(get(row, "reinsurerPaymentTerms"), dict) else {}), **{
                     "r" + str(i+1): 90 for i, r in enumerate(reinsurers if is_array(reinsurers) else [])
-                    if is_swiss_facility(get(r, "name"))}} if swiss else js_or(get(row, "reinsurerPaymentTerms"), {})),
+                    if is_swiss_facility(get(r, "name")) or (is_allianz(get(r,"name")) or ga_target(payload,get(r,"name")))}} if swiss else installment_mapping(row,reinsurers)),
             }
             for row in (installments if is_array(installments) else [])
         ],
         "reinsurers": [
             {"name": js_or(get(row, "name"), ""), "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS
-             if is_auw_reinsurer(get(row, "name")) else 90 if swiss and is_swiss_facility(get(row, "name")) else _nn(get(row, "paymentTermsDays"))}
+             if is_auw_reinsurer(get(row, "name")) else 90 if is_allianz(get(row,"name")) or ga_target(payload,get(row,"name")) else 90 if swiss and is_swiss_facility(get(row, "name")) else _nn(get(row, "paymentTermsDays"))}
             for row in (reinsurers if is_array(reinsurers) else [])
         ],
     }

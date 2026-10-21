@@ -126,7 +126,7 @@ class AccountingView(NoStoreMixin, APIView):
                     # without duplicating payment histories or claim schedule rows.
                     fields = ('scheduleKey','installmentId','installmentLabel','partyKey','partyType','partyName',
                               'currency','amount','paid','outstanding','termsDays','dueDate','contractDueDate','status',
-                              'paymentAllowed','paymentBlockedReason','paymentRule','source')
+                              'paymentAllowed','paymentBlockedReason','paymentRule','source','allianzFacility','allianzCase','greatAmericanFacility','greatAmericanCase','fullPaymentRequired','offsetAllowed','cedantReceiptConfirmed','sourceBaseDate','accountingLeadDays')
                     for item in shared[c["caseUid"]].schedule("raw")["items"]:
                         schedule_rows.append({**{k:item.get(k) for k in fields},'source':'premium',
                             'key':c['caseUid']+':'+item['scheduleKey'],'caseUid':c['caseUid'],
@@ -164,7 +164,9 @@ class AccountingView(NoStoreMixin, APIView):
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
         action = _text(body.get("action"))
-        handlers = {"record_payment": self.record_payment, "reverse_payment": self.reverse_payment,
+        from .allianz_accounting import record_followup
+        from .great_american_accounting import record_followup as ga_followup
+        handlers = {"record_great_american_claim_followup": lambda req,data:ga_followup(self,req,data), "record_allianz_claim_followup": lambda req,data:record_followup(self,req,data), "record_payment": self.record_payment, "reverse_payment": self.reverse_payment,
                     "record_transaction_payments": lambda r, b: record_transaction_payments(self,r,b),
                     "reverse_batch_payment": lambda r, b: reverse_batch_payment(self,r,b)}
         for swiss_handler in ("confirm_swiss_collection", "unconfirm_swiss_collection", "record_swiss_clearance", "record_swiss_offset", "mark_swiss_statement"):
@@ -208,6 +210,10 @@ class AccountingView(NoStoreMixin, APIView):
         expected = js_to_number(body.get("rowVersion", UNDEFINED))  # Number(undefined) 是 NaN，不是 0
         if case.row_version != expected:
             return _error(409, "version_conflict", "This case changed. Refresh Accounting and try again.")
+        from .payment_policy import collection_change_error as ga_change
+        ga_problem = ga_change(case_payload(case), payload)
+        if ga_problem:
+            return _error(409, 'collection_settlement_required', ga_problem)
         old_entries = case.payload.get("paymentEntries") if isinstance(case.payload, dict) else None
         before = {"rowVersion": case.row_version, "paymentEntries": js_or(old_entries, [])}
         reset_after_changes(case.payload or {}, payload, _iso_now())
@@ -304,6 +310,9 @@ class AccountingView(NoStoreMixin, APIView):
         if original.get("offsetId"):
             return _error(400, "linked_offset_locked", "Offset records must remain linked to both policies; review them with Accounting.")
         payload["paymentEntries"] = json_roundtrip([*entries, reversal])
+        from .allianz_accounting import collection_change_error
+        blocked=collection_change_error(case_payload(case),payload)
+        if blocked:return _error(409,"allianz_collection_required",blocked)
         return self._save(request, body, case, payload, "reverse_payment", json_roundtrip({
             "paymentEntryId": reversal["id"], "reversalOf": entry_id,
             "scheduleKey": get(original, "scheduleKey"), "amount": get(original, "amount"),

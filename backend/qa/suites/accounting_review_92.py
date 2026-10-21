@@ -102,7 +102,8 @@ try:
   pending.refresh_from_db();key['rowVersion']=pending.row_version
   check('existing valid contract days remain locked',request(sales,'complete_payment_terms',**key).status_code==409)
   root=make('OFFSET');refund=make('REFUND',parent=root,originalPremium=-200,reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
-  check('ordinary premium manual offset succeeds',offset(fin,root,refund).status_code==200)
+  assert pay(fin,refund,'Leg 2',160).status_code==200 and settle(fin,refund,'Leg 2').status_code==200
+  check('ordinary premium manual offset succeeds after all RI refund cash is received and settled',offset(fin,root,refund).status_code==200)
   check('manual offset creates no bank receipt and does not auto-settle',details(root)[tx(root,'Leg 1')]['cashPaid']==0 and details(root)[tx(root,'Leg 1')]['outstanding']==800 and details(refund)[tx(refund,'Leg 1')]['settlement']=='pending_confirmation')
   try:build_reversed_payload(root.payload);blocked=False
   except ValueError:blocked=True
