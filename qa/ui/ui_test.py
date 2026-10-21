@@ -75,6 +75,25 @@ def section(page, title):
     return page.locator(".el-collapse-item").filter(has=page.locator(".el-collapse-item__header", has_text=title)).first
 
 
+def structure_card(page):
+    """2026-10-16 起 Reinsurance Structure 與 Class 在表單最上方同一張卡片，兩項都選了才顯示後續區塊。"""
+    return page.locator('[data-testid="reinsurance-structure-section"]')
+
+
+def choose_structure_class(page, structure="Quota Share", klass="Property"):
+    card = structure_card(page)
+    pick(card, page, "Reinsurance Structure", structure)
+    pick(card, page, "Class", klass)
+    section(page, "Risk Details").wait_for()
+    page.wait_for_timeout(300)
+
+
+def info(page, name):
+    """2026-10-16 起 Property 的 Occupation & Construction／Breakdown of Sum Insured／Loss Record／Special Agreement 合併成一張 Information 卡片。
+    name：occupation、sumInsured、loss、specialAgreement"""
+    return page.locator(f'[data-testid="property-information"] .information-section[data-section="{name}"]')
+
+
 def message(page, expect):
     """等待「包含 expect 文字」的提示訊息出現（畫面上可能還留著前一則），回傳是否出現。"""
     try:
@@ -144,14 +163,31 @@ def phase_a(page):
     nav(page, "Account List")
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
-    check("new case: header 'Account' with Cancel / Save draft in the header", header_title(page) == "Account"
-          and page.locator(".page-header button", has_text="Save draft").is_visible() and page.locator(".page-header button", has_text="Cancel").is_visible())
     page.wait_for_timeout(800)
+    # 2026-10-16「Reinsurance Structure 與 Class 同區塊先選」：一開始只有 Structure 與 Class，兩項都選了才出現其他欄位與 Save draft
+    check("new case: header 'Account', only Reinsurance Structure and Class shown, Save draft hidden until both are chosen",
+          header_title(page) == "Account" and page.locator(".page-header button", has_text="Cancel").is_visible()
+          and item(structure_card(page), page, "Reinsurance Structure").is_visible() and item(structure_card(page), page, "Class").is_visible()
+          and page.locator(".case-form .el-collapse-item").count() == 0 and item(page, page, "Case Owner").count() == 0
+          and page.locator(".page-header button", has_text="Save draft").count() == 0 and page.locator(".form-actions button", has_text="Save draft").count() == 0)
+    snap(page, "new-case-structure-class")
+    pick(structure_card(page), page, "Reinsurance Structure", "Quota Share")
+    check("Structure alone does not reveal the rest of the form", page.locator(".case-form .el-collapse-item").count() == 0)
+    pick(structure_card(page), page, "Class", "Property")
+    section(page, "Risk Details").wait_for()
+    page.wait_for_timeout(500)
+    check("after Structure and Class: Risk Details, Save draft in the header, Review & confirm / Save draft at the bottom",
+          page.locator(".page-header button", has_text="Save draft").is_visible()
+          and page.locator(".form-actions button", has_text="Review & confirm").is_visible() and page.locator(".form-actions button", has_text="Save draft").is_visible())
+    titles = [t.strip() for t in page.locator(".case-form .el-collapse-item__header").all_inner_texts()]
+    want = ["Risk Details", "Schedule of Security", "Terms & Conditions", "Information", "Cedant Premium", "Reinsurer Premium", "Performance Split", "Reinsurance Conditions"]
+    check("Property sections in order, Information merged (2026-10-16)", [w for t in titles for w in want if t == w or t.startswith(w + " ")] == want
+          and not any(t in titles for t in ("Occupation & Construction", "Breakdown of Sum Insured", "Loss Record", "Special Agreement")), titles)
     owner = selected_label(page, page, "Case Owner")
     check("case owner defaults to the signed-in person", owner == "UI Sales", owner)
     fill(page, page, "Original Insured (EN)", "UI Test Insured Ltd")
-    # 2026-10-10 起存檔就要有 Loss Record 的 advised date 與 Past year(s)
-    loss = section(page, "Loss Record")
+    # 2026-10-10 起存檔就要有 Loss Record 的 advised date 與 Past year(s)（2026-10-16 起在 Information 卡片內）
+    loss = info(page, "loss")
     date(loss, page, "Loss record advised by broker on", "2026-02-01")
     fill(loss, page, "Past Year(s)", "5")
     page.locator(".form-actions button", has_text="Save draft").click()
@@ -166,11 +202,14 @@ def phase_a(page):
     page.locator(".page-header button", has_text="Edit draft").click()
     page.locator(".case-form").wait_for()
     page.wait_for_timeout(800)
+    # 既有案件沿用已存的 Structure 與 Class，直接顯示後續內容（2026-10-16）
+    check("editing the Draft: saved Structure and Class kept, details shown directly",
+          selected_label(structure_card(page), page, "Reinsurance Structure") == "Quota Share"
+          and selected_label(structure_card(page), page, "Class").startswith("Property") and section(page, "Risk Details").is_visible(),
+          (selected_label(structure_card(page), page, "Reinsurance Structure"), selected_label(structure_card(page), page, "Class")))
     risk = section(page, "Risk Details")
-    pick(risk, page, "Reinsurance Structure", "Quota Share")
     pick(risk, page, "Account Executive", "UI AE One")
     pick(risk, page, "Currency", "USD")
-    pick(risk, page, "Class", "Property")
     pick(risk, page, "New / Renew", "New")
     item(risk, page, "Type").locator("input, textarea").first.fill("Fire")
     pick(risk, page, "Reinsured", "UI Cedant Insurance")
@@ -188,23 +227,28 @@ def phase_a(page):
     fill(cards.nth(0), page, "Order Hereon (%)", "60")
     pick(cards.nth(1), page, "Reinsurer", "UI Re Beta (Facility)")
     fill(cards.nth(1), page, "Order Hereon (%)", "40")
+    # 2026-10-16 92 項會計規則：每家普通再保人的付款天數要各自填寫，沒有預設繼承
+    check("each reinsurer row has its own empty Payment Terms (Days)",
+          all(item(cards.nth(i), page, "Payment Terms (Days)").locator("input").first.input_value() == "" for i in (0, 1)))
+    fill(cards.nth(0), page, "Payment Terms (Days)", "45")
+    fill(cards.nth(1), page, "Payment Terms (Days)", "60")
 
     terms = section(page, "Terms & Conditions")
     fill(terms, page, "Limit of Liability", "1000000")
     fill(terms, page, "Deductibles", "10% of loss")
     fill(terms, page, "Original Conditions", "As original")
-    occ = section(page, "Occupation & Construction")
+    occ = info(page, "occupation")
     fill(occ, page, "Occupation", "Office")
     fill(occ, page, "Construction", "Concrete")
-    sums = section(page, "Breakdown of Sum Insured")
+    sums = info(page, "sumInsured")
     sums.locator(".sum-row input").nth(0).fill("Building")
     sums.locator(".sum-row input").nth(1).fill("1000000")
-    loss = section(page, "Loss Record")
+    loss = info(page, "loss")
     date(loss, page, "Loss record advised by broker on", "2026-02-01")
     fill(loss, page, "Past Year(s)", "5")
     cedant = section(page, "Cedant Premium")
     fill(cedant, page, "100% Premium", "1000")
-    fill(cedant, page, "Payment Terms (Days)", "30")
+    fill(cedant, page, "Cedant Collection Days", "30")   # 2026-10-16 起由「Payment Terms (Days)」更名
     fill(cedant, page, "Ceding Commission (%)", "10")
     fill(cedant, page, "Tax (%)", "0")
     rp = section(page, "Reinsurer Premium").locator(".repeat-card")
@@ -305,6 +349,11 @@ def phase_a(page):
     page.locator(".endorsement-editor").wait_for()
     check("endorsement form: header 'New endorsement' and risk fields locked", header_title(page) == "New endorsement"
           and page.locator("fieldset.case-fieldset").first.evaluate("el => el.disabled") is True, header_title(page))
+    # 2026-10-21：批單沿用原案件的 Cedant 收款天數與各再保人付款天數
+    endo_days = (item(section(page, "Cedant Premium"), page, "Cedant Collection Days").locator("input").first.input_value(),
+                 [item(c, page, "Payment Terms (Days)").locator("input").first.input_value() for c in section(page, "Schedule of Security").locator(".repeat-card").all()])
+    check("endorsement inherits Cedant Collection Days and each reinsurer's Payment Terms (Days) from the source case",
+          endo_days == ("30", ["45", "60"]), endo_days)
     snap(page, "endorsement-form")
     page.locator(".page-header button", has_text="Cancel").click()
     page.locator(".case-table").wait_for()
@@ -359,8 +408,9 @@ def phase_b(page):
     nav(page, "Account List")
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
+    choose_structure_class(page)   # 2026-10-16 起先選 Structure 與 Class 才出現其他欄位
     fill(page, page, "Original Insured (EN)", "UI Recycle Me")
-    loss = section(page, "Loss Record")   # 存檔就需要 Loss Record 的 advised date 與 Past year(s)
+    loss = info(page, "loss")   # 存檔就需要 Loss Record 的 advised date 與 Past year(s)（Property 的 Information 卡片內）
     date(loss, page, "Loss record advised by broker on", "2026-02-01")
     fill(loss, page, "Past Year(s)", "5")
     page.locator(".form-actions button", has_text="Save draft").click()
@@ -493,7 +543,8 @@ def row_cells(page, tx):
 
 def phase_d(page):
     """Accounting（SoA／Transactions）。要在階段 F（Production close 產生保費交易）之後執行。
-    2026-10-14 起沒有任何自動結清：餘額歸零後一律是 Awaiting confirmation，由會計按 Confirm settlement。"""
+    2026-10-14 起沒有任何自動結清：餘額歸零後一律是 Awaiting confirmation，由會計按 Confirm settlement。
+    2026-10-16 起（92 項會計規則）保費只能整筆登錄餘額、曾銷帳的金額永久鎖定。"""
     login(page, "ui.finance")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
     check("Finance Staff sees Dashboard, Account List, Production Report, Accounting, FX Rates (Account List read-only since 2026-10-07)",
@@ -525,32 +576,41 @@ def phase_d(page):
     item(filters, page, "Type").locator(".el-select__clear").first.click()
     page.wait_for_timeout(300)
 
-    # 部分收款 → 再收完 → 不會自動結清 → 人工確認
+    check("10 rows (50 or fewer): no pagination bar (2026-10-15 Accounting 表格分頁)", page.locator('[data-testid="accounting-pagination"]').count() == 0)
+
+    # 2026-10-16 92 項會計規則：保費每次須登錄整筆餘額（不能部分收款），只有賠款可部分收付；餘額歸零後仍須人工銷帳
     acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Record payment").click()
-    dlg = page.locator(".el-dialog").filter(has_text="Record remittance")
+    dlg = page.locator(".el-dialog").filter(has_text="Record receipt / payment")
     dlg.wait_for()
     today = page.evaluate("new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())")
     shown = item(dlg, page, "Payment date").locator("input").first.input_value()
     check("payment date defaults to today in Taipei", shown == today, (shown, today))
-    fill(dlg, page, "Remittance amount (positive magnitude)", "100")
-    fill(dlg, page, "Bank / remittance reference", "UI-REMIT-1")
-    check("dialog shows allocated amount equals the remittance", "Difference: 0.00" in dlg.inner_text(), dlg.inner_text()[-200:])
+    amount = item(dlg, page, "Recorded receipt / payment amount").locator("input").first
+    check("premium: amount fixed to the whole outstanding balance (540.00, not editable), allocation difference 0.00",
+          amount.is_disabled() and amount.input_value().replace(",", "") == "540.00" and "Difference: 0.00" in dlg.inner_text()
+          and "Premiums must be recorded for their full remaining balance" in dlg.inner_text(), (amount.input_value(), dlg.inner_text()[-300:]))
+    # 畫面已鎖住金額；再直接對伺服器送一筆部分保費收款，確認伺服器也拒絕（不能繞過畫面）
+    partial = page.evaluate("""async () => {
+      const list = await (await fetch('/api/accounting?view=list', {cache: 'no-store'})).json()
+      const row = (list.transactionRows || []).find((r) => String(r.txNo || '').startsWith('TWPAR2603001-R1-T1'))
+      if (!row) return {status: 'no row', keys: Object.keys(list)}
+      await fetch('/api/auth/csrf', {cache: 'no-store'})
+      const token = (document.cookie.split('; ').find((c) => c.startsWith('csrftoken=')) || '').split('=')[1] || ''
+      const r = await fetch('/api/accounting', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': decodeURIComponent(token)},
+        body: JSON.stringify({action: 'record_transaction_payments', paymentDate: new Date().toISOString().slice(0, 10), amount: 100, reference: 'UI-PARTIAL', note: '',
+                              allocations: [{caseUid: row.caseUid, txNo: row.txNo, rowVersion: row.caseRowVersion, amount: 100}]})})
+      return {status: r.status, body: await r.text()}
+    }""")
+    console_errors.clear()   # 上面故意送出部分保費，400 在 console 會有一行網路錯誤，屬預期
+    check("server rejects a partial premium receipt (USD 100 of 540)", partial.get("status") in (400, 409, 422), str(partial)[:300])
+    fill(dlg, page, "External system reference", "UI-REMIT-1")
     snap(page, "accounting-remittance")
     dlg.get_by_role("button", name="Record payment").click()
-    check("remittance recorded", message(page, "Payment recorded"))
+    check("whole-balance receipt recorded", message(page, "Payment recorded"))
     page.wait_for_timeout(800)
     t1 = row_cells(page, "TWPAR2603001-R1-T1")
-    check("T1 row: Paid 100.00, outstanding 440.00, Partial", "100.00" in t1 and "440.00" in t1 and "Partial" in t1, t1)
-
-    acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Record payment").click()
-    dlg = page.locator(".el-dialog").filter(has_text="Record remittance")
-    dlg.wait_for()
-    fill(dlg, page, "Remittance amount (positive magnitude)", "440")
-    dlg.get_by_role("button", name="Record payment").click()
-    check("second remittance recorded", message(page, "Payment recorded"))
-    page.wait_for_timeout(800)
-    t1 = row_cells(page, "TWPAR2603001-R1-T1")
-    check("fully paid T1 is NOT settled automatically: Awaiting confirmation", "Awaiting confirmation" in t1 and "Settled" not in t1, t1)
+    check("fully received T1 is NOT settled automatically: received 540.00, outstanding 0.00, Awaiting confirmation",
+          "540.00" in t1 and "0.00" in t1 and "Awaiting confirmation" in t1 and "Settled" not in t1 and "Reported received" in t1, t1)
     check("T3 (brokerage) stays open until T1 and T2 are confirmed", "Open" in row_cells(page, "TWPAR2603001-R1-T3"), row_cells(page, "TWPAR2603001-R1-T3"))
     acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Confirm settlement").click()
     box = page.locator(".el-message-box")
@@ -564,30 +624,76 @@ def phase_d(page):
     t1 = row_cells(page, "TWPAR2603001-R1-T1")
     check("T1 row: Settled after the manual confirmation", "Settled" in t1 and "Awaiting" not in t1, t1)
 
-    # 沖回整筆匯款：確認失效、餘額回復
+    # 2026-10-16：曾銷帳的金額永久鎖定（不能再沖回或改金額）——取代原本「沖回已確認的整筆匯款」的檢查
     acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="History").click()
     hist = page.locator(".el-dialog").filter(has_text="Payment history")
     hist.wait_for()
-    check("history lists both remittances and the settlement confirmation", hist.locator(".el-table__row").count() >= 3, hist.inner_text()[:300])
-    hist.locator(".el-table__row").filter(has_text="payment").first.get_by_role("button").first.click()
-    batch = page.locator(".el-dialog").filter(has_text="Remittance details")
+    check("history lists the receipt and the settlement confirmation", "UI-REMIT-1" in hist.inner_text() and "Confirmed settlement" in hist.inner_text()
+          and "UI bank statement 2026-03" in hist.inner_text(), hist.inner_text()[:400])
+    check("settled amount locked: no Edit amount", hist.get_by_role("button", name="Edit amount").count() == 0)
+    hist.get_by_role("button", name="View registration").first.click()
+    batch = page.locator(".el-dialog").filter(has_text="Receipt / payment record details")
     batch.wait_for()
-    reverse = batch.get_by_role("button", name="Reverse entire remittance")
-    check("remittance details offer a whole-remittance reversal", reverse.is_visible())
-    reverse.click()
-    confirm_box(page, "Create reversal")
-    check("whole remittance reversed", message(page, "Entire remittance reversed"))
+    check("settled receipt cannot be reversed (no Reverse button)", batch.get_by_role("button", name="Reverse recorded amounts").count() == 0, batch.inner_text()[:300])
+    batch.get_by_role("button", name="Close").first.click()
+    page.wait_for_timeout(300)
+    page.keyboard.press("Escape")   # Payment history 對話框也還開著
+    page.wait_for_timeout(300)
+
+    # 尚未銷帳的收款可整筆沖回：Cedant 對 UI Re Beta 的 T1（USD 360.00）
+    acc_row(page, "TWPAR2603001-R2-T1").get_by_role("button", name="Record payment").click()
+    dlg = page.locator(".el-dialog").filter(has_text="Record receipt / payment")
+    dlg.wait_for()
+    fill(dlg, page, "External system reference", "UI-REMIT-2")
+    dlg.get_by_role("button", name="Record payment").click()
+    check("R2 T1 whole-balance receipt recorded", message(page, "Payment recorded"))
     page.wait_for_timeout(800)
-    t1 = row_cells(page, "TWPAR2603001-R1-T1")
-    check("after the reversal the settlement confirmation is void and a balance is open again",
-          "Settled" not in t1 and "Awaiting confirmation" not in t1 and ("Partial" in t1 or "Open" in t1), t1)
-    check("remittance details stay open showing the reversed status (no further Reverse button)",
-          batch.is_visible() and batch.get_by_role("button", name="Reverse entire remittance").count() == 0 and "reversed" in batch.inner_text())
+    check("R2 T1: Awaiting confirmation", "Awaiting confirmation" in row_cells(page, "TWPAR2603001-R2-T1"), row_cells(page, "TWPAR2603001-R2-T1"))
+    acc_row(page, "TWPAR2603001-R2-T1").get_by_role("button", name="History").click()
+    hist = page.locator(".el-dialog").filter(has_text="Payment history")
+    hist.wait_for()
+    hist.get_by_role("button", name="View registration").first.click()
+    batch = page.locator(".el-dialog").filter(has_text="Receipt / payment record details")
+    batch.wait_for()
+    reverse = batch.get_by_role("button", name="Reverse recorded amounts")
+    check("unsettled receipt details offer a whole reversal", reverse.is_visible())
+    reverse.click()
+    box = page.locator(".el-message-box")
+    box.wait_for()
+    box.locator("input").fill("UI wrong remittance")
+    box.locator("button.el-button--primary").click()
+    check("whole receipt reversed", message(page, "Receipt / payment records reversed"))
+    page.wait_for_timeout(800)
+    t = row_cells(page, "TWPAR2603001-R2-T1")
+    check("after the reversal the balance is open again (no confirmation pending)", "Awaiting confirmation" not in t and "Settled" not in t and "Open" in t and "360.00" in t, t)
+    check("record details stay open showing the reversed status (no further Reverse button)",
+          batch.is_visible() and batch.get_by_role("button", name="Reverse recorded amounts").count() == 0 and "reversed" in batch.inner_text().lower(), batch.inner_text()[:300])
     snap(page, "accounting-after-reversal")
     batch.get_by_role("button", name="Close").first.click()
     page.wait_for_timeout(300)
-    page.keyboard.press("Escape")   # 後面的 Payment history 對話框也還開著
+    page.keyboard.press("Escape")
     page.wait_for_timeout(300)
+
+    # 2026-10-16：回到 Accounting 先顯示上次清單並在背景更新（更新完成前不能記收款或確認）。先把更新的請求擋住，才看得到「Updating…」
+    nav(page, "Dashboard")
+    held = []
+    page.route("**/api/accounting?view=list", lambda route: held.append(route))
+    nav(page, "Accounting")
+    banner = page.locator('[data-testid="accounting-refreshing"]')
+    try:
+        banner.wait_for(timeout=5000)
+    except Exception:  # noqa: BLE001
+        pass
+    check("returning to Accounting: last list shown at once with the 'Updating…' banner, recording hidden while refreshing",
+          banner.is_visible() and "Updating" in banner.inner_text() and "Settled" in row_cells(page, "TWPAR2603001-R1-T1")
+          and page.locator(".table-card").get_by_role("button", name="Record payment").count() == 0, banner.all_inner_texts())
+    snap(page, "accounting-refreshing")
+    for route in held:   # 放行擋住的更新請求，再取消攔截
+        route.continue_()
+    page.unroute("**/api/accounting?view=list")
+    banner.wait_for(state="hidden", timeout=15000)
+    check("after the refresh the banner disappears and recording is available again",
+          acc_row(page, "TWPAR2603001-R2-T1").get_by_role("button", name="Record payment").is_visible())
     logout(page)
 
     login(page, "ui.admin")
@@ -607,8 +713,10 @@ def phase_e(page):
     open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
     page.locator(".case-detail-tabs .el-tabs__item", has_text="Claim").click()
     page.get_by_text("Root TW Reference").wait_for()
-    check("Claim tab: root TW Reference and split source shown", "TWPAR2603001" in page.locator(".overview-kv").first.inner_text()
-          and "2 reinsurer line(s)" in page.locator(".overview-kv").first.inner_text(), page.locator(".overview-kv").first.inner_text())
+    # 2026-10-16 92 項會計規則：賠款按出險日適用的保單／批單比例分攤（原本顯示「N reinsurer line(s)」的分攤來源）
+    kv = page.locator(".overview-kv").first.inner_text()
+    check("Claim tab: root TW Reference and allocation rule (Date of Loss, source kept per obligation) shown", "TWPAR2603001" in kv
+          and "effective on the Date of Loss" in kv and "source is retained with each obligation" in kv, kv)
     check("no claims yet", page.get_by_text("No claims recorded").is_visible())
     add = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Add claim"))
     check("VM: Date of Loss marked required, help text updated", item(add, page, "Date of Loss").locator(".is-required, .el-form-item__label").count() >= 1
@@ -650,11 +758,16 @@ def phase_e(page):
     fill(dlg, page, "Note", "first payment")
     snap(page, "claim-payment")
     dlg.get_by_role("button", name="Record obligation").click()
-    check("claim obligation recorded", message(page, "Claim obligations created; record actual cash in Accounting"))
+    check("claim obligation recorded", message(page, "Claim obligations saved; Accounting records receipts and payments separately"))
     page.wait_for_timeout(800)
     card = page.locator(".overview-card").filter(has_text="UI-LOSS-01")
     text = card.inner_text()
-    check("payments table and Cumulative Loss Paid show 1,000.00", "1,000.00" in text and "first payment" in text and "2026-07-01" in text, text[:300])
+    check("obligations table and Cumulative claim obligations show 1,000.00", "1,000.00" in text and "first payment" in text and "2026-07-01" in text, text[:300])
+    # 2026-10-16 92 項會計規則：賠款帳款到期日 = 建立帳款的台灣日期 + 15 日，不可修改
+    import datetime as dt
+    due = (dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date() + dt.timedelta(days=15)).isoformat()
+    row = card.locator(".el-table__row").filter(has_text="first payment").first.inner_text()
+    check("claim obligation due date fixed at creation (Taipei) + 15 days", due in row and "Due date (fixed)" in text, (due, row))
     snap(page, "claims")
 
     page.locator(".case-detail-tabs .el-tabs__item", has_text="SOA").click()
@@ -888,9 +1001,12 @@ def phase_r(page):
     errors = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Configuration errors")).locator(".el-table__row")
     check("Configuration errors: the first run (AE had no Personnel record) is listed",
           errors.count() >= 1 and "Account Executive does not match one active Personnel record." in errors.first.inner_text(), errors.count())
-    pay = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Payment reminders")).locator(".el-table__row")
-    check("Payment: reminders listed, Suppressed, Finance among the recipients", pay.count() >= 1 and "Suppressed (not sent)" in pay.first.inner_text()
-          and "ui.fin@tw-insure.com" in pay.first.inner_text(), pay.first.inner_text() if pay.count() else "no rows")
+    # 2026-10-16 92 項會計規則：財務提醒改用「正式帳款」的實際到期日，帳款要到 Production 關帳（階段 F）才建立；
+    # 此時案件還沒有正式帳款，所以不會有付款提醒（原本依付款排程提醒、檢查 Finance 收件人的項目改為此檢查）
+    pay_card = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Payment reminders"))
+    check("Payment: no reminders before formal accounting entries exist (created at Production close); recipients rule shows AE, supervisor and Finance",
+          pay_card.locator(".el-table__row").count() == 0 and "No payment reminders for this case." in pay_card.inner_text()
+          and "Account Executive's supervisor and Finance" in pay_card.inner_text(), pay_card.inner_text()[:300])
     rows.first.get_by_role("button", name="Preview").click()
     dlg = page.locator(".el-dialog").filter(has_text="Reminder preview")
     dlg.wait_for()
@@ -999,17 +1115,18 @@ def phase_k(page):
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
     page.wait_for_timeout(800)
-    risk = section(page, "Risk Details")
+    # 2026-10-16 起 Class 在最上方的 Structure 卡片（與 Reinsurance Structure 一起先選）
+    top = structure_card(page)
     security = section(page, "Schedule of Security")
     def conditions():
         page.wait_for_timeout(300)
         return section(page, "Reinsurance Conditions").inner_text()
-    pick(risk, page, "Class", "Property")
+    choose_structure_class(page, "Quota Share", "Property")
     pick(security.locator(".repeat-card").nth(0), page, "Reinsurer", "UI Re Alpha")
     text = conditions()
     check("Property case: all-class and Property-only reinsurer clauses, no Marine class clause",
           all(c in text for c in ("LMA3333", "INTERMEDIARY", "LMA5390", "LPO9999")) and "NMA2918" not in text, text[:400])
-    pick(risk, page, "Class", "UI Marine Cargo")
+    pick(top, page, "Class", "UI Marine Cargo")
     text = conditions()
     check("changing Class re-applies clauses: Marine class clause in, Property-only clause out",
           all(c in text for c in ("LMA3333", "LMA5390", "NMA2918")) and "LPO9999" not in text, text[:400])

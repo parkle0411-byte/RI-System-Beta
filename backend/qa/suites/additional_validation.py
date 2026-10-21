@@ -67,15 +67,18 @@ try:
         check('closed unlocked FX values and versions stay unchanged',before==list(FxRate.objects.filter(year_month='2096-07').values_list('rate','row_version')))
 
         case=case_for('2096-08')
+        # 2026-10-16「92 項會計規則重新確認」：賠款按出險日適用的保單／批單比例分攤；出險日不在任何保單期間回 409 claim_split_pending_review。
+        # 原 fixture 出險日 2026-01-01 不在保單期間（2096-08-01～2097-08-01），改放在保單期間內，其餘斷言不變。
+        DOL='2096-09-01'
         def claim(action,**extra):
             case.refresh_from_db()
             return api(ClaimsView,dict(caseUid=str(case.case_uid),rowVersion=case.row_version,action=action,**extra))
         for value in ['1e308','-1e308']:
             before=(case.row_version,case.payload,EntitySnapshot.objects.count())
-            r=claim('create_claim',claim=dict(dateOfLoss='2026-01-01',outstandingReserve=value));case.refresh_from_db()
+            r=claim('create_claim',claim=dict(dateOfLoss=DOL,outstandingReserve=value));case.refresh_from_db()
             check('unrepresentable/negative reserve rejected '+value,r.status_code==400 and r.data.get('error')=='invalid_claim_reserve',r.data)
             check('rejected reserve leaves case/version/snapshots unchanged '+value,before==(case.row_version,case.payload,EntitySnapshot.objects.count()))
-        r=claim('create_claim',claim=dict(dateOfLoss='2026-01-01',outstandingReserve=12.345));case.refresh_from_db()
+        r=claim('create_claim',claim=dict(dateOfLoss=DOL,outstandingReserve=12.345));case.refresh_from_db()
         check('valid reserve rounds to two decimals',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==12.35,r.data)
         before=(case.row_version,case.payload,EntitySnapshot.objects.count())
         r=claim('update_reserve',claimId=1,outstandingReserve='1e308');case.refresh_from_db()

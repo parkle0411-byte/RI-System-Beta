@@ -74,7 +74,8 @@ try:
 
         # --- 註冊了什麼 ---
         registered = {m.__name__ for m in admin.site._registry}
-        check("exactly the 11 RI models are registered (incl. the two reminder logs)", registered == {"Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot", "SignedSlipAlert", "PaymentAlert"}, registered)
+        # 2026-10-19：Lloyd's Market 共用信評（MarketRatingProfile）也以唯讀方式註冊
+        check("exactly the 12 RI models are registered (incl. the two reminder logs and the Lloyd's rating profile)", registered == {"MarketRatingProfile", "Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot", "SignedSlipAlert", "PaymentAlert"}, registered)
         check("Django User / Group (password hashes) are NOT registered", User not in admin.site._registry and "Group" not in registered)
         try: admin.site.register(User, admin.ModelAdmin)
         except Exception: pass

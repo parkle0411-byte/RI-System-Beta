@@ -49,8 +49,11 @@ def endorsement(premium=-1000,re_premium=-800,installments=False,zero_fee=False)
     r=call('post','/api/case-workflow',{'action':'create_endorsement','caseUid':str(source.case_uid),'rowVersion':source.row_version})
     assert r.status_code==201,r.content
     child=Case.objects.get(case_uid=r.json()['case']['caseUid']);payload=copy.deepcopy(child.payload)
-    payload.update(originalPremium=premium,endoEffectiveDate='2037-05-10',endoTypes=['Premium'],endoText='Return premium for this endorsement',statementNo='REFUND-SOA')
-    payload['reinsurers'][0].update(premium=re_premium,riCommPct=10 if zero_fee else 5,settlementRef='RI-REFUND')
+    # 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
+    check('new endorsement inherits the Cedant days of the case it is created from',payload['paymentTermsDays']==source.payload.get('paymentTermsDays'))
+    # 測試接著把批單天數改成 30 天（Draft 可修改）
+    payload.update(originalPremium=premium,endoEffectiveDate='2037-05-10',endoTypes=['Premium'],endoText='Return premium for this endorsement',statementNo='REFUND-SOA',paymentTermsDays=30)
+    payload['reinsurers'][0].update(premium=re_premium,riCommPct=10 if zero_fee else 5,settlementRef='RI-REFUND',paymentTermsDays=30)
     if zero_fee:payload['reinsurers'][0]['riCommPct']=10
     if installments:
         payload.update(installmentEnabled=True,performanceInstallments=[
@@ -111,29 +114,48 @@ def pay(row,amount,version=None):
     child.refresh_from_db()
     return call('post','/api/accounting',{'action':'record_payment','caseUid':str(child.case_uid),'rowVersion':version or child.row_version,
         'scheduleKey':row['scheduleKey'],'paymentDate':'2037-05-20','amount':amount})
-check('refund payment still rejects overpayment',pay(cedant,890.01).status_code==400)
-check('refund API accepts a positive cash magnitude',pay(cedant,100).status_code==200)
-child.refresh_from_db();entry=child.payload['paymentEntries'][-1]
-check('refund entry stores signed amount and explicit direction',entry['amount']==-100 and entry['paymentDirection']=='payable')
-cedant=next(r for r in rows(child) if r['partyType']=='cedant')
-check('partial refund reduces signed outstanding balance',cedant['paid']==-100 and cedant['outstanding']==-790 and cedant['settlement']=='partial' and cedant['partial'])
-txrows=[r for r in call('get','/api/accounting').json()['transactionRows'] if r['caseUid']==str(child.case_uid)]
-check('SoA T1 reflects partial refund settlement',next(r for r in txrows if r['legType']=='Leg 1')['settlement']=='partial')
+def leg(name):
+    child.refresh_from_db();return next(t['txNo'] for t in child.payload['transactions'] if t['legType']==name)
+# 2026-10-20 四類統一：須先收到所有再保人退款並逐筆人工銷帳，才可一次全額退清 Cedant
+r=pay(cedant,890)
+check('Cedant refund is blocked until every reinsurer refund is received and settled',r.status_code==400 and next(x for x in rows(child) if x['partyType']=='cedant')['paid']==0)
+check('refund recovery still rejects overpayment',pay(ri,752.01).status_code==400)
+# 2026-10-16 92 項規則（第 52 項）：保費（含退費）每次須登錄整筆餘額，不得部分收付（取代舊的部分退款情境）
+check('partial reinsurer refund receipt is rejected',pay(ri,100).status_code==400)
 stale=child.row_version
-check('remaining refund settles',pay(cedant,790).status_code==200)
-check('stale refund writes are rejected',pay(ri,100,version=stale).status_code==409)
-check('reinsurer recovery also records signed amount',pay(ri,752).status_code==200)
+check('reinsurer recovery accepts a positive cash magnitude for the full balance',pay(ri,752).status_code==200)
+check('stale refund writes are rejected',pay(ri,1,version=stale).status_code==409)
+child.refresh_from_db();ri_entry=child.payload['paymentEntries'][-1]
+check('recovery entry stores signed amount and explicit direction',ri_entry['amount']==-752 and ri_entry['paymentDirection']=='receivable')
+check('full receipt alone does not yet release the Cedant refund',pay(cedant,890).status_code==400)
+child.refresh_from_db()
+r=call('post','/api/accounting',{'action':'confirm_facility_settlement','caseUid':str(child.case_uid),'rowVersion':child.row_version,'txNo':leg('Leg 2'),'note':'QA RI refund write-off'})
+check('Finance manually settles the reinsurer refund receipt',r.status_code==200)
+check('Cedant refund still rejects overpayment',pay(cedant,890.01).status_code==400)
+check('Cedant refund still rejects a partial amount',pay(cedant,100).status_code==400)
+check('Cedant refund API accepts a positive cash magnitude for the full balance',pay(cedant,890).status_code==200)
+child.refresh_from_db();entry=child.payload['paymentEntries'][-1]
+check('refund entry stores signed amount and explicit direction',entry['amount']==-890 and entry['paymentDirection']=='payable')
 ledger=rows(child)
 # 2026-10-14：餘額歸零後等待會計人工確認
-check('full refund and recovery both settle to zero',all(r['outstanding']==0 and r['paymentStatus']=='pending_confirmation' for r in ledger))
+check('full refund and recovery both settle to zero; Cedant awaits manual settlement, RI already settled',all(r['outstanding']==0 for r in ledger)
+      and [r['settlement'] for r in ledger if r['partyType']=='cedant']==['pending_confirmation'] and [r['settlement'] for r in ledger if r['partyType']=='reinsurer']==['settled'])
+txrows=[r for r in call('get','/api/accounting').json()['transactionRows'] if r['caseUid']==str(child.case_uid)]
+check('SoA T1 reflects the full refund awaiting manual settlement',next(r for r in txrows if r['legType']=='Leg 1')['settlement']=='pending_confirmation')
 child.refresh_from_db()
-r=call('post','/api/accounting',{'action':'reverse_payment','caseUid':str(child.case_uid),'rowVersion':child.row_version,'entryId':entry['id']})
+# 2026-10-16：record_payment 改為單筆匯款批次，更正須整筆沖回該匯款
+r=call('post','/api/accounting',{'action':'reverse_batch_payment','batchId':entry['batchId'],'paymentDate':'2037-05-21','note':'QA mistaken refund',
+    'cases':[{'caseUid':str(child.case_uid),'rowVersion':child.row_version}]})
 check('mistaken cash payment can be reversed independently',r.status_code==200)
 cedant=next(r for r in rows(child) if r['partyType']=='cedant')
-check('cash reversal reopens exact refund balance',cedant['outstanding']==-100 and cedant['paid']==-790)
+check('cash reversal reopens exact refund balance',cedant['outstanding']==-890 and cedant['paid']==0)
+check('reversing the Cedant refund keeps the reinsurer receipt',next(r for r in rows(child) if r['partyType']=='reinsurer')['paid']==-752)
 child.refresh_from_db()
 item=build_payment_schedule(child.payload,datetime(2037,5,25,4,tzinfo=tz.utc))['items'][0]
-check('refund due reminder is not suppressed by negative outstanding',reminder_kind(item,'2037-05-25')=='due_today' and due_kind(item,'2037-05-25',{})=='due_today')
+check('refund screen reminder is not suppressed by negative outstanding',reminder_kind(item,'2037-05-25')=='due_today')
+# 2026-10-16 92 項規則（第 83、84 項）：提醒信以實際到期日（較晚日 5/10＋30＝6/9）判斷，畫面維持提前 15 日
+check('refund e-mail reminder uses the actual due date',item['contractDueDate']=='2037-06-09' and due_kind(item,'2037-06-09',{})=='due_today'
+      and due_kind(item,'2037-06-02',{})=='seven_days_before' and due_kind(item,'2037-05-25',{})=='')
 check('refund reminder identifies the actual cash direction','應退分保人' in message(child.payload,'due_today',[item])['html'])
 after=Case.objects.filter(pk=root.pk).values().get()
 check('parent policy fields, transactions and cash entries remain unchanged',root_before==after)
@@ -142,10 +164,12 @@ multi=copy.deepcopy(child.payload);multi['paymentEntries']=[]
 multi['reinsurers']=[{**multi['reinsurers'][0],'sharePct':60},
                      {**multi['reinsurers'][0],'name':'QA Second Re','foreignBroker':'','sharePct':40,'premium':-700,'riCommPct':10}]
 mt=build_premium_transactions({**multi,'twRef':child.tw_ref})
-check('multiple reinsurers retain independent signed leg amounts',[t['amount'] for t in mt]==[-534,-451.2,-82.8,-356,-249.2,-106.8])
+# 2026-10-20 逐步取位：TWD 每一步四捨五入到整數（佣金／Tax 以取位後分出保費計），取代舊的兩位小數結果 -451.2／-82.8／-249.2／-106.8
+check('multiple reinsurers retain independent signed leg amounts',[t['amount'] for t in mt]==[-534,-451,-83,-356,-249,-107])
 ms=build_payment_schedule(multi)['items']
-check('refund schedule aggregates cedant and separates each RI recovery',[i['amount'] for i in ms]==[-890,-451.2,-249.2])
-rounding=copy.deepcopy(child.payload);rounding.update(originalPremium=-1000.01,paymentEntries=[],installmentEnabled=True,
+check('refund schedule aggregates cedant and separates each RI recovery',[i['amount'] for i in ms]==[-890,-451,-249])
+# 2026-10-20 逐步取位：TWD 保費只准整數、每步取整；為保留「分期兩位小數尾差」測試意旨，此情境改用 USD（每步保留兩位小數）
+rounding=copy.deepcopy(child.payload);rounding.update(currency='USD',originalPremium=-1000.01,paymentEntries=[],installmentEnabled=True,
     performanceInstallments=[{'id':'round1','premium':-333.33,'performanceMonth':'2037-05','paymentBaseDate':'2037-05-10'},
                              {'id':'round2','premium':-666.68,'performanceMonth':'2037-06','paymentBaseDate':'2037-06-10'}])
 rounding['reinsurers'][0]['premium']=-800.01

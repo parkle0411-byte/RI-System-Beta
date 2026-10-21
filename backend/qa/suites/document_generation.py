@@ -39,7 +39,9 @@ def ready(**over):
     b = dict(reinsuranceStructure="QS", ae="ZZ AE", currency="USD", classOfBusiness="ZZ Class", classCode="PAR", newOrRenew="New", typePrefix="ZZ Type",
              reinsured="ZZ Doc Cedant", originalInsured="ZZ Doc Insured", policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
              situations=[dict(address="1 ZZ Road", postcode="100")],
-             reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=5, taxPct=0)],
+             # 2026-10-16「92 項會計規則重新確認」：每家再保人付款天數須獨立填寫，不繼承 Case 預設（缺漏時 Debit Note 409）；
+             # 一般 fixture 明確填 30 天，讓其他欄位的檢查維持原意。
+             reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=5, taxPct=0, paymentTermsDays=30)],
              limitOfLiability=1000000, reinsuredRetention="Advice of Reinsured's retention waived.", deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)
@@ -507,7 +509,8 @@ try:
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         for structure in ("QS", "XOL"):
             for rows in ([{"sharePct": 0}], [{"sharePct": "0"}], [{"sharePct": 20}, {"sharePct": 30}], [{"sharePct": 12.3456}, {"sharePct": 0}, {"sharePct": 7.6544}]):
-                rows = [{**row, "name": f"Sample Reinsurer {index + 1}"} for index, row in enumerate(rows)]
+                # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
+                rows = [{**row, "name": f"Sample Reinsurer {index + 1}", "paymentTermsDays": 30} for index, row in enumerate(rows)]
                 Case.objects.filter(pk=posted.pk).update(payload={**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "reinsurers": rows})
                 for kind in ("cover", "debit"):
                     r = docx(sales, kind=kind, caseUid=str(posted.case_uid))
@@ -561,13 +564,13 @@ try:
                 check(f"Cover {structure}: {label}", code(response) == expected and response.status_code == (409 if expected else 204) and gen_audit(posted.case_uid).count() == before + (0 if expected else 1), response.content[:150])
                 for kind in ("debit", "endorsement"):
                     check(f"{kind} {structure}: Location/duplicate rules do not gate document", docx(sales, kind=kind, caseUid=str(posted.case_uid)).status_code == 204)
-            facility = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "situations": situations, "reinsurers": [{"name": "RI (Facility)", "sharePct": 100}], "sumInsured": [{"category": "Building", "amount": 3000, "locationIndex": None}]}
+            facility = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "situations": situations, "reinsurers": [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}], "sumInsured": [{"category": "Building", "amount": 3000, "locationIndex": None}]}  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
             Case.objects.filter(pk=posted.pk).update(payload=facility)
             check(f"Cover {structure}: all Facility skips Location coverage", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
             facility["sumInsured"].append({"category": "BUILDING", "amount": 1000, "locationIndex": 1})
             Case.objects.filter(pk=posted.pk).update(payload=facility)
             check(f"Cover {structure}: all Facility still requires unique names", code(docx(sales, kind="cover", caseUid=str(posted.case_uid))) == "sum_insured_duplicate_names")
-            facility["reinsurers"].append({"name": "Non-Facility RI", "sharePct": 0})
+            facility["reinsurers"].append({"name": "Non-Facility RI", "sharePct": 0, "paymentTermsDays": 30})
             facility["sumInsured"] = [{"category": "Building", "amount": 1000, "locationIndex": 0}]
             Case.objects.filter(pk=posted.pk).update(payload=facility)
             check(f"Cover {structure}: mixed RI requires every Location", code(docx(sales, kind="cover", caseUid=str(posted.case_uid))) == "sum_insured_locations_required")
@@ -578,7 +581,7 @@ try:
                 for value in (None, "", " \t\n", "　", "\ufeff"):
                     payload = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "lossAdvisedDate": value, "lossRecordYears": 0, "lossRecord": []}
                     if facility:
-                        payload["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100}]
+                        payload["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}]  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
                     Case.objects.filter(pk=posted.pk).update(payload=payload)
                     before = gen_audit(posted.case_uid).count()
                     response = docx(sales, kind="cover", caseUid=str(posted.case_uid), lossAdvisedDate="2026-10-13")
@@ -603,7 +606,7 @@ try:
                     else:
                         payload["lossRecordYears"] = value
                     if facility:
-                        payload["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100}]
+                        payload["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}]  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
                     Case.objects.filter(pk=posted.pk).update(payload=payload)
                     before = gen_audit(posted.case_uid).count()
                     response = docx(sales, kind="cover", caseUid=str(posted.case_uid), lossRecordYears=5)
@@ -613,7 +616,7 @@ try:
                 for value in (0, "0", " 0 ", 1, 5):
                     payload = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "newOrRenew": "New", "lossRecordYears": value, "lossRecord": []}
                     if facility:
-                        payload["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100}]
+                        payload["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}]  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
                     Case.objects.filter(pk=posted.pk).update(payload=payload)
                     check(f"Cover {structure}/Facility={facility}: saved years {value!r} accepted including zero", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
@@ -626,7 +629,7 @@ try:
             for facility in (False, True):
                 base = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "lossRecordYears": 5}
                 if facility:
-                    base["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100}]
+                    base["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}]  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
                 for label, losses in undated_losses:
                     Case.objects.filter(pk=posted.pk).update(payload={**base, "lossRecord": losses})
                     before = gen_audit(posted.case_uid).count()
@@ -651,7 +654,7 @@ try:
             for facility in (False, True):
                 cause_base = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "lossRecordYears": 5}
                 if facility:
-                    cause_base["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100}]
+                    cause_base["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}]  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
                 for label, losses in missing_causes:
                     Case.objects.filter(pk=posted.pk).update(payload={**cause_base, "lossRecord": losses})
                     before = gen_audit(posted.case_uid).count()
@@ -676,7 +679,7 @@ try:
             for facility in (False, True):
                 paid_base = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit", "lossRecordYears": 5}
                 if facility:
-                    paid_base["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100}]
+                    paid_base["reinsurers"] = [{"name": "RI (Facility)", "sharePct": 100, "paymentTermsDays": 30}]  # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
                 for label, losses in unpaid_amounts:
                     Case.objects.filter(pk=posted.pk).update(payload={**paid_base, "lossRecord": losses})
                     before = gen_audit(posted.case_uid).count()
@@ -696,8 +699,9 @@ try:
                 check(f"Cover {structure}/Facility={facility}: no loss rows and New zero accepted", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Reinsurer identity comes from saved name, not Foreign RI Broker/request.
-        named_ri = {"name": "ZZ Named Reinsurer", "sharePct": 100, "foreignBroker": "ZZ Foreign Broker"}
-        missing_names = [("missing name", [{"sharePct": 0, "foreignBroker": "ZZ Foreign Broker"}])]
+        # 2026-10-16「92 項會計規則重新確認」：再保人付款天數須獨立填寫、不繼承 Case 預設；替換的再保人列明確填 30 天，維持原本只測其他欄位的意圖。
+        named_ri = {"name": "ZZ Named Reinsurer", "sharePct": 100, "foreignBroker": "ZZ Foreign Broker", "paymentTermsDays": 30}
+        missing_names = [("missing name", [{"sharePct": 0, "foreignBroker": "ZZ Foreign Broker", "paymentTermsDays": 30}])]
         missing_names += [(f"blank name {value!r}", [{**named_ri, "name": value}]) for value in (None, "", " \t\n", "　", "\ufeff")]
         missing_names += [("first name missing", [{**named_ri, "name": "", "sharePct": 0}, named_ri]), ("later name missing", [named_ri, {**named_ri, "name": "", "sharePct": 0}])]
         for structure in ("QS", "XOL"):
@@ -714,6 +718,8 @@ try:
                 check(f"Cover {structure}: saved Reinsurer names accepted with Foreign RI Broker", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Non-installment Debit Notes require effective terms for every saved RI.
+        # 2026-10-16「92 項會計規則重新確認」：每家普通再保人的付款天數須獨立填寫，沒有預設繼承（不再以 Case 預設補位）；
+        # 錯誤訊息改為 "...independently for every Reinsurer..."，以下 Case 預設相關斷言依此更新。
         terms_bad = [None, "", " \t\n", "　", "\ufeff", 0, "0", -1, 14, "14", 15.5, "15.5", "bad", "90days", True, False, [], {}, [None], "１５"]
         terms_ri = {"name": "ZZ Terms RI", "sharePct": 50}
         for structure in ("QS", "XOL"):
@@ -723,7 +729,7 @@ try:
                 Case.objects.filter(pk=posted.pk).update(payload=payload)
                 before = gen_audit(posted.case_uid).count()
                 response = docx(sales, kind="debit", caseUid=str(posted.case_uid), paymentTermsDays=90, installmentEnabled=True, reinsurers=[{**terms_ri, "paymentTermsDays": 90}])
-                check(f"Debit {structure}: invalid terms {value!r} blocked without request override/audit", response.status_code == 409 and code(response) == "debit_payment_terms_required" and message(response) == 'Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.' and gen_audit(posted.case_uid).count() == before)
+                check(f"Debit {structure}: invalid terms {value!r} blocked without request override/audit", response.status_code == 409 and code(response) == "debit_payment_terms_required" and message(response) == 'Complete valid Payment Terms Days (an integer of at least 15) independently for every Reinsurer, before generating a Debit Note.' and gen_audit(posted.case_uid).count() == before)
                 for kind in ("cover", "endorsement"):
                     check(f"{kind} {structure}: no new payment term restriction", docx(sales, kind=kind, caseUid=str(posted.case_uid)).status_code == 204)
             mixed = [{**terms_ri, "paymentTermsDays": 90}, {**terms_ri, "name": "ZZ Terms RI 2", "paymentTermsDays": None}]
@@ -736,14 +742,20 @@ try:
             response = docx(sales, kind="debit", caseUid=str(posted.case_uid))
             check(f"Debit {structure}: both term fields missing blocked", response.status_code == 409 and code(response) == "debit_payment_terms_required")
             for value in (15, "15", 15.0, "15.0", 90, " 90 ", "9e1", "0x5a"):
-                for case_days, row_days in ((None,value),(value,None)):
-                    Case.objects.filter(pk=posted.pk).update(payload={**terms_base, "paymentTermsDays": case_days, "reinsurers": [{**terms_ri, "paymentTermsDays": row_days}]})
-                    check(f"Debit {structure}: valid effective terms {case_days!r}/{row_days!r} accepted", docx(sales, kind="debit", caseUid=str(posted.case_uid)).status_code == 204)
+                Case.objects.filter(pk=posted.pk).update(payload={**terms_base, "paymentTermsDays": None, "reinsurers": [{**terms_ri, "paymentTermsDays": value}]})
+                check(f"Debit {structure}: valid effective terms None/{value!r} accepted", docx(sales, kind="debit", caseUid=str(posted.case_uid)).status_code == 204)
+                # 2026-10-16：只有 Case 預設天數、再保人未填 -> 不繼承，阻擋（原斷言為 204）。
+                Case.objects.filter(pk=posted.pk).update(payload={**terms_base, "paymentTermsDays": value, "reinsurers": [{**terms_ri, "paymentTermsDays": None}]})
+                response = docx(sales, kind="debit", caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: valid Case default {value!r} alone is not inherited by the Reinsurer", response.status_code == 409 and code(response) == "debit_payment_terms_required")
             for value in terms_bad:
+                # 2026-10-16：再保人天數無效時不得以有效的 Case 預設 90 取代（原斷言為 204）。
                 Case.objects.filter(pk=posted.pk).update(payload={**terms_base, "paymentTermsDays": 90, "reinsurers": [{**terms_ri,"paymentTermsDays":value}]})
-                check(f"Debit {structure}: invalid RI terms {value!r} use valid Case default", docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+                response = docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: invalid RI terms {value!r} not replaced by valid Case default", response.status_code==409 and code(response)=="debit_payment_terms_required")
             for enabled in (True,False,None,0,1,"true"):
-                Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90,"ratio":100}]})
+                # 2026-10-16：分期天數須逐期逐家再保人填寫（reinsurerPaymentTerms），期別預設 paymentTermsDays 不再繼承，故補 r1。
+                Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90,"reinsurerPaymentTerms":{"r1":90},"ratio":100}]})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
                 check(f"Debit {structure}: installment flag {enabled!r} respects strict boolean scope", response.status_code==(204 if enabled is True else 409) and (enabled is True or code(response)=="debit_payment_terms_required"))
         for enabled in (True,False):
@@ -753,7 +765,8 @@ try:
         # Every installment needs its own real ISO calendar date; no fallback.
         base_dates_bad=[None,""," \t\n","　","\ufeff","2026-02-30","2025-02-29","1900-02-29","2026-04-31","2026-00-01","2026-13-01","2026-01-00","2026-01-32","2026-1-01","2026-01-1","01/01/2026","2026-01-01T00:00:00Z"," 2026-01-01 ","2026-01-01\n","0000-01-01","not a date",0,False,[],{},["2026-01-01"],"２０２６-０１-０１"]
         base_dates_valid=["2026-01-01","2024-02-29","2000-02-29","2400-02-29","0001-01-01","9999-01-01","2026-12-31","1900-03-01","2026-02-28","2026-04-30","2027-01-01","2026-03-01"]
-        good_inst={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","ratio":100}
+        # 2026-10-16「92 項會計規則重新確認」：每期每家再保人天數獨立填寫，fixture 明確填 r1，讓本段只測日期。
+        good_inst={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","ratio":100,"reinsurerPaymentTerms":{"r1":30}}
         bad_inst_rows=[None,{},[],[None],[{}],[good_inst,{**good_inst,"paymentBaseDate":""}],[{**good_inst,"paymentBaseDate":""},good_inst],[good_inst,None]]
         for structure in ("QS","XOL"):
             dates_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True}
@@ -787,6 +800,9 @@ try:
             check("Treaty Draft debit remains exempt from installment dates",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Every installment/RI pair must resolve terms from the four sources.
+        # 2026-10-16「92 項會計規則重新確認」：「每期每家普通再保人的約定天數須獨立填寫，沒有預設繼承」。
+        # 原本四個來源（期別×再保人、再保人預設、期別預設、Case 預設）任一有效即可；現只有期別×再保人（reinsurerPaymentTerms）有效，
+        # 其餘三個來源單獨存在或作為後備都必須阻擋。以下斷言依此改為 409。
         inst_terms_bad=[None,""," \t\n","　","\ufeff",0,"0",-1,14,"14",15.5,"15.5","bad","90days",True,False,[],{},[None],"１５"]
         inst_terms_good=(15,"15",15.0,"15.0",90," 90 ","9e1","0x5a")
         inst_terms_ri={"name":"ZZ Installment Terms RI","sharePct":50,"paymentTermsDays":None}
@@ -811,7 +827,11 @@ try:
                     elif source_index==2:payload["performanceInstallments"]=[{**inst_terms_row,"paymentTermsDays":value}]
                     else:payload["paymentTermsDays"]=value
                     Case.objects.filter(pk=posted.pk).update(payload=payload)
-                    check(f"Debit {structure}: source {source_index+1} alone resolves valid terms {value!r}",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+                    response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                    if source_index==0:
+                        check(f"Debit {structure}: source 1 (installment x Reinsurer) alone resolves valid terms {value!r}",response.status_code==204)
+                    else:
+                        check(f"Debit {structure}: source {source_index+1} alone is not inherited {value!r}",response.status_code==409 and code(response)=="debit_installment_payment_terms_required")
             for value in inst_terms_bad:
                 for fallback in (1,2,3):
                     payload={**pair_base,"reinsurers":pair_ris,"performanceInstallments":[{**inst_terms_row,"reinsurerPaymentTerms":{"r1":value,"r2":value}}]}
@@ -819,7 +839,8 @@ try:
                     elif fallback==2:payload["performanceInstallments"][0]["paymentTermsDays"]=90
                     else:payload["paymentTermsDays"]=90
                     Case.objects.filter(pk=posted.pk).update(payload=payload)
-                    check(f"Debit {structure}: invalid override {value!r} uses fallback source {fallback+1}",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+                    response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                    check(f"Debit {structure}: invalid override {value!r} not replaced by fallback source {fallback+1}",response.status_code==409 and code(response)=="debit_installment_payment_terms_required")
             complete={**inst_terms_row,"reinsurerPaymentTerms":{"r1":90,"r2":90}}
             incomplete={**inst_terms_row,"performanceMonth":"2026-04","paymentBaseDate":"2026-04-01","reinsurerPaymentTerms":{"r1":90,"r2":None}}
             for rows,ris in (([complete,incomplete],pair_ris),([{**incomplete,"reinsurerPaymentTerms":{"r1":None,"r2":90}},complete],pair_ris),([complete,{**incomplete,"reinsurerPaymentTerms":{}}],pair_ris),([incomplete],[{**pair_ris[0],"sharePct":100},{**pair_ris[1],"sharePct":0}])):
@@ -828,7 +849,8 @@ try:
                 check(f"Debit {structure}: every pair checked including later/first/entire-period/zero-share gaps",response.status_code==409 and code(response)=="debit_installment_payment_terms_required")
             for mapping in (None,[],90,"bad",{}):
                 Case.objects.filter(pk=posted.pk).update(payload={**pair_base,"paymentTermsDays":90,"reinsurers":pair_ris,"performanceInstallments":[{**inst_terms_row,"reinsurerPaymentTerms":mapping}]})
-                check(f"Debit {structure}: malformed override mapping safely uses valid default",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
+                response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
+                check(f"Debit {structure}: malformed override mapping is safely blocked, not filled from Case default",response.status_code==409 and code(response)=="debit_installment_payment_terms_required")
             for enabled in (True,False,None,0,1,"true"):
                 Case.objects.filter(pk=posted.pk).update(payload={**pair_base,"installmentEnabled":enabled,"reinsurers":pair_ris,"performanceInstallments":[inst_terms_row]})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
@@ -839,7 +861,8 @@ try:
             check("Treaty Draft debit remains exempt from installment term checks",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # All installments lacking both allocation sources must not silently split equally.
-        allocation_row={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01"}
+        # 2026-10-16「92 項會計規則重新確認」：每期每家再保人天數獨立填寫，fixture 明確填 r1，讓本段只測分配。
+        allocation_row={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","reinsurerPaymentTerms":{"r1":90}}
         allocation_blanks=(None,""," \t\n","　","\ufeff")
         for structure in ("QS","XOL"):
             allocation_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
@@ -869,7 +892,8 @@ try:
             Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"performanceInstallments":[{**allocation_row,"paymentBaseDate":""}]})
             response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
             check(f"Debit {structure}: existing base-date guard keeps priority",code(response)=="debit_installment_base_date_required")
-            Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"paymentTermsDays":None,"performanceInstallments":rows})
+            # 2026-10-16：Case 預設已不參與分期天數，改以移除逐期再保人天數觸發付款天數檢查，仍驗證其優先於分配檢查。
+            Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"paymentTermsDays":None,"performanceInstallments":[{**r,"reinsurerPaymentTerms":{}} for r in rows]})
             response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
             check(f"Debit {structure}: existing payment-term guard keeps priority",code(response)=="debit_installment_payment_terms_required")
         for saved_rows in ([allocation_row],[{**allocation_row,"premium":None,"ratio":"　"}],[]):
@@ -880,7 +904,8 @@ try:
         # A missing first, middle or final allocation blocks even when other periods are filled.
         for structure in ("QS","XOL"):
             each_allocation_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
-            complete_rows=[{"performanceMonth":month,"paymentBaseDate":day,"ratio":1} for month,day in (("2026-03","2026-03-01"),("2026-06","2026-06-01"),("2026-09","2026-09-01"))]
+            # 2026-10-16：每期每家再保人天數獨立填寫，fixture 明確填 r1。
+            complete_rows=[{"performanceMonth":month,"paymentBaseDate":day,"ratio":1,"reinsurerPaymentTerms":{"r1":90}} for month,day in (("2026-03","2026-03-01"),("2026-06","2026-06-01"),("2026-09","2026-09-01"))]
             for gap in range(3):
                 for premium,ratio in ((None,None),("","　")):
                     saved_rows=[dict(r) for r in complete_rows];saved_rows[gap].update(premium=premium,ratio=ratio)
@@ -911,7 +936,8 @@ try:
         ]
         for structure in ("QS","XOL"):
             positive_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
-            row_base={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01"}
+            # 2026-10-16：每期每家再保人天數獨立填寫，fixture 明確填 r1，讓本段只測正數分配。
+            row_base={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","reinsurerPaymentTerms":{"r1":90}}
             for original in (0,1000):
                 for fields,valid in positive_cases:
                     saved_rows=[{**row_base,**fields},{**row_base,"paymentBaseDate":"2026-06-01","ratio":1}]

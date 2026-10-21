@@ -70,9 +70,12 @@ for name in [TARGET.lower(), '  '+TARGET.replace(' ', '  ')+'  ']:
 for name in [TARGET.replace('0609', '0610'), TARGET.replace(' (Facility)', ''), 'Other (Facility)']:
     raw = copy.deepcopy(ready)
     raw['reinsurers'][0]['name'] = name
+    # 2026-10-16 92 項規則：普通再保人天數須明確填寫、沒有預設繼承（缺漏即待確認），故此處明確填 90 天
+    raw['reinsurers'][0]['paymentTermsDays'] = 90
     item = ri(raw)
+    # 2026-10-16：逾期改以實際約定到期日判斷，所有帳款都帶 contractDueDate；此處改驗它是生效日＋90，而非 AUW 月底＋120
     check('unrelated facilities keep date-based terms '+name, item['dueDate']=='2026-03-22'
-        and item['baseDate']=='2026-01-01' and 'contractDueDate' not in item)
+        and item['baseDate']=='2026-01-01' and item['contractDueDate']=='2026-04-01' and item.get('paymentRule')!='auw_month_end_120')
 
 def cedant(raw):
     return next(row for row in build_payment_schedule(raw)['items'] if row['partyType']=='cedant')
@@ -80,8 +83,9 @@ check('AUW case Cedant uses its own 90 days and 15-day accounting lead', cedant(
     and cedant(ready)['dueDate']=='2026-03-17')
 ordinary = copy.deepcopy(ready)
 ordinary['reinsurers'][0].update(name='QA Ordinary Reinsurer', paymentTermsDays=30)
-check('unmarked ordinary historical cases retain minimum-reinsurer collection dates', cedant(ordinary)['termsDays']==30
-    and cedant(ordinary)['dueDate']=='2026-01-16')
+# 2026-10-16 92 項規則（第 33 項）：Cedant 一律用自己填的天數，不再沿用最短再保人天數（取代 10/06 舊案「最短再保期限」算法）
+check('unmarked historical cases also use the Cedant own days, not the minimum reinsurer term', cedant(ordinary)['termsDays']==90
+    and cedant(ordinary)['dueDate']=='2026-03-17')
 new = {**ordinary, 'cedantTermsBasis':'case'}
 check('new-case Cedant is independent of a shorter reinsurer term', cedant(new)['termsDays']==90
     and cedant(new)['dueDate']=='2026-03-17' and ri(new)['dueDate']=='2026-01-21')
@@ -115,8 +119,12 @@ check('each installment uses its own month-end and ignores terms overrides for A
     and two['dueDate']==add('2026-02-28', 110) and one['termsDays']==two['termsDays']==120)
 check('installment amount allocation and matching keys are preserved', one['amount']==2800 and two['amount']==4200
     and one['scheduleKey']=='I1:reinsurer:r1' and two['scheduleKey']=='I2:reinsurer:r1')
-check('reminders use the accounting date seven days before and on May 21', reminder_kind(ri(ready), '2026-05-14')=='seven_days_before'
-    and reminder_kind(ri(ready), '2026-05-21')=='due_today' and due_kind(ri(ready), '2026-05-14', {})=='seven_days_before')
+check('screen reminders use the accounting date seven days before and on May 21', reminder_kind(ri(ready), '2026-05-14')=='seven_days_before'
+    and reminder_kind(ri(ready), '2026-05-21')=='due_today')
+# 2026-10-16 92 項規則（第 83、84 項）：財務提醒信改以實際到期日（AUW 為月底＋120 的 5/31）前 7 日、到期日寄送；畫面仍維持提前 10 日
+check('finance e-mail reminders use the actual AUW due date: May 24 and May 31', due_kind(ri(ready), '2026-05-24', {})=='seven_days_before'
+    and due_kind(ri(ready), '2026-05-31', {})=='due_today' and due_kind(ri(ready), '2026-05-14', {})==''
+    and due_kind(ri(ready), '2026-05-21', {})=='')
 check('contract payment day does not trigger a duplicate due-today notice', reminder_kind(ri(ready), '2026-05-31')!='due_today')
 
 user = get_user_model().objects.create_user(username='zz.auw.dates', password='AUW-Dates-Password-9!')
@@ -162,21 +170,43 @@ response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion'
 case.refresh_from_db()
 check('posted cases cannot silently switch back to the old Cedant rule', response.status_code==200
       and case.payload.get('cedantTermsBasis')=='case')
-for amount in [2500, 4500]:
+def post(action, **kw):
     case.refresh_from_db()
-    response = call('post', '/api/accounting', {'action':'record_payment', 'caseUid':str(case.case_uid),
-        'rowVersion':case.row_version, 'scheduleKey':item['scheduleKey'], 'paymentDate':'2026-05-31', 'amount':amount})
-    check('cash entry still matches the same AUW schedule '+str(amount), response.status_code==200)
-paid = ledger()
-check('fully paid AUW row awaits manual settlement and keeps both recalculated dates', paid['paid']==7000 and paid['outstanding']==0
-    and paid['paymentStatus']=='pending_confirmation' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
+    return call('post', '/api/accounting', {'action':action, 'caseUid':str(case.case_uid), 'rowVersion':case.row_version, **kw})
+def pay(key, amount):
+    return post('record_payment', scheduleKey=key, paymentDate='2026-05-31', amount=amount)
+cedant_row = next(row for row in call('get', '/api/accounting').json()['rows']
+                  if row['caseUid']==str(case.case_uid) and row['partyType']=='cedant')
+# 2026-10-20 四類統一：AUW 付款前須先登錄整期 Cedant 全額收款並逐筆人工銷帳
+response = pay(item['scheduleKey'], 7000)
+check('AUW payment is blocked before the whole Cedant installment is received and settled', response.status_code==400 and ledger()['paid']==0)
+check('Cedant receipt is recorded in full', pay(cedant_row['scheduleKey'], cedant_row['amount']).status_code==200)
+check('full Cedant receipt alone does not yet release AUW payment', pay(item['scheduleKey'], 7000).status_code==400)
 case.refresh_from_db()
-entry = case.payload['paymentEntries'][0]
+t1 = next(t['txNo'] for t in case.payload['transactions'] if str(t.get('legType','')).startswith('Leg 1'))
+response = post('confirm_facility_settlement', txNo=t1, note='QA AUW Cedant write-off')
+check('Finance manually settles the Cedant T1 receipt', response.status_code==200)
+# 2026-10-16 92 項規則（第 52 項）：保費每次須登錄整筆餘額，不得部分付款（取代舊的 2500＋4500 分次付款）
+response = pay(item['scheduleKey'], 2500)
+check('partial AUW premium payment is rejected', response.status_code==400 and ledger()['paid']==0)
+check('full cash entry matches the same AUW schedule', pay(item['scheduleKey'], 7000).status_code==200)
+paid = ledger()
+# 2026-10-20 四類統一：付款過原到期日（5/31）後，即使已登錄全額付款，未經人工確認仍顯示逾期；原期限不重算
+check('fully paid AUW row awaits manual settlement, stays overdue after the contract date, and keeps both recalculated dates', paid['paid']==7000 and paid['outstanding']==0
+    and paid['settlement']=='pending_confirmation' and paid['paymentStatus']=='overdue' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
+case.refresh_from_db()
+entry = next(e for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey'])
+# 2026-10-16 92 項規則：保費收付改為逐筆交易登錄（record_payment 轉為單筆匯款批次），更正須整筆沖回該匯款
 response = call('post', '/api/accounting', {'action':'reverse_payment', 'caseUid':str(case.case_uid),
     'rowVersion':case.row_version, 'entryId':entry['id'], 'paymentDate':'2026-06-01'})
+check('single-entry reversal cannot split a remittance', response.status_code==400 and response.json()['error']=='batch_reverse_required')
+response = call('post', '/api/accounting', {'action':'reverse_batch_payment', 'batchId':entry['batchId'], 'paymentDate':'2026-06-01',
+    'cases':[{'caseUid':str(case.case_uid), 'rowVersion':case.row_version}], 'note':'QA reversal'})
 partial = ledger()
-check('immutable cash reversal leaves 4500 paid and 2500 outstanding', response.status_code==200
-    and partial['paid']==4500 and partial['outstanding']==2500 and partial['contractDueDate']=='2026-05-31')
+check('immutable cash reversal reopens the full 7000 on the same schedule', response.status_code==200
+    and partial['paid']==0 and partial['outstanding']==7000 and partial['contractDueDate']=='2026-05-31')
+case.refresh_from_db()
+check('reversal is kept as a separate immutable entry', [e.get('entryType') for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey']]==['payment', 'reversal'])
 case.refresh_from_db()
 check('payment and reversal operations preserve the original SoA transactions', case.payload['transactions']==before['transactions'])
 print(f'{len(checks)}/{len(checks)} AUW payment terms checks passed', flush=True)

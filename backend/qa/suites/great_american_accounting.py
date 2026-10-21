@@ -28,8 +28,11 @@ def schedules(p,day='2026-01-01'):return build_payment_schedule(p,day+'T01:00:00
 def ga(p,day='2026-01-01'):return [i for i in schedules(p,day) if i.get('greatAmericanFacility')]
 check('only exact Singapore Facility Property applies',applies(raw()) and target(raw(),NAME.lower()) and not target(raw(classOfBusiness='CGL'),NAME) and not target(raw(),NAME.replace(' (Facility)','')) and not target(raw(),'Great American Other (Facility)'))
 for source,base,remind,due in [('2026-01-01','2026-03-31','2026-06-14','2026-06-29'),('2026-03-31','2026-03-31','2026-06-14','2026-06-29'),('2026-04-01','2026-06-30','2026-09-13','2026-09-28'),('2026-06-30','2026-06-30','2026-09-13','2026-09-28'),('2026-09-30','2026-09-30','2026-12-14','2026-12-29'),('2026-12-31','2026-12-31','2027-03-16','2027-03-31'),('2027-12-20','2027-12-31','2028-03-15','2028-03-30')]:
+ # 2026-10-20 四類統一：季末＋80 日開始提醒（取代＋75 日），＋90 日到期不變
+ from datetime import date as _date,timedelta as _td
+ remind=(_date.fromisoformat(base)+_td(80)).isoformat()
  p=raw(policyFrom=source);before=copy.deepcopy(p);item=ga(p)[0]
- check('quarter plus90/75 '+source,(item['baseDate'],item['dueDate'],item['contractDueDate'],item['termsDays'])==(base,remind,due,90))
+ check('quarter plus 90/80 '+source,(item['baseDate'],item['dueDate'],item['contractDueDate'],item['termsDays'])==(base,remind,due,90))
  check('schedule reads do not mutate '+source,p==before)
 for klass in ('CGL','Marine','',None):
  p=raw(classOfBusiness=klass);check('other class remains ordinary '+str(klass),not ga(p) and schedules(p)[1]['termsDays']==30)
@@ -78,12 +81,12 @@ check('receipt can be recorded',pay(c,t1).status_code==200)
 check('cash full without manual confirmation still blocks payout',not ds(c)[t2]['paymentAllowed'] and pay(c,t2,400).status_code==400)
 check('manual whole Cedant confirmation releases payout',confirm(c,t1).status_code==200 and ds(c)[t2]['paymentAllowed'])
 check('staff cannot record outgoing payment',pay(c,t2,400,staff).status_code==403)
-check('GA first partial remittance accepted',pay(c,t2,400).status_code==200)
-d=ds(c)[t2];check('partial retains original deadline and remaining balance',d['outstanding']==400 and d['contractDueDate']=='2026-06-29' and d['paymentStatus']=='overdue' and not d['fullPaymentRequired'])
-check('cannot confirm payment complete while partially paid',confirm(c,t2).status_code==400)
+# 2026-10-20 四類統一：Great American 不再允許分次匯出，保費須整筆登錄餘額
+before_partial=copy.deepcopy(ds(c)[t2])
+check('GA partial remittance is rejected (full balance only)',pay(c,t2,400).status_code==400 and ds(c)[t2]['outstanding']==before_partial['outstanding'])
+check('GA full remittance accepted',pay(c,t2).status_code==200)
 check('cannot cancel whole Cedant confirmation after payout',confirm(c,t1,True).status_code==409)
-check('remaining partial remittance accepted',pay(c,t2,400).status_code==200)
-check('cash full keeps overdue until manual payment confirmation',ds(c)[t2]['outstanding']==0 and ds(c)[t2]['paymentStatus']=='overdue')
+check('cash full keeps overdue until manual payment confirmation',ds(c)[t2]['outstanding']==0 and ds(c)[t2]['paymentStatus']=='overdue' and ds(c)[t2]['contractDueDate']=='2026-06-29')
 check('manual bank-success full payment completes',confirm(c,t2).status_code==200)
 check('confirmation stops overdue',ds(c)[t2]['manualSettlementConfirmed'] and ds(c)[t2]['paymentStatus']=='settled')
 check('bank return cannot reopen original completion',confirm(c,t2,True).status_code==409)
@@ -149,7 +152,8 @@ refund=make(parent=mixed,parentTwRef=mixed.tw_ref,endoEffectiveDate='2026-03-31'
 rf1=number(refund,'Leg 1');rfga=number(refund,'Leg 2');rfother=number(refund,'Leg 2',1)
 check('Cedant refund cannot precede all refunds',pay(refund,rf1).status_code==400)
 assert pay(refund,rfga).status_code==200
-check('refund full cash remains overdue until manual confirmation',ds(refund)[rfga]['paymentStatus']=='overdue')
+# 2026-10-20 四類統一：「全額付款後未確認仍逾期」只適用付出款項；向再保人收回的退款全額收到後顯示待人工確認
+check('refund fully received waits for manual confirmation',ds(refund)[rfga]['paymentStatus']=='pending_confirmation' and ds(refund)[rfga]['settlement']=='pending_confirmation')
 assert confirm(refund,rfga).status_code==200 and pay(refund,rfother).status_code==200
 check('other reinsurer refund must also be confirmed',pay(refund,rf1).status_code==400)
 assert confirm(refund,rfother).status_code==200
@@ -164,7 +168,8 @@ for party,idx in (('cedant',0),('reinsurer',0),('reinsurer',1)):
  returned=[i for i in schedules(case_payload(refund)) if i['partyType']==party][idx]
  mixed.refresh_from_db();refund.refresh_from_db()
  response=api('record_premium_offset',originalCaseUid=str(mixed.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=mixed.row_version,refundRowVersion=refund.row_version,originalKey=original['scheduleKey'],refundKey=returned['scheduleKey'],paymentDate='2026-10-20',amount=abs(returned['amount']))
- check('GA premium/refund netting rejected '+party+str(idx),response.status_code==400 and response.json()['error']=='great_american_offset_not_allowed',response.content)
+ # 2026-10-20：再保人退款一律須全額實收（refund_cash_receipt_required），比 GA 專屬限制先擋下；兩者都禁止抵銷
+ check('GA premium/refund netting rejected '+party+str(idx),response.status_code==400 and response.json()['error'] in (('great_american_offset_not_allowed',) if party=='cedant' else ('great_american_offset_not_allowed','refund_cash_receipt_required')),response.content)
 
 root=make();stamp=datetime(2026,10,18,17,tzinfo=timezone.utc)
 def claim(action,**kw):
@@ -175,8 +180,9 @@ with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:stamp)):
 check('claim obligation announces successfully',response.status_code==200,response.content)
 no=number(root,'Claim Leg 1');root.refresh_from_db();stored=next(t for t in root.payload['transactions'] if t['txNo']==no)
 check('Claim Announced timestamp is server-owned',stored['claimAnnouncedAt']==stamp.isoformat())
-for day,tracking,nextday in [('2026-10-26',True,'2026-10-26'),('2026-10-27',False,'2026-11-02'),('2026-11-02',True,'2026-11-02'),('2026-11-09',True,'2026-11-09')]:
- d=ds(root,day)[no];check('claim calendar15/7 '+day,(d['baseDate'],d['contractDueDate'],d['trackingDue'],d['nextTrackingDate'])==('2026-10-19','2026-11-03',tracking,nextday))
+# 2026-10-20 四類統一：賠款建帳＋15 日到期；到期前 7 日、到期日、其後每 7 日提醒（取代建帳第 7 日起追蹤）
+for day,tracking,nextday in [('2026-10-26',False,'2026-10-27'),('2026-10-27',True,'2026-10-27'),('2026-11-02',False,'2026-11-03'),('2026-11-03',True,'2026-11-03'),('2026-11-04',False,'2026-11-10'),('2026-11-10',True,'2026-11-10')]:
+ d=ds(root,day)[no];check('claim calendar 15 days, reminders 7 days before / due / every 7 days '+day,(d['baseDate'],d['contractDueDate'],d['trackingDue'],d['nextTrackingDate'])==('2026-10-19','2026-11-03',tracking,nextday))
 root.refresh_from_db();v=root.row_version
 check('follow-up permission enforced',api('record_great_american_claim_followup',staff,caseUid=str(root.case_uid),rowVersion=v,txNo=no,note='QA').status_code==403)
 check('follow-up rejects blank note',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v,txNo=no,note=' ').status_code==400)
@@ -184,11 +190,12 @@ check('manual claim follow-up saved',api('record_great_american_claim_followup',
 check('stale follow-up conflicts',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v,txNo=no,note='stale').status_code==409)
 check('follow-up retains accountant and time',ds(root)[no]['trackingHistory'][0]['recordedByName']==finance.name and ds(root)[no]['trackingHistory'][0]['recordedAt'])
 check('partial claim receipt accepted',pay(root,no,400).status_code==200)
-d=ds(root,'2026-11-09')[no];check('partial claim retains original due/reminders',d['outstanding']==600 and d['contractDueDate']=='2026-11-03' and d['trackingDue'])
+d=ds(root,'2026-11-10')[no];check('partial claim retains original due/reminders',d['outstanding']==600 and d['contractDueDate']=='2026-11-03' and d['trackingDue'])
 check('remaining claim receipt accepted',pay(root,no,600).status_code==200)
-d=ds(root,'2026-11-09')[no];check('full receipt without manual confirmation keeps claim overdue and reminder',d['paymentStatus']=='overdue' and d['trackingDue'] and d['nextTrackingDate'])
+# 2026-10-20 四類統一：全額收款登錄即停止該筆提醒，不等待銷帳
+d=ds(root,'2026-11-10')[no];check('full receipt stops claim reminders and waits for manual confirmation',d['paymentStatus']=='pending_confirmation' and not d['trackingDue'] and not d['nextTrackingDate'],(d['paymentStatus'],d['trackingDue'],d['nextTrackingDate']))
 check('claim full receipt manual confirmation succeeds',confirm(root,no).status_code==200)
-d=ds(root,'2026-11-09')[no];check('manual confirmation stops claim reminders',d['paymentStatus']=='settled' and not d['trackingDue'] and not d['nextTrackingDate'])
+d=ds(root,'2026-11-10')[no];check('manual confirmation settles the claim',d['paymentStatus']=='settled' and not d['trackingDue'] and not d['nextTrackingDate'])
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:datetime(2026,11,2,1,tzinfo=timezone.utc))):
  check('new claim request succeeds',claim('record_payment',claimId=1,payment={'date':'2026-03-25','amount':100}).status_code==200)
 newno=number(root,'Claim Leg 1',1);check('new request independently starts15-day deadline',ds(root)[newno]['contractDueDate']=='2026-11-17' and ds(root)[no]['contractDueDate']=='2026-11-03')

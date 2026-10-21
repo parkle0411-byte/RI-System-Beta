@@ -101,11 +101,14 @@ check('pure AUW long reference still does not advance any sequence',ReferenceSeq
 for source,ref in [(pure,'TW44SM000001'),(pure,'TW44SM-DRAFT')]:
  r=workflow(source,'create_endorsement',ref);check('endorsement rejects reused ref '+ref,r.status_code==409)
 r=workflow(pure,'create_endorsement','TW44SM-ENDO');assert r.status_code==201,r.content
-endo=Case.objects.get(case_uid=r.json()['case']['caseUid']);p=copy.deepcopy(endo.payload);p.update(endoEffectiveDate='2044-06-01',endoTypes=['premium'],endoText='Additional premium',originalPremium=1000);p['reinsurers'][0]['premium']=800
+endo=Case.objects.get(case_uid=r.json()['case']['caseUid'])
+# 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
+check('new pure AUW endorsement inherits the original Cedant days',endo.payload['paymentTermsDays']==pure.payload.get('paymentTermsDays'))
+p=copy.deepcopy(endo.payload);p.update(endoEffectiveDate='2044-06-01',endoTypes=['premium'],endoText='Additional premium',originalPremium=1000,paymentTermsDays=90);p['reinsurers'][0]['premium']=800
 assert edit(endo,p).status_code==200
 seq=list(ReferenceSequence.objects.values());evidence(endo,'offer');evidence(endo,'signed',[AUW]);r=announce(endo);endo.refresh_from_db()
 check('pure AUW endorsement has its own manual primary without an E sequence',r.status_code==200 and endo.tw_ref=='TW44SM-ENDO' and list(ReferenceSequence.objects.values())==seq)
-check('endorsement retains original parent, Cedant days and one settlement',endo.payload['parentTwRef']==pure.tw_ref and endo.payload['paymentTermsDays']==90 and not endo.payload['installmentEnabled'])
+check('endorsement retains original parent, its own entered Cedant days and one settlement',endo.payload['parentTwRef']==pure.tw_ref and endo.payload['paymentTermsDays']==90 and not endo.payload['installmentEnabled'])
 schedule=build_payment_schedule(endo.payload)
 check('AUW endorsement schedule retains fixed 120-day month-end rule',not schedule['issues'] and next(x for x in schedule['items'] if x['partyType']=='reinsurer')['paymentRule']=='auw_month_end_120')
 r=workflow(long,'create_endorsement','TW44SM-LONG-ENDO');assert r.status_code==201,r.content

@@ -74,7 +74,9 @@ def create_child(source,manual='TW50SM-END'):
  assert r.status_code==201,r.content
  return Case.objects.get(case_uid=r.json()['case']['caseUid'])
 child=create_child(root)
-check('AUW endorsement starts single settlement, keeps original Cedant 120 and editable deductions',child.payload['installmentEnabled'] is False and child.payload['performanceInstallments']==[] and child.payload['paymentTermsDays']==120 and child.payload['reinsurers'][0]['riCommPct']==12.5)
+# 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
+check('AUW endorsement starts single settlement, keeps the original Cedant 120 days and editable deductions',child.payload['installmentEnabled'] is False and child.payload['performanceInstallments']==[] and child.payload['paymentTermsDays']==120 and child.payload['reinsurers'][0]['riCommPct']==12.5)
+check('if the user clears the endorsement Cedant days it becomes pending review',build_payment_schedule({**child.payload,'paymentTermsDays':None,'endoEffectiveDate':'2050-01-15','endorsementAnnouncedAt':'2050-02-01T00:00:00Z','originalPremium':1000})['items'][0]['dueDate']=='')
 check('new endorsement clears old actual Announce date and manual ref is new',child.payload['endorsementAnnouncedAt']=='' and child.payload['manualTwRef']=='TW50SM-END')
 def save(row,payload):return call('put','/api/cases',dict(caseUid=str(row.case_uid),rowVersion=row.row_version,case=payload))
 for flag,rows in [(True,[]),(False,[dict(id='bad',premium=1)]),(True,ready['performanceInstallments'])]:
@@ -82,10 +84,12 @@ for flag,rows in [(True,[]),(False,[dict(id='bad',premium=1)]),(True,ready['perf
  before=child.row_version
  r=save(child,p);child.refresh_from_db()
  check('API cannot add endorsement installments even with spoofed identity '+str(flag)+str(len(rows)),r.status_code==400 and child.row_version==before)
+# 2026-10-16／10-20：批單 Cedant 天數由該批單自行填寫（取代 10/07「繼承原保單、批單不可改」），Draft 可填入並保存。
 p=copy.deepcopy(child.payload);p['paymentTermsDays']=90
-r=save(child,p)
-check('Cedant term change is blocked on an endorsement',r.status_code==400 and r.json()['error']=='endorsement_cedant_terms_locked')
-p=copy.deepcopy(child.payload);p.update(originalPremium=1000,endoEffectiveDate='2050-01-15',endoTypes=['Premium'],endoText='Additional premium',endorsementAnnouncedAt='2099-12-01T00:00:00Z',endorsementPerformanceMonth='2099-12');p['reinsurers'][0]['premium']=800
+r=save(child,p);child.refresh_from_db()
+check('endorsement Draft accepts its own Cedant days',r.status_code==200 and child.payload['paymentTermsDays']==90)
+p=copy.deepcopy(child.payload);p['paymentTermsDays']=120   # 本批單自行填 120，以下會計日期沿用原斷言
+p.update(originalPremium=1000,endoEffectiveDate='2050-01-15',endoTypes=['Premium'],endoText='Additional premium',endorsementAnnouncedAt='2099-12-01T00:00:00Z',endorsementPerformanceMonth='2099-12');p['reinsurers'][0]['premium']=800
 r=save(child,p);assert r.status_code==200,r.content;child.refresh_from_db()
 check('Draft cannot supply Announce date or special historical performance month',child.payload['endorsementAnnouncedAt']=='' and not child.payload.get('endorsementPerformanceMonth'))
 stamp=datetime(2050,1,31,17,tzinfo=tz.utc)
@@ -108,16 +112,22 @@ check('posted edit preserves server Announce date and a customized deduction',ch
 p=copy.deepcopy(child.payload);p['endoEffectiveDate']='2050-04-01'
 r=save(child,p)
 check('payment base cannot change after Announce',r.status_code==409 and r.json()['error']=='payment_terms_locked')
-# A chained endorsement reads original policy days, not a stale/intermediate payload.
+# 2026-10-16：已有效的天數不可修改；批單自己的 Cedant 天數在 Announce 後同樣鎖定（保留原「批單 Cedant 天數不可任意改」的意旨）
+p=copy.deepcopy(child.payload);p['paymentTermsDays']=90
+r=save(child,p)
+check('endorsement Cedant days are locked after Announce',r.status_code==409 and r.json()['error']=='payment_terms_locked')
+# 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
 child.payload['paymentTermsDays']=90;child.save(update_fields=['payload'])
 chained=create_child(child,'TW50SM-END2')
-check('chained endorsement still inherits root 120 days',chained.payload['paymentTermsDays']==120)
+check('chained endorsement inherits the days of the case it is created from (intermediate 90)',chained.payload['paymentTermsDays']==90)
 normal=copy.deepcopy(ready);normal['reinsurers'][0]['name']='QA Ordinary Endorsement RI';normal.pop('manualTwRef')
 r=call('post','/api/cases',{'case':normal});assert r.status_code==201,r.content
 ordinary=Case.objects.get(case_uid=r.json()['case']['caseUid']);ordinary.status='posted';ordinary.tw_ref='TWAER5001002';ordinary.save()
 normal_child=create_child(ordinary)
-check('non-AUW endorsement also has no installments and inherits original days',normal_child.payload['installmentEnabled'] is False and normal_child.payload['performanceInstallments']==[] and normal_child.payload['paymentTermsDays']==120)
-normal_p=copy.deepcopy(normal_child.payload);normal_p.update(originalPremium=1000,endoEffectiveDate='2050-01-15',endoTypes=['Premium'],endoText='Additional premium');normal_p['reinsurers'][0]['premium']=800
+# 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
+check('non-AUW endorsement also has no installments and inherits the Cedant and reinsurer days',normal_child.payload['installmentEnabled'] is False and normal_child.payload['performanceInstallments']==[] and normal_child.payload['paymentTermsDays']==ordinary.payload['paymentTermsDays'] and normal_child.payload['reinsurers'][0].get('paymentTermsDays')==ordinary.payload['reinsurers'][0].get('paymentTermsDays'))
+normal_p=copy.deepcopy(normal_child.payload);normal_p['paymentTermsDays']=120;normal_p.update(originalPremium=1000,endoEffectiveDate='2050-01-15',endoTypes=['Premium'],endoText='Additional premium');normal_p['reinsurers'][0].update(premium=800,paymentTermsDays=120)
+# 2026-10-16 92 項規則：普通再保人天數亦須明確填寫（沒有預設值，缺漏即待確認），故批單自行填入 Cedant 及再保人各 120 天
 r=save(normal_child,normal_p);assert r.status_code==200,r.content;normal_child.refresh_from_db()
 normal_docs=[CaseDocument.objects.create(case=normal_child,kind=k,reinsurers=['QA Ordinary Endorsement RI'] if k!='offer' else [],filename=k+'.pdf',content_type='application/pdf',byte_size=5,sha256='0'*64,storage_key='qa-'+str(uuid.uuid4()),is_selected=True,uploaded_by='qa') for k in ['offer','signed']]
 with patch('cases.workflow_views.timezone',SimpleNamespace(now=lambda:stamp)):
@@ -135,7 +145,8 @@ report=ProductionReport.objects.create(year_month='2052-09',version=1,status='cl
 closed_before=ProductionReport.objects.filter(pk=report.pk).values().get();legacy_before=copy.deepcopy(legacy.payload)
 result=consolidate_existing_endorsement(str(legacy.case_uid),'2052-09',expected_version=legacy.row_version);legacy.refresh_from_db()
 check('legacy repair converts to one full settlement, retains September origin',result['changedCaseCount']==1 and not legacy.payload['installmentEnabled'] and legacy.payload['performanceInstallments']==[] and legacy.payload['endorsementPerformanceMonth']=='2052-09')
-check('legacy repair reads actual old Announce and original policy days',legacy.payload['endorsementAnnouncedAt']==legacy.announced_at.isoformat() and legacy.payload['paymentTermsDays']==120)
+# 2026-10-16／10-20：批單 Cedant 天數屬於該批單本身（沒有預設繼承），修復時保留批單自己的 90 天，不改回原保單 120 天
+check('legacy repair reads actual old Announce and keeps the endorsement own Cedant days',legacy.payload['endorsementAnnouncedAt']==legacy.announced_at.isoformat() and legacy_before['paymentTermsDays']==90 and legacy.payload['paymentTermsDays']==90)
 check('legacy repair preserves missing AUW Ref, tax, customized deductions, premiums and all other fields',all(legacy.payload[k]==v for k,v in legacy_before.items() if k not in ['installmentEnabled','performanceInstallments','paymentTermsDays','cedantTermsBasis','endorsementAnnouncedAt','endorsementPerformanceMonth']))
 check('closed September receives an October deferral',len(result['productionDeferrals'])==1 and result['productionDeferrals'][0]['fromMonth']=='2052-09' and result['productionDeferrals'][0]['toMonth']=='2052-10')
 check('closed report is byte-for-byte untouched',closed_before==ProductionReport.objects.filter(pk=report.pk).values().get())

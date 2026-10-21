@@ -17,11 +17,13 @@ def check(name, condition):
     print('PASS ' + name)
 
 
-def case(names, shares, premium, comm, tax, split):
-    raw = {'reinsuranceStructure': 'QS', 'classOfBusiness': 'Property', 'currency': 'TWD', 'reinsured': 'ZZ Cedant',
+def case(names, shares, premium, comm, tax, split, currency='TWD'):
+    # 2026-10-20：TWD 保費只准整數（每步取位到元）；USD 保留兩位小數
+    whole = currency == 'TWD'
+    raw = {'reinsuranceStructure': 'QS', 'classOfBusiness': 'Property', 'currency': currency, 'reinsured': 'ZZ Cedant',
            'originalInsured': 'ZZ', 'policyFrom': '2026-10-01', 'policyTo': '2027-10-01', 'paymentTermsDays': 90,
            'originalPremium': premium, 'riCommPct': comm, 'taxPct': tax, 'installmentEnabled': False, 'cedantTermsBasis': 'case',
-           'reinsurers': [{'name': n, 'sharePct': sh, 'premium': round(premium * sh / 100, 2), 'riCommPct': comm, 'taxPct': tax,
+           'reinsurers': [{'name': n, 'sharePct': sh, 'premium': round(premium * sh / 100) if whole else round(premium * sh / 100, 2), 'riCommPct': comm, 'taxPct': tax,
                            'paymentTermsDays': 60} for n, sh in zip(names, shares)]}
     if split:
         raw.update(splitEnabled=True, splitParties=[{'name': 'A', 'pct': split}, {'name': 'B', 'pct': round(100 - split, 6)}])
@@ -50,18 +52,20 @@ check('percentages not totalling 100 are not forced to the leg total', sum(t['am
 
 random.seed(2026)
 bad = []
-for _ in range(1500):
+for n in range(1500):
     count = random.randint(1, 3)
     cuts = sorted(random.randint(1, 99) for _ in range(count - 1))
     shares = [b - a for a, b in zip([0] + cuts, cuts + [100])]
-    value = case([f'ZZ Re {i}' for i in range(count)], shares, random.choice([509, 1800, 757.29, 1084, 333.33]),
-                 random.choice([0, 5, 10, 12.5]), random.choice([0, 1, 5]), random.randint(1, 99))
+    currency = 'USD' if n % 2 else 'TWD'   # TWD 只用整數保費；USD 保留小數保費
+    premiums = [509, 1800, 757.29, 1084, 333.33] if currency == 'USD' else [509, 1800, 757, 1084, 333]
+    value = case([f'ZZ Re {i}' for i in range(count)], shares, random.choice(premiums),
+                 random.choice([0, 5, 10, 12.5]), random.choice([0, 1, 5]), random.randint(1, 99), currency)
     schedule = build_payment_schedule(value, '2026-10-14T02:00:00Z')['items']
     ledger = build_premium_transactions(value)
     cedant = sum(i['amount'] for i in schedule if i['partyType'] == 'cedant')
     leg1 = sum(t['amount'] for t in ledger if t['legType'].startswith('Leg 1'))
     if abs(cedant - leg1) > 0.0049:
         bad.append((cedant, leg1))
-check('1,500 random split cases: Leg 1 total equals the Cedant schedule', not bad)
+check('1,500 random split cases (TWD whole dollars and USD cents): Leg 1 total equals the Cedant schedule', not bad)
 
 print(f'{len(checks)}/{len(checks)} passed; no database access')

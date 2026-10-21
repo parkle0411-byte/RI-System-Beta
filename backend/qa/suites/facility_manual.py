@@ -18,8 +18,8 @@ from personnel.models import Personnel
 
 assert os.environ.get('RI_DISPOSABLE_QA') == 'true'
 checks = []
-def check(name, condition):
-    assert condition, name
+def check(name, condition, extra=None):
+    assert condition, (name, extra) if extra is not None else name
     checks.append(name)
     print('PASS ' + name, flush=True)
 
@@ -68,9 +68,10 @@ try:
         original_amounts = [t['amount'] for t in case.payload['transactions']]
         check('cannot confirm a Facility receivable before cash clearance', settle(finance, case, 'M-R1-T1').status_code == 400)
         check('read-only roles cannot confirm Facility settlement', settle(readonly, case, 'M-R1-T1').status_code == 403)
-        check('manual receipt supports partial cash', pay(finance, case, ckey, 400).status_code == 200)
-        check('partial receipt remains partial', transaction_details(case.payload)['M-R1-T1']['settlement'] == 'partial')
-        check('manual final receipt succeeds', pay(finance, case, ckey, 600).status_code == 200)
+        # 2026-10-16「92 項會計規則」／2026-10-20「四類會計收付」：保費每次須登錄整筆餘額，只有賠款可部分收付
+        check('manual receipt rejects partial premium cash', pay(finance, case, ckey, 400).status_code == 400)
+        check('rejected partial receipt leaves T1 open', transaction_details(case.payload)['M-R1-T1']['settlement'] == 'open' and not case.payload['paymentEntries'])
+        check('manual full receipt succeeds', pay(finance, case, ckey, 1000).status_code == 200)
         d = transaction_details(case.payload)
         check('zero cash balance does not auto-settle Facility T1', d['M-R1-T1']['outstanding'] == 0 and d['M-R1-T1']['settlement'] == 'pending_confirmation')
         check('read-only Accounting can see pending confirmation', any(r['settlement'] == 'pending_confirmation' for r in readonly.get('/api/accounting').json()['transactionRows'] if r['caseUid'] == str(case.case_uid)))
@@ -91,16 +92,34 @@ try:
         check('T3 confirmation creates no cash remittance', case.payload['paymentEntries'] == payments_before)
         check('T3 shows settled after accountant confirmation', transaction_details(case.payload)['M-R1-T3']['settlement'] == 'settled')
         check('manual history records actor, date and reason', all(e.get('confirmedBy') and e.get('confirmedAt') and e.get('note') for e in case.payload['facilityAccounting']['history']))
-        check('cancel T1 settlement is a manual action', settle(finance, case, 'M-R1-T1', undo=True).status_code == 200)
-        check('cancelling T1 invalidates retained-income settlement', transaction_details(case.payload)['M-R1-T3']['settlement'] != 'settled')
-        check('cancelling reconciliation does not reverse bank cash', case.payload['paymentEntries'] == payments_before)
-        check('T1 can be manually reconfirmed', settle(finance, case, 'M-R1-T1').status_code == 200)
+        # 2026-10-16「92 項會計規則」：T3 完成後整組（T1／T2／T3）都不能取消；曾銷帳金額永久鎖定
+        response = settle(finance, case, 'M-R1-T1', undo=True)
+        check('T1 settlement cannot be cancelled after T3 is final', response.status_code == 409 and response.json()['error'] == 'final_settlement_locked')
+        check('final group keeps retained-income settlement', transaction_details(case.payload)['M-R1-T3']['settlement'] == 'settled')
+        check('rejected cancellation does not touch bank cash', case.payload['paymentEntries'] == payments_before)
         incoming = next(e for e in case.payload['paymentEntries'] if e['scheduleKey'] == ckey)
-        check('cash reversal is a manual action', post(finance, case, 'reverse_payment', entryId=incoming['id'], paymentDate='2026-04-21', note='Bank return').status_code == 200)
-        d = transaction_details(case.payload)
-        check('reversal restores outstanding and invalidates T1 confirmation', d['M-R1-T1']['outstanding'] == 400 and d['M-R1-T1']['settlement'] != 'settled')
-        check('reversal also invalidates T3 confirmation', d['M-R1-T3']['settlement'] != 'settled')
-        check('principal and original payment history are preserved', [t['amount'] for t in case.payload['transactions']] == original_amounts and incoming in case.payload['paymentEntries'])
+        response = finance.post('/api/accounting', json.dumps({'action': 'reverse_batch_payment', 'batchId': incoming['batchId'], 'cases': [{'caseUid': str(case.case_uid), 'rowVersion': case.row_version}], 'paymentDate': '2026-04-21', 'note': 'Bank return'}), content_type='application/json')
+        case.refresh_from_db()
+        check('settled cash cannot be reversed', response.status_code == 409 and response.json()['error'] == 'settled_amount_locked' and case.payload['paymentEntries'] == payments_before, response.content[:200])
+        # 取消銷帳仍為人工動作（T3 未完成前）；取消銷帳不解鎖金額，也不沖回銀行現金
+        second = make('ZZ-MANUAL-AUW-2')
+        assert pay(finance, second, ckey, 1000).status_code == 200 and settle(finance, second, 'M-R1-T1').status_code == 200
+        cash = copy.deepcopy(second.payload['paymentEntries'])
+        check('cancel T1 settlement is a manual action', settle(finance, second, 'M-R1-T1', undo=True).status_code == 200)
+        check('cancelling reconciliation does not reverse bank cash', second.payload['paymentEntries'] == cash and transaction_details(second.payload)['M-R1-T1']['settlement'] == 'pending_confirmation')
+        batch = cash[0]['batchId']
+        response = finance.post('/api/accounting', json.dumps({'action': 'reverse_batch_payment', 'batchId': batch, 'cases': [{'caseUid': str(second.case_uid), 'rowVersion': second.row_version}], 'note': 'Bank return'}), content_type='application/json')
+        check('cancelling settlement does not unlock the previously settled amount', response.status_code == 409 and response.json()['error'] == 'settled_amount_locked')
+        check('T1 can be manually reconfirmed', settle(finance, second, 'M-R1-T1').status_code == 200)
+        # 未銷帳的收款仍可人工沖回（須填原因），餘額恢復
+        third = make('ZZ-MANUAL-AUW-3')
+        assert pay(finance, third, ckey, 1000).status_code == 200
+        third_cash = copy.deepcopy(third.payload['paymentEntries'])
+        response = finance.post('/api/accounting', json.dumps({'action': 'reverse_batch_payment', 'batchId': third_cash[0]['batchId'], 'cases': [{'caseUid': str(third.case_uid), 'rowVersion': third.row_version}], 'paymentDate': '2026-04-21', 'note': 'Bank return'}), content_type='application/json')
+        check('cash reversal is a manual action', response.status_code == 200, response.content[:200])
+        third.refresh_from_db(); d = transaction_details(third.payload)
+        check('reversal restores outstanding and leaves T1 unsettled', d['M-R1-T1']['outstanding'] == 1000 and d['M-R1-T1']['settlement'] == 'open')
+        check('principal and original payment history are preserved', [t['amount'] for t in third.payload['transactions']] == original_amounts and all(e in third.payload['paymentEntries'] for e in third_cash))
         stale = case.row_version - 1
         response = finance.post('/api/accounting', json.dumps({'action': 'confirm_facility_settlement', 'caseUid': str(case.case_uid), 'rowVersion': stale, 'txNo': 'M-R1-T1', 'note': 'stale'}), content_type='application/json')
         check('stale confirmation is rejected', response.status_code == 409)
@@ -134,12 +153,20 @@ try:
         swiss = make('ZZ-MANUAL-SWISS', fixture(SWISS_NAME))
         check('Swiss cash receipt is manually recorded', pay(finance, swiss, ckey, 1000).status_code == 200)
         check('Swiss zero receipt requires an accountant action', not build_payment_schedule(swiss.payload)['items'][0]['collectionConfirmed'])
-        check('Swiss manual collected confirmation succeeds', post(finance, swiss, 'confirm_swiss_collection', scheduleKey=ckey).status_code == 200)
-        check('Swiss collected action settles the matching T1 transaction', transaction_details(swiss.payload)['M-R1-T1']['settlement'] == 'settled')
+        # 2026-10-16「92 項會計規則」：Swiss 收妥與 Cedant 逐筆銷帳合一，移除另設收妥勾選；付款前必填結算清單參考號
+        response = post(finance, swiss, 'confirm_swiss_collection', scheduleKey=ckey)
+        check('separate Swiss collected action is retired', response.status_code == 400 and response.json()['error'] == 'manual_transaction_workflow')
+        check('Swiss T1 manual settlement succeeds', settle(finance, swiss, 'M-R1-T1').status_code == 200)
+        check('Swiss T1 settlement doubles as the collection confirmation', transaction_details(swiss.payload)['M-R1-T1']['settlement'] == 'settled' and build_payment_schedule(swiss.payload)['items'][0]['collectionConfirmed'])
+        check('Swiss payment requires the settlement statement reference', pay(finance, swiss, rkey, 900).status_code == 400)
+        check('Swiss statement reference is recorded', post(finance, swiss, 'mark_swiss_statement', scheduleKey=rkey, reference='SWISS-SOA-QA').status_code == 200)
         check('Swiss full payment is manually recorded', pay(finance, swiss, rkey, 900).status_code == 200)
         check('Swiss full payment remains awaiting reconciliation', transaction_details(swiss.payload)['M-R1-T2']['settlement'] == 'pending_confirmation')
-        check('Swiss schedule settlement is manual', post(finance, swiss, 'confirm_facility_settlement', scheduleKey=rkey, note='Swiss statement matched').status_code == 200)
-        check('Swiss schedule confirmation settles the matching T2', transaction_details(swiss.payload)['M-R1-T2']['settlement'] == 'settled')
+        # 2026-10-16：銷帳逐筆交易進行，排程層級（scheduleKey）銷帳已停用
+        response = post(finance, swiss, 'confirm_facility_settlement', scheduleKey=rkey, note='Swiss statement matched')
+        check('Swiss schedule-level settlement is replaced by transaction settlement', response.status_code == 400 and response.json()['error'] == 'individual_transaction_required')
+        check('Swiss T2 settlement is manual', settle(finance, swiss, 'M-R1-T2').status_code == 200)
+        check('Swiss transaction confirmation settles T2', transaction_details(swiss.payload)['M-R1-T2']['settlement'] == 'settled')
         check('Swiss T3 also requires manual settlement', transaction_details(swiss.payload)['M-R1-T3']['settlement'] == 'pending_confirmation')
         legacy = fixture(SWISS_NAME)
         for item in build_payment_schedule(legacy)['items']:

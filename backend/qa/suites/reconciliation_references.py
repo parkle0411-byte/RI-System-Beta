@@ -11,8 +11,8 @@ from cases.cash_ledger import transaction_details
 from personnel.models import Personnel
 assert os.environ.get('RI_DISPOSABLE_QA')=='true', 'Run only in the disposable QA environment.'
 checks=[]
-def check(label,value):
- assert value,label
+def check(label,value,extra=None):
+ assert value,(label,extra) if extra is not None else label
  checks.append(label);print('PASS '+label)
 def actor(tag,role='sales',department='reinsurance'):
  user=get_user_model().objects.create_user(username='references.'+tag,password='Ref-QA-only-9!')
@@ -22,7 +22,8 @@ def actor(tag,role='sales',department='reinsurance'):
 def make(ref,status='closed',**over):
  p={'twRef':ref,'currency':'TWD','statementNo':'CEDANT-OLD','originalInsured':'Reference Test Insured','originalInsuredCn':'對帳號碼測試','reinsured':'Ref QA Cedant','classOfBusiness':'Property','classCode':'PAR','reinsuranceStructure':'QS','policyFrom':'2026-01-01','policyTo':'2027-01-01','paymentTermsDays':90,'originalPremium':1000,'riCommPct':10,'taxPct':1,'reinsurers':[{'name':'Ref QA Alpha','sharePct':50,'premium':500,'riCommPct':20,'taxPct':1,'settlementRef':'RI-A-OLD'},{'name':'Ref QA Beta','sharePct':50,'premium':500,'riCommPct':20,'taxPct':1,'settlementRef':'RI-B-OLD'}], 'paymentEntries':[], 'facilityAccounting':{'untouched':{'note':'Original reconciliation history'}},'claims':[{'id':'keep-claim','note':'Preserve claim history'}]}
  p.update(over);p['transactions']=build_premium_transactions(p)
- p['transactions'] += [{'txNo':ref+'-C1-T1','source':'claim','legType':'Claim Leg 1','reinsurerIdx':0,'reinsurer':'Ref QA Alpha','amount':50},{'txNo':ref+'-C1-T2','source':'claim','legType':'Claim Leg 2','reinsurerIdx':0,'amount':50}]
+ p['transactions'] += [{'txNo':ref+'-C1-T1','source':'claim','legType':'Claim Leg 1','reinsurerIdx':0,'reinsurer':'Ref QA Alpha','amount':50,'createdAt':'2026-10-01T02:00:00Z'},{'txNo':ref+'-C1-T2','source':'claim','legType':'Claim Leg 2','reinsurerIdx':0,'amount':50,'createdAt':'2026-10-01T02:00:00Z'}]
+ # 2026-10-16「92 項會計規則」：賠款建立即建帳，到期日＝建帳台灣日期＋15 日；夾具補上建帳時間（createdAt）
  return Case.objects.create(tw_ref=ref,status=status,payload=p,currency='TWD',created_by='qa',updated_by='qa')
 def url(case):return '/api/case-reconciliation-references?caseUid='+str(case.case_uid)
 def write(client,case,**extra):
@@ -56,11 +57,15 @@ try:
   # Cash already recorded and manual settlement confirmed must survive reference edits.
   paidcase=make('REF-QA-PAID')
   t1=next(tx['txNo'] for tx in paidcase.payload['transactions'] if tx['legType']=='Leg 1')
+  c1=next(tx['txNo'] for tx in paidcase.payload['transactions'] if tx['legType']=='Claim Leg 1')
   def account(body):return finance.post('/api/accounting',data=json.dumps(body),content_type='application/json')
-  def pay_amount(value):
-   paidcase.refresh_from_db();return account({'action':'record_transaction_payments','paymentDate':'2026-10-15','amount':value,'allocations':[{'caseUid':str(paidcase.case_uid),'txNo':t1,'rowVersion':paidcase.row_version,'amount':value}]})
-  check('partial payment fixture created',pay_amount(100).status_code==200)
+  def pay_amount(value,no=None):
+   no=no or t1;paidcase.refresh_from_db();return account({'action':'record_transaction_payments','paymentDate':'2026-10-15','amount':value,'allocations':[{'caseUid':str(paidcase.case_uid),'txNo':no,'rowVersion':paidcase.row_version,'amount':value}]})
+  # 2026-10-16「92 項會計規則」：保費每次須登錄整筆餘額，只有賠款可部分收付 → 部分收款夾具改用賠款
+  check('partial premium payment rejected',pay_amount(100).status_code==400)
+  check('partial payment fixture created',pay_amount(20,c1).status_code==200)
   paidcase.refresh_from_db();cash_before=transaction_details(paidcase.payload);raw_before=strip_refs(paidcase.payload)
+  check('partial claim fixture recorded',cash_before[c1]['paid']==20 and cash_before[c1]['outstanding']==30,cash_before[c1])
   check('partially paid references update without changing cash',write(sales,paidcase,statementNo='AFTER-PARTIAL').status_code==200 and cash_before==transaction_details(paidcase.payload) and raw_before==strip_refs(paidcase.payload))
   check('remaining payment fixture created',pay_amount(cash_before[t1]['outstanding']).status_code==200)
   paidcase.refresh_from_db();response=account({'action':'confirm_facility_settlement','caseUid':str(paidcase.case_uid),'txNo':t1,'rowVersion':paidcase.row_version,'note':'QA reconciliation complete'})

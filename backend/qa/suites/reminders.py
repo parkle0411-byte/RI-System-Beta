@@ -8,6 +8,8 @@ from django.test import Client, override_settings
 from django.utils import timezone
 from audit.models import AuditLog
 from cases.calc.payment_terms import build_payment_schedule
+from cases.calc.accounting import build_premium_transactions
+from cases.cash_ledger import transaction_details
 from cases.models import Case, CaseDocument
 from personnel.models import Personnel
 from reminders import runner
@@ -36,7 +38,8 @@ def ready(**over):
     b = dict(reinsuranceStructure="QS", ae="ZZ REM AE", currency="USD", classOfBusiness="ZZ Class", classCode="PAR", newOrRenew="New", typePrefix="ZZ Type",
              reinsured="ZZ Rem Cedant", originalInsured="ZZ Rem Insured", policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
              situations=[dict(address="1 ZZ Road", postcode="100")],
-             reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0), dict(name="ZZ Re B", sharePct=40, premium=400, riCommPct=5, taxPct=0)],
+             # 2026-10-16 92 項規則（第 31 項）：每家普通再保人天數須明確填寫，沒有預設值
+             reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0, paymentTermsDays=30), dict(name="ZZ Re B", sharePct=40, premium=400, riCommPct=5, taxPct=0, paymentTermsDays=30)],
              limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)
@@ -47,7 +50,10 @@ def make_case(c, status="posted", **over):
     case = Case.objects.get(case_uid=r.json()["case"]["caseUid"])
     if status != "draft":
         _ref[0] += 1
-        Case.objects.filter(pk=case.pk).update(status=status, tw_ref=f"ZZ-REM-{_ref[0]:04d}", announced_at=timezone.now())
+        # 2026-10-16 92 項規則：財務提醒依正式帳款（已建立的保費交易）；合成案件直接建立對應交易
+        ref = f"ZZ-REM-{_ref[0]:04d}"
+        Case.objects.filter(pk=case.pk).update(status=status, tw_ref=ref, announced_at=timezone.now(),
+                                               payload={**case.payload, "transactions": build_premium_transactions({**case.payload, "twRef": ref})})
     case.refresh_from_db(); return case
 def d(s, n=0): return (date.fromisoformat(s) + timedelta(days=n)).isoformat()
 def slips(case): return list(SignedSlipAlert.objects.filter(case=case).order_by("alert_on"))
@@ -61,7 +67,8 @@ PDF_FROM = "2026-03-01"
 DAY60 = d(PDF_FROM, 60)   # 2026-04-30
 
 try:
-    with transaction.atomic(), override_settings(REMINDER_EMAIL_ENABLED=False, REMINDER_LINK_URL="http://vm.example/ri", REMINDER_LINK_TEXT="開啟 VM"):
+    # 2026-10-16：財務提醒信獨立由 RI_PAYMENT_REMINDER_ENABLED（PAYMENT_REMINDER_EMAIL_ENABLED）控制，不連動 Signed Slip 開關
+    with transaction.atomic(), override_settings(REMINDER_EMAIL_ENABLED=False, PAYMENT_REMINDER_EMAIL_ENABLED=False, REMINDER_LINK_URL="http://vm.example/ri", REMINDER_LINK_TEXT="開啟 VM"):
         ae = person("ZZ REM AE", email="ZZ.AE@tw-insure.com", supervisor_name="ZZ Boss", supervisor_email="zz.boss@tw-insure.com")
         person("ZZ REM Finance", role="accounting", dept="finance", email="zz.fin@tw-insure.com")
         sales_p = person("ZZ REM Sales")
@@ -145,11 +152,14 @@ try:
 
         # ================= 付款提醒 =================
         p = make_case(sales, policyFrom="2026-08-01", policyTo="2027-08-01")
-        items = build_payment_schedule({**p.payload, "id": p.pk})["items"]
-        due = sorted({i["dueDate"] for i in items if i.get("dueDate")})
-        check("synthetic case has a payment schedule with a due date", len(due) >= 1, items[:2])
-        first = min((i for i in items if i.get("dueDate")), key=lambda i: i["dueDate"])
-        D, K = first["dueDate"], first["scheduleKey"]
+        # 2026-10-16 92 項規則（第 83、84 項）：提醒以正式帳款的「實際約定到期日」前 7 日、到期日、其後每 7 日（不再用提前 15／10 日的會計日）
+        details = transaction_details({**p.payload, "id": p.pk})
+        items = [{**x, "scheduleKey": "transaction:" + no} for no, x in details.items()]
+        due = sorted({i["contractDueDate"] for i in items if i.get("contractDueDate")})
+        check("synthetic case has posted transactions with an actual due date", len(due) >= 1, items[:2])
+        first = min((i for i in items if i.get("contractDueDate")), key=lambda i: i["contractDueDate"])
+        D, K = first["contractDueDate"], first["scheduleKey"]
+        check("actual due date is policy date + 30 days, not the 15-day-earlier screen date", D == "2026-08-31", D)
         kinds = lambda case: [x.alert_kind for x in pays(case) if K in x.schedule_keys]   # 只追蹤同一個付款項目
         runner.run_payment(d(D, -8))
         check("8 days before: nothing", not pays(p))
@@ -160,8 +170,10 @@ try:
         check("recipients: AE and supervisor lower-cased, then every Finance e-mail, no duplicates",
               rec[:2] == ["zz.ae@tw-insure.com", "zz.boss@tw-insure.com"] and "zz.fin@tw-insure.com" in rec and len(rec) == len(set(rec)), rec)
         check("schedule keys stored for the reminded items", al and al[0].schedule_keys and all(k in {i["scheduleKey"] for i in items} for k in al[0].schedule_keys))
+        # 2026-10-16 92 項規則：逾期改以實際約定到期「日」判斷，帳款不再有 12:00 時點，信件不再寫 12:00；改驗信件列出實際到期日
         check("preview: subject '[Payment 7 天後到期] <TW Ref>' and VM link", al and al[0].subject == f"[Payment 7 天後到期] {p.tw_ref}"
-              and '<a href="http://vm.example/ri">開啟 VM</a>' in al[0].body_html and "12:00 (Taiwan)" in al[0].body_html, al and al[0].subject)
+              and '<a href="http://vm.example/ri">開啟 VM</a>' in al[0].body_html, al and al[0].subject)
+        check("preview body states the actual due date that triggered the notice", al and f"{D} (Taiwan)" in al[0].body_html, al and al[0].body_html)
         check("audit suppress_payment_reminder with metadata", audits("suppress_payment_reminder", al[0].pk).filter(
             metadata__alertKind="seven_days_before", metadata__caseUid=str(p.case_uid)).exists())
         runner.run_payment(d(D, -3))
@@ -172,6 +184,8 @@ try:
         check("6 days overdue: nothing new", kinds(p) == ["seven_days_before", "due_today"], kinds(p))
         runner.run_payment(d(D, 7))
         check("7 days overdue: weekly_overdue", kinds(p) == ["seven_days_before", "due_today", "weekly_overdue"], kinds(p))
+        # 2026-10-21 待確認（未改斷言）：2026-09-26 規則「suppressed 算已提醒」；10/16 程式改為 suppressed 不算成功，
+        # 不寄信模式下 D+7 之後每天都新增一筆逾期提醒。10/16 規則文字未明示取代，故保留原每 7 日斷言待業主確認。
         runner.run_payment(d(D, 13))
         check("weekly cadence anchored to the last weekly reminder: day 13 nothing", len(kinds(p)) == 3, kinds(p))
         runner.run_payment(d(D, 14))
@@ -183,7 +197,7 @@ try:
 
         # 失敗後同一天可以重新佔位
         q = make_case(sales, policyFrom="2026-08-01", policyTo="2027-08-01")
-        with override_settings(REMINDER_EMAIL_ENABLED=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
+        with override_settings(PAYMENT_REMINDER_EMAIL_ENABLED=True, EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend"):
             real_send = runner._send
             runner._send = lambda *a_, **k: (_ for _ in ()).throw(OSError("smtp down"))
             try:
@@ -201,10 +215,13 @@ try:
         # 沒有任何 Finance 的 e-mail
         Personnel.objects.filter(role_code__in=["accounting", "accounting_manager"]).update(email=None)
         s = make_case(sales, policyFrom="2026-08-01", policyTo="2027-08-01")
-        runner.run_payment(d(D, -7))
+        r = runner.run_payment(d(D, -7))
         err = audits("payment_reminder_configuration_error", s.case_uid).first()
-        check("no active Finance e-mail -> configuration error, no alert", not pays(s) and err
-              and err.after_data["error"] == "No active Finance Staff or Finance Manager has a valid e-mail." and err.metadata["alertKind"] == "seven_days_before")
+        # 2026-10-16 92 項規則（第 85 項）：有效收件人先寄，缺漏另提示；收件人只含啟用中 Finance Staff（不再含 Finance Manager）
+        check("no active Finance e-mail -> AE and supervisor still reminded, missing Finance reported separately",
+              [x.recipients for x in pays(s)] == [["zz.ae@tw-insure.com", "zz.boss@tw-insure.com"]] and not err
+              and any(e["caseUid"] == str(s.case_uid) and e.get("partialDelivery") and e["error"] == "No active Finance Staff has a valid email." for e in r["configurationErrors"]),
+              ([x.recipients for x in pays(s)], [e for e in r["configurationErrors"] if e["caseUid"] == str(s.case_uid)]))
 
         # ================= 案件明細的 Reminders API =================
         r = call(sales, "get", f"/api/case-reminders?caseUid={p.case_uid}")
@@ -218,9 +235,13 @@ try:
         check("API: Signed Slip reminders newest first", [x["alertOn"] for x in j["signedSlip"]] == [d(DAY60, 7), DAY60] and j["signedSlip"][0]["status"] == "suppressed")
         j = call(sales, "get", f"/api/case-reminders?caseUid={c.case_uid}").json()
         errs = j["configurationErrors"]
-        check("API: configuration errors from the Audit Log (both reminders, newest first)", any(e["reminder"] == "signed_slip" and e["alertDate"] == DAY60 for e in errs)
-              and any(e["reminder"] == "payment" and e["alertKind"] for e in errs) and all(e["error"] == "AE does not match one active Personnel record." for e in errs)
-              and [e["at"] for e in errs] == sorted([e["at"] for e in errs], reverse=True), errs[:3])
+        logged = [e for e in errs if e["at"]]
+        # 2026-10-16 第 85 項：有效收件人（Finance）先寄，AE 缺漏不再整封擋下寫 Audit 錯誤，而是在 API 最上方另列即時缺漏提示（at 為空）；
+        # Audit 紀錄仍新到舊。此時 Finance e-mail 已被上一段清空，所以即時提示同時列出 AE 與 Finance 缺漏。
+        check("API: configuration errors from the Audit Log (both reminders, newest first) plus the live payment contact warning", any(e["reminder"] == "signed_slip" and e["alertDate"] == DAY60
+              and e["error"] == "AE does not match one active Personnel record." for e in logged)
+              and errs[0]["reminder"] == "payment" and errs[0]["at"] is None and errs[0]["alertKind"] == "contact_missing" and "AE does not match one active Personnel record." in errs[0]["error"]
+              and [e["at"] for e in logged] == sorted([e["at"] for e in logged], reverse=True), errs[:3])
         check("API: viewer cannot see a case that is not theirs -> 404", call(viewer, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 404)
         check("API: Finance can inspect case reminders under the approved all-case read permission", call(fin, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 200)
         check("API: unknown case -> 404", call(sales, "get", "/api/case-reminders?caseUid=00000000-0000-4000-8000-000000000000").status_code == 404)

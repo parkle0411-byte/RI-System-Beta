@@ -121,23 +121,43 @@ with transaction.atomic(), override_settings(AUDIT_LOG_PAUSED=True):
             current_case = Case.objects.get(pk=case.pk)
             check(f'payment {amount!r} rejected with no entry/version/snapshot change',response.status_code==400 and response.json().get('error')=='invalid_payment' and current_case.payload==before_payload and current_case.row_version==before_version and EntitySnapshot.objects.count()==snapshot_count,response.status_code)
             transaction.set_rollback(True)
+    # 2026-10-16 92 項規則：保費只能逐筆交易、整筆登錄餘額；只有賠款可部分收付。
+    # 金額取位（到分）與超付檢查改用一筆賠款應收來測（record_transaction_payments）。
+    from cases.calc.accounting import build_premium_transactions
+    claim_payload = copy.deepcopy(payload)
+    claim_payload['transactions'] = build_premium_transactions({**claim_payload,'twRef':'ZZ-VALIDATION-C-'+tag}) + [
+        {'txNo':'ZZ-VAL-C1','source':'claim','legType':'Claim Leg 1','reinsurer':claim_payload['reinsurers'][0]['name'],'reinsurerIdx':0,
+         'label':'Claim','amount':250,'settlement':'open','createdAt':'2026-10-01T02:00:00+00:00','dueDate':'2026-10-16'}]
+    claim_case = Case.objects.create(tw_ref='ZZ-VALIDATION-C-'+tag,status='closed',currency='USD',reinsurance_structure='QS',payload=claim_payload,created_by='qa',updated_by='qa')
+    def pay_claim(amount,version=None):
+        claim_case.refresh_from_db()
+        return call('post','/api/accounting',dict(action='record_transaction_payments',paymentDate='2026-10-06',amount=amount,
+            allocations=[dict(caseUid=str(claim_case.case_uid),txNo='ZZ-VAL-C1',rowVersion=claim_case.row_version if version is None else version,amount=amount)]))
+    def last_entry():
+        return Case.objects.get(pk=claim_case.pk).payload['paymentEntries'][-1]
     for amount,expected in [(0.005,0.01),(0.01,0.01),(12.345,12.35),('100.005',100.01)]:
         with transaction.atomic():
-            response = pay(amount)
-            current_case = Case.objects.get(pk=case.pk)
-            check(f'payment {amount!r} rounds to {expected} and saves snapshot',response.status_code==200 and current_case.payload['paymentEntries'][-1]['amount']==expected and current_case.row_version==case.row_version+1 and EntitySnapshot.objects.filter(entity_type='case',entity_id=str(case.case_uid),entity_version=current_case.row_version).exists(),response.content[:150])
+            snapshot_count = EntitySnapshot.objects.count(); version = Case.objects.get(pk=claim_case.pk).row_version
+            response = pay_claim(amount)
+            check(f'claim payment {amount!r} rounds to {expected} and saves snapshot',response.status_code==200 and abs(last_entry()['amount'])==expected
+                  and Case.objects.get(pk=claim_case.pk).row_version==version+1 and EntitySnapshot.objects.count()>snapshot_count,response.content[:150])
             transaction.set_rollback(True)
     with transaction.atomic():
         # Raw balance+0.0049 used to reject even when its stored amount equals balance.
-        response = pay(item['outstanding']+0.0049)
-        check('overpayment check uses the rounded amount actually stored',response.status_code==200 and Case.objects.get(pk=case.pk).payload['paymentEntries'][-1]['amount']==item['outstanding'],response.content[:150])
+        response = pay_claim(250.0049)
+        check('overpayment check uses the rounded amount actually stored',response.status_code==200 and abs(last_entry()['amount'])==250,response.content[:150])
         transaction.set_rollback(True)
     with transaction.atomic():
-        response = pay(item['outstanding']+0.0051)
+        response = pay_claim(250.0051)
         check('rounded payment above balance still rejects overpayment',response.status_code==400 and response.json().get('error')=='overpayment',response.content[:150])
         transaction.set_rollback(True)
-    response = pay(0.01,version=case.row_version+10)
-    check('stale payment version still returns 409',response.status_code==409 and response.json().get('error')=='version_conflict')
+    response = pay_claim(0.01,version=Case.objects.get(pk=claim_case.pk).row_version+10)
+    check('stale payment version still returns 409',response.status_code==409 and response.json().get('error')=='version_conflict',response.content[:150])
+    premium_tx = next(t for t in claim_payload['transactions'] if t['legType']=='Leg 1')
+    claim_case.refresh_from_db()
+    response = call('post','/api/accounting',dict(action='record_transaction_payments',paymentDate='2026-10-06',amount=1,
+        allocations=[dict(caseUid=str(claim_case.case_uid),txNo=premium_tx['txNo'],rowVersion=claim_case.row_version,amount=1)]))
+    check('a partial premium payment is rejected (premiums are recorded in full)',response.status_code==400,response.content[:150])
 
     response = call('post','/api/auth/change-password',dict(currentPassword='Validation-Test-9',newPassword='New-Validation-Pass-8'))
     user.refresh_from_db()

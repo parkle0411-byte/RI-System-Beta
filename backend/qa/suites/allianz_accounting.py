@@ -26,14 +26,16 @@ def raw(**changes):
  p.update(changes);return p
 def ri(p,day='2026-01-01'):return [i for i in build_payment_schedule(p,now(day))['items'] if i.get('allianzFacility')]
 check('exact Facility identity is required',is_allianz(NAME.lower()) and not is_allianz(NAME.replace(' (Facility)','')) and not is_allianz('Allianz Other (Facility)'))
-for month_end,reminder,due in [('2026-01-31','2026-04-16','2026-05-01'),('2026-02-28','2026-05-14','2026-05-29'),('2028-02-29','2028-05-14','2028-05-29'),('2026-12-31','2027-03-16','2027-03-31')]:
+# 2026-10-20「四類會計統一」：Allianz 基準月底＋80 日開始提醒、＋90 日到期（取代 10-19 的＋75 日提醒）
+for month_end,reminder,due in [('2026-01-31', '2026-04-21', '2026-05-01'), ('2026-02-28', '2026-05-19', '2026-05-29'), ('2028-02-29', '2028-05-19', '2028-05-29'), ('2026-12-31', '2027-03-21', '2027-03-31')]:
  p=raw(policyFrom=month_end);r=ri(p)[0]
- check('calendar month-end90/75 '+month_end,(r['baseDate'],r['dueDate'],r['contractDueDate'])==(month_end,reminder,due))
+ check('calendar month-end 90/80 '+month_end,(r['baseDate'],r['dueDate'],r['contractDueDate'])==(month_end,reminder,due))
  check('read does not mutate source '+month_end,p['reinsurers'][0]['paymentTermsDays']==30)
 p=raw(parentTwRef='ROOT',endoEffectiveDate='2026-01-20',endorsementAnnouncedAt='2026-02-02T17:00:00Z',originalPremium=-200)
 p['reinsurers'][0]['premium']=-160;r=ri(p)[0]
 check('refund uses later actual Announce Taiwan month',(r['sourceBaseDate'],r['contractDueDate'],r['paymentDirection'])==('2026-02-03','2026-05-29','receivable'))
-check('refund has no outgoing Cedant gate',r['paymentAllowed'] and r['offsetAllowed'] is False)
+# 2026-10-20 四類統一：再保人退款是「向再保人收款」，沒有付款放行欄位；Cedant 退款須等再保人退款收妥銷帳（payment_policy）
+check('refund (receivable from the reinsurer) has no outgoing payment gate',r.get('paymentAllowed',True) and r['offsetAllowed'] is False)
 p['endorsementAnnouncedAt']='';result=build_payment_schedule(p)
 check('unannounced endorsement never guesses dates',ri(p)[0]['dueDate']=='' and result['reviewRequired'])
 p=raw(installmentEnabled=True,performanceInstallments=[{'id':'I1','paymentBaseDate':'2026-01-10','premium':500,'paymentTermsDays':30,'reinsurerPaymentTerms':{'r1':22}}, {'id':'I2','paymentBaseDate':'2026-02-10','premium':500,'paymentTermsDays':45,'reinsurerPaymentTerms':{'r1':45}}])
@@ -43,8 +45,15 @@ for i in p2['performanceInstallments']:i['reinsurerPaymentTerms']['r1']=90
 check('legacy fixed terms canonicalize without false posted changes',payment_terms_signature(p2)==before)
 normal=normalize_draft(p)['value'];check('draft stores Allianz90 including each period',normal['reinsurers'][0]['paymentTermsDays']==90 and all(i['reinsurerPaymentTerms']['r1']==90 for i in normal['performanceInstallments']))
 p['paymentEntries']=[{'entryType':'payment','scheduleKey':'I1:cedant','amount':500}]
-check('first installment releases independently without ledger settlement',ri(p)[0]['paymentAllowed'] and not ri(p)[1]['paymentAllowed'])
-p['paymentEntries'][0]['nonCash']=True
+# 2026-10-20 四類統一：整期 Cedant 須全額實收「並逐筆人工銷帳」才放行該期付款
+check('full receipt alone does not release payment before manual settlement',not ri(p)[0]['paymentAllowed'] and not ri(p)[1]['paymentAllowed'])
+from cases.facility_accounting import schedule_signature
+def settle_cedant(p,key):
+ item=next(i for i in build_payment_schedule(p,now('2026-01-01'))['items'] if i['scheduleKey']==key)
+ p.setdefault('facilityAccounting',{}).setdefault('confirmations',{})['schedule:'+key]={'confirmed':True,'fingerprint':schedule_signature(p,item),'confirmedAt':'2026-01-05T00:00:00Z'}
+settle_cedant(p,'I1:cedant')
+check('first installment releases independently once its Cedant receipt is settled',ri(p)[0]['paymentAllowed'] and not ri(p)[1]['paymentAllowed'])
+p['paymentEntries'][0]['nonCash']=True;settle_cedant(p,'I1:cedant')   # 重新銷帳，確認擋下的原因是「非現金」本身
 check('noncash offsets cannot prove full cash receipt',not ri(p)[0]['paymentAllowed'])
 p=raw();p['reinsurers']+=[{'name':"Lloyd's Underwriter Syndicate No. 0609 AUW (Facility)",'premium':100,'sharePct':0,'riCommPct':0,'taxPct':0}, {'name':'Ordinary QA','premium':100,'sharePct':0,'riCommPct':0,'taxPct':0,'paymentTermsDays':45}]
 items=build_payment_schedule(p)['items'];check('mixed AUW and ordinary retain own date formulas',items[2]['contractDueDate']=='2026-05-31' and items[3]['contractDueDate']=='2026-02-15')
@@ -69,28 +78,43 @@ check('cash API blocks outgoing before full Cedant receipt',pay(c,'Leg 2',800).s
 c.refresh_from_db();check('blocked payment is atomic',c.payload==original)
 check('Finance records full Cedant receipt',pay(c,'Leg 1',1000).status_code==200)
 c.refresh_from_db();check('receipt remains distinct from manual settlement',transaction_details(c.payload)[tx(c,'Leg 1')]['settlement']=='pending_confirmation')
-check('Allianz can be paid without T1 write-off confirmation',pay(c,'Leg 2',800).status_code==200)
+# 2026-10-20 四類統一：Allianz 付款前，整期 Cedant 須全額實收並人工銷帳
+check('Allianz payment is blocked until the T1 receipt is manually settled',pay(c,'Leg 2',800).status_code==400)
+c.refresh_from_db();r=account(fin,'confirm_facility_settlement',caseUid=str(c.case_uid),rowVersion=c.row_version,txNo=tx(c,'Leg 1'),note='QA write-off')
+check('Finance settles the T1 receipt',r.status_code==200,r.content[:200])
+check('Allianz can be paid after the T1 receipt is settled',pay(c,'Leg 2',800).status_code==200)
 c.refresh_from_db();d=transaction_details(c.payload,now('2026-05-02'))[tx(c,'Leg 2')]
-check('manual full payment stops overdue without automatic ledger settlement',d['outstanding']==0 and d['paymentStatus']=='pending_confirmation' and d['settlement']=='pending_confirmation')
+# 2026-10-20 四類統一：付款過原到期日後，即使已登錄全額付款，尚未人工確認仍顯示逾期；到期前則為待確認
+check('full payment after the due date stays overdue until manual confirmation',d['outstanding']==0 and d['paymentStatus']=='overdue' and d['settlement']=='pending_confirmation',(d['paymentStatus'],d['settlement']))
+early=transaction_details(c.payload,now('2026-04-15'))[tx(c,'Leg 2')]
+check('full payment before the reminder date waits for manual confirmation',early['paymentStatus']=='pending_confirmation' and early['settlement']=='pending_confirmation',(early['paymentStatus'],early['settlement']))
+mid=transaction_details(c.payload,now('2026-04-25'))[tx(c,'Leg 2')]
+check('until confirmed, the reminder status keeps following the calendar',mid['paymentStatus']=='reminder',mid['paymentStatus'])
 incoming=next(e for e in c.payload['paymentEntries'] if e.get('transactionNo')==tx(c,'Leg 1'))
 correction=account(fin,'edit_payment',caseUid=str(c.case_uid),rowVersion=c.row_version,entryId=incoming['id'],amount=900,reason='QA negative test')
-check('receipt correction cannot bypass paid Allianz gate',correction.status_code==400 and correction.json()['error']=='full_premium_required')
+# 2026-10-20：T1 已人工銷帳，金額永久鎖定（settled_amount_locked）；未銷帳時則由 full_premium_required 擋下。兩者都不能繞過付款前提
+before_edit=copy.deepcopy(c.payload);c.refresh_from_db()
+check('receipt correction cannot bypass paid Allianz gate',correction.status_code in (400,409) and correction.json()['error'] in ('full_premium_required','settled_amount_locked') and c.payload['paymentEntries']==before_edit['paymentEntries'],(correction.status_code,correction.content[:200]))
 unpaid=make();d=transaction_details(unpaid.payload,now('2026-05-02'))[tx(unpaid,'Leg 2')]
 check('overdue uses90-day contract date and never shifts',d['paymentStatus']=='overdue' and d['contractDueDate']=='2026-05-01')
-check('75-day screen reminder starts on its calendar date',transaction_details(unpaid.payload,now('2026-04-16'))[tx(unpaid,'Leg 2')]['paymentStatus']=='reminder')
+check('80-day screen reminder starts on its calendar date',transaction_details(unpaid.payload,now('2026-04-21'))[tx(unpaid,'Leg 2')]['paymentStatus']=='reminder')
 refund=make(parent=unpaid,parentTwRef=unpaid.tw_ref,endoEffectiveDate='2026-01-10',endorsementAnnouncedAt='2026-02-03T00:00:00Z',originalPremium=-200,reinsurers=[{'name':NAME,'sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':90}])
 for party in ('cedant','reinsurer'):
  a=next(i for i in build_payment_schedule(unpaid.payload)['items'] if i['partyType']==party)
  b=next(i for i in build_payment_schedule(refund.payload)['items'] if i['partyType']==party)
  response=account(fin,'record_premium_offset',originalCaseUid=str(unpaid.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=unpaid.row_version,refundRowVersion=refund.row_version,originalKey=a['scheduleKey'],refundKey=b['scheduleKey'],paymentDate='2026-10-19',amount=abs(b['outstanding']))
- check('Allianz offset blocked for '+party,response.status_code==400 and response.json()['error']=='allianz_offset_not_allowed')
+ # 2026-10-20：再保人退款一律須全額實收（refund_cash_receipt_required），比 Allianz 專屬限制先擋下；兩者都禁止抵銷
+ check('Allianz offset blocked for '+party,response.status_code==400 and response.json()['error'] in (('allianz_offset_not_allowed',) if party=='cedant' else ('allianz_offset_not_allowed','refund_cash_receipt_required')),response.content[:200])
 a=make();b=make(policyFrom='2026-02-01')
 assert pay(a,'Leg 1',1000).status_code==200 and pay(b,'Leg 1',1000).status_code==200
+for obj in (a,b):   # 2026-10-20：先人工銷帳 T1，才會檢查到「不同到期日不可合併匯款」
+ obj.refresh_from_db();assert account(fin,'confirm_facility_settlement',caseUid=str(obj.case_uid),rowVersion=obj.row_version,txNo=tx(obj,'Leg 1'),note='QA').status_code==200
+ obj.refresh_from_db()
 alloc=[]
 for obj in (a,b):
  no=tx(obj,'Leg 2');alloc.append({'caseUid':str(obj.case_uid),'rowVersion':obj.row_version,'txNo':no,'amount':800})
 response=account(fin,'record_transaction_payments',paymentDate='2026-10-19',amount=1600,allocations=alloc)
-check('different original due dates cannot share remittance',response.status_code==400 and response.json()['error']=='allianz_separate_due_dates')
+check('different original due dates cannot share remittance',response.status_code==400 and response.json()['error']=='allianz_separate_due_dates',response.content[:200])
 check('fixed Allianz terms cannot be completed to another value',account(staff,'complete_payment_terms',caseUid=str(a.case_uid),rowVersion=a.row_version,partyKey='r1',days=30,reason='QA').status_code==409)
 
 root=make();stamp=datetime(2026,10,18,17,tzinfo=tz.utc)
@@ -102,11 +126,13 @@ with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:stamp)):
 check('successful recording announces claim obligation',response.status_code==200,response.content)
 root.refresh_from_db();no=tx(root,'Claim Leg 1');stored=next(t for t in root.payload['transactions'] if t['txNo']==no)
 check('claim announcement is server-owned',stored['claimAnnouncedAt']==stamp.isoformat())
+# 2026-10-20 四類統一：賠款自建帳台灣日期＋15 日到期；到期前 7 日、到期日、其後每 7 日提醒（取代舊的建帳第 7 日起追蹤）
 d=transaction_details(root.payload,now('2026-10-26'))[no]
-check('claim15-day due and7-day first tracking use Taiwan announcement',(d['baseDate'],d['contractDueDate'],d['reminderDate'])==('2026-10-19','2026-11-03','2026-10-26'))
-for day,tracking,next_day in [('2026-10-26',True,'2026-10-26'),('2026-10-27',False,'2026-11-02'),('2026-11-02',True,'2026-11-02'),('2026-11-09',True,'2026-11-09')]:
+check('claim 15-day due and 7-days-before first reminder use the Taiwan announcement date',(d['baseDate'],d['contractDueDate'],d['reminderDate'])==('2026-10-19','2026-11-03','2026-10-27'))
+for day,tracking,next_day,status in [('2026-10-26',False,'2026-10-27','upcoming'),('2026-10-27',True,'2026-10-27','reminder'),('2026-11-02',False,'2026-11-03','reminder'),
+                                      ('2026-11-03',True,'2026-11-03','due_today'),('2026-11-04',False,'2026-11-10','overdue'),('2026-11-10',True,'2026-11-10','overdue')]:
  d=transaction_details(root.payload,now(day))[no]
- check('claim repeating display '+day,(d['trackingDue'],d['nextTrackingDate'])==(tracking,next_day))
+ check('claim reminder schedule '+day,(d['trackingDue'],d['nextTrackingDate'],d['paymentStatus'])==(tracking,next_day,status),(d['trackingDue'],d['nextTrackingDate'],d['paymentStatus']))
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:datetime(2026,11,1,tzinfo=tz.utc))):
  check('unprocessed correction succeeds',claim('correct_payment',claimId=1,paymentId=1,reason='QA correction',payment={'date':'2020-01-01','amount':1000}).status_code==200)
 root.refresh_from_db();check('correction does not reset announcement',next(t for t in root.payload['transactions'] if t['txNo']==no)['claimAnnouncedAt']==stamp.isoformat())
@@ -118,7 +144,7 @@ root.refresh_from_db();history=transaction_details(root.payload)[no]['trackingHi
 check('follow-up retains actor time and note',len(history)==1 and history[0]['recordedByName']==finance.name and history[0]['recordedAt'] and history[0]['note']=='Contacted Allianz on claim status')
 check('stale follow-up conflicts',account(fin,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version,txNo=no,note='stale').status_code==409)
 check('partial claim receipt accepted',pay(root,'Claim Leg 1',400).status_code==200)
-root.refresh_from_db();d=transaction_details(root.payload,now('2026-11-09'))[no]
+root.refresh_from_db();d=transaction_details(root.payload,now('2026-11-10'))[no]   # 到期後每 7 日的提醒日
 check('partial claim keeps due date and repeating tracking',d['outstanding']==600 and d['contractDueDate']=='2026-11-03' and d['trackingDue'])
 check('remaining claim receipt accepted',pay(root,'Claim Leg 1',600).status_code==200)
 root.refresh_from_db();d=transaction_details(root.payload,now('2026-11-09'))[no]

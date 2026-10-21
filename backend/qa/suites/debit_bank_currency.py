@@ -22,10 +22,12 @@ with transaction.atomic():
  def call(path,body):
   client.get('/api/auth/csrf')
   return client.post(path,data=json.dumps(body),content_type='application/json',HTTP_X_CSRFTOKEN=client.cookies['csrftoken'].value)
- base=dict(currency='USD',reinsuranceStructure='QS',ae='QA Bank Currency',aeEmail='qa@example.invalid',reinsured='Cedant',originalInsured='Insured',type='Property',policyFrom='2026-01-01',policyTo='2027-01-01',interest='Buildings',limitOfLiability=1000,underlyingLimits='Primary',deductibles='10%',reinsuredRetention='Nil',originalPremium=1000,paymentTermsDays=90,reinsurers=[dict(name='RI A',sharePct=100)],situations=[dict(address='Risk A',postcode='100')],sumInsured=[dict(category='Building',amount=1000,locationIndex=0)],lossRecordYears=5,lossAdvisedDate='2026-10-15',lossRecord=[])
+ base=dict(currency='USD',reinsuranceStructure='QS',ae='QA Bank Currency',aeEmail='qa@example.invalid',reinsured='Cedant',originalInsured='Insured',type='Property',policyFrom='2026-01-01',policyTo='2027-01-01',interest='Buildings',limitOfLiability=1000,underlyingLimits='Primary',deductibles='10%',reinsuredRetention='Nil',originalPremium=1000,paymentTermsDays=90,reinsurers=[dict(name='RI A',sharePct=100,paymentTermsDays=90)],situations=[dict(address='Risk A',postcode='100')],sumInsured=[dict(category='Building',amount=1000,locationIndex=0)],lossRecordYears=5,lossAdvisedDate='2026-10-15',lossRecord=[])
  case=Case.objects.create(status='posted',tw_ref='QA-BANK-CURRENCY',payload=base,owner_personnel=person,created_by='qa',updated_by='qa')
  saved_version=case.row_version
- periods=[dict(id='I1',performanceMonth='2026-01',paymentBaseDate='2026-01-01',ratio=50),dict(id='I2',performanceMonth='2026-04',paymentBaseDate='2026-04-01',ratio=50)]
+ # 2026-10-16「92 項會計規則重新確認」：每家再保人、每期每家再保人的付款天數須獨立填寫，不繼承 Case 預設；
+ # 缺漏時 Debit Note 回 409 debit_payment_terms_required。本套件只測幣別，故 fixture 明確補齊各再保人及各期天數。
+ periods=[dict(id='I1',performanceMonth='2026-01',paymentBaseDate='2026-01-01',ratio=50,reinsurerPaymentTerms={'r1':90}),dict(id='I2',performanceMonth='2026-04',paymentBaseDate='2026-04-01',ratio=50,reinsurerPaymentTerms={'r1':90})]
  variants=[('USD',True),('TWD',True),('usd',True),(' twd ',True),('EUR',False),('HKD',False),('JPY',False),('GBP',False),('NTD',False),('',False),(None,False),('　',False),('\ufeff',False)]
  for structure in ['QS','XOL']:
   for currency,supported in variants:

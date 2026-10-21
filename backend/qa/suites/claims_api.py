@@ -58,10 +58,13 @@ def claims(c, case):
 def act(c, action, case, root=None, **extra):
     body = {"action": action, "caseUid": str(case.case_uid), "rowVersion": Case.objects.get(pk=(root or case).pk).row_version, **extra}
     return call(c, "post", "/api/claims", body)
-def endorse(c, root, status, reinsurers=None):
+def endorse(c, root, status, reinsurers=None, effective=None):
     e = make_case(c, "draft", **({"reinsurers": reinsurers} if reinsurers else {}))
     _ref[0] += 1
-    Case.objects.filter(pk=e.pk).update(parent_case=root, case_kind="endorsement", status=status,
+    # 2026-10-16「92 項會計規則重新確認」第 62 項：賠款採出險日適用且已生效的保單／批單比例，
+    # 批單以 endoEffectiveDate 判斷是否生效，故 fixture 需明確給批單生效日。
+    payload = {**e.payload, **({"endoEffectiveDate": effective} if effective else {})}
+    Case.objects.filter(pk=e.pk).update(parent_case=root, case_kind="endorsement", status=status, payload=payload,
                                         tw_ref=None if status == "draft" else f"ZZ-CLM-{_ref[0]:04d}-E")
     e.refresh_from_db(); return e
 def audit(uid, action=None):
@@ -100,15 +103,19 @@ try:
 
         three = [dict(name="ZZ Re A", sharePct=50, premium=500, riCommPct=5, taxPct=0), dict(name="ZZ Re C", sharePct=30, premium=300, riCommPct=5, taxPct=0),
                  dict(name="ZZ Re B (Facility)", sharePct=20, premium=200, riCommPct=5, taxPct=0, foreignBroker="ZZ Broker")]
-        e_draft = endorse(sales, root, "draft", three)
+        # 2026-10-16「92 項會計規則重新確認」第 62 項：分攤來源改為「出險日當天適用且已生效」的保單／批單，
+        # 不再是「最新一張已 Announce／Confirmed 批單」。下方以出險日 2026-05-01 的理賠付款驗證：
+        # 生效日 ≤ 出險日中最晚的已公告批單（e1）勝出；Draft 與封存批單即使生效日更晚也不採用。
+        e_draft = endorse(sales, root, "draft", three, effective="2026-04-25")
         st = claims(sales, root).json()["claimsState"]
         check("a Draft endorsement is not the split source", st["splitSource"]["caseUid"] == str(root.case_uid))
-        e_old = endorse(sales, root, "closed")   # 較早的已確認批單：分攤要用「最新」那一張
-        e1 = endorse(sales, root, "posted", three)
-        e_arch = endorse(sales, root, "closed"); Case.objects.filter(pk=e_arch.pk).update(is_archived=True, archived_at=timezone.now(), archived_by="t")
+        e_old = endorse(sales, root, "closed", effective="2026-04-01")   # 較早生效的已確認批單：出險日適用的是較晚生效的 e1
+        e1 = endorse(sales, root, "posted", three, effective="2026-04-15")
+        e_arch = endorse(sales, root, "closed", effective="2026-04-20"); Case.objects.filter(pk=e_arch.pk).update(is_archived=True, archived_at=timezone.now(), archived_by="t")
         st = claims(sales, root).json()["claimsState"]
-        check("the latest Announced/Confirmed endorsement is the split source (archived ones ignored)", st["splitSource"]["caseUid"] == str(e1.case_uid) and st["splitSource"]["twRef"] == e1.tw_ref
-              and len(st["splitSource"]["reinsurers"]) == 3, st["splitSource"]["caseUid"])
+        # 2026-10-16 第 62 項：GET 沒有出險日，畫面上的預設 splitSource 為根案件；實際分攤於付款時依出險日決定（見理賠付款段）。
+        check("GET without a Date of Loss shows the root as the default split source", st["splitSource"]["caseUid"] == str(root.case_uid) and st["splitSource"]["twRef"] == root.tw_ref
+              and len(st["splitSource"]["reinsurers"]) == 2, st["splitSource"]["caseUid"])
         se = claims(sales, e1).json()["claimsState"]
         check("reading from an endorsement returns the same root state", se == st)
 
@@ -174,7 +181,15 @@ try:
         check("payment: failed attempts changed nothing", Case.objects.get(pk=root.pk).row_version == v2)
         r = act(sales, "record_payment", e1, root=root, claimId=1, payment={"amount": "1,000.005", "date": "2026-07-01", "note": " first "}); root.refresh_from_db()
         p1 = root.payload["claims"][0]["payments"][0]; tx = [t for t in root.payload.get("transactions", []) if t.get("source") == "claim"]
-        check("payment recorded: id 1, amount parsed and rounded, note trimmed", r.status_code == 200 and p1 == {"id": 1, "date": "2026-07-01", "amount": 1000.01, "note": "first"}, (r.status_code, p1))
+        # 2026-10-16「92 項會計規則重新確認」：付款紀錄另存伺服器建立時間 createdAt（到期日起算）及出險日適用的 splitSource；
+        # 原本的 id／日期／金額／備註斷言不變，splitSource 必須是出險日（2026-05-01）適用的 e1（Archived／Draft 不採用）。
+        check("payment recorded: id 1, amount parsed and rounded, note trimmed", r.status_code == 200 and {k: p1.get(k) for k in ("id", "date", "amount", "note")} == {"id": 1, "date": "2026-07-01", "amount": 1000.01, "note": "first"}
+              and bool(p1.get("createdAt")), (r.status_code, p1))
+        check("Date of Loss split source: the latest Announced/Confirmed endorsement effective on the Date of Loss (archived/draft ignored)",
+              p1.get("splitSource", {}).get("caseUid") == str(e1.case_uid) and p1["splitSource"]["twRef"] == e1.tw_ref and len(p1["splitSource"]["reinsurers"]) == 3, p1.get("splitSource"))
+        # 2026-10-16 第 71／72 項：賠款從建立帳款當天台灣日期起算 15 日到期。
+        from cases.calc.payment_terms import taipei_date, add_calendar_days
+        check("claim obligations due on creation Taiwan date + 15 days", tx and all(t.get("dueDate") == add_calendar_days(taipei_date(p1["createdAt"]), 15) for t in tx), [t.get("dueDate") for t in tx[:2]])
         check("transactions: Claim Leg 1 + Leg 2 per reinsurer of the split source (3 -> 6)", len(tx) == 6 and [t["legType"] for t in tx[:2]] == ["Claim Leg 1", "Claim Leg 2"], len(tx))
         check("VM fix: transaction numbers start with the root TW Ref (Alpha: 'undefined')", all(t["txNo"].startswith(root.tw_ref + "-C1-P1-R") for t in tx) and not any("undefined" in t["txNo"] for t in tx), [t["txNo"] for t in tx[:2]])
         check("shares follow the endorsement split: 50% / 30% / 20%", [t["amount"] for t in tx[::2]] == [money(1000.01 * 0.5), money(1000.01 * 30 / 100), money(1000.01 * 20 / 100)], [t["amount"] for t in tx[::2]])
@@ -188,7 +203,17 @@ try:
               and len(tx2) == 6 and all(t["amount"] < 0 for t in tx2), r.content[:200])
         rows = [x for x in ledger(fin, root) if x["source"] == "claim"]
         check("claim transactions appear in the Accounting ledger", len(rows) == 12 and all(x["settlement"] == "open" for x in rows), len(rows))
-        check("GET shows the claims with payments", claims(sales, e1).json()["claimsState"]["claims"] == root.payload["claims"])
+        # 2026-10-16「92 項會計規則重新確認」第 65／71 項：GET 對每筆付款另加顯示用 canCorrect（可否更正）與 dueDate（建帳台灣日＋15）；
+        # 去掉這兩個顯示欄位後須與儲存內容完全一致，並確認顯示值正確。
+        shown = claims(sales, e1).json()["claimsState"]["claims"]
+        stripped = [{**cl, "payments": [{k: v for k, v in pay.items() if k not in ("canCorrect", "dueDate")} for pay in cl["payments"]]} for cl in shown]
+        check("GET shows the claims with payments", stripped == root.payload["claims"]
+              and [pay["dueDate"] for pay in shown[0]["payments"]] == [add_calendar_days(taipei_date(pay["createdAt"]), 15) for pay in root.payload["claims"][0]["payments"]]
+              and all(pay["canCorrect"] is True for pay in shown[0]["payments"]), shown[0]["payments"])
+        # 2026-10-16 第 62 項：出險日不在任何保單／批單期間 -> claim_split_pending_review，不寫入付款或交易。
+        r = act(sales, "create_claim", root, claim={"dateOfLoss": "2028-01-01"}); root.refresh_from_db(); v3 = root.row_version; before = root.payload
+        r = act(sales, "record_payment", root, claimId=3, payment={"amount": 10, "date": "2028-01-02"}); root.refresh_from_db()
+        check("Date of Loss outside every policy/endorsement period -> claim_split_pending_review, nothing written", code(r) == "claim_split_pending_review" and root.row_version == v3 and root.payload == before, (r.status_code, code(r)))
         raise Rollback()
 except Rollback:
     pass
