@@ -3,6 +3,7 @@
 import JSZip from 'jszip'
 import { apiFetch } from '../../api'
 import { isStandardCgl, cglInformationRows } from '../cglInformation'
+import { CGL_TYPE_PREFIXES, cglTypePrefix, cglType, cglCoveragesText } from '../cglRiskDetails'
 
 // Load shared templates before the current VM Word generator.
 const SCRIPTS = ['docx-templates.js', 'vm-docx-generator.js']
@@ -48,8 +49,9 @@ export async function generateDocx(kind, documentCase) {
     debit: ['generateDebit', 'debitFilename'],
     endorsement: ['generateEndorsement', 'endorsementFilename']
   }[kind]
+  if (isStandardCgl(documentCase) && CGL_TYPE_PREFIXES.includes(cglTypePrefix(documentCase))) documentCase = { ...documentCase, type: cglType(documentCase) }
   const renderCase = kind === 'cover' && isStandardCgl(documentCase)
-    ? { ...documentCase, cglInformationRows: cglInformationRows(documentCase) } : documentCase
+    ? { ...documentCase, cglInformationRows: cglInformationRows(documentCase), cglCoveragesText: cglCoveragesText(documentCase) } : documentCase
   const blob = await window.RIDocx[generator[0]](renderCase, window.RI_DOCX_TEMPLATES)
   window.RIDocx.downloadBlob(blob, window.RIDocx[generator[1]](documentCase))
 }

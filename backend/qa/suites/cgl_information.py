@@ -15,7 +15,7 @@ def check(name,ok,detail=''):
  checks.append((name,bool(ok),str(detail)))
  if not ok:print('FAIL',name,detail)
 def ready():
- return dict(reinsuranceStructure='QS',classOfBusiness='Commercial General Liability',classCode='GL',currency='USD',newOrRenew='New',ae='CGL QA AE',
+ return dict(coverages=['Premises-Operations Liability'],reinsuranceStructure='QS',classOfBusiness='Commercial General Liability',classCode='GL',currency='USD',newOrRenew='New',ae='CGL QA AE',
   typePrefix='Commercial General Liability',originalInsured='CGL QA Insured',reinsured='CGL QA Cedant',policyFrom='2026-01-01',policyTo='2027-01-01',
   situations=[dict(address='QA Road',postcode='100')],interest='Liability under original policy',limitOfLiability=1000000,deductibles='As original',originalConditions='As original',
   reinsuredRetention='Advice waived',originalPremium=1000,paymentTermsDays=90,lossAdvisedDate='2026-01-01',lossRecordYears=5,occupation='',construction='',sumInsured=[],

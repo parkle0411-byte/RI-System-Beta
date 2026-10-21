@@ -15,6 +15,7 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglInformation.js'), 'utf8').replace(/export /g, ''), context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRiskDetails.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/sumInsured.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(extract('  function validSumInsuredAmount(value)', '\n  function validPostcode')
   + extract('  function validLossRecordYears(value, caseData)', '\n  function fieldInvalid'), context);
@@ -56,7 +57,7 @@ check('renewal linkage prevents zero-year New bypass', {lossRecordYears: 0, rene
   ['Loss history years']);
 console.log(`${count}/${count} Loss Record readiness regression checks passed`);
 
-const cgl = {classOfBusiness: 'Commercial General Liability', occupation: '', construction: '', sumInsured: [],
+const cgl = {typePrefix: 'Commercial General Liability', type: 'Commercial General Liability Facultative Reinsurance as original', coverages: ['Premises-Operations Liability'], classOfBusiness: 'Commercial General Liability', occupation: '', construction: '', sumInsured: [],
   cglInformation: {policyForm: 'Occurrence Form', territorialLimits: 'USA/Canada Only', insuredBusiness: 'Manufacturing', insuredProducts: 'Products',
     estimatedTurnover: [{region: 'USA/Canada', currency: 'USD', amount: 1000000}], specialAgreementApplies: 'notApplicable'}};
 check('CGL replaces removed Property requirements', cgl, []);
@@ -64,4 +65,13 @@ check('CGL requires Business', {...cgl, cglInformation: {...cgl.cglInformation, 
 check('CGL requires Products', {...cgl, cglInformation: {...cgl.cglInformation, insuredProducts: ''}}, ['Insured’s Products']);
 check('CGL Claims-Made requires retroactive date and ERP choice', {...cgl, cglInformation: {...cgl.cglInformation, policyForm: 'Claims-Made Form'}}, ['Retroactive Date', 'Extended Reporting Period applicability']);
 check('CGL requires selected agreement content', {...cgl, cglInformation: {...cgl.cglInformation, specialAgreementApplies: 'applicable'}}, ['Special Agreement']);
+check('CGL requires one coverage', {...cgl, coverages: []}, ['Coverages — select at least one available option']);
+check('CGL Other requires wording', {...cgl, coverages: ['Other']}, ['Coverages — Other']);
+check('CGL accepts Other alone and optional blank SIR', {...cgl, coverages: ['Other'], coveragesOther: 'Extra liability', selfInsuredRetention: ''}, []);
+check('CGL requires permitted Type', {...cgl, typePrefix: 'Property'}, ['Type — select Products Liability or Commercial General Liability']);
+check('CGL uses Limit of Indemnity label', {...cgl, limitOfLiability: null}, ['Limit of Indemnity']);
+check('CGL XOL requires Underlying Limits', {...cgl, reinsuranceStructure: 'XOL'}, ['Underlying Limits']);
+check('CGL XOL accepts Underlying and blank optionals', {...cgl, reinsuranceStructure: 'XOL', underlyingLimits: 'USD500,000', aggregateLimit: null, subLimits: ''}, []);
+check('CGL hidden valuation Other does not block readiness', {...cgl, basisOfValuation: 'Other', basisOfValuationOther: '', indemnityPeriod: 'Legacy period', notices: ''}, []);
+check('Property valuation Other still requires wording', {basisOfValuation: 'Other', basisOfValuationOther: ''}, ['Basis of Valuation — Other']);
 console.log(`${count}/${count} total readiness checks passed`);

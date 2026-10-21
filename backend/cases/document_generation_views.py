@@ -1,4 +1,5 @@
 from .cgl_information import is_standard_cgl, information_issues
+from .cgl_risk_details import type_issues, underlying_issues, liability_limit_label, risk_details_issues
 """Word-only Cover Note, Debit Note and Endorsement generation authorization.
 
 Word files are assembled in the browser. This API validates access and the
@@ -119,15 +120,20 @@ def _check_case(request, body):
         return None, kind, _error(409, "ae_required", "Select an AE in the case before generating a document.")
     if not _ae_email(payload):
         return None, kind, _error(409, "ae_email_required", "Complete the AE Email in the case or Personnel before generating a document.")
+    if kind == "cover" and type_issues(payload):
+        return None, kind, _error(409, "cgl_type_required", "Select Products Liability or Commercial General Liability for Type before generating a Cover Note.")
     if kind == "cover":
+        risk_issues = risk_details_issues(payload)
+        if risk_issues:
+            return None, kind, _error(409, "cgl_coverages_required", "Complete Coverages before generating a Cover Note: " + "; ".join(row["label"] for row in risk_issues))
         cgl_issues = information_issues(payload)
         if cgl_issues:
             return None, kind, _error(409, "cgl_information_required", "Complete Information before generating a Cover Note: " + "; ".join(row["label"] for row in cgl_issues))
     if kind == "cover" and not _text(payload, "interest"):
         return None, kind, _error(409, "interest_required", "Complete Interest in the case before generating a Cover Note.")
     if kind == "cover" and not _text(payload, "limitOfLiability"):
-        return None, kind, _error(409, "limit_of_liability_required", "Complete Limit of Liability in the case before generating a Cover Note.")
-    if kind == "cover" and _text(payload, "reinsuranceStructure") == "XOL" and not _text(payload, "underlyingLimits"):
+        return None, kind, _error(409, "limit_of_liability_required", f"Complete {liability_limit_label(payload)} in the case before generating a Cover Note.")
+    if kind == "cover" and (underlying_issues(payload) or (_text(payload, "reinsuranceStructure") == "XOL" and not _text(payload, "underlyingLimits"))):
         return None, kind, _error(409, "underlying_limits_required", "Complete Underlying Limits in the case before generating a Cover Note.")
     if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "deductibles"):
         return None, kind, _error(409, "deductibles_required", "Complete Deductibles in the case before generating a Cover Note.")
@@ -136,9 +142,9 @@ def _check_case(request, body):
     if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         situations = get(payload, "situations")
         if not isinstance(situations, list) or not situations or any(not isinstance(row, dict) or not _text(row, "address") for row in situations):
-            return None, kind, _error(409, "situation_address_required", "Complete Risk Address for every Situation in the case before generating a Cover Note.")
+            return None, kind, _error(409, "situation_address_required", "Complete Principal Address in the case before generating a Cover Note." if is_standard_cgl(payload) else "Complete Risk Address for every Situation in the case before generating a Cover Note.")
         if any(not re.fullmatch(r"[0-9]{3,6}", _text(row, "postcode")) for row in situations):
-            return None, kind, _error(409, "situation_postcode_required", "Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.")
+            return None, kind, _error(409, "situation_postcode_required", "Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note." if is_standard_cgl(payload) else "Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.")
     if kind in ("cover", "debit") and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "originalPremium"):
         return None, kind, _error(409, "original_premium_required", "Complete 100% Premium in the case before generating a Cover Note or Debit Note.")
     if kind in ("cover", "debit") and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
