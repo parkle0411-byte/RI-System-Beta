@@ -74,5 +74,20 @@ try:
   version=case.row_version;call_command('convert_twd_premiums',apply=True,stdout=sink);case.refresh_from_db();check('management conversion idempotent',case.row_version==version)
   raise Rollback
 except Rollback:pass
+# 2026-10-21 使用者決定：保費取位正負對稱（-50.5 → -51），全額退保與原保費正好抵銷；legacy-cents 維持原算法
+import random as _random
+check('negative half rounds away from zero for TWD',premium_money(-50.5,{'currency':'TWD'})==-51 and premium_money(50.5,{'currency':'TWD'})==51 and premium_money(-50.4,{'currency':'TWD'})==-50)
+check('negative half-cent rounds away from zero for USD',premium_money(-0.005,{'currency':'USD'})==-0.01 and premium_money(0.005,{'currency':'USD'})==0.01)
+check('legacy-cents cases keep the historical rounding',premium_money(-0.005,{'currency':'TWD','premiumRounding':'legacy-cents'})==0)
+check('no negative zero',str(premium_money(-0.4,{'currency':'TWD'}))=='0.0')
+_rng=_random.Random(21);_bad=[]
+for _ in range(3000):
+  cur=_rng.choice(['TWD','USD']);prem=_rng.randint(1,900000) if cur=='TWD' else round(_rng.uniform(1,90000),2)
+  base={'currency':cur,'riCommPct':_rng.choice([5,7.5,10,12.5,15,33.33,50]),'taxPct':_rng.choice([0,1,1.5])}
+  share=_rng.choice([100,50,33.33,25,12.5]);comm=_rng.choice([0,5,10,50])
+  a=calc_legs_for_reinsurer({**base,'originalPremium':prem},{'sharePct':share,'premium':prem,'riCommPct':comm,'taxPct':0})
+  b=calc_legs_for_reinsurer({**base,'originalPremium':-prem},{'sharePct':share,'premium':-prem,'riCommPct':comm,'taxPct':0})
+  if any(round(a[k]+b[k],6)!=0 for k in a):_bad.append((cur,prem,base,share,comm))
+check('3,000 random full returns cancel the original premium legs exactly (TWD and USD)',not _bad)
 for name,ok in checks:print(('PASS ' if ok else 'FAIL ')+name)
 print(f'{len(checks)}/{len(checks)} passed')

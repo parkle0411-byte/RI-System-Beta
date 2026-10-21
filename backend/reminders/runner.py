@@ -171,8 +171,12 @@ def run_payment(today=None):
     people = _people("role_code")
     finance = msg.finance_emails(people)
     success = {}
-    for case_id, kind, keys, alert_date in PaymentAlert.objects.filter(status__in=("sent", "simulated")).values_list(
-            "case_id", "alert_kind", "schedule_keys", "alert_date"):
+    # 2026-10-21 使用者決定：寄信暫停（suppressed）時，逾期提醒也維持每 7 天一次，不會每天記一筆；
+    # 到期前 7 日與到期日只在當天觸發，suppressed 不影響日後開啟寄信。
+    for case_id, kind, keys, alert_date, status in PaymentAlert.objects.filter(status__in=("sent", "simulated", "suppressed")).values_list(
+            "case_id", "alert_kind", "schedule_keys", "alert_date", "status"):
+        if status == "suppressed" and kind != "weekly_overdue":
+            continue
         for key in keys if isinstance(keys, list) else []:
             index = f"{case_id}::{key}::{kind}"
             text = alert_date.isoformat()

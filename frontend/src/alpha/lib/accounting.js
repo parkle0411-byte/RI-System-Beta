@@ -13,9 +13,17 @@ function money(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
+// 2026-10-21：保費取位正負對稱（-50.5 → -51），全額退保與原保費正好抵銷；legacy-cents 維持原算法。與後端 premium_money 相同。
+function symmetricRound(value, scale) {
+  const x = Number(value);
+  if (!Number.isFinite(x)) return x;
+  const rounded = scale === 1 ? Math.round(Math.abs(x) + Number.EPSILON) : Math.round((Math.abs(x) + Number.EPSILON) * scale) / scale;
+  return x < 0 && rounded ? -rounded : rounded + 0;
+}
+
 export function premiumMoney(value, caseData) {
-  return String(caseData?.currency || '').trim().toUpperCase() === 'TWD' && caseData?.premiumRounding !== 'legacy-cents'
-    ? Math.round(Number(value) + Number.EPSILON) : money(value);
+  if (caseData?.premiumRounding === 'legacy-cents') return money(value);
+  return symmetricRound(value, String(caseData?.currency || '').trim().toUpperCase() === 'TWD' ? 1 : 100);
 }
 
 export function premiumInputErrors(payload, existing = null) {

@@ -7,8 +7,21 @@ def precision(case_data):
     case_data = case_data if isinstance(case_data, dict) else {}
     return 0 if str(case_data.get("currency") or "").strip().upper() == "TWD" and case_data.get("premiumRounding") != LEGACY else 2
 
+def _symmetric(value, scale):
+    """四捨五入、正負對稱（-50.5 → -51，與 50.5 → 51 對稱）。正數結果與 Math.round 相同。
+    2026-10-21 使用者決定：全額退保的負數保費必須與原保費正好抵銷，不留 1 元／1 分差額。"""
+    x = js_to_number(value)
+    if x != x or x in (float("inf"), float("-inf")):
+        return x
+    rounded = js_round(abs(x) * scale + EPSILON * scale) / scale if scale != 1 else js_round(abs(x) + EPSILON)
+    return -rounded if x < 0 and rounded else rounded + 0.0
+
+
 def premium_money(value, case_data):
-    return js_round(js_to_number(value) + EPSILON) if precision(case_data) == 0 else money(value)
+    data = case_data if isinstance(case_data, dict) else {}
+    if data.get("premiumRounding") == LEGACY:
+        return money(value)            # 受保護的歷史算法維持原樣
+    return _symmetric(value, 1 if precision(data) == 0 else 100)
 
 def premium_fields(payload):
     yield "originalPremium", "100% Premium", payload.get("originalPremium")

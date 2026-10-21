@@ -134,7 +134,8 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     payload["statementNo"] = ""
     payload["claims"] = []
     payload["reinsurers"] = [{**js_spread(row), "premium": None, "settlementRef": ""} for row in _rows(payload.get("reinsurers"))]
-    payload["paymentTermsDays"] = None
+    # 2026-10-21 使用者決定（取代 92 項規則第 35 條「批單 Cedant 自填天數，不沿用原單」）：
+    # 新批單的 Cedant 與各再保人付款天數一律沿用來源保單，業務仍可在 Draft 修改。
     return payload
 
 

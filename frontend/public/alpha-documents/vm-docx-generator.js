@@ -52,9 +52,13 @@
     return `${currencyLabel(c)}${formatMoney(value, c)}`;
   }
 
+  // 2026-10-21：保費取位正負對稱（-50.5 → -51），與會計（premium_money／premiumMoney）一致；legacy-cents 維持原算法
   function premiumRound(value, c) {
     const scale = currencyLabel(c) === 'TWD' && c?.premiumRounding !== 'legacy-cents' ? 1 : 100;
-    return Math.round((Number(value) + Number.EPSILON) * scale) / scale;
+    const x = Number(value);
+    if (c?.premiumRounding === 'legacy-cents' || !Number.isFinite(x)) return Math.round((x + Number.EPSILON) * scale) / scale;
+    const rounded = Math.round((Math.abs(x) + Number.EPSILON) * scale) / scale;
+    return x < 0 && rounded ? -rounded : rounded + 0;
   }
 
   function premiumAllocation(total, weights, c) {

@@ -87,7 +87,10 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
         elif get(item, 'swissFacility') is True:
             timing = f"Swiss結算日 {_s(get(item, 'dueDate'))} (Taiwan)"
         else:
-            timing = f"{_s(get(item, 'dueDate'))} (Taiwan)"
+            # 2026-10-21：信件寫真正到期日（觸發提醒所依據的日期），並附會計提醒日（較早的內部提醒日）
+            actual = _s(js_or(get(item, 'contractDueDate'), get(item, 'dueDate')))
+            accounting = _s(get(item, 'dueDate'))
+            timing = f"到期日 {actual} (Taiwan)" + (f"；會計提醒 {accounting}" if accounting and accounting != actual else "")
         amount = ("應收 " if get(item, "paymentDirection") == "receivable" else "應付 ") + amount
         rows.append(f"{_s(get(item, 'installmentLabel'))} · {_s(get(item, 'partyName'))} · {_s(get(item, 'currency'))} {amount} · " + timing)
     heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') == 'swiss_cedant_75_90' for i in items) else label(kind))
