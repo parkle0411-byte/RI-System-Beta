@@ -25,7 +25,7 @@ def pct():
 def case():
     n = R.choice([0, 1, 2, 3, 4, 5, 6])
     return {
-        "twRef": "TW-1",
+        "twRef": "TW-1", "accountingLegacyMath": True, "premiumRounding": "legacy-cents",
         "originalPremium": round(R.uniform(1000, 900_000_000), R.choice([0, 1, 2, 2, 2, 3])),
         "riCommPct": pct(), "taxPct": pct(),
         "reinsurers": [{"name": f"R{i}", "sharePct": pct(), "premium": round(R.uniform(1000, 900_000_000), R.choice([0, 2, 2, 3])),
@@ -92,7 +92,7 @@ for c in cases:
             bad_bound += 1
 
 n_cases = len(cases)
-check(f"{n_cases} random cases: totals = sum of per-reinsurer rounded amounts", bad_sum == 0, bad_sum)
+check(f"{n_cases} protected historical cases: totals preserve per-reinsurer rounded amounts", bad_sum == 0, bad_sum)
 check("Brokerage = Leg 1 - Leg 2 in every case", bad_broker == 0, bad_broker)
 check("list figures (ourSharePremium, brokerage) equal the totals", bad_list == 0, bad_list)
 check("per-reinsurer lines equal the accounting legs", bad_line == 0, bad_line)

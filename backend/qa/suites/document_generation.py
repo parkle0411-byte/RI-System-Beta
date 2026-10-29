@@ -42,7 +42,7 @@ def ready(**over):
              # 2026-10-16「92 項會計規則重新確認」：每家再保人付款天數須獨立填寫，不繼承 Case 預設（缺漏時 Debit Note 409）；
              # 一般 fixture 明確填 30 天，讓其他欄位的檢查維持原意。
              reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=5, taxPct=0, paymentTermsDays=30)],
-             limitOfLiability=1000000, reinsuredRetention="Advice of Reinsured's retention waived.", deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
+             limitOfLiability=1000000, reinsuredRetention="Advice of Reinsured's retention waived.", deductibles="10%", originalConditions="As original", occupation="Office", construction='Concrete', constructionSelections=['A2 Class'],
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)
     b.update(over); return b
@@ -329,8 +329,11 @@ try:
                 for kind in ("cover", "debit"):
                     before = gen_audit(posted.case_uid).count()
                     r = docx(sales, kind=kind, caseUid=str(posted.case_uid), reinsurers=[{"name": "Request Reinsurer", "sharePct": 100}])
+                    corrupt = label in ("not an array", "null row")
+                    expected = "case_data_invalid" if corrupt else "order_hereon_required"
+                    expected_message = "Case data is invalid. Amounts are pending confirmation. Correct the saved data before continuing." if corrupt else "Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note."
                     check(f"{kind} {structure}: {label} stored Order hereon -> 409, no audit", r.status_code == 409
-                          and code(r) == "order_hereon_required" and message(r) == "Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note."
+                          and code(r) == expected and message(r) == expected_message
                           and gen_audit(posted.case_uid).count() == before)
         invalid_sums = (("missing", None), ("null", None), ("not an array", {}), ("empty list", []),
                         ("empty row", [{}]), ("null row", [None]), ("null name", [{"category": None, "amount": 1000}]),
@@ -670,7 +673,7 @@ try:
                 Case.objects.filter(pk=posted.pk).update(payload=payload)
                 check(f"Cover {structure}/Facility={facility}: no loss rows and New zero accepted", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
-        # Saved Loss Paid is required for every entry; numeric zero is present.
+        # Saved Loss Amount is required for every entry; numeric zero is present.
         paid_loss = {"date": "2024-02-29", "cause": "Fire", "lossPaid": 0}
         unpaid_amounts = [("missing paid amount", [{"date": "2024-02-29", "cause": "Fire"}])]
         unpaid_amounts += [(f"blank paid amount {value!r}", [{**paid_loss, "lossPaid": value}]) for value in (None, "", " \t\n", "　", "\ufeff")]
@@ -684,12 +687,12 @@ try:
                     Case.objects.filter(pk=posted.pk).update(payload={**paid_base, "lossRecord": losses})
                     before = gen_audit(posted.case_uid).count()
                     response = docx(sales, kind="cover", caseUid=str(posted.case_uid), lossRecord=[paid_loss])
-                    check(f"Cover {structure}/Facility={facility}: {label} blocked without audit/request override", response.status_code == 409 and code(response) == "loss_record_paid_required" and message(response) == 'Complete Loss Paid for every Loss Record entry in the case before generating a Cover Note.' and gen_audit(posted.case_uid).count() == before)
+                    check(f"Cover {structure}/Facility={facility}: {label} blocked without audit/request override", response.status_code == 409 and code(response) == "loss_record_paid_required" and message(response) == 'Complete Loss Amount for every Loss Record entry in the case before generating a Cover Note.' and gen_audit(posted.case_uid).count() == before)
                     for kind in ("debit", "endorsement"):
                         check(f"{kind} {structure}/Facility={facility}: paid amount has no new restriction", docx(sales, kind=kind, caseUid=str(posted.case_uid)).status_code == 204)
                 for amount in (0, "0", " 0 ", 0.01, 125.5):
                     Case.objects.filter(pk=posted.pk).update(payload={**paid_base, "lossRecord": [{**paid_loss, "lossPaid": amount}]})
-                    check(f"Cover {structure}/Facility={facility}: saved Loss Paid {amount!r} accepted including zero", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
+                    check(f"Cover {structure}/Facility={facility}: saved Loss Amount {amount!r} accepted including zero", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
                 for label, losses in (("clean history", []), ("multiple paid entries", [paid_loss, {**paid_loss, "date": "2026-10-13", "cause": "Flood", "lossPaid": 125.5}])):
                     Case.objects.filter(pk=posted.pk).update(payload={**paid_base, "lossRecord": losses})
                     check(f"Cover {structure}/Facility={facility}: {label} accepted", docx(sales, kind="cover", caseUid=str(posted.case_uid)).status_code == 204)
@@ -777,10 +780,11 @@ try:
                 check(f"Debit {structure}: invalid saved installment date {value!r} blocked without fallback/request override/audit",response.status_code==409 and code(response)=="debit_installment_base_date_required" and message(response)=='Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before)
                 for kind in ("cover","endorsement"):
                     check(f"{kind} {structure}: no new installment date requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
-            for rows in bad_inst_rows:
+            for bad_index,rows in enumerate(bad_inst_rows):
                 Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"performanceInstallments":rows})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
-                check(f"Debit {structure}: malformed/missing/incomplete installment rows {rows!r} blocked",response.status_code==409 and code(response)=="debit_installment_base_date_required")
+                expected = "case_data_invalid" if bad_index in (1,3,7) else "debit_installment_base_date_required"
+                check(f"Debit {structure}: malformed/missing/incomplete installment rows {rows!r} blocked",response.status_code==409 and code(response)==expected)
             payload={**dates_base};payload.pop("performanceInstallments",None)
             Case.objects.filter(pk=posted.pk).update(payload=payload)
             response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
@@ -923,23 +927,25 @@ try:
             check(f"Debit {structure}: explicit zero allocation for every period blocked",response.status_code==409 and code(response)=="debit_installment_allocation_positive_required")
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Effective installment weights must be positive, even when original premium is zero.
+        # The final flag explicitly identifies unreadable monetary inputs. Blank
+        # underwriting/allocation fields keep the established document requirements.
         positive_cases=[
-            ({"premium":0,"ratio":50},False),({"premium":"0","ratio":50},False),
-            ({"premium":-1,"ratio":50},False),({"premium":"-1","ratio":50},False),
-            ({"premium":" \t\n","ratio":50},False),({"premium":False,"ratio":50},False),
-            ({"premium":[],"ratio":50},False),({"ratio":0},False),({"ratio":"0"},False),
-            ({"ratio":-1},False),({"ratio":"bad"},False),({"premium":"bad","ratio":0},False),
-            ({"premium":1,"ratio":0},True),({"premium":0.01,"ratio":0},True),
-            ({"premium":" 1 ","ratio":0},True),({"premium":None,"ratio":50},True),
-            ({"premium":"","ratio":50},True),({"ratio":0.01},True),
-            ({"premium":"bad","ratio":50},True),({"premium":{},"ratio":50},True),
+            ({"premium":0,"ratio":50},False,False),({"premium":"0","ratio":50},False,False),
+            ({"premium":-1,"ratio":50},False,False),({"premium":"-1","ratio":50},False,False),
+            ({"premium":" \t\n","ratio":50},False,False),({"premium":False,"ratio":50},False,True),
+            ({"premium":[],"ratio":50},False,True),({"ratio":0},False,False),({"ratio":"0"},False,False),
+            ({"ratio":-1},False,True),({"ratio":"bad"},False,True),({"premium":"bad","ratio":0},False,True),
+            ({"premium":1,"ratio":0},True,False),({"premium":0.01,"ratio":0},True,False),
+            ({"premium":" 1 ","ratio":0},True,False),({"premium":None,"ratio":50},True,False),
+            ({"premium":"","ratio":50},True,False),({"ratio":0.01},True,False),
+            ({"premium":"bad","ratio":50},False,True),({"premium":{},"ratio":50},False,True),
         ]
         for structure in ("QS","XOL"):
             positive_base={**original_payload,"reinsuranceStructure":structure,"underlyingLimits":"Primary","installmentEnabled":True,"paymentTermsDays":90}
             # 2026-10-16：每期每家再保人天數獨立填寫，fixture 明確填 r1，讓本段只測正數分配。
             row_base={"performanceMonth":"2026-03","paymentBaseDate":"2026-03-01","reinsurerPaymentTerms":{"r1":90}}
             for original in (0,1000):
-                for fields,valid in positive_cases:
+                for fields,valid,corrupt in positive_cases:
                     saved_rows=[{**row_base,**fields},{**row_base,"paymentBaseDate":"2026-06-01","ratio":1}]
                     saved={**positive_base,"originalPremium":original,"performanceInstallments":saved_rows}
                     Case.objects.filter(pk=posted.pk).update(payload=saved)
@@ -947,6 +953,8 @@ try:
                     response=docx(sales,kind="debit",caseUid=str(posted.case_uid),performanceInstallments=[{**row_base,"premium":1000,"ratio":100}],originalPremium=1000,installmentEnabled=False)
                     if valid:
                         check(f"Debit {structure}: original={original}, effective positive {fields!r} accepted",response.status_code==204)
+                    elif corrupt:
+                        check(f"Debit {structure}: unreadable monetary allocation {fields!r} blocked without override/audit/data change",response.status_code==409 and code(response)=="case_data_invalid" and gen_audit(posted.case_uid).count()==before and Case.objects.get(pk=posted.pk).payload==saved)
                     else:
                         check(f"Debit {structure}: original={original}, invalid effective allocation {fields!r} blocked without override/audit/data change",response.status_code==409 and code(response)=="debit_installment_allocation_positive_required" and message(response)=='Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.' and gen_audit(posted.case_uid).count()==before and Case.objects.get(pk=posted.pk).payload==saved)
             for gap in range(3):
@@ -958,9 +966,10 @@ try:
                 check(f"{kind} {structure}: no new positive allocation requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
             Case.objects.filter(pk=posted.pk).update(payload={**positive_base,"installmentEnabled":False,"performanceInstallments":[{**row_base,"premium":0}]})
             check(f"Debit {structure}: non-installment zero rows outside scope",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
-        for fields,valid in positive_cases[:12]:
+        for fields,valid,corrupt in positive_cases[:12]:
             Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":[{**row_base,**fields}]})
-            check("Treaty Draft: non-positive installment allocation exempt",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
+            response=docx(sales,kind="debit",caseUid=str(draft.case_uid))
+            check("Treaty Draft: blank/nonpositive allocation stays exempt; corrupted monetary data is blocked",response.status_code==(409 if corrupt else 204) and (not corrupt or code(response)=="case_data_invalid"))
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Treaty requirements are intentionally deferred, including reference/AE.
         Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure": "TREATY"})

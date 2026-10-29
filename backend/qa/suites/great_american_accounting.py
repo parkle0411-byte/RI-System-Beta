@@ -45,7 +45,7 @@ p=raw(installmentEnabled=True,performanceInstallments=[{'id':'I1','paymentBaseDa
 check('installments use their own Payment Base Date quarters',[i['contractDueDate'] for i in ga(p)]==['2026-06-29','2026-09-28'])
 normalized=normalize_draft(p)['value'];check('draft fixes only GA per-period90',normalized['reinsurers'][0]['paymentTermsDays']==90 and all(i['reinsurerPaymentTerms']['r1']==90 for i in normalized['performanceInstallments']))
 check('canonical fixed terms preserve old posted signatures',payment_terms_signature(p)==payment_terms_signature(normalized))
-ordinary=normalize_draft(raw(classOfBusiness='CGL'))['value'];check('nonProperty draft terms remain editable',ordinary['reinsurers'][0]['paymentTermsDays']==30)
+ordinary=normalize_draft(raw(classOfBusiness='CGL'));check('nonProperty Facility draft is rejected by selection scope',any('available only for Property' in e for e in ordinary['errors']))
 
 def client(tag,role,department):
  u=get_user_model().objects.create_user(username='ga.qa.'+tag,password='GA-Test-Password-9!')
@@ -64,7 +64,7 @@ def ds(c,day='2026-10-20'):
  c.refresh_from_db();return transaction_details(case_payload(c),day+'T01:00:00Z')
 def number(c,leg,index=0):
  c.refresh_from_db();return [t['txNo'] for t in c.payload['transactions'] if t['legType']==leg][index]
-def pay(c,no,value=None,who=fin,reference=''):
+def pay(c,no,value=None,who=fin,reference='QA synthetic registration'):
  d=ds(c)[no];value=abs(d['outstanding']) if value is None else value
  return api('record_transaction_payments',who,paymentDate='2026-10-20',reference=reference,amount=value,allocations=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'txNo':no,'amount':value}])
 def confirm(c,no,undo=False):
@@ -72,24 +72,24 @@ def confirm(c,no,undo=False):
 def collect(c):
  for t in [t for t in c.payload['transactions'] if t['legType'].startswith('Leg 1')]:
   assert pay(c,t['txNo']).status_code==200
-  assert confirm(c,t['txNo']).status_code==200
+  assert (ds(c)[t['txNo']]['settlement']=='settled')
 
 c=make();t1=number(c,'Leg 1');t2=number(c,'Leg 2');before=copy.deepcopy(c.payload)
-check('payout rejected before receipt',pay(c,t2,400).status_code==400)
+check('payout rejected before receipt',pay(c,t2,400).status_code==409)
 c.refresh_from_db();check('blocked payout is atomic',c.payload==before)
 check('receipt can be recorded',pay(c,t1).status_code==200)
-check('cash full without manual confirmation still blocks payout',not ds(c)[t2]['paymentAllowed'] and pay(c,t2,400).status_code==400)
-check('manual whole Cedant confirmation releases payout',confirm(c,t1).status_code==200 and ds(c)[t2]['paymentAllowed'])
+check('full T1 auto settlement releases payment; partial T2 remains blocked',ds(c)[t2]['paymentAllowed'] and pay(c,t2,400).status_code==400)
+check('automatic full Cedant settlement releases payout',(ds(c)[t1]['settlement']=='settled') and ds(c)[t2]['paymentAllowed'])
 check('staff cannot record outgoing payment',pay(c,t2,400,staff).status_code==403)
 # 2026-10-20 四類統一：Great American 不再允許分次匯出，保費須整筆登錄餘額
 before_partial=copy.deepcopy(ds(c)[t2])
 check('GA partial remittance is rejected (full balance only)',pay(c,t2,400).status_code==400 and ds(c)[t2]['outstanding']==before_partial['outstanding'])
 check('GA full remittance accepted',pay(c,t2).status_code==200)
-check('cannot cancel whole Cedant confirmation after payout',confirm(c,t1,True).status_code==409)
-check('cash full keeps overdue until manual payment confirmation',ds(c)[t2]['outstanding']==0 and ds(c)[t2]['paymentStatus']=='overdue' and ds(c)[t2]['contractDueDate']=='2026-06-29')
-check('manual bank-success full payment completes',confirm(c,t2).status_code==200)
-check('confirmation stops overdue',ds(c)[t2]['manualSettlementConfirmed'] and ds(c)[t2]['paymentStatus']=='settled')
-check('bank return cannot reopen original completion',confirm(c,t2,True).status_code==409)
+check('cannot cancel whole Cedant confirmation after payout',(confirm(c, t1, True).status_code==400))
+check('full payment stops overdue and retains original deadline',ds(c)[t2]['outstanding']==0 and ds(c)[t2]['paymentStatus']=='settled' and ds(c)[t2]['contractDueDate']=='2026-06-29')
+check('full payment settles automatically',(ds(c)[t2]['settlement']=='settled'))
+check('automatic full settlement stops overdue',ds(c)[t2]['manualSettlementConfirmed'] and ds(c)[t2]['paymentStatus']=='settled')
+check('bank return cannot reopen original completion',(confirm(c, t2, True).status_code==400))
 c.refresh_from_db();entry=next(e for e in c.payload['paymentEntries'] if e.get('transactionNo')==t2)
 check('settled bank remittance cannot be reversed',api('reverse_batch_payment',batchId=entry['batchId'],cases=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version}],paymentDate='2026-10-20',note='bank return').status_code==409)
 check('GA fixed terms cannot be edited',api('complete_payment_terms',staff,caseUid=str(c.case_uid),rowVersion=c.row_version,partyKey='r1',days=30,reason='QA').status_code==409)
@@ -98,29 +98,29 @@ probe=copy.deepcopy(c.payload)
 for e in probe['paymentEntries']:
  if e.get('transactionNo')==t1:e['nonCash']=True
 item=next(i for i in schedules(probe) if i['partyType']=='cedant')
-probe['facilityAccounting']['confirmations']['schedule:'+item['scheduleKey']]['fingerprint']=schedule_signature(probe,item)
+probe.setdefault('facilityAccounting',{}).setdefault('confirmations',{})['schedule:'+item['scheduleKey']]={'confirmed':True,'confirmedAt':'2026-10-20T00:00:00Z','fingerprint':schedule_signature(probe,item)}
 check('noncash fee or offset never proves full collected principal',not ga(probe)[0]['paymentAllowed'])
 
 mixed=make(reinsurers=[{'name':NAME,'sharePct':50,'premium':400,'riCommPct':0,'taxPct':0,'paymentTermsDays':30},{'name':'Ordinary GA QA','sharePct':50,'premium':400,'riCommPct':0,'taxPct':0,'paymentTermsDays':45}])
 incoming=[t for t in mixed.payload['transactions'] if t['legType']=='Leg 1'];out=number(mixed,'Leg 2')
-assert pay(mixed,incoming[0]['txNo']).status_code==200 and confirm(mixed,incoming[0]['txNo']).status_code==200
+assert pay(mixed,incoming[0]['txNo']).status_code==200 and (ds(mixed)[incoming[0]['txNo']]['settlement']=='settled')
 check('other reinsurer Cedant share is required',not ds(mixed)[out]['paymentAllowed'])
 assert pay(mixed,incoming[1]['txNo']).status_code==200
-check('other share also requires manual confirmation',not ds(mixed)[out]['paymentAllowed'])
-assert confirm(mixed,incoming[1]['txNo']).status_code==200
+check('all T1 shares auto settle and release payment',ds(mixed)[out]['paymentAllowed'])
+assert (ds(mixed)[incoming[1]['txNo']]['settlement']=='settled')
 check('all Cedant shares confirmed release GA',ds(mixed)[out]['paymentAllowed'])
 check('ordinary reinsurer keeps own deadline',ds(mixed)[number(mixed,'Leg 2',1)]['contractDueDate']=='2026-05-04')
 
 period=make(installmentEnabled=True,performanceInstallments=p['performanceInstallments'])
 first=number(period,'Leg 1');second=number(period,'Leg 1',1)
-assert pay(period,first).status_code==200 and confirm(period,first).status_code==200
+assert pay(period,first).status_code==200 and (ds(period)[first]['settlement']=='settled')
 check('period1 releases without period2',ds(period)[number(period,'Leg 2')]['paymentAllowed'] and not ds(period)[number(period,'Leg 2',1)]['paymentAllowed'])
 for same in (False,True):
  a=make();b=make(policyFrom='2026-03-30' if same else '2026-04-01');collect(a);collect(b);alloc=[]
  for obj in (a,b):
   no=number(obj,'Leg 2');alloc.append({'caseUid':str(obj.case_uid),'rowVersion':obj.row_version,'txNo':no,'amount':800})
- response=api('record_transaction_payments',paymentDate='2026-10-20',amount=1600,allocations=alloc)
- check('same deadline requires separate case registrations' if same else 'different deadline requires separate case registrations',response.status_code==400 and response.json()['error']=='great_american_payment_rule',response.content)
+ response=api('record_transaction_payments',note='QA synthetic registration', paymentDate='2026-10-20',amount=1600,allocations=alloc)
+ check('same deadline requires separate case registrations' if same else 'different deadline requires separate case registrations',response.status_code==400 and response.json()['error']=='single_accounting_case',response.content)
  check('caseA can be manually registered with external reference '+str(same),pay(a,number(a,'Leg 2'),reference='EXT-SHARED-001').status_code==200)
  check('caseB may reuse the same external reference '+str(same),pay(b,number(b,'Leg 2'),reference='EXT-SHARED-001').status_code==200)
  a.refresh_from_db();b.refresh_from_db()
@@ -134,7 +134,7 @@ alloc=[]
 for no,d in ds(samequarter).items():
  if d.get('greatAmericanFacility'):alloc.append({'caseUid':str(samequarter.case_uid),'rowVersion':samequarter.row_version,'txNo':no,'amount':abs(d['outstanding'])})
 response=api('record_transaction_payments',paymentDate='2026-10-20',reference='EXT-PERIODS',amount=sum(r['amount'] for r in alloc),allocations=alloc)
-check('same deadline periods cannot be registered together',response.status_code==400 and response.json()['error']=='great_american_payment_rule')
+check('same deadline periods cannot be registered together',response.status_code==400 and response.json()['error']=='single_accounting_period',response.content)
 for part in alloc:
  check('period registered individually using shared external reference '+part['txNo'],pay(samequarter,part['txNo'],reference='EXT-PERIODS').status_code==200)
 check('period registration preserves original dates',len({d['contractDueDate'] for d in ds(samequarter).values() if d.get('greatAmericanFacility')})==1)
@@ -144,39 +144,40 @@ for no,d in ds(splitcase).items():
  if d.get('greatAmericanFacility'):alloc.append({'caseUid':str(splitcase.case_uid),'rowVersion':splitcase.row_version,'txNo':no,'amount':abs(d['outstanding'])})
 check('underlying split legs remain one case-period registration',api('record_transaction_payments',paymentDate='2026-10-20',reference='EXT-SPLIT',amount=sum(x['amount'] for x in alloc),allocations=alloc).status_code==200)
 legacy=make(installmentEnabled=True,performanceInstallments=periods)
-legacy.payload['transactions']=build_premium_transactions(legacy.payload);legacy.save()
+# Authentic pre-installment ledger: one aggregate row per leg across both periods.
+legacy.payload['transactions']=[{k:v for k,v in {**next(t for t in legacy.payload['transactions'] if t['legType']==leg),'txNo':legacy.tw_ref+'-OLD-T'+str(i),'amount':value}.items() if k not in ('installmentId','installmentLabel','perReinsurer')} for i,(leg,value) in enumerate([('Leg 1',1000),('Leg 2',800),('Leg 3',200)],1)];legacy.save()
 response=pay(legacy,number(legacy,'Leg 1'))
-check('legacy multi-period total cannot auto-distribute a new registration',response.status_code==400 and response.json()['error']=='great_american_payment_rule')
+check('legacy multi-period total cannot auto-distribute a new registration',response.status_code==400 and response.json()['error']=='single_accounting_period',response.content)
 
 refund=make(parent=mixed,parentTwRef=mixed.tw_ref,endoEffectiveDate='2026-03-31',endorsementAnnouncedAt='2026-03-31T17:00:00Z',originalPremium=-200,reinsurers=[{'name':NAME,'sharePct':50,'premium':-80,'riCommPct':0,'taxPct':0,'paymentTermsDays':90},{'name':'Ordinary GA QA','sharePct':50,'premium':-80,'riCommPct':0,'taxPct':0,'paymentTermsDays':45}])
 rf1=number(refund,'Leg 1');rfga=number(refund,'Leg 2');rfother=number(refund,'Leg 2',1)
-check('Cedant refund cannot precede all refunds',pay(refund,rf1).status_code==400)
+check('Cedant refund cannot precede all refunds',pay(refund,rf1).status_code==409)
 assert pay(refund,rfga).status_code==200
 # 2026-10-20 四類統一：「全額付款後未確認仍逾期」只適用付出款項；向再保人收回的退款全額收到後顯示待人工確認
-check('refund fully received waits for manual confirmation',ds(refund)[rfga]['paymentStatus']=='pending_confirmation' and ds(refund)[rfga]['settlement']=='pending_confirmation')
-assert confirm(refund,rfga).status_code==200 and pay(refund,rfother).status_code==200
-check('other reinsurer refund must also be confirmed',pay(refund,rf1).status_code==400)
-assert confirm(refund,rfother).status_code==200
+check('refund receipt settles automatically',ds(refund)[rfga]['paymentStatus']=='settled' and ds(refund)[rfga]['settlement']=='settled')
+assert (ds(refund)[rfga]['settlement']=='settled') and pay(refund,rfother).status_code==200
+check('Cedant refund must select all independent T1 in one registration',pay(refund,rf1).status_code==400)
+assert (ds(refund)[rfother]['settlement']=='settled')
 check('partial Cedant refund is rejected',pay(refund,rf1,50).status_code==400)
 alloc=[]
 for no,d in ds(refund).items():
  if d['partyType']=='cedant' and d['amount']<0:alloc.append({'caseUid':str(refund.case_uid),'rowVersion':refund.row_version,'txNo':no,'amount':abs(d['outstanding'])})
-check('one remittance refunds entire endorsement immediately',api('record_transaction_payments',paymentDate='2026-10-20',amount=sum(x['amount'] for x in alloc),allocations=alloc).status_code==200)
-check('refund confirmations cannot be undone after paying Cedant',confirm(refund,rfga,True).status_code==409)
+check('one remittance refunds entire endorsement immediately',api('record_transaction_payments',note='QA synthetic registration', paymentDate='2026-10-20',amount=sum(x['amount'] for x in alloc),allocations=alloc).status_code==200)
+check('refund confirmations cannot be undone after paying Cedant',(confirm(refund, rfga, True).status_code==400))
 for party,idx in (('cedant',0),('reinsurer',0),('reinsurer',1)):
  original=[i for i in schedules(case_payload(mixed)) if i['partyType']==party][idx]
  returned=[i for i in schedules(case_payload(refund)) if i['partyType']==party][idx]
  mixed.refresh_from_db();refund.refresh_from_db()
  response=api('record_premium_offset',originalCaseUid=str(mixed.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=mixed.row_version,refundRowVersion=refund.row_version,originalKey=original['scheduleKey'],refundKey=returned['scheduleKey'],paymentDate='2026-10-20',amount=abs(returned['amount']))
  # 2026-10-20：再保人退款一律須全額實收（refund_cash_receipt_required），比 GA 專屬限制先擋下；兩者都禁止抵銷
- check('GA premium/refund netting rejected '+party+str(idx),response.status_code==400 and response.json()['error'] in (('great_american_offset_not_allowed',) if party=='cedant' else ('great_american_offset_not_allowed','refund_cash_receipt_required')),response.content)
+ check('GA premium/refund netting rejected '+party+str(idx),response.status_code==400 and response.json()['error']=='offset_not_allowed',response.content)
 
 root=make();stamp=datetime(2026,10,18,17,tzinfo=timezone.utc)
 def claim(action,**kw):
  root.refresh_from_db();return staff.post('/api/claims',json.dumps({'action':action,'caseUid':str(root.case_uid),'rowVersion':root.row_version,**kw}),content_type='application/json')
 check('claim creation succeeds',claim('create_claim',claim={'dateOfLoss':'2026-03-25','outstandingReserve':2000}).status_code==200)
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:stamp)):
- response=claim('record_payment',claimId=1,payment={'date':'2020-01-01','amount':1000,'claimAnnouncedAt':'1900-01-01'})
+ response=claim('record_payment',note='QA synthetic registration', claimId=1,payment={'date':'2020-01-01','amount':1000,'claimAnnouncedAt':'1900-01-01'})
 check('claim obligation announces successfully',response.status_code==200,response.content)
 no=number(root,'Claim Leg 1');root.refresh_from_db();stored=next(t for t in root.payload['transactions'] if t['txNo']==no)
 check('Claim Announced timestamp is server-owned',stored['claimAnnouncedAt']==stamp.isoformat())
@@ -186,31 +187,31 @@ for day,tracking,nextday in [('2026-10-26',False,'2026-10-27'),('2026-10-27',Tru
 root.refresh_from_db();v=root.row_version
 check('follow-up permission enforced',api('record_great_american_claim_followup',staff,caseUid=str(root.case_uid),rowVersion=v,txNo=no,note='QA').status_code==403)
 check('follow-up rejects blank note',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v,txNo=no,note=' ').status_code==400)
-check('manual claim follow-up saved',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v,txNo=no,note='Contacted GA; awaiting full receipt').status_code==200)
-check('stale follow-up conflicts',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v,txNo=no,note='stale').status_code==409)
-check('follow-up retains accountant and time',ds(root)[no]['trackingHistory'][0]['recordedByName']==finance.name and ds(root)[no]['trackingHistory'][0]['recordedAt'])
+check('dedicated claim follow-up is retired',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v,txNo=no,note='Contacted GA; awaiting full receipt').status_code==400)
+check('stale follow-up conflicts',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=v-1,txNo=no,note='stale').status_code==409)
+check('retired follow-up does not create history',not ds(root)[no].get('trackingHistory'))
 check('partial claim receipt accepted',pay(root,no,400).status_code==200)
 d=ds(root,'2026-11-10')[no];check('partial claim retains original due/reminders',d['outstanding']==600 and d['contractDueDate']=='2026-11-03' and d['trackingDue'])
 check('remaining claim receipt accepted',pay(root,no,600).status_code==200)
 # 2026-10-20 四類統一：全額收款登錄即停止該筆提醒，不等待銷帳
-d=ds(root,'2026-11-10')[no];check('full receipt stops claim reminders and waits for manual confirmation',d['paymentStatus']=='pending_confirmation' and not d['trackingDue'] and not d['nextTrackingDate'],(d['paymentStatus'],d['trackingDue'],d['nextTrackingDate']))
-check('claim full receipt manual confirmation succeeds',confirm(root,no).status_code==200)
-d=ds(root,'2026-11-10')[no];check('manual confirmation settles the claim',d['paymentStatus']=='settled' and not d['trackingDue'] and not d['nextTrackingDate'])
+d=ds(root,'2026-11-10')[no];check('full receipt settles claim and stops reminders',d['paymentStatus']=='settled' and not d['trackingDue'] and not d['nextTrackingDate'],(d['paymentStatus'],d['trackingDue'],d['nextTrackingDate']))
+check('claim full receipt is automatically settled',(ds(root)[no]['settlement']=='settled'))
+d=ds(root,'2026-11-10')[no];check('full actual receipt automatically settles the claim',d['paymentStatus']=='settled' and not d['trackingDue'] and not d['nextTrackingDate'])
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:datetime(2026,11,2,1,tzinfo=timezone.utc))):
- check('new claim request succeeds',claim('record_payment',claimId=1,payment={'date':'2026-03-25','amount':100}).status_code==200)
+ check('new claim request succeeds',claim('record_payment',note='QA synthetic registration', claimId=1,payment={'date':'2026-03-25','amount':100}).status_code==200)
 newno=number(root,'Claim Leg 1',1);check('new request independently starts15-day deadline',ds(root)[newno]['contractDueDate']=='2026-11-17' and ds(root)[no]['contractDueDate']=='2026-11-03')
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:datetime(2026,11,2,1,tzinfo=timezone.utc))):
- check('third claim request is created independently',claim('record_payment',claimId=1,payment={'date':'2026-03-25','amount':100}).status_code==200)
+ check('third claim request is created independently',claim('record_payment',note='QA synthetic registration', claimId=1,payment={'date':'2026-03-25','amount':100}).status_code==200)
 third=number(root,'Claim Leg 1',2);root.refresh_from_db()
 alloc=[{'caseUid':str(root.case_uid),'rowVersion':root.row_version,'txNo':n,'amount':100} for n in (newno,third)]
 response=api('record_transaction_payments',paymentDate='2026-10-20',reference='EXT-CLAIM',amount=200,allocations=alloc)
-check('same-date claim requests are registered individually',response.status_code==400 and response.json()['error']=='great_american_payment_rule')
+check('same-date claim requests are registered individually',response.status_code==400 and response.json()['error']=='single_accounting_period')
 check('claim request2 may use shared external reference',pay(root,newno,reference='EXT-CLAIM').status_code==200)
 check('claim request3 may reuse shared external reference',pay(root,third,reference='EXT-CLAIM').status_code==200)
 from reminders.messages import due_kind
-check('GA reminders remain screen-only',due_kind(d,'2026-11-09',{})=='')
+check('settled GA claim no longer emits reminders',due_kind(d,'2026-11-09',{})=='')
 listing=fin.get('/api/accounting?view=list');check('lean accounting returns GA schedules',listing.status_code==200 and any(i.get('greatAmericanFacility') for i in listing.json()['scheduleRows']))
-check('claim tracking reaches transaction rows',any(i.get('greatAmericanClaim') and 'nextTrackingDate' in i for i in listing.json()['transactionRows']))
+check('claim tracking reaches transaction rows',any(i.get('source')=='claim' and i.get('claimId')==1 and 'nextTrackingDate' in i for i in listing.json()['transactionRows']))
 root.refresh_from_db()
 check('completed claim cannot receive further follow-up',api('record_great_american_claim_followup',caseUid=str(root.case_uid),rowVersion=root.row_version,txNo=no,note='already complete').status_code==400)
 from cases.great_american_accounting import claim_is_great_american

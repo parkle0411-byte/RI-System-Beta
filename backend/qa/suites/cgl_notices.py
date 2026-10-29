@@ -21,8 +21,16 @@ def ready():
         coverages=['Medical Payment'],lossRecordYears=5,lossAdvisedDate='2026-01-01',originalPremium=1000,paymentTermsDays=90,
         basisOfValuation='Other',basisOfValuationOther='',indemnityPeriod='Legacy 24 months',
         reinsurers=[dict(name='QA General Re',sharePct=100,premium=1000,riCommPct=5,taxPct=0,paymentTermsDays=90)],
-        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredProducts='Products',
+        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredBusinessSelections=['Other'],insuredBusinessOther='Business',insuredProducts='Products',
             estimatedTurnover=[dict(region='USA/Canada',currency='USD',amount=1000000)],specialAgreementApplies='notApplicable'))
+# Complete fixtures include the newly confirmed QS formal fields.
+_legacy_ready = ready
+def ready():
+    p = _legacy_ready()
+    p.setdefault('originalInsuredCn', 'QS QA CN')
+    p.setdefault('riCommPct', 0)
+    p.setdefault('taxPct', 0)
+    return p
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
@@ -43,10 +51,10 @@ try:
     check('legacy valuation explanation retained',result['value']['basisOfValuationOther']=='Legacy replacement wording')
     check('multi-line notices retained',result['value']['notices']=='通知\nsecond')
     check('multiple principal addresses and leading zeros retained',result['value']['situations']==base['situations'])
-    for patch in [dict(classOfBusiness='Property'),dict(reinsuranceStructure='TREATY'),dict(reinsurers=[dict(name='QA (Facility)')]),dict(reinsurers=[dict(name='Swiss Re Asia')]),dict(reinsurers=[dict(name='QA',foreignBroker='PWS')])]:
+    for patch in [dict(classOfBusiness='Property'),dict(reinsuranceStructure='TREATY'),dict(reinsurers=[dict(name='QA (Facility)')]),dict(reinsurers=[dict(name='Swiss Re Asia')]),dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])]:
         issues=validate_announce_ready({**base,**patch})
         check('non-standard scope still requires Other wording '+repr(patch),any(i['field']=='basisOfValuationOther' for i in issues))
-    for patch,field in [(dict(address='',postcode='123'),'.address'),(dict(address='QA road',postcode=''),'.postcode'),(dict(address='QA road',postcode='12'),'.postcode'),(dict(address='QA road',postcode='A12'),'.postcode')]:
+    for patch,field in [(dict(address='',postcode='123'),'.address'),(dict(address='QA road',postcode='1234567'),'.postcode'),(dict(address='QA road',postcode='12'),'.postcode'),(dict(address='QA road',postcode='A12'),'.postcode')]:
         p={**base,'situations':[base['situations'][0],patch]}
         check('second address remains required '+repr(patch),any(i['field']=='situations.1'+field for i in validate_announce_ready(p)))
     response=call('post','/api/cases',dict(case={**base,'notices':''}));check('API creates draft with hidden Other and no notices',response.status_code==201,response.content[:400])
@@ -64,10 +72,11 @@ try:
         check('API read round-trips notices '+repr(wording),response.status_code==200 and response.json()['case']['payload']['notices']==wording,response.content[:400])
         response=call('post','/api/document-generation-log',dict(caseUid=str(uid),kind='cover',format='docx'));check('Cover allows optional notices '+repr(wording),response.status_code==204,response.content[:400])
     stored=copy.deepcopy(case.payload)
-    for patch,error in [(dict(address='',postcode='123'),'situation_address_required'),(dict(address='QA Road',postcode=''),'situation_postcode_required'),(dict(address='QA Road',postcode='12'),'situation_postcode_required')]:
+    for patch,error in [(dict(address='',postcode='123'),'situation_address_required'),(dict(address='QA Road',postcode='1234567'),'situation_postcode_required'),(dict(address='QA Road',postcode='12'),'situation_postcode_required')]:
         Case.objects.filter(pk=case.pk).update(payload={**stored,'situations':[base['situations'][0],patch]})
         response=call('post','/api/document-generation-log',dict(caseUid=str(uid),kind='cover',format='docx'))
-        check('Cover checks every principal address '+repr(patch),response.status_code==409 and response.json().get('error')==error,response.content[:400])
+        expected = response.status_code==204 if not patch['address'] else response.status_code==409 and response.json().get('error')==error
+        check('New CGL optional address / supplied postcode '+repr(patch),expected,response.content[:400])
     raise Rollback()
 except Rollback:pass
 print(f'{len(checks)}/{len(checks)} CGL notices checks passed; database changes rolled back')

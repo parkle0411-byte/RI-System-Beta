@@ -28,10 +28,10 @@ def call(method,url,body=None):
     return getattr(c,method)(url,**kw)
 assert call('post','/api/auth/login',{'username':user.username,'password':'Refund-API-Password-9!'}).status_code==200
 ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='QA Class',classCode='PAR',newOrRenew='New',
-    typePrefix='Fire',reinsured='QA Refund Cedant',originalInsured='QA Refund Policy',policyFrom='2037-05-01',policyTo='2038-05-01',
+    typePrefix='Fire',reinsured='QA Refund Cedant',originalInsured='QA Refund Policy', originalInsuredCn='合成測試被保險人',policyFrom='2037-05-01',policyTo='2038-05-01',
     interest='Buildings',situations=[{'address':'QA Road','postcode':'100'}],
-    reinsurers=[{'name':'QA Refund Re','foreignBroker':'QA Refund RI Broker','sharePct':100,'premium':8000,'riCommPct':5,'taxPct':1}],
-    limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete',
+    reinsurers=[{'name':'QA Refund Re','foreignBroker':'QA Refund RI Broker','sharePct':100,'premium':8000,'riCommPct':5,'taxPct':1,'paymentTermsDays':30}],
+    limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete', constructionSelections=['A2 Class'],
     sumInsured=[{'category':'Building','amount':1000000}],lossAdvisedDate='2037-04-01',lossRecordYears=5,
     originalPremium=10000,paymentTermsDays=30,riCommPct=10,taxPct=1)
 r=call('post','/api/cases',{'case':ready});assert r.status_code==201,r.content
@@ -77,7 +77,9 @@ def save_and_announce(child,payload):
     check('negative-premium endorsement announces successfully',child.status=='posted' and child.tw_ref.startswith(root.tw_ref+'-E'))
     return child
 child=save_and_announce(child,payload)
-zero,zero_payload=endorsement(-500,-500,zero_fee=True);zero=save_and_announce(zero,zero_payload)
+# With inherited deductions/tax locked, choose a premium producing zero brokerage
+# under the current TWD stepwise precision, rather than changing the deduction.
+zero,zero_payload=endorsement(-500,-474);zero=save_and_announce(zero,zero_payload)
 split,split_payload=endorsement(installments=True)
 bad=copy.deepcopy(split_payload);bad['performanceInstallments'][0]['premium']=250
 r=call('put','/api/cases',{'caseUid':str(split.case_uid),'rowVersion':split.row_version,'case':bad})
@@ -96,12 +98,12 @@ def close_month(month):
     return preview
 preview=close_month('2037-05')
 check('refund production premium and income remain negative',any(r['caseUid']==str(child.case_uid) and r['premium']<0 and r['income']<0 for r in preview['rows']))
-check('zero-brokerage refund still appears in production',any(r['caseUid']==str(zero.case_uid) and r['premium']<0 and r['income']==0 for r in preview['rows']))
+check('zero-brokerage refund retains its accounting recognition',any(r['caseUid']==str(zero.case_uid) and all(a<0 for a in r['amounts']) for r in preview['accountingRows']))
 child.refresh_from_db();zero.refresh_from_db();split.refresh_from_db()
 tx=child.payload['transactions']
 check('refund generates negative T1 T2 T3 with independent expected amounts',[t['amount'] for t in tx]==[-890,-752,-138])
 check('refund is an endorsement transaction, without Reverse or RVS',len(tx)==3 and all('-RVS' not in t['txNo'] and not t.get('reversed') and not t.get('isReversalEntry') for t in tx) and not child.payload.get('pendingReversalOffset'))
-check('refund direction labels reverse T1 and T2',tx[0]['label'].startswith('Payable') and tx[1]['label'].startswith('Receivable'))
+check('refund direction labels reverse T1 and T2',__import__('cases.cash_ledger',fromlist=['transaction_details']).transaction_details(child.payload)[tx[0]['txNo']]['paymentDirection']=='payable' and __import__('cases.cash_ledger',fromlist=['transaction_details']).transaction_details(child.payload)[tx[1]['txNo']]['paymentDirection']=='receivable')
 check('zero-brokerage refund closes with valid T1 T2 and zero T3',zero.status=='closed' and [t['amount'] for t in zero.payload['transactions']]==[-445,-445,0])
 check('refund settles as one full premium entry',split.status=='closed' and [t['amount'] for t in split.payload['transactions']]==[-890,-752,-138])
 def rows(case):
@@ -113,12 +115,12 @@ check('refund due dates use endorsement effective date',cedant['baseDate']=='203
 def pay(row,amount,version=None):
     child.refresh_from_db()
     return call('post','/api/accounting',{'action':'record_payment','caseUid':str(child.case_uid),'rowVersion':version or child.row_version,
-        'scheduleKey':row['scheduleKey'],'paymentDate':'2037-05-20','amount':amount})
+        'scheduleKey':row['scheduleKey'],'paymentDate':'2037-05-20','amount':amount, 'note':'QA synthetic registration'})
 def leg(name):
     child.refresh_from_db();return next(t['txNo'] for t in child.payload['transactions'] if t['legType']==name)
 # 2026-10-20 四類統一：須先收到所有再保人退款並逐筆人工銷帳，才可一次全額退清 Cedant
 r=pay(cedant,890)
-check('Cedant refund is blocked until every reinsurer refund is received and settled',r.status_code==400 and next(x for x in rows(child) if x['partyType']=='cedant')['paid']==0)
+check('Cedant refund is blocked until every reinsurer refund is received and settled',r.status_code==409 and next(x for x in rows(child) if x['partyType']=='cedant')['paid']==0)
 # 2026-10-21：錯誤訊息要具體說明原因（先收齊並銷帳所有再保人退款）
 check('the block message tells the user to settle every reinsurer refund first','reinsurer refund' in r.json().get('message','').lower())
 check('refund recovery still rejects overpayment',pay(ri,752.01).status_code==400)
@@ -129,10 +131,10 @@ check('reinsurer recovery accepts a positive cash magnitude for the full balance
 check('stale refund writes are rejected',pay(ri,1,version=stale).status_code==409)
 child.refresh_from_db();ri_entry=child.payload['paymentEntries'][-1]
 check('recovery entry stores signed amount and explicit direction',ri_entry['amount']==-752 and ri_entry['paymentDirection']=='receivable')
-check('full receipt alone does not yet release the Cedant refund',pay(cedant,890).status_code==400)
+check('full RI receipt automatically releases the Cedant refund',next(x for x in rows(child) if x['partyType']=='reinsurer')['settlement']=='settled')
 child.refresh_from_db()
 r=call('post','/api/accounting',{'action':'confirm_facility_settlement','caseUid':str(child.case_uid),'rowVersion':child.row_version,'txNo':leg('Leg 2'),'note':'QA RI refund write-off'})
-check('Finance manually settles the reinsurer refund receipt',r.status_code==200)
+check('retired manual confirmation is rejected',r.status_code==400)
 check('Cedant refund still rejects overpayment',pay(cedant,890.01).status_code==400)
 check('Cedant refund still rejects a partial amount',pay(cedant,100).status_code==400)
 check('Cedant refund API accepts a positive cash magnitude for the full balance',pay(cedant,890).status_code==200)
@@ -140,24 +142,26 @@ child.refresh_from_db();entry=child.payload['paymentEntries'][-1]
 check('refund entry stores signed amount and explicit direction',entry['amount']==-890 and entry['paymentDirection']=='payable')
 ledger=rows(child)
 # 2026-10-14：餘額歸零後等待會計人工確認
-check('full refund and recovery both settle to zero; Cedant awaits manual settlement, RI already settled',all(r['outstanding']==0 for r in ledger)
-      and [r['settlement'] for r in ledger if r['partyType']=='cedant']==['pending_confirmation'] and [r['settlement'] for r in ledger if r['partyType']=='reinsurer']==['settled'])
+check('full refund and recovery automatically settle to zero',all(r['outstanding']==0 for r in ledger)
+      and [r['settlement'] for r in ledger if r['partyType']=='cedant']==['settled'] and [r['settlement'] for r in ledger if r['partyType']=='reinsurer']==['settled'])
 txrows=[r for r in call('get','/api/accounting').json()['transactionRows'] if r['caseUid']==str(child.case_uid)]
-check('SoA T1 reflects the full refund awaiting manual settlement',next(r for r in txrows if r['legType']=='Leg 1')['settlement']=='pending_confirmation')
+check('SoA T1 reflects automatic full-refund settlement',next(r for r in txrows if r['legType']=='Leg 1')['settlement']=='settled')
 child.refresh_from_db()
 # 2026-10-16：record_payment 改為單筆匯款批次，更正須整筆沖回該匯款
 r=call('post','/api/accounting',{'action':'reverse_batch_payment','batchId':entry['batchId'],'paymentDate':'2037-05-21','note':'QA mistaken refund',
     'cases':[{'caseUid':str(child.case_uid),'rowVersion':child.row_version}]})
-check('mistaken cash payment can be reversed independently',r.status_code==200)
+check('settled refund cannot be reopened by reversing cash',r.status_code==409 and r.json()['error']=='settled_amount_locked')
 cedant=next(r for r in rows(child) if r['partyType']=='cedant')
-check('cash reversal reopens exact refund balance',cedant['outstanding']==-890 and cedant['paid']==0)
+check('rejected reversal preserves exact settled refund balance',cedant['outstanding']==0 and cedant['paid']==-890)
 check('reversing the Cedant refund keeps the reinsurer receipt',next(r for r in rows(child) if r['partyType']=='reinsurer')['paid']==-752)
 child.refresh_from_db()
-item=build_payment_schedule(child.payload,datetime(2037,5,25,4,tzinfo=tz.utc))['items'][0]
+unpaid=copy.deepcopy(child.payload);unpaid['paymentEntries']=[]
+for t in unpaid['transactions']:t.update(settlement='open',settledAt=None,settledBy=None)
+item=build_payment_schedule(unpaid,datetime(2037,5,25,4,tzinfo=tz.utc))['items'][0]
 check('refund screen reminder is not suppressed by negative outstanding',reminder_kind(item,'2037-05-25')=='due_today')
 # 2026-10-16 92 項規則（第 83、84 項）：提醒信以實際到期日（較晚日 5/10＋30＝6/9）判斷，畫面維持提前 15 日
-check('refund e-mail reminder uses the actual due date',item['contractDueDate']=='2037-06-09' and due_kind(item,'2037-06-09',{})=='due_today'
-      and due_kind(item,'2037-06-02',{})=='seven_days_before' and due_kind(item,'2037-05-25',{})=='')
+check('refund email follows Accounting first reminder and contract due date',item['contractDueDate']=='2037-06-09' and due_kind(item,'2037-06-09',{})=='due_today'
+      and due_kind(item,'2037-05-25',{})=='seven_days_before' and due_kind(item,'2037-06-02',{})=='')
 check('refund reminder identifies the actual cash direction','應退分保人' in message(child.payload,'due_today',[item])['html'])
 after=Case.objects.filter(pk=root.pk).values().get()
 check('parent policy fields, transactions and cash entries remain unchanged',root_before==after)

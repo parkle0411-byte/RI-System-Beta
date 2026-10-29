@@ -18,13 +18,14 @@ def check(name, condition):
 
 
 def case(names, shares, premium, comm, tax, split, currency='TWD'):
+    # Property QS Original uses fixed 40/60 or 70/30; arbitrary legacy splits are verified outside that scope.
     # 2026-10-20：TWD 保費只准整數（每步取位到元）；USD 保留兩位小數
     whole = currency == 'TWD'
-    raw = {'reinsuranceStructure': 'QS', 'classOfBusiness': 'Property', 'currency': currency, 'reinsured': 'ZZ Cedant',
+    raw = {'reinsuranceStructure': 'QS', 'classOfBusiness': 'Legacy Split Class', 'currency': currency, 'reinsured': 'ZZ Cedant',
            'originalInsured': 'ZZ', 'policyFrom': '2026-10-01', 'policyTo': '2027-10-01', 'paymentTermsDays': 90,
            'originalPremium': premium, 'riCommPct': comm, 'taxPct': tax, 'installmentEnabled': False, 'cedantTermsBasis': 'case',
            'reinsurers': [{'name': n, 'sharePct': sh, 'premium': round(premium * sh / 100) if whole else round(premium * sh / 100, 2), 'riCommPct': comm, 'taxPct': tax,
-                           'paymentTermsDays': 60} for n, sh in zip(names, shares)]}
+                           'paymentTermsDays': 60} for n, sh in zip(names, shares)], 'originalInsuredCn':'合成測試被保險人'}
     if split:
         raw.update(splitEnabled=True, splitParties=[{'name': 'A', 'pct': split}, {'name': 'B', 'pct': round(100 - split, 6)}])
     result = normalize_draft(raw)
@@ -38,23 +39,18 @@ def case(names, shares, premium, comm, tax, split, currency='TWD'):
 known = case(['ZZ Re A', 'ZZ Re B'], [60, 40], 1800, 5, 0, 33)
 rows = build_premium_transactions(known)
 plain = build_premium_transactions({**known, 'splitEnabled': False})
-for leg in ('Leg 1', 'Leg 2', 'Leg 3'):
-    for idx in (0, 1):
-        a = next(t for t in rows if t['legType'] == leg + 'a' and t['reinsurerIdx'] == idx)['amount']
-        b = next(t for t in rows if t['legType'] == leg + 'b' and t['reinsurerIdx'] == idx)['amount']
-        whole = next(t for t in plain if t['legType'] == leg and t['reinsurerIdx'] == idx)['amount']
-        check(f'{leg} reinsurer {idx + 1}: a + b equals the leg', round(a + b, 2) == whole)
-
-# Unequal percentages that do not total 100 keep the original independent rounding.
-partial = {**known, 'splitParties': [{'name': 'A', 'pct': 30}, {'name': 'B', 'pct': 30}]}
-only = build_premium_transactions(partial)
-check('percentages not totalling 100 are not forced to the leg total', sum(t['amount'] for t in only if t['legType'] == 'Leg 1a') > 0)
+check('Performance Split does not split the independent T1/T2/T3 cash ledgers',[(t['txNo'],t['amount']) for t in rows]==[(t['txNo'],t['amount']) for t in plain] and len(rows)==6)
+from production.calc import build_production_preview
+report=build_production_preview([{'id':1,'case_uid':'QA-SPLIT','status':'posted','payload':known,'announced_at':'2026-10-01T00:00:00Z'}],'2026-10',{},[])['rows']
+check('Performance Split belongs to Production, with two people per reinsurer',len(report)==4)
+check('Production premium is conserved across the two people',sum(r['premium'] for r in report)==1800)
+check('Other Staff gets rounded Case total 820 x 67%=549; first RI absorbs the one-dollar tail',sum(r['income'] for r in report if r['ae']=='B')==549 and sum(r['income'] for r in report if r['ae']=='A')==271)
 
 random.seed(2026)
 bad = []
 for n in range(1500):
     count = random.randint(1, 3)
-    cuts = sorted(random.randint(1, 99) for _ in range(count - 1))
+    cuts = sorted(random.sample(range(1, 100), count - 1))
     shares = [b - a for a, b in zip([0] + cuts, cuts + [100])]
     currency = 'USD' if n % 2 else 'TWD'   # TWD 只用整數保費；USD 保留小數保費
     premiums = [509, 1800, 757.29, 1084, 333.33] if currency == 'USD' else [509, 1800, 757, 1084, 333]

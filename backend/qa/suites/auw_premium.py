@@ -25,7 +25,7 @@ def check(name, condition):
 user = get_user_model().objects.create_user(username='zz.auw.defaults', password='AUW-Defaults-Password-9!')
 person = Personnel.objects.create(name='QA AUW Default AE', department='admin', role_code='admin',
     auth_user_id=str(user.pk), account_status='active', created_by='qa', updated_by='qa')
-for kind, name in [('ae', person.name), ('class', 'QA AUW Default Class'), ('reinsured', 'QA AUW Cedant'),
+for kind, name in [('ae', person.name), ('class', 'Property'), ('reinsured', 'QA AUW Cedant'),
                    ('reinsurer', TARGET), ('foreign_broker', 'Howden Specialty Limited')]:
     MasterRecord.objects.get_or_create(entity_type=kind, name=name, defaults={'created_by':'qa', 'updated_by':'qa'})
 client = Client(enforce_csrf_checks=True, HTTP_HOST='localhost', raise_request_exception=False)
@@ -36,12 +36,12 @@ def call(method, url, body=None):
         kwargs.update(data=json.dumps(body), content_type='application/json')
     return getattr(client, method)(url, **kwargs)
 assert call('post', '/api/auth/login', {'username':user.username, 'password':'AUW-Defaults-Password-9!'}).status_code == 200
-ready = dict(reinsuranceStructure='QS', ae=person.name, currency='TWD', classOfBusiness='QA AUW Default Class',
-    classCode='ADF', newOrRenew='New', typePrefix='Fire', reinsured='QA AUW Cedant', originalInsured='QA AUW Defaults',
+ready = dict(reinsuranceStructure='QS', ae=person.name, currency='TWD', classOfBusiness='Property',
+    classCode='ADF', newOrRenew='New', typePrefix='Fire', reinsured='QA AUW Cedant', originalInsured='QA AUW Defaults', originalInsuredCn='合成測試被保險人', reinsuredRetention='Synthetic retention',
     policyFrom='2043-01-01', policyTo='2044-01-01', interest='Buildings', situations=[{'address':'QA Road', 'postcode':'100'}],
     reinsurers=[{'name':TARGET, 'sharePct':100, 'premium':8000, 'riCommPct':12.5, 'taxPct':1,
                  'foreignBroker':'Howden Specialty Limited'}], limitOfLiability=1000000, deductibles='As original',
-    originalConditions='As original', occupation='Office', construction='Concrete',
+    basisOfValuation='Replacement Value',originalConditions='As original', occupation='Office', construction='Concrete', constructionSelections=['A2 Class'],
     sumInsured=[{'category':'Building', 'amount':1000000}], lossAdvisedDate='2042-12-01', lossRecordYears=5,
     originalPremium=10000, paymentTermsDays=30, riCommPct=17, taxPct=1, manualTwRef='TW43SM010001')
 _ref_seq = [0]

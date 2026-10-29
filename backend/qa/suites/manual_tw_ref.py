@@ -25,7 +25,7 @@ def check(name, condition):
 user = get_user_model().objects.create_user(username='zz.manual.ref', password='Manual-Ref-Password-9!')
 person = Personnel.objects.create(name='QA Manual Reference AE', department='admin', role_code='admin',
     auth_user_id=str(user.pk), account_status='active', created_by='qa', updated_by='qa')
-for kind, name in [('ae', person.name), ('class', 'QA Manual Class'), ('reinsured', 'QA Manual Cedant'),
+for kind, name in [('ae', person.name), ('class', 'Property'), ('reinsured', 'QA Manual Cedant'),
                    ('reinsurer', TARGET), ('reinsurer', 'QA Ordinary Reinsurer'), ('foreign_broker', 'Howden Specialty Limited')]:
     MasterRecord.objects.create(entity_type=kind, name=name, created_by='qa', updated_by='qa')
 client = Client(enforce_csrf_checks=True, HTTP_HOST='localhost', raise_request_exception=False)
@@ -36,11 +36,11 @@ def call(method, url, body=None):
         kwargs.update(data=json.dumps(body), content_type='application/json')
     return getattr(client, method)(url, **kwargs)
 assert call('post', '/api/auth/login', {'username': user.username, 'password': 'Manual-Ref-Password-9!'}).status_code == 200
-ready = dict(reinsuranceStructure='QS', ae=person.name, currency='TWD', classOfBusiness='QA Manual Class', classCode='PAR',
-    newOrRenew='New', typePrefix='Fire', reinsured='QA Manual Cedant', originalInsured='QA Manual Reference Policy',
+ready = dict(reinsuranceStructure='QS', ae=person.name, currency='TWD', classOfBusiness='Property', classCode='PAR',
+    newOrRenew='New', typePrefix='Fire', reinsured='QA Manual Cedant', originalInsured='QA Manual Reference Policy', originalInsuredCn='合成測試被保險人', reinsuredRetention='Synthetic retention',
     policyFrom='2039-05-01', policyTo='2040-05-01', interest='Buildings', situations=[{'address':'QA Road', 'postcode':'100'}],
     reinsurers=[{'name':TARGET,'foreignBroker':'Howden Specialty Limited','sharePct':100,'premium':8000,'riCommPct':5,'taxPct':1}],
-    limitOfLiability=1000000, deductibles='As original', originalConditions='As original', occupation='Office', construction='Concrete',
+    limitOfLiability=1000000, deductibles='As original', basisOfValuation='Replacement Value',originalConditions='As original', occupation='Office', construction='Concrete', constructionSelections=['A2 Class'],
     sumInsured=[{'category':'Building','amount':1000000}], lossAdvisedDate='2039-04-01', lossRecordYears=5,
     originalPremium=10000, paymentTermsDays=30, riCommPct=10, taxPct=1)
 def create(payload):
@@ -61,6 +61,7 @@ def announce(row):
         'documentIds':[str(i) for i in CaseDocument.objects.filter(case=row,is_selected=True).values_list('pk',flat=True)]})
 normal_payload = copy.deepcopy(ready)
 normal_payload['reinsurers'][0]['name'] = 'QA Ordinary Reinsurer'
+normal_payload['reinsurers'][0]['paymentTermsDays']=90
 normal = create(normal_payload)
 check('ordinary draft has no extra reference in stored payload', 'manualTwRef' not in normal.payload)
 check('ordinary ready case does not require manual reference', not validate_announce_ready(normal.payload))

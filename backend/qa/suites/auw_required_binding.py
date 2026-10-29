@@ -26,7 +26,7 @@ def check(name, condition):
 user=get_user_model().objects.create_user(username='zz.auw.binding', password='AUW-Binding-Password-9!')
 person=Personnel.objects.create(name='QA AUW Binding AE',department='admin',role_code='admin',
     auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
-for kind,name in [('ae',person.name),('class','QA AUW Binding Class'),('reinsured','QA Binding Cedant'),
+for kind,name in [('ae',person.name),('class','Property'),('reinsured','QA Binding Cedant'),
                   ('reinsurer',TARGET),('reinsurer','QA Binding Ordinary'),('foreign_broker',HOWDEN)]:
     MasterRecord.objects.get_or_create(entity_type=kind,name=name,defaults={'created_by':'qa','updated_by':'qa'})
 client=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False)
@@ -36,11 +36,11 @@ def call(method,url,body=None):
     if body is not None:options.update(data=json.dumps(body),content_type='application/json')
     return getattr(client,method)(url,**options)
 assert call('post','/api/auth/login',{'username':user.username,'password':'AUW-Binding-Password-9!'}).status_code==200
-ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='QA AUW Binding Class',classCode='ABR',
+ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='Property',classCode='ABR',
     newOrRenew='New',typePrefix='Fire',reinsured='QA Binding Cedant',originalInsured='QA Binding Policy',
     policyFrom='2045-01-01',policyTo='2046-01-01',interest='Buildings',situations=[{'address':'QA Road','postcode':'100'}],
     reinsurers=[{'name':TARGET,'foreignBroker':'Other Broker','sharePct':100,'premium':8000,'riCommPct':12.5,'taxPct':1}],
-    limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete',
+    limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete', constructionSelections=['A2 Class'],
     sumInsured=[{'category':'Building','amount':1000000}],lossAdvisedDate='2044-12-01',lossRecordYears=5,
     originalPremium=10000,paymentTermsDays=90,riCommPct=17,taxPct=1,manualTwRef='TW45SM010001')
 _ref_seq = [0]
@@ -119,9 +119,9 @@ check('legacy wrong Howden blocks direct Announce before allocating a TW ref',re
     and any(issue['field']=='reinsurers.0.foreignBroker' for issue in response.json()['issues'])
     and list(ReferenceSequence.objects.values())==sequence)
 
-# Workflow-created drafts also require the new reference before they exist.
-# 續保只能從最新的已確認案件建立（之後加入的規則），所以兩個動作各用一張獨立的原保單
-for number, action in enumerate(['create_endorsement','create_renewal'], 1):
+# Original/renewal manual references retain their requirements. Endorsement
+# references are now server-derived on successful Announce (2026-10-28).
+for number, action in enumerate(['create_renewal'], 1):
     root=create(ready);root.status='closed';root.tw_ref=f'TWABR459900{number}'
     root.payload['transactions']=build_premium_transactions({**root.payload,'twRef':root.tw_ref})
     root.save()
@@ -136,6 +136,11 @@ for number, action in enumerate(['create_endorsement','create_renewal'], 1):
     check(action+' stores a separate entered ref and fixed Howden',child.payload['manualTwRef']=='NEW-'+action
           and child.payload['reinsurers'][0]['foreignBroker']==HOWDEN and child.tw_ref is None
           and child.payload['reinsurers'][0]['riCommPct']==12.5)
+root=create(ready);root.status='closed';root.tw_ref='TWABR4599002';root.save()
+response=workflow(root,'create_endorsement',manualTwRef={'obsolete':'ignored'})
+assert response.status_code==201,response.content
+child=Case.objects.get(case_uid=response.json()['case']['caseUid'])
+check('endorsement needs no manual reference and keeps inherited Howden/deductions',not child.payload.get('manualTwRef') and child.tw_ref is None and child.payload['reinsurers'][0]['foreignBroker']==HOWDEN and child.payload['reinsurers'][0]['riCommPct']==root.payload['reinsurers'][0]['riCommPct'])
 check('workflow drafts do not allocate automatic references',list(ReferenceSequence.objects.values())==sequence)
 normal.status='closed';normal.tw_ref='TWABR4501002';normal.save()
 response=workflow(normal,'create_renewal')

@@ -35,7 +35,7 @@ def details(case):case.refresh_from_db();return transaction_details(case.payload
 def tx(case,leg,index=0):case.refresh_from_db();return [t['txNo'] for t in case.payload['transactions'] if t['legType']==leg][index]
 def request(c,action,**body):return c.post('/api/accounting',data=json.dumps({'action':action,**body}),content_type='application/json')
 def pay(c,case,leg,value,index=0,date='2026-10-01'):
- no=tx(case,leg,index);return request(c,'record_transaction_payments',paymentDate=date,amount=value,allocations=[{'caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no,'amount':value}])
+ no=tx(case,leg,index);return request(c,'record_transaction_payments',note='QA synthetic registration', paymentDate=date,amount=value,allocations=[{'caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no,'amount':value}])
 def settle(c,case,leg,index=0,undo=False,**extra):
  no=tx(case,leg,index);return request(c,'unconfirm_facility_settlement' if undo else 'confirm_facility_settlement',caseUid=str(case.case_uid),rowVersion=case.row_version,txNo=no,note='AR92 checked',**extra)
 def offset(c,root,refund,party='cedant'):
@@ -52,17 +52,17 @@ try:
   a=make()
   check('premium partial receipt rejected',pay(fin,a,'Leg 1',200).status_code==400)
   check('full premium receipt accepted',pay(fin,a,'Leg 1',1000).status_code==200)
-  check('received is distinct from manual settlement',details(a)[tx(a,'Leg 1')]['settlement']=='pending_confirmation')
-  check('manual T1 settlement succeeds',settle(fin,a,'Leg 1').status_code==200)
+  check('full received premium automatically settles',details(a)[tx(a,'Leg 1')]['settlement']=='settled')
+  check('full T1 settlement is derived from actual cash',(details(a)[tx(a, 'Leg 1')]['settlement']=='settled'))
   a.refresh_from_db();entry=a.payload['paymentEntries'][0]
   check('settled amount editing rejected',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=900,reason='test').status_code==409)
-  check('T1 can cancel before final T3',settle(fin,a,'Leg 1',undo=True).status_code==200)
-  a.refresh_from_db();check('ever-settled amount stays locked after cancellation',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=1000,reason='test').status_code==409)
-  check('T1 can be explicitly re-settled',settle(fin,a,'Leg 1').status_code==200)
+  check('retired undo cannot reopen T1 before T3',(settle(fin, a, 'Leg 1', undo=True).status_code==400))
+  a.refresh_from_db();check('ever-settled amount stays locked after rejected cancellation',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=1000,reason='test').status_code==409)
+  check('T1 remains automatically settled after rejected undo',(details(a)[tx(a, 'Leg 1')]['settlement']=='settled'))
   check('full T2 payment accepted',pay(fin,a,'Leg 2',800).status_code==200)
-  check('T3 blocked before T2 manual settlement',settle(fin,a,'Leg 3').status_code==400)
-  check('T2 and T3 settle explicitly',settle(fin,a,'Leg 2').status_code==200 and settle(fin,a,'Leg 3').status_code==200)
-  check('final T3 locks all three cancellation paths',all(settle(fin,a,l,undo=True).status_code==409 for l in ['Leg 1','Leg 2','Leg 3']))
+  check('retired manual T3 confirmation is rejected',settle(fin,a,'Leg 3').status_code==400)
+  check('full T2 cash automatically settles T2 and T3',(details(a)[tx(a, 'Leg 2')]['settlement']=='settled') and (details(a)[tx(a, 'Leg 3')]['settlement']=='settled'))
+  check('final T3 locks all three cancellation paths',all((settle(fin, a, l, undo=True).status_code==400) for l in ['Leg 1','Leg 2','Leg 3']))
   from cases.workflow import build_reversed_payload
   try:build_reversed_payload(a.payload);blocked=False
   except ValueError:blocked=True
@@ -73,7 +73,7 @@ try:
    claimroot.refresh_from_db();return sales.post('/api/claims',data=json.dumps({'action':action,'caseUid':str(claimroot.case_uid),'rowVersion':claimroot.row_version,**body}),content_type='application/json')
   check('claim reserve creation succeeds without accounting entries',claimwrite('create_claim',claim={'dateOfLoss':'2026-03-01','outstandingReserve':1000}).status_code==200)
   old=len(claimroot.payload['transactions']);claimroot.refresh_from_db();check('reserve has no ledger',len(claimroot.payload['transactions'])==old)
-  check('record claim creates obligations immediately',claimwrite('record_payment',claimId=1,payment={'date':'2026-01-01','amount':1000}).status_code==200)
+  check('record claim creates obligations immediately',claimwrite('record_payment',note='QA synthetic registration', claimId=1,payment={'date':'2026-01-01','amount':1000}).status_code==200)
   claimroot.refresh_from_db();claims=[t for t in claimroot.payload['transactions'] if t.get('source')=='claim']
   check('claim uses loss-date 60/40 not later 50/50', [t['amount'] for t in claims if t['legType']=='Claim Leg 1']==[600,400])
   expected=(timezone.now().astimezone(__import__('zoneinfo').ZoneInfo('Asia/Taipei')).date()+timedelta(days=15)).isoformat()
@@ -100,21 +100,21 @@ try:
   check('Finance cannot edit case contract terms',request(fin,'complete_payment_terms',**key).status_code==403)
   check('case staff can complete missing terms without Reverse',request(sales,'complete_payment_terms',**key).status_code==200)
   pending.refresh_from_db();key['rowVersion']=pending.row_version
-  check('existing valid contract days remain locked',request(sales,'complete_payment_terms',**key).status_code==409)
+  check('unhandled contract days remain editable with an explicit reason',request(sales,'complete_payment_terms',**key).status_code==200)
   root=make('OFFSET');refund=make('REFUND',parent=root,originalPremium=-200,reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
-  assert pay(fin,refund,'Leg 2',160).status_code==200 and settle(fin,refund,'Leg 2').status_code==200
-  check('ordinary premium manual offset succeeds after all RI refund cash is received and settled',offset(fin,root,refund).status_code==200)
-  check('manual offset creates no bank receipt and does not auto-settle',details(root)[tx(root,'Leg 1')]['cashPaid']==0 and details(root)[tx(root,'Leg 1')]['outstanding']==800 and details(refund)[tx(refund,'Leg 1')]['settlement']=='pending_confirmation')
+  assert pay(fin,refund,'Leg 2',160).status_code==200 and (details(refund)[tx(refund, 'Leg 2')]['settlement']=='settled')
+  check('ordinary offsets remain rejected after all RI refunds settle',offset(fin,root,refund).status_code==400)
+  check('rejected offset leaves all balances and cash records unchanged',details(root)[tx(root,'Leg 1')]['cashPaid']==0 and details(root)[tx(root,'Leg 1')]['outstanding']==1000 and details(refund)[tx(refund,'Leg 1')]['outstanding']==-200)
   try:build_reversed_payload(root.payload);blocked=False
   except ValueError:blocked=True
-  check('offset history blocks Case Reverse',blocked)
+  check('rejected offset creates no history or Reverse block',not blocked)
   sname='Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)'
   swiss=make('SWISS',reinsurers=[{'name':sname,'sharePct':100,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':90}])
   swissrefund=make('SWISSREF',parent=swiss,endoEffectiveDate='2026-09-01',announced=datetime(2026,9,1,tzinfo=dtz.utc),originalPremium=-200,reinsurers=[{'name':sname,'sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':90}])
   check('Swiss cannot offset before collection prerequisites',offset(fin,swiss,swissrefund,'reinsurer').status_code==400 and offset(fin,swiss,swissrefund,'cedant').status_code==400)
-  check('Swiss payment waits for Cedant manual settlement',pay(fin,swiss,'Leg 2',800).status_code==400)
-  check('Swiss full Cedant receipt and settlement accepted',pay(fin,swiss,'Leg 1',1000).status_code==200 and settle(fin,swiss,'Leg 1').status_code==200)
-  check('Swiss still requires statement reference',pay(fin,swiss,'Leg 2',800).status_code==400)
+  check('Swiss payment waits for full Cedant cash settlement',pay(fin,swiss,'Leg 2',800).status_code==409)
+  check('Swiss full Cedant receipt and settlement accepted',pay(fin,swiss,'Leg 1',1000).status_code==200 and (details(swiss)[tx(swiss, 'Leg 1')]['settlement']=='settled'))
+  check('Swiss still requires statement reference',pay(fin,swiss,'Leg 2',800).status_code==409)
   swiss.refresh_from_db();key={'caseUid':str(swiss.case_uid),'rowVersion':swiss.row_version,'scheduleKey':'case-effective-date:reinsurer:r1'}
   check('Swiss statement ref can be entered after collection',request(fin,'mark_swiss_statement',**key,reference='SWISS-AR92').status_code==200)
   check('Swiss payment accepted after collection and reference',pay(fin,swiss,'Leg 2',800).status_code==200)
@@ -122,7 +122,7 @@ try:
   check('separate Swiss collected checkbox removed',request(fin,'confirm_swiss_collection',caseUid=str(swiss.case_uid),rowVersion=swiss.row_version,scheduleKey='case-effective-date:cedant').status_code==400)
   # Close a month containing only a zero-income obligation: no Production rows.
   zero=make('ZERO',status='posted',policyFrom='2031-05-01',policyTo='2032-05-01',announced=datetime(2031,5,1,tzinfo=dtz.utc),reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':1000,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
-  zero.payload['transactions']=[];zero.save()
+  zero_ids=[(t['txNo'],t['amount']) for t in zero.payload['transactions']]
   prod='/api/production-report'
   view=mgr.get(prod+'?month=2031-05').json();preview=view.get('preview',view)
   check('zero-income preview excludes performance rows but includes accounting rows',not preview['rows'] and len(preview.get('accountingRows',[]))==1,view.keys())
@@ -130,7 +130,7 @@ try:
   generated=prodpost('generate',sourceSignature=preview['sourceSignature']);check('zero-income-only report can be generated',generated.status_code==201,generated.content)
   report=generated.json()['report'];closed=prodpost('close',reportUid=report['reportUid'],rowVersion=report['rowVersion'],sourceSignature=report['sourceSignature'])
   check('zero-income-only report close succeeds',closed.status_code==200,closed.content)
-  zero.refresh_from_db();check('zero-income close creates T1/T2/T3 and Confirmed',zero.status=='closed' and len(zero.payload['transactions'])==3)
+  zero.refresh_from_db();check('zero-income close recognizes existing Announce obligations without duplication',zero.status=='closed' and [(t['txNo'],t['amount']) for t in zero.payload['transactions']]==zero_ids and len(zero_ids)==3)
   check('new premium obligations retain actual posting month',all(t['postedMonth']=='2031-05' for t in zero.payload['transactions']))
   # Reminder service is fully mocked: no live or test SMTP is ever contacted.
   from reminders.runner import run_payment
@@ -141,8 +141,8 @@ try:
   check('Finance Manager not added to financial recipient group',mp.email not in recipients['recipients'])
   mailcase=make('MAIL',policyFrom='2031-05-16',policyTo='2032-05-16',ae=sp.name)
   with patch('reminders.runner._open_cases',return_value=Case.objects.filter(pk=mailcase.pk)),patch('reminders.runner._send',return_value='AR92-MOCK') as sender,patch('reminders.runner.is_reserved_test_email',return_value=False),override_settings(PAYMENT_REMINDER_EMAIL_ENABLED=True):
-   first=run_payment('2031-06-08');check('reminder sends seven days before actual contract due',first['sent']==1,first)
-   check('same-day reminder deduplicated',run_payment('2031-06-08')['sent']==0)
+   first=run_payment('2031-05-31');check('reminder sends on Cedant Accounting reminder date',first['sent']==1,first)
+   check('same-day reminder deduplicated',run_payment('2031-05-31')['sent']==0)
    check('due-day reminder sends',run_payment('2031-06-15')['sent']==1)
    check('no daily overdue spam',run_payment('2031-06-16')['sent']==0)
    check('weekly overdue reminder sends',run_payment('2031-06-22')['sent']==1)
@@ -150,13 +150,13 @@ try:
   check('Finance read-only references stay forbidden',fin.get('/api/case-reconciliation-references?caseUid='+str(a.case_uid)).status_code==403)
   # Every T1 must be explicitly settled; one Swiss checkbox never settles its peers.
   mixed=make('SWISSMIX',reinsurers=[{'name':sname,'sharePct':60,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':90},{'name':'Other RI','sharePct':40,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
-  check('both mixed Cedant receipt allocations recorded',pay(fin,mixed,'Leg 1',600,0).status_code==200 and pay(fin,mixed,'Leg 1',400,1).status_code==200)
-  check('first mixed T1 manual settlement succeeds',settle(fin,mixed,'Leg 1',0).status_code==200)
-  check('one cleared T1 never settles the other or releases Swiss',details(mixed)[tx(mixed,'Leg 1',1)]['settlement']=='pending_confirmation' and pay(fin,mixed,'Leg 2',480,0).status_code==400)
-  check('last T1 manual settlement completes whole-period confirmation',settle(fin,mixed,'Leg 1',1).status_code==200)
+  check('both mixed Cedant receipt allocations recorded',pay(fin,mixed,'Leg 1',600,0).status_code==200)
+  check('first mixed T1 automatically settles independently',(details(mixed)[tx(mixed, 'Leg 1', 0)]['settlement']=='settled'))
+  check('one cleared T1 never settles the other or releases Swiss',details(mixed)[tx(mixed,'Leg 1',1)]['settlement']=='open' and pay(fin,mixed,'Leg 2',480,0).status_code==409)
+  check('last T1 receipt completes whole-period automatic settlement',pay(fin,mixed,'Leg 1',400,1).status_code==200 and details(mixed)[tx(mixed, 'Leg 1', 1)]['settlement']=='settled')
   from cases.calc.payment_terms import build_payment_schedule
   mixed.refresh_from_db()
-  check('whole Cedant confirmation uses manual settlement date',next(i for i in build_payment_schedule(mixed.payload)['items'] if i.get('swissFacility'))['collectionConfirmed'])
+  check('whole Cedant collection is derived from all full T1 receipts',next(i for i in build_payment_schedule(mixed.payload)['items'] if i.get('swissFacility'))['collectionConfirmed'])
   # Dry-run, explicitly signed apply, history protection and idempotent legacy repair.
   from django.core.management import call_command
   from io import StringIO
@@ -167,7 +167,7 @@ try:
   payment={'id':1,'date':'2026-02-01','amount':1000};claim['payments']=[payment];legacy.payload['claims']=[claim];legacy.payload['transactions'].extend(build_claim_payment_transactions(legacy.payload,later.payload,claim,payment));legacy.row_version=2;legacy.save()
   EntitySnapshot.objects.create(entity_type='case',entity_id=str(legacy.case_uid),entity_version=1,snapshot_reason='claim_created',snapshot_data={'payload':before},created_by='qa',created_at=datetime(2026,4,1,tzinfo=dtz.utc))
   EntitySnapshot.objects.create(entity_type='case',entity_id=str(legacy.case_uid),entity_version=2,snapshot_reason='claim_payment_recorded',snapshot_data={'payload':copy.deepcopy(legacy.payload)},created_by='qa',created_at=datetime(2026,4,2,tzinfo=dtz.utc))
-  oldzero=make('OLDZERO',status='posted',policyFrom='2031-05-01',policyTo='2032-05-01',announced=datetime(2031,5,1,tzinfo=dtz.utc),reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':1000,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}]);oldzero.payload['transactions']=[];oldzero.save()
+  oldzero=make('OLDZERO',status='posted',policyFrom='2031-05-01',policyTo='2032-05-01',announced=datetime(2031,5,1,tzinfo=dtz.utc),reinsurers=[{'name':'AR92 Legacy Other (Facility)','sharePct':100,'premium':1000,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}]);oldzero.payload['transactions']=[];oldzero.save()
   def preview_repair(**kw):
    out=StringIO();call_command('apply_accounting_review',stdout=out,**kw);return json.loads(out.getvalue())
   v=legacy.row_version;preview=preview_repair();legacy.refresh_from_db();check('legacy dry-run makes no writes',legacy.row_version==v and not preview['applied'])

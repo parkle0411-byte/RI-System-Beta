@@ -46,7 +46,7 @@ check('legacy fixed terms canonicalize without false posted changes',payment_ter
 normal=normalize_draft(p)['value'];check('draft stores Allianz90 including each period',normal['reinsurers'][0]['paymentTermsDays']==90 and all(i['reinsurerPaymentTerms']['r1']==90 for i in normal['performanceInstallments']))
 p['paymentEntries']=[{'entryType':'payment','scheduleKey':'I1:cedant','amount':500}]
 # 2026-10-20 四類統一：整期 Cedant 須全額實收「並逐筆人工銷帳」才放行該期付款
-check('full receipt alone does not release payment before manual settlement',not ri(p)[0]['paymentAllowed'] and not ri(p)[1]['paymentAllowed'])
+check('full cash automatically releases only its own installment',ri(p)[0]['paymentAllowed'] and not ri(p)[1]['paymentAllowed'])
 from cases.facility_accounting import schedule_signature
 def settle_cedant(p,key):
  item=next(i for i in build_payment_schedule(p,now('2026-01-01'))['items'] if i['scheduleKey']==key)
@@ -55,7 +55,7 @@ settle_cedant(p,'I1:cedant')
 check('first installment releases independently once its Cedant receipt is settled',ri(p)[0]['paymentAllowed'] and not ri(p)[1]['paymentAllowed'])
 p['paymentEntries'][0]['nonCash']=True;settle_cedant(p,'I1:cedant')   # 重新銷帳，確認擋下的原因是「非現金」本身
 check('noncash offsets cannot prove full cash receipt',not ri(p)[0]['paymentAllowed'])
-p=raw();p['reinsurers']+=[{'name':"Lloyd's Underwriter Syndicate No. 0609 AUW (Facility)",'premium':100,'sharePct':0,'riCommPct':0,'taxPct':0}, {'name':'Ordinary QA','premium':100,'sharePct':0,'riCommPct':0,'taxPct':0,'paymentTermsDays':45}]
+p=raw();p['reinsurers'][0]['sharePct']=60;p['reinsurers']+=[{'name':"Lloyd's Underwriter Syndicate No. 0609 AUW (Facility)",'premium':100,'sharePct':20,'riCommPct':0,'taxPct':0}, {'name':'Ordinary QA','premium':100,'sharePct':20,'riCommPct':0,'taxPct':0,'paymentTermsDays':45}]
 items=build_payment_schedule(p)['items'];check('mixed AUW and ordinary retain own date formulas',items[2]['contractDueDate']=='2026-05-31' and items[3]['contractDueDate']=='2026-02-15')
 
 def user(tag,role,department):
@@ -72,24 +72,24 @@ def make(**changes):
 def account(client,action,**kw):return client.post('/api/accounting',json.dumps({'action':action,**kw}),content_type='application/json')
 def tx(c,leg):c.refresh_from_db();return next(t['txNo'] for t in c.payload['transactions'] if t['legType']==leg)
 def pay(c,leg,value,client=fin):
- no=tx(c,leg);return account(client,'record_transaction_payments',paymentDate='2026-10-19',amount=value,allocations=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'txNo':no,'amount':value}])
+ no=tx(c,leg);return account(client,'record_transaction_payments',note='QA synthetic registration', paymentDate='2026-10-19',amount=value,allocations=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'txNo':no,'amount':value}])
 c=make();original=copy.deepcopy(c.payload)
-check('cash API blocks outgoing before full Cedant receipt',pay(c,'Leg 2',800).status_code==400)
+check('cash API blocks outgoing before full Cedant receipt',pay(c,'Leg 2',800).status_code==409)
 c.refresh_from_db();check('blocked payment is atomic',c.payload==original)
 check('Finance records full Cedant receipt',pay(c,'Leg 1',1000).status_code==200)
-c.refresh_from_db();check('receipt remains distinct from manual settlement',transaction_details(c.payload)[tx(c,'Leg 1')]['settlement']=='pending_confirmation')
+c.refresh_from_db();check('full receipt automatically settles',transaction_details(c.payload)[tx(c,'Leg 1')]['settlement']=='settled')
 # 2026-10-20 四類統一：Allianz 付款前，整期 Cedant 須全額實收並人工銷帳
-check('Allianz payment is blocked until the T1 receipt is manually settled',pay(c,'Leg 2',800).status_code==400)
+check('full automatic Cedant settlement releases Allianz payment',transaction_details(c.payload)[tx(c,'Leg 2')]['paymentAllowed'])
 c.refresh_from_db();r=account(fin,'confirm_facility_settlement',caseUid=str(c.case_uid),rowVersion=c.row_version,txNo=tx(c,'Leg 1'),note='QA write-off')
-check('Finance settles the T1 receipt',r.status_code==200,r.content[:200])
+check('retired manual T1 confirmation is rejected',r.status_code==400,r.content[:200])
 check('Allianz can be paid after the T1 receipt is settled',pay(c,'Leg 2',800).status_code==200)
 c.refresh_from_db();d=transaction_details(c.payload,now('2026-05-02'))[tx(c,'Leg 2')]
 # 2026-10-20 四類統一：付款過原到期日後，即使已登錄全額付款，尚未人工確認仍顯示逾期；到期前則為待確認
-check('full payment after the due date stays overdue until manual confirmation',d['outstanding']==0 and d['paymentStatus']=='overdue' and d['settlement']=='pending_confirmation',(d['paymentStatus'],d['settlement']))
+check('full payment automatically settles even after original due date',d['outstanding']==0 and d['paymentStatus']=='settled' and d['settlement']=='settled',(d['paymentStatus'],d['settlement']))
 early=transaction_details(c.payload,now('2026-04-15'))[tx(c,'Leg 2')]
-check('full payment before the reminder date waits for manual confirmation',early['paymentStatus']=='pending_confirmation' and early['settlement']=='pending_confirmation',(early['paymentStatus'],early['settlement']))
+check('full payment stops tracking before reminder date',early['paymentStatus']=='settled' and early['settlement']=='settled',(early['paymentStatus'],early['settlement']))
 mid=transaction_details(c.payload,now('2026-04-25'))[tx(c,'Leg 2')]
-check('until confirmed, the reminder status keeps following the calendar',mid['paymentStatus']=='reminder',mid['paymentStatus'])
+check('settled payment stays settled across calendar dates',mid['paymentStatus']=='settled',mid['paymentStatus'])
 incoming=next(e for e in c.payload['paymentEntries'] if e.get('transactionNo')==tx(c,'Leg 1'))
 correction=account(fin,'edit_payment',caseUid=str(c.case_uid),rowVersion=c.row_version,entryId=incoming['id'],amount=900,reason='QA negative test')
 # 2026-10-20：T1 已人工銷帳，金額永久鎖定（settled_amount_locked）；未銷帳時則由 full_premium_required 擋下。兩者都不能繞過付款前提
@@ -104,17 +104,18 @@ for party in ('cedant','reinsurer'):
  b=next(i for i in build_payment_schedule(refund.payload)['items'] if i['partyType']==party)
  response=account(fin,'record_premium_offset',originalCaseUid=str(unpaid.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=unpaid.row_version,refundRowVersion=refund.row_version,originalKey=a['scheduleKey'],refundKey=b['scheduleKey'],paymentDate='2026-10-19',amount=abs(b['outstanding']))
  # 2026-10-20：再保人退款一律須全額實收（refund_cash_receipt_required），比 Allianz 專屬限制先擋下；兩者都禁止抵銷
- check('Allianz offset blocked for '+party,response.status_code==400 and response.json()['error'] in (('allianz_offset_not_allowed',) if party=='cedant' else ('allianz_offset_not_allowed','refund_cash_receipt_required')),response.content[:200])
+ check('Allianz offset blocked for '+party,response.status_code==400 and response.json()['error']=='offset_not_allowed',response.content[:200])
 a=make();b=make(policyFrom='2026-02-01')
 assert pay(a,'Leg 1',1000).status_code==200 and pay(b,'Leg 1',1000).status_code==200
-for obj in (a,b):   # 2026-10-20：先人工銷帳 T1，才會檢查到「不同到期日不可合併匯款」
- obj.refresh_from_db();assert account(fin,'confirm_facility_settlement',caseUid=str(obj.case_uid),rowVersion=obj.row_version,txNo=tx(obj,'Leg 1'),note='QA').status_code==200
+for obj in (a,b):
+ obj.refresh_from_db()
+ check('full Cedant cash automatically settles '+str(obj.pk),transaction_details(obj.payload)[tx(obj,'Leg 1')]['settlement']=='settled')
  obj.refresh_from_db()
 alloc=[]
 for obj in (a,b):
  no=tx(obj,'Leg 2');alloc.append({'caseUid':str(obj.case_uid),'rowVersion':obj.row_version,'txNo':no,'amount':800})
-response=account(fin,'record_transaction_payments',paymentDate='2026-10-19',amount=1600,allocations=alloc)
-check('different original due dates cannot share remittance',response.status_code==400 and response.json()['error']=='allianz_separate_due_dates',response.content[:200])
+response=account(fin,'record_transaction_payments',note='QA synthetic registration', paymentDate='2026-10-19',amount=1600,allocations=alloc)
+check('different original due dates cannot share remittance',response.status_code==400 and response.json()['error']=='single_accounting_case',response.content[:200])
 check('fixed Allianz terms cannot be completed to another value',account(staff,'complete_payment_terms',caseUid=str(a.case_uid),rowVersion=a.row_version,partyKey='r1',days=30,reason='QA').status_code==409)
 
 root=make();stamp=datetime(2026,10,18,17,tzinfo=tz.utc)
@@ -122,7 +123,7 @@ def claim(action,**kw):
  root.refresh_from_db();return staff.post('/api/claims',json.dumps({'action':action,'caseUid':str(root.case_uid),'rowVersion':root.row_version,**kw}),content_type='application/json')
 check('claim can be created',claim('create_claim',claim={'dateOfLoss':'2026-03-01','outstandingReserve':1000}).status_code==200)
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:stamp)):
- response=claim('record_payment',claimId=1,payment={'date':'2020-01-01','amount':1000,'claimAnnouncedAt':'1900-01-01'})
+ response=claim('record_payment',note='QA synthetic registration', claimId=1,payment={'date':'2020-01-01','amount':1000,'claimAnnouncedAt':'1900-01-01'})
 check('successful recording announces claim obligation',response.status_code==200,response.content)
 root.refresh_from_db();no=tx(root,'Claim Leg 1');stored=next(t for t in root.payload['transactions'] if t['txNo']==no)
 check('claim announcement is server-owned',stored['claimAnnouncedAt']==stamp.isoformat())
@@ -139,23 +140,25 @@ root.refresh_from_db();check('correction does not reset announcement',next(t for
 root.refresh_from_db();version=root.row_version
 check('follow-up requires Accounting permission',account(staff,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version,txNo=no,note='QA').status_code==403)
 check('follow-up requires note',account(fin,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version,txNo=no,note=' ').status_code==400)
-check('Accounting can save follow-up record',account(fin,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version,txNo=no,note='Contacted Allianz on claim status').status_code==200)
+check('retired dedicated follow-up endpoint is rejected',account(fin,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version,txNo=no,note='Contacted Allianz on claim status').status_code==400)
+# Existing dedicated tracking remains visible; only new writes are retired.
+root.refresh_from_db();root.payload['allianzClaimTracking']=[{'txNo':no,'recordedByName':finance.name,'recordedAt':'2026-10-20T00:00:00Z','note':'Contacted Allianz on claim status'}];root.save()
 root.refresh_from_db();history=transaction_details(root.payload)[no]['trackingHistory']
 check('follow-up retains actor time and note',len(history)==1 and history[0]['recordedByName']==finance.name and history[0]['recordedAt'] and history[0]['note']=='Contacted Allianz on claim status')
-check('stale follow-up conflicts',account(fin,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version,txNo=no,note='stale').status_code==409)
+check('stale follow-up conflicts',account(fin,'record_allianz_claim_followup',caseUid=str(root.case_uid),rowVersion=version-1,txNo=no,note='stale').status_code==409)
 check('partial claim receipt accepted',pay(root,'Claim Leg 1',400).status_code==200)
 root.refresh_from_db();d=transaction_details(root.payload,now('2026-11-10'))[no]   # 到期後每 7 日的提醒日
 check('partial claim keeps due date and repeating tracking',d['outstanding']==600 and d['contractDueDate']=='2026-11-03' and d['trackingDue'])
 check('remaining claim receipt accepted',pay(root,'Claim Leg 1',600).status_code==200)
 root.refresh_from_db();d=transaction_details(root.payload,now('2026-11-09'))[no]
-check('manual full receipt stops follow-up without auto settlement',not d['nextTrackingDate'] and not d['trackingDue'] and d['settlement']=='pending_confirmation')
+check('full claim receipt settles and stops follow-up',not d['nextTrackingDate'] and not d['trackingDue'] and d['settlement']=='settled')
 with patch('cases.claims_views.timezone',SimpleNamespace(now=lambda:datetime(2026,11,2,1,tzinfo=tz.utc))):
- check('additional claim request succeeds',claim('record_payment',claimId=1,payment={'date':'2026-03-01','amount':100}).status_code==200)
+ check('additional claim request succeeds',claim('record_payment',note='QA synthetic registration', claimId=1,payment={'date':'2026-03-01','amount':100}).status_code==200)
 root.refresh_from_db();new=next(t for t in root.payload['transactions'] if t.get('source')=='claim' and t.get('paymentId')==2 and t['legType']=='Claim Leg 1')
 check('new request has independent announcement and due date',transaction_details(root.payload)[new['txNo']]['contractDueDate']=='2026-11-17' and transaction_details(root.payload)[no]['contractDueDate']=='2026-11-03')
 from reminders.messages import due_kind
 check('screen-only reminders do not introduce email flow',due_kind(d,'2026-10-26',{})=='')
 listing=fin.get('/api/accounting?view=list')
 check('lean Accounting includes Allianz metadata',listing.status_code==200 and any(r.get('allianzFacility') and r.get('offsetAllowed') is False for r in listing.json()['scheduleRows']))
-check('Allianz follow-up metadata reaches transaction rows',any(r.get('allianzClaim') and 'nextTrackingDate' in r for r in listing.json()['transactionRows']))
+check('Allianz historical follow-up metadata reaches transaction rows',any(r.get('txNo')==no and r.get('trackingHistory') and 'nextTrackingDate' in r for r in listing.json()['transactionRows']))
 print(f'{len(checks)}/{len(checks)} Allianz accounting checks passed',flush=True)

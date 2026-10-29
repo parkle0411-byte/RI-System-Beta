@@ -110,7 +110,7 @@ with transaction.atomic(), override_settings(AUDIT_LOG_PAUSED=True):
     case = Case.objects.create(tw_ref='ZZ-VALIDATION-'+tag,status='posted',currency='USD',reinsurance_structure='QS',payload=payload,created_by='qa',updated_by='qa')
     item = next(i for i in build_payment_schedule(payload)['items'] if i['partyType']=='cedant' and i['dueDate'])
     def pay(amount,version=None):
-        return call('post','/api/accounting',dict(action='record_payment',caseUid=str(case.case_uid),scheduleKey=item['scheduleKey'],
+        return call('post','/api/accounting',dict(note='QA synthetic registration', action='record_payment',caseUid=str(case.case_uid),scheduleKey=item['scheduleKey'],
             rowVersion=case.row_version if version is None else version,amount=amount,paymentDate='2026-10-06'))
     for amount in [0.001,'0.001',0.004,0.0000001,'NaN','Infinity',0,-1,1e308]:
         with transaction.atomic():
@@ -126,12 +126,12 @@ with transaction.atomic(), override_settings(AUDIT_LOG_PAUSED=True):
     from cases.calc.accounting import build_premium_transactions
     claim_payload = copy.deepcopy(payload)
     claim_payload['transactions'] = build_premium_transactions({**claim_payload,'twRef':'ZZ-VALIDATION-C-'+tag}) + [
-        {'txNo':'ZZ-VAL-C1','source':'claim','legType':'Claim Leg 1','reinsurer':claim_payload['reinsurers'][0]['name'],'reinsurerIdx':0,
+        {'txNo':'ZZ-VAL-C1','source':'claim','claimId':1,'paymentId':1,'legType':'Claim Leg 1','reinsurer':claim_payload['reinsurers'][0]['name'],'reinsurerIdx':0,
          'label':'Claim','amount':250,'settlement':'open','createdAt':'2026-10-01T02:00:00+00:00','dueDate':'2026-10-16'}]
     claim_case = Case.objects.create(tw_ref='ZZ-VALIDATION-C-'+tag,status='closed',currency='USD',reinsurance_structure='QS',payload=claim_payload,created_by='qa',updated_by='qa')
     def pay_claim(amount,version=None):
         claim_case.refresh_from_db()
-        return call('post','/api/accounting',dict(action='record_transaction_payments',paymentDate='2026-10-06',amount=amount,
+        return call('post','/api/accounting',dict(note='QA synthetic registration', action='record_transaction_payments',paymentDate='2026-10-06',amount=amount,
             allocations=[dict(caseUid=str(claim_case.case_uid),txNo='ZZ-VAL-C1',rowVersion=claim_case.row_version if version is None else version,amount=amount)]))
     def last_entry():
         return Case.objects.get(pk=claim_case.pk).payload['paymentEntries'][-1]
@@ -155,7 +155,7 @@ with transaction.atomic(), override_settings(AUDIT_LOG_PAUSED=True):
     check('stale payment version still returns 409',response.status_code==409 and response.json().get('error')=='version_conflict',response.content[:150])
     premium_tx = next(t for t in claim_payload['transactions'] if t['legType']=='Leg 1')
     claim_case.refresh_from_db()
-    response = call('post','/api/accounting',dict(action='record_transaction_payments',paymentDate='2026-10-06',amount=1,
+    response = call('post','/api/accounting',dict(note='QA synthetic registration', action='record_transaction_payments',paymentDate='2026-10-06',amount=1,
         allocations=[dict(caseUid=str(claim_case.case_uid),txNo=premium_tx['txNo'],rowVersion=claim_case.row_version,amount=1)]))
     check('a partial premium payment is rejected (premiums are recorded in full)',response.status_code==400,response.content[:150])
 

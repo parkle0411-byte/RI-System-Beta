@@ -22,6 +22,14 @@ def ready():
   reinsurers=[dict(name='CGL QA Reinsurer',sharePct=100,premium=1000,riCommPct=10,taxPct=0,paymentTermsDays=90)],
   cglInformation=dict(policyForm='Occurrence Form',territorialLimits='Worldwide excluding USA/Canada',insuredBusiness='Manufacturing\nWholesale',insuredProducts='QA products',
    estimatedTurnover=[dict(region='USA/Canada',currency='USD',amount=1000000),dict(region='Other regions',currency='TWD',amount=0)],insuredWebsite='free text without scheme',specialAgreementApplies='notApplicable'))
+# Complete fixtures include the newly confirmed QS formal fields.
+_legacy_ready = ready
+def ready():
+    p = _legacy_ready()
+    p.setdefault('originalInsuredCn', 'QS QA CN')
+    p.setdefault('riCommPct', 0)
+    p.setdefault('taxPct', 0)
+    return p
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
@@ -52,13 +60,17 @@ try:
   p=copy.deepcopy(base);p['cglInformation'].update(retroactiveDate='2020-01-01',extendedReportingApplies='applicable',extendedReportingPeriod='HIDDEN ERP',territorialOther='HIDDEN TERRITORY');p['specialAgreement']='HIDDEN AGREEMENT'
   v=normalize_draft(p)['value'];check('inactive dependent content cleared on API normalization',all(v['cglInformation'][key]=='' for key in ['retroactiveDate','extendedReportingApplies','extendedReportingPeriod','territorialOther']) and v['specialAgreement']=='')
   p=copy.deepcopy(base);p['cglInformation']['specialAgreementApplies']='applicable';check('applicable agreement requires text',bool(information_issues(p)));p['specialAgreement']='Agreed';check('agreement text accepted',not information_issues(p))
-  for name,patch in [('Property',dict(classOfBusiness='Property')),('Treaty',dict(reinsuranceStructure='TREATY')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsurers=[dict(name='QA',foreignBroker='PWS Global Risks Limited')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia Pte. Ltd., Hong Kong Branch')]))]:
+  for name,patch in [('Property',dict(classOfBusiness='Property')),('Treaty',dict(reinsuranceStructure='TREATY')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS Global Risks Limited')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia Pte. Ltd., Hong Kong Branch')]))]:
    p=copy.deepcopy(base);p.update(patch);check(name+' scope unchanged',not is_standard_cgl(p) and not information_issues(p))
   p=copy.deepcopy(base);p['classOfBusiness']='Property';check('Property still requires occupation construction sums',{'occupation','construction','sumInsured'}.issubset({i['field'] for i in validate_announce_ready(p)}))
   incomplete=copy.deepcopy(base);incomplete['cglInformation']={}
   response=call('post','/api/cases',{'case':incomplete});check('incomplete Information saves Draft',response.status_code==201,response.content[:300]);uid=response.json()['case']['caseUid'];case=Case.objects.get(case_uid=uid)
   response=call('post','/api/case-announce',{'caseUid':uid,'rowVersion':case.row_version,'confirmed':True});check('Announce blocks incomplete Information',response.status_code==400 and response.json().get('error')=='case_not_ready',response.content[:300])
-  before=case.row_version;response=call('put','/api/cases',{'caseUid':uid,'rowVersion':before,'case':base});check('complete Information saves',response.status_code==200,response.content[:300]);case.refresh_from_db();check('Information round-trip retains rows and website',case.payload['cglInformation']==value['cglInformation'])
+  # Raw normalization assertions above exercise legacy free text. New API cases use selections.
+  base['cglInformation'].update(insuredBusinessSelections=['Other'],insuredBusinessOther=base['cglInformation']['insuredBusiness'])
+  for row in base['cglInformation']['estimatedTurnover']:
+   if row['region'] not in ('USA/Canada','Rest of World','Other'):row.update(region='Other',regionOther=row['region'])
+  before=case.row_version;response=call('put','/api/cases',{'caseUid':uid,'rowVersion':before,'case':base});check('complete Information saves',response.status_code==200,response.content[:300]);case.refresh_from_db();check('Information round-trip retains rows and website',case.payload['cglInformation']['insuredBusiness']==value['cglInformation']['insuredBusiness'] and case.payload['cglInformation']['insuredWebsite']==value['cglInformation']['insuredWebsite'] and len(case.payload['cglInformation']['estimatedTurnover'])==2)
   # Document readiness reads stored data, never request-provided overrides.
   Case.objects.filter(pk=case.pk).update(status='posted',tw_ref='ZZ-CGL-QA-001',announced_at=timezone.now(),payload={**case.payload,'aeEmail':'cgl@example.invalid'})
   response=call('post','/api/document-generation-log',{'caseUid':uid,'kind':'cover','format':'docx'});check('CGL Cover Note allows no property breakdown',response.status_code==204,response.content[:300])

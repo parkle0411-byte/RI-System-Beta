@@ -39,10 +39,10 @@ def code(r):
 
 def ready(**over):
     b = dict(reinsuranceStructure="QS", ae="ZZ AE", currency="USD", classOfBusiness="ZZ Class", classCode="PAR", newOrRenew="New", typePrefix="ZZ Type",
-             reinsured="ZZ Acc Cedant", originalInsured="ZZ Acc Insured", policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
+             reinsured="ZZ Acc Cedant", originalInsured="ZZ Acc Insured", originalInsuredCn='合成測試被保險人', policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
              situations=[dict(address="1 ZZ Road", postcode="100")],
-             reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0, paymentTermsDays=30), dict(name="ZZ Re B (Facility)", sharePct=40, premium=400, riCommPct=5, taxPct=0, paymentTermsDays=30)],   # 2026-10-16：每家再保人天數獨立填寫、不繼承
-             limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
+             reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0, paymentTermsDays=30), dict(name="ZZ Re B", sharePct=40, premium=400, riCommPct=5, taxPct=0, paymentTermsDays=30)],   # 2026-10-16：每家再保人天數獨立填寫、不繼承
+             limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction='Concrete', constructionSelections=['A2 Class'],
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)
     b.update(over); return b
@@ -61,7 +61,7 @@ def ledger(c, case=None):
 def post(c, action, case, **extra):
     body = {"action": action, "caseUid": str(case.case_uid), "rowVersion": Case.objects.get(pk=case.pk).row_version, **extra}
     return call(c, "post", "/api/accounting", body)
-def pay(c, case, key, amount, date="2026-09-20", **extra): return post(c, "record_payment", case, scheduleKey=key, amount=amount, paymentDate=date, **extra)
+def pay(c, case, key, amount, date="2026-09-20", **extra): return post(c, "record_payment", case, scheduleKey=key, amount=amount, paymentDate=date, **{'note':'QA synthetic registration',**extra})
 def audit(uid, action=None):
     q = AuditLog.objects.filter(entity_type="case", entity_id=str(uid)); return q.filter(action=action) if action else q
 def snaps(uid, reason=None):
@@ -78,9 +78,9 @@ try:
         for label, c in (("sales", sales), ("general manager", gm)):   # 2026-09-27：帳本唯讀
             r = call(c, "get", "/api/accounting")
             check(f"{label}: ledger read-only (200, canEdit false), record/reverse 403", r.status_code == 200 and r.json()["scope"]["canEdit"] is False
-                  and code(call(c, "post", "/api/accounting", {"action": "record_payment"})) == "permission_denied"
+                  and code(call(c, "post", "/api/accounting", {"action": "record_payment", 'note':'QA synthetic registration'})) == "permission_denied"
                   and code(call(c, "post", "/api/accounting", {"action": "reverse_payment"})) == "permission_denied")
-        check("viewer: no accounting.read -> GET and POST 403", call(viewer, "get", "/api/accounting").status_code == 403 and call(viewer, "post", "/api/accounting", {"action": "record_payment"}).status_code == 403)
+        check("viewer: no accounting.read -> GET and POST 403", call(viewer, "get", "/api/accounting").status_code == 403 and call(viewer, "post", "/api/accounting", {"action": "record_payment", 'note':'QA synthetic registration'}).status_code == 403)
         check("anonymous -> 401", call(new_client(), "get", "/api/accounting").status_code == 401)
         for label, c in (("admin", admin), ("finance staff", fin), ("finance manager", finm)):
             r = call(c, "get", "/api/accounting")
@@ -142,7 +142,7 @@ try:
         def txpay(c, case, amounts, date="2026-09-20", **extra):
             v = Case.objects.get(pk=case.pk).row_version
             return call(c, "post", "/api/accounting", {"action": "record_transaction_payments", "paymentDate": date, "amount": round(sum(amounts.values()), 2),
-                        "allocations": [{"caseUid": str(case.case_uid), "rowVersion": v, "txNo": no, "amount": a} for no, a in amounts.items()], **extra})
+                        "allocations": [{"caseUid": str(case.case_uid), "rowVersion": v, "txNo": no, "amount": a} for no, a in amounts.items()], **{'note':'QA synthetic registration',**extra}})
         def reverse_batch(c, case, batch, **extra):
             return call(c, "post", "/api/accounting", {"action": "reverse_batch_payment", "batchId": batch, "cases": [{"caseUid": str(case.case_uid), "rowVersion": Case.objects.get(pk=case.pk).row_version}], **extra})
         close_production(posted); close_production(closed)
@@ -158,19 +158,20 @@ try:
             ("date 0000-01-01", dict(paymentDate="0000-01-01")),
         ]
         for label, override in bad_inputs:
-            body = {"action": "record_payment", "caseUid": str(posted.case_uid), "rowVersion": v0, "scheduleKey": rkey, "amount": 10, "paymentDate": "2026-09-20", **override}
+            body = {"action": "record_payment", "caseUid": str(posted.case_uid), "rowVersion": v0, "scheduleKey": rkey, "amount": 10, "paymentDate": "2026-09-20", **override, 'note':'QA synthetic registration'}
             r = call(fin, "post", "/api/accounting", body)
             check(f"record: {label} -> 400 invalid_payment", r.status_code == 400 and code(r) == "invalid_payment", (r.status_code, code(r)))
         full_a = due(posted, t2a)
-        r = pay(fin, posted, rkey, full_a, "2024-02-29"); check("record: leap day 2024-02-29 is accepted", r.status_code == 200, r.content[:200]); posted.refresh_from_db()
-        # 讓後面從乾淨的餘額開始；2026-10-16：沖回整筆匯款須填原因
-        r = reverse_batch(fin, posted, posted.payload["paymentEntries"][-1]["batchId"], note="QA reset"); posted.refresh_from_db()
-        check("record: leap-day remittance reversed to restore a clean balance", r.status_code == 200 and due(posted, t2a) == full_a, r.content[:200])
+        r = txpay(fin, posted, {t1a: due(posted,t1a),t1b:due(posted,t1b)}, date="2024-02-29")
+        check("record: leap day accepted on full Cedant receipt",r.status_code==200,r.content[:200]);posted.refresh_from_db()
+        leap_batch=posted.payload['paymentEntries'][-1]['batchId']
+        r=reverse_batch(fin,posted,leap_batch,note='Attempt to reopen settled receipt');posted.refresh_from_db()
+        check("full leap-day receipt is automatically settled and permanently locked",r.status_code==409 and code(r)=='settled_amount_locked' and due(posted,t1a)==0 and due(posted,t1b)==0,r.content[:200])
         v0 = posted.row_version
-        r = call(fin, "post", "/api/accounting", {"action": "record_payment", "caseUid": str(uuid.uuid4()), "rowVersion": 1, "scheduleKey": rkey, "amount": 1, "paymentDate": "2026-09-20"})
+        r = call(fin, "post", "/api/accounting", {"action": "record_payment", "caseUid": str(uuid.uuid4()), "rowVersion": 1, "scheduleKey": rkey, "amount": 1, "paymentDate": "2026-09-20", 'note':'QA synthetic registration'})
         check("record: unknown case -> 404", r.status_code == 404 and code(r) == "case_not_found")
         for label, uid in (("upper-case UUID", str(posted.case_uid).upper()), ("UUID without dashes", posted.case_uid.hex), ("not a UUID", "abc")):
-            r = call(fin, "post", "/api/accounting", {"action": "record_payment", "caseUid": uid, "rowVersion": v0, "scheduleKey": rkey, "amount": 1, "paymentDate": "2026-09-20"})
+            r = call(fin, "post", "/api/accounting", {"action": "record_payment", "caseUid": uid, "rowVersion": v0, "scheduleKey": rkey, "amount": 1, "paymentDate": "2026-09-20", 'note':'QA synthetic registration'})
             check(f"record: {label} -> 404 (same as Alpha's case_uid::text match)", r.status_code == 404, r.status_code)
         for label, c in (("Draft", draft), ("Reversed", rev)):
             r = pay(fin, c, key, 1); check(f"record on a {label} case -> 409 accounting_status_locked (VM)", r.status_code == 409 and code(r) == "accounting_status_locked", (r.status_code, code(r)))
@@ -182,7 +183,7 @@ try:
         r = pay(fin, posted, rkey, full_a + 0.01); check("record: more than the premium balance -> 400 (whole balance required)", r.status_code == 400 and code(r) == "swiss_payment_blocked", code(r))
         r = pay(fin, posted, rkey, 10); check("record: partial premium -> 400 (whole balance required)", r.status_code == 400 and code(r) == "swiss_payment_blocked", code(r))
         r = pay(fin, posted, rkey, full_a, rowVersion=v0 - 1 if v0 > 1 else 99); check("record: stale rowVersion -> 409 version_conflict", r.status_code == 409 and code(r) == "version_conflict")
-        r = call(fin, "post", "/api/accounting", {"action": "record_payment", "caseUid": str(posted.case_uid), "scheduleKey": rkey, "amount": full_a, "paymentDate": "2026-09-20"})
+        r = call(fin, "post", "/api/accounting", {"action": "record_payment", "caseUid": str(posted.case_uid), "scheduleKey": rkey, "amount": full_a, "paymentDate": "2026-09-20", 'note':'QA synthetic registration'})
         # 2026-10-16：排程登錄改走逐筆交易登錄，缺 rowVersion 屬「缺少案件版本」的輸入錯誤（400 invalid_payment），同樣不寫入
         check("record: rowVersion missing -> rejected (400 invalid_payment)", r.status_code == 400 and code(r) == "invalid_payment", (r.status_code, code(r)))
         check("record: no failed attempt changed the case", Case.objects.get(pk=posted.pk).row_version == v0 and len(Case.objects.get(pk=posted.pk).payload["paymentEntries"]) == 2)
@@ -214,28 +215,30 @@ try:
         s = snaps(posted.case_uid, "payment_recorded").order_by("-id").first()
         check("snapshot payment_recorded at the new version (VM addition)", s and s.entity_version == v0 + 1 and s.snapshot_data["payload"]["paymentEntries"][-1]["id"] == e["id"])
         _, _, rows = ledger(fin, posted); r1row = next(x for x in rows if x.get("scheduleKey") == rkey)
-        check("ledger: paid, outstanding 0, not partial, entry listed on the row, awaiting manual settlement", r1row["paid"] == e["amount"] and r1row["outstanding"] == 0 and r1row["partial"] is False
-              and [x["id"] for x in r1row["entries"]][-1] == e["id"] and r1row["caseRowVersion"] == v0 + 1 and r1row["settlement"] == "pending_confirmation", r1row)
-        check("ledger: the payment is listed only on its own row", all(x.get("entries", []) == [] for x in rows if x.get("scheduleKey") not in (rkey, None) and x.get("source") != "claim"))
+        check("ledger: paid, outstanding 0, not partial, entry listed, automatically settled", r1row["paid"] == e["amount"] and r1row["outstanding"] == 0 and r1row["partial"] is False
+              and [x["id"] for x in r1row["entries"]][-1] == e["id"] and r1row["caseRowVersion"] == v0 + 1 and r1row["settlement"] == "settled", r1row)
+        check("ledger: the payment is listed only on its own row", all(x.get("entries", []) == [] for x in rows if x.get("scheduleKey") not in (rkey, key, None) and x.get("source") != "claim"))
         # Cedant：兩筆 T1 逐筆選擇、整筆餘額，一次登錄（財務主管）
         r = txpay(finm, posted, {t1a: due(posted, t1a), t1b: due(posted, t1b)}); posted.refresh_from_db()
         _, _, rows = ledger(fin, posted); ced3 = next(x for x in rows if x.get("scheduleKey") == key)
-        check("paying every Cedant transaction in full awaits manual settlement (finance manager)", r.status_code == 200 and ced3["outstanding"] == 0 and ced3["paymentStatus"] == "pending_confirmation" and ced3["settlement"] == "pending_confirmation" and ced3["partial"] is False, ced3)
+        check("settled Cedant transactions reject duplicate receipts (finance manager)", r.status_code == 400 and code(r) in ("transaction_not_payable","invalid_payment") and ced3["outstanding"] == 0 and ced3["paymentStatus"] == "settled" and ced3["settlement"] == "settled" and ced3["partial"] is False, ced3)
         cedant_batch = posted.payload["paymentEntries"][-1]["batchId"]
         # 2026-10-16：銷帳逐筆交易進行，排程層級銷帳回 individual_transaction_required
         r = post(finm, "confirm_facility_settlement", posted, scheduleKey=key, note="Bank and statement reconciled")
         check("schedule-level settlement -> 400 individual_transaction_required", r.status_code == 400 and code(r) == "individual_transaction_required", code(r))
-        ok = all(post(finm, "confirm_facility_settlement", posted, txNo=no, note="Bank and statement reconciled").status_code == 200 for no in (t1a, t1b)); posted.refresh_from_db()
+        ok = all(post(finm, "confirm_facility_settlement", posted, txNo=no, note="Bank and statement reconciled").status_code == 400 for no in (t1a, t1b)); posted.refresh_from_db()
         _, _, rows = ledger(fin, posted); reconciled = next(x for x in rows if x.get("scheduleKey") == key)
-        check("finance manager manually settles each cleared Cedant transaction", ok and reconciled["settlement"] == "settled", reconciled)
+        check("manual confirmation is retired and leaves Cedant automatically settled", ok and reconciled["settlement"] == "settled", reconciled)
         r = txpay(fin, posted, {t1a: 0.01}); check("a settled transaction cannot take more money -> transaction_not_payable", code(r) == "transaction_not_payable", code(r))
+        fund={no:due(closed,no) for no in txs(closed,"Leg 1")}
+        check("Confirmed case receives full Cedant prerequisite",txpay(admin,closed,fund).status_code==200)
         rclosed = pay(admin, closed, rkey, due(closed, txs(closed, "Leg 2")[0])); check("admin can record on a Confirmed case", rclosed.status_code == 200, rclosed.content[:200])
 
         # ================= 賠款：可部分收付 =================
         # 2026-10-16：賠款建立即建帳，建帳台灣日期＋15 日到期；只有賠款可部分收付，付出不得超過已收
         pc = copy.deepcopy(Case.objects.get(pk=posted.pk).payload)
-        pc["transactions"] += [{"source": "claim", "txNo": "ZZ-CL-T1", "legType": "Claim Leg 1", "reinsurer": "ZZ Re A", "reinsurerIdx": 0, "amount": 100, "createdAt": "2026-09-01T02:00:00Z"},
-                               {"source": "claim", "txNo": "ZZ-CL-T2", "legType": "Claim Leg 2", "reinsurer": "ZZ Re A", "reinsurerIdx": 0, "amount": 100, "createdAt": "2026-09-01T02:00:00Z"}]
+        pc["transactions"] += [{"source": "claim", "claimId": 91, "paymentId": 1, "txNo": "ZZ-CL-T1", "legType": "Claim Leg 1", "reinsurer": "ZZ Re A", "reinsurerIdx": 0, "amount": 100, "createdAt": "2026-09-01T02:00:00Z"},
+                               {"source": "claim", "claimId": 91, "paymentId": 1, "txNo": "ZZ-CL-T2", "legType": "Claim Leg 2", "reinsurer": "ZZ Re A", "reinsurerIdx": 0, "amount": 100, "createdAt": "2026-09-01T02:00:00Z"}]
         Case.objects.filter(pk=posted.pk).update(payload=pc); posted.refresh_from_db()
         check("claim due date is creation Taiwan date + 15", detail(posted, "ZZ-CL-T1")["contractDueDate"] == "2026-09-16", detail(posted, "ZZ-CL-T1").get("contractDueDate"))
         r = txpay(fin, posted, {"ZZ-CL-T1": 100.01}); check("claim: more than outstanding -> 400 overpayment", code(r) == "overpayment", code(r))
@@ -281,13 +284,13 @@ try:
         r = post(fin, "reverse_payment", posted, entryId=legacy[1]["id"], paymentDate="2026-09-01", note="explicit date"); posted.refresh_from_db()
         check("reverse with an explicit date keeps that date", r.status_code == 200 and posted.payload["paymentEntries"][-1]["paymentDate"] == "2026-09-01")
         # 整筆匯款沖回：未銷帳者可沖回；已銷帳者永久鎖定（取消銷帳亦不解鎖）
-        r = reverse_batch(fin, posted, e["batchId"]); check("batch reverse: missing reason -> 400 correction_reason_required", code(r) == "correction_reason_required", code(r))
+        r = reverse_batch(fin, posted, e["batchId"]); check("settled cash remains locked even without a reversal reason", code(r) == "settled_amount_locked", code(r))
         r = reverse_batch(fin, posted, e["batchId"], note="Bank return", paymentDate="2026-09-22"); posted.refresh_from_db()
-        check("batch reverse of an unsettled remittance restores the balance", r.status_code == 200 and due(posted, t2a) == full_a and posted.payload["paymentEntries"][-1]["reversalOf"] == e["id"], r.content[:200])
+        check("settled premium remittance cannot be reversed", r.status_code == 409 and code(r)=="settled_amount_locked" and due(posted,t2a)==0, r.content[:200])
         r = reverse_batch(fin, posted, cedant_batch, note="Bank return"); check("batch reverse of settled cash -> 409 settled_amount_locked", r.status_code == 409 and code(r) == "settled_amount_locked", code(r))
         r = post(finm, "unconfirm_facility_settlement", posted, txNo=t1a, note="Reopen reconciliation")
         r2 = reverse_batch(fin, posted, cedant_batch, note="Bank return")
-        check("cancelling settlement does not unlock the settled amount", r.status_code == 200 and r2.status_code == 409 and code(r2) == "settled_amount_locked", (r.status_code, code(r2)))
+        check("cancelling settlement does not unlock the settled amount", r.status_code == 400 and r2.status_code == 409 and code(r2) == "settled_amount_locked", (r.status_code, code(r2)))
         raise Rollback()
 except Rollback:
     pass

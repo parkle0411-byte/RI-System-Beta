@@ -20,8 +20,8 @@ try:
   a.refresh_from_db();check('empty settlement note rejected',request(fin,'confirm_facility_settlement',caseUid=str(a.case_uid),rowVersion=a.row_version,txNo=tx(a,'Leg 1'),note=' ').status_code==400)
   check('manual confirmation cannot be backdated',settle(fin,a,'Leg 1',confirmationDate='2026-01-15').status_code==400)
   with override_settings(AUDIT_LOG_PAUSED=True):
-   before=AuditLog.objects.count();check('manual settlement operates during Audit pause',settle(fin,a,'Leg 1').status_code==200)
-   a.refresh_from_db();check('business settlement history persists during Audit pause',a.payload['facilityAccounting']['history'] and AuditLog.objects.count()==before and EntitySnapshot.objects.filter(entity_type='case',entity_id=str(a.case_uid),entity_version=a.row_version).exists())
+   before=AuditLog.objects.count();check('automatic settlement remains visible during Audit pause',details(a)[tx(a,'Leg 1')]['settlement']=='settled')
+   a.refresh_from_db();check('business settlement history persists during Audit pause',any(tx.get('settledAt') for tx in a.payload['transactions'] if tx['legType']=='Leg 1') and AuditLog.objects.count()==before and EntitySnapshot.objects.filter(entity_type='case',entity_id=str(a.case_uid),entity_version=a.row_version).exists())
   a.refresh_from_db();before_payload=copy.deepcopy(a.payload)
   ref=sales.post('/api/case-reconciliation-references',data=json.dumps({'caseUid':str(a.case_uid),'rowVersion':a.row_version,'statementNo':'EDGE-CHECKED','reinsurers':[{'index':0,'settlementRef':'EDGE-RI'}]}),content_type='application/json')
   a.refresh_from_db();check('reference-only changes preserve settled amount and confirmation',ref.status_code==200 and a.payload['paymentEntries']==before_payload['paymentEntries'] and details(a)[tx(a,'Leg 1')]['settlement']=='settled')
@@ -34,12 +34,12 @@ try:
    allocations=[]
    for case,leg,v in items:
     no=tx(case,leg);allocations.append({'caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no,'amount':v})
-   return request(fin,'record_transaction_payments',paymentDate='2026-10-01',amount=sum(x[2] for x in items),allocations=allocations)
+   return request(fin,'record_transaction_payments',note='QA synthetic registration', paymentDate='2026-10-01',amount=sum(x[2] for x in items),allocations=allocations)
   check('different counterparties cannot share a remittance',batch([(b,'Leg 1',1000),(c,'Leg 1',1000)]).status_code==400)
   check('failed batch changes neither case',not Case.objects.get(pk=b.pk).payload['paymentEntries'] and not Case.objects.get(pk=c.pk).payload['paymentEntries'])
   usd=make('USD',currency='USD');check('mixed currency batch rejected',batch([(b,'Leg 1',1000),(usd,'Leg 1',1000)]).status_code==400)
-  check('mixed cash direction batch rejected',batch([(b,'Leg 1',1000),(b,'Leg 2',800)]).status_code==400)
-  peer=make('PEER');check('same-party batch retains independent full allocations',batch([(b,'Leg 1',1000),(peer,'Leg 1',1000)]).status_code==200)
+  check('mixed cash direction rejected before an unfunded outgoing allocation',batch([(b,'Leg 1',1000),(b,'Leg 2',800)]).status_code==409)
+  peer=make('PEER');check('cross-case registrations remain separate even for the same party',batch([(b,'Leg 1',1000),(peer,'Leg 1',1000)]).status_code==400)
   u=make('AUW',reinsurers=[{'name':MANUAL_TW_REF_REINSURER,'foreignBroker':'Howden Specialty Limited','sharePct':100,'premium':800,'riCommPct':0,'taxPct':0}])
   ur=make('AUWREF',parent=u,originalPremium=-200,reinsurers=[{'name':MANUAL_TW_REF_REINSURER,'foreignBroker':'Howden Specialty Limited','sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0}])
   check('AUW reinsurer refund requires cash receipt instead of offset',offset(fin,u,ur,'reinsurer').status_code==400)

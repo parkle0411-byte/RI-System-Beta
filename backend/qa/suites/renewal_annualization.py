@@ -79,9 +79,9 @@ try:
                                                         "rowVersion": e2.row_version})
         check("renewal from latest case succeeds", response.status_code == 201)
         draft = Case.objects.get(case_uid=response.json()["case"]["caseUid"])
-        check("annualized 100% premium is 10,365", draft.payload["originalPremium"] == 10365)
-        check("reinsurer annual premiums are 8,292 and 7,255.50",
-              [r["premium"] for r in draft.payload["reinsurers"]] == [8292, 7255.5])
+        check("full-period average uses accumulated 10,400 and actual 366-day renewal", draft.payload["originalPremium"] == 10428.49)
+        check("each reinsurer uses its own cumulative full-period premium",
+              [r["premium"] for r in draft.payload["reinsurers"]] == [8342.79, 7299.95])
         check("new renewal keeps latest risk and shifts policy dates",
               draft.case_kind == "renewal" and draft.parent_case_id is None
               and draft.payload["policyFrom"] == "2047-03-01"

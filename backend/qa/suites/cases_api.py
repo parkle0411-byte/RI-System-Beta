@@ -202,7 +202,13 @@ try:
         r = put(sales, uid, cur["rowVersion"], e4); st = Case.objects.get(case_uid=uid).payload
         check("#8 omitting them does not erase them either", r.status_code == 200 and len(st["claims"]) == 1 and len(st["transactions"]) == 1 and len(st["paymentEntries"]) == 1)
 
-        # 已 Announce（posted）：付款條件鎖定
+        # The remaining checks cover the retained legacy Facility contract.
+        # Ordinary placements now use accounting_ag / cgl_qs for the A-G
+        # correction and Reverse rules; they no longer use this old contract.
+        legacy = copy.deepcopy(Case.objects.get(case_uid=uid).payload)
+        legacy['reinsurers'][0]['name'] = 'ZZ Legacy (Facility)'
+        Case.objects.filter(case_uid=uid).update(payload=legacy)
+        # 已 Announce（posted）：舊 Facility 付款條件鎖定
         Case.objects.filter(case_uid=uid).update(status="posted", tw_ref="ZZ-TEST-2")
         cur = load(sales, uid); pt = copy.deepcopy(cur["payload"]); pt["paymentTermsDays"] = 45
         r = put(sales, uid, cur["rowVersion"], pt); check("posted: changing payment terms -> 409 payment_terms_locked", r.status_code == 409 and code(r) == "payment_terms_locked")

@@ -36,11 +36,11 @@ def account(p, tag):
 
 def ready(**over):
     b = dict(reinsuranceStructure="QS", ae="ZZ REM AE", currency="USD", classOfBusiness="ZZ Class", classCode="PAR", newOrRenew="New", typePrefix="ZZ Type",
-             reinsured="ZZ Rem Cedant", originalInsured="ZZ Rem Insured", policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
+             reinsured="ZZ Rem Cedant", originalInsured="ZZ Rem Insured", originalInsuredCn='合成測試被保險人', policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
              situations=[dict(address="1 ZZ Road", postcode="100")],
              # 2026-10-16 92 項規則（第 31 項）：每家普通再保人天數須明確填寫，沒有預設值
              reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0, paymentTermsDays=30), dict(name="ZZ Re B", sharePct=40, premium=400, riCommPct=5, taxPct=0, paymentTermsDays=30)],
-             limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
+             limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction='Concrete', constructionSelections=['A2 Class'],
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)
     b.update(over); return b
@@ -116,7 +116,7 @@ try:
         c = make_case(sales, ae="ZZ REM Nobody")
         runner.run_signed_slip(DAY60)
         err = audits("signed_slip_configuration_error", c.case_uid).first()
-        check("AE without a Personnel record -> configuration error audit, no alert", not slips(c) and err and err.after_data["error"] == "AE does not match one active Personnel record."
+        check("AE without a Personnel record -> configuration error audit, no alert", not slips(c) and err and err.after_data["error"] == "Account Executive does not match one active Personnel record."
               and err.metadata == {"alertOn": DAY60}, err and err.after_data)
 
         signed_doc(a, ["ZZ Re B"])
@@ -159,19 +159,20 @@ try:
         check("synthetic case has posted transactions with an actual due date", len(due) >= 1, items[:2])
         first = min((i for i in items if i.get("contractDueDate")), key=lambda i: i["contractDueDate"])
         D, K = first["contractDueDate"], first["scheduleKey"]
+        F = first.get("reminderDate") or first["dueDate"]
         check("actual due date is policy date + 30 days, not the 15-day-earlier screen date", D == "2026-08-31", D)
         kinds = lambda case: [x.alert_kind for x in pays(case) if K in x.schedule_keys]   # 只追蹤同一個付款項目
-        runner.run_payment(d(D, -8))
-        check("8 days before: nothing", not pays(p))
-        runner.run_payment(d(D, -7))
+        runner.run_payment(d(F, -1))
+        check("day before Accounting reminder: nothing", not pays(p))
+        runner.run_payment(F)
         al = pays(p)
-        check("7 days before: seven_days_before suppressed", [x.alert_kind for x in al] == ["seven_days_before"] and al[0].status == "suppressed", [(x.alert_kind, x.status) for x in al])
+        check("Accounting reminder day: compatible seven_days_before identifier suppressed", [x.alert_kind for x in al] == ["seven_days_before"] and al[0].status == "suppressed", [(x.alert_kind, x.status) for x in al])
         rec = al[0].recipients if al else []
         check("recipients: AE and supervisor lower-cased, then every Finance e-mail, no duplicates",
               rec[:2] == ["zz.ae@tw-insure.com", "zz.boss@tw-insure.com"] and "zz.fin@tw-insure.com" in rec and len(rec) == len(set(rec)), rec)
         check("schedule keys stored for the reminded items", al and al[0].schedule_keys and all(k in {i["scheduleKey"] for i in items} for k in al[0].schedule_keys))
         # 2026-10-16 92 項規則：逾期改以實際約定到期「日」判斷，帳款不再有 12:00 時點，信件不再寫 12:00；改驗信件列出實際到期日
-        check("preview: subject '[Payment 7 天後到期] <TW Ref>' and VM link", al and al[0].subject == f"[Payment 7 天後到期] {p.tw_ref}"
+        check("preview: subject '[Payment 會計收付款提醒] <TW Ref>' and VM link", al and al[0].subject == f"[Payment 會計收付款提醒] {p.tw_ref}"
               and '<a href="http://vm.example/ri">開啟 VM</a>' in al[0].body_html, al and al[0].subject)
         check("preview body states the actual due date that triggered the notice", al and f"{D} (Taiwan)" in al[0].body_html, al and al[0].body_html)
         check("audit suppress_payment_reminder with metadata", audits("suppress_payment_reminder", al[0].pk).filter(
@@ -201,13 +202,13 @@ try:
             real_send = runner._send
             runner._send = lambda *a_, **k: (_ for _ in ()).throw(OSError("smtp down"))
             try:
-                runner.run_payment(d(D, -7))
+                runner.run_payment(F)
             finally:
                 runner._send = real_send
             al = pays(q)
             check("payment send failure -> failed with error_message", len(al) == 1 and al[0].status == "failed" and al[0].error_message == "smtp down")
             mail.outbox = []
-            runner.run_payment(d(D, -7))
+            runner.run_payment(F)
             al = pays(q)
             check("same day retry after failure (Alpha: DO UPDATE WHERE status = 'failed') -> sent, still one row",
                   len(al) == 1 and al[0].status == "sent" and any(q.tw_ref in m.subject for m in mail.outbox), [(x.status) for x in al])
@@ -215,7 +216,7 @@ try:
         # 沒有任何 Finance 的 e-mail
         Personnel.objects.filter(role_code__in=["accounting", "accounting_manager"]).update(email=None)
         s = make_case(sales, policyFrom="2026-08-01", policyTo="2027-08-01")
-        r = runner.run_payment(d(D, -7))
+        r = runner.run_payment(F)
         err = audits("payment_reminder_configuration_error", s.case_uid).first()
         # 2026-10-16 92 項規則（第 85 項）：有效收件人先寄，缺漏另提示；收件人只含啟用中 Finance Staff（不再含 Finance Manager）
         check("no active Finance e-mail -> AE and supervisor still reminded, missing Finance reported separately",
@@ -239,8 +240,8 @@ try:
         # 2026-10-16 第 85 項：有效收件人（Finance）先寄，AE 缺漏不再整封擋下寫 Audit 錯誤，而是在 API 最上方另列即時缺漏提示（at 為空）；
         # Audit 紀錄仍新到舊。此時 Finance e-mail 已被上一段清空，所以即時提示同時列出 AE 與 Finance 缺漏。
         check("API: configuration errors from the Audit Log (both reminders, newest first) plus the live payment contact warning", any(e["reminder"] == "signed_slip" and e["alertDate"] == DAY60
-              and e["error"] == "AE does not match one active Personnel record." for e in logged)
-              and errs[0]["reminder"] == "payment" and errs[0]["at"] is None and errs[0]["alertKind"] == "contact_missing" and "AE does not match one active Personnel record." in errs[0]["error"]
+              and e["error"] == "Account Executive does not match one active Personnel record." for e in logged)
+              and errs[0]["reminder"] == "payment" and errs[0]["at"] is None and errs[0]["alertKind"] == "contact_missing" and "Account Executive does not match one active Personnel record." in errs[0]["error"]
               and [e["at"] for e in logged] == sorted([e["at"] for e in logged], reverse=True), errs[:3])
         check("API: viewer cannot see a case that is not theirs -> 404", call(viewer, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 404)
         check("API: Finance can inspect case reminders under the approved all-case read permission", call(fin, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 200)

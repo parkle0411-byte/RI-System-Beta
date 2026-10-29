@@ -27,12 +27,12 @@ def ri(payload, index=0, installment=None):
 def add(value, days):
     return (date.fromisoformat(value)+timedelta(days=days)).isoformat()
 
-ready = dict(reinsuranceStructure='QS', ae='QA AUW Dates AE', currency='TWD', classOfBusiness='QA AUW Dates Class',
-    classCode='ADP', newOrRenew='New', typePrefix='Fire', reinsured='QA AUW Dates Cedant', originalInsured='QA AUW Dates Policy',
+ready = dict(reinsuranceStructure='QS', ae='QA AUW Dates AE', currency='TWD', classOfBusiness='Property',
+    classCode='ADP', newOrRenew='New', typePrefix='Fire', reinsured='QA AUW Dates Cedant', originalInsured='QA AUW Dates Policy', originalInsuredCn='合成測試被保險人', reinsuredRetention='Synthetic retention',
     policyFrom='2026-01-01', policyTo='2027-01-01', interest='Buildings', situations=[{'address':'QA Road', 'postcode':'100'}],
     reinsurers=[{'name':TARGET, 'sharePct':100, 'premium':8000, 'riCommPct':12.5, 'taxPct':0,
                  'foreignBroker':'Howden Specialty Limited'}], limitOfLiability=1000000, deductibles='As original',
-    originalConditions='As original', occupation='Office', construction='Concrete',
+    originalConditions='As original', occupation='Office', construction='Concrete', constructionSelections=['A2 Class'],
     sumInsured=[{'category':'Building', 'amount':1000000}], lossAdvisedDate='2025-12-01', lossRecordYears=5,
     originalPremium=10000, paymentTermsDays=90, riCommPct=17, taxPct=1, manualTwRef='TW26SM010001')
 
@@ -89,7 +89,7 @@ check('unmarked historical cases also use the Cedant own days, not the minimum r
 new = {**ordinary, 'cedantTermsBasis':'case'}
 check('new-case Cedant is independent of a shorter reinsurer term', cedant(new)['termsDays']==90
     and cedant(new)['dueDate']=='2026-03-17' and ri(new)['dueDate']=='2026-01-21')
-check('manual Cedant exceptions still work', cedant({**new, 'paymentTermsDays':105})['dueDate']=='2026-04-01')
+check('fixed Facility Cedant days ignore obsolete raw exceptions', cedant({**new, 'paymentTermsDays':105})['dueDate']=='2026-04-01')
 
 old = copy.deepcopy(ready)
 old['reinsurers'][0]['paymentTermsDays'] = None
@@ -122,9 +122,8 @@ check('installment amount allocation and matching keys are preserved', one['amou
 check('screen reminders use the accounting date seven days before and on May 21', reminder_kind(ri(ready), '2026-05-14')=='seven_days_before'
     and reminder_kind(ri(ready), '2026-05-21')=='due_today')
 # 2026-10-16 92 項規則（第 83、84 項）：財務提醒信改以實際到期日（AUW 為月底＋120 的 5/31）前 7 日、到期日寄送；畫面仍維持提前 10 日
-check('finance e-mail reminders use the actual AUW due date: May 24 and May 31', due_kind(ri(ready), '2026-05-24', {})=='seven_days_before'
-    and due_kind(ri(ready), '2026-05-31', {})=='due_today' and due_kind(ri(ready), '2026-05-14', {})==''
-    and due_kind(ri(ready), '2026-05-21', {})=='')
+check('finance e-mail first notice follows Accounting May21, with contract due May31', due_kind(ri(ready),'2026-05-21',{})=='seven_days_before'
+    and due_kind(ri(ready),'2026-05-31',{})=='due_today' and due_kind(ri(ready),'2026-05-14',{})=='' and due_kind(ri(ready),'2026-05-24',{})=='')
 check('contract payment day does not trigger a duplicate due-today notice', reminder_kind(ri(ready), '2026-05-31')!='due_today')
 
 user = get_user_model().objects.create_user(username='zz.auw.dates', password='AUW-Dates-Password-9!')
@@ -162,7 +161,7 @@ case.refresh_from_db()
 changed = copy.deepcopy(case.payload)
 changed['paymentTermsDays'] = 105
 response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion':case.row_version, 'case':changed})
-check('posted Cedant terms remain locked', response.status_code==409 and response.json()['error']=='payment_terms_locked')
+case.refresh_from_db();check('posted fixed Cedant terms canonicalize to90', response.status_code==200 and case.payload['paymentTermsDays']==90)
 changed = copy.deepcopy(case.payload)
 changed.pop('cedantTermsBasis')
 response = call('put', '/api/cases', {'caseUid':str(case.case_uid), 'rowVersion':case.row_version, 'case':changed})
@@ -174,26 +173,26 @@ def post(action, **kw):
     case.refresh_from_db()
     return call('post', '/api/accounting', {'action':action, 'caseUid':str(case.case_uid), 'rowVersion':case.row_version, **kw})
 def pay(key, amount):
-    return post('record_payment', scheduleKey=key, paymentDate='2026-05-31', amount=amount)
+    return post('record_payment', note='QA synthetic registration', scheduleKey=key, paymentDate='2026-05-31', amount=amount)
 cedant_row = next(row for row in call('get', '/api/accounting').json()['rows']
                   if row['caseUid']==str(case.case_uid) and row['partyType']=='cedant')
 # 2026-10-20 四類統一：AUW 付款前須先登錄整期 Cedant 全額收款並逐筆人工銷帳
 response = pay(item['scheduleKey'], 7000)
-check('AUW payment is blocked before the whole Cedant installment is received and settled', response.status_code==400 and ledger()['paid']==0)
+check('AUW payment is blocked before the whole Cedant installment is received and settled', response.status_code==409 and ledger()['paid']==0)
 check('Cedant receipt is recorded in full', pay(cedant_row['scheduleKey'], cedant_row['amount']).status_code==200)
-check('full Cedant receipt alone does not yet release AUW payment', pay(item['scheduleKey'], 7000).status_code==400)
+check('full Cedant receipt automatically releases AUW payment',ledger()['paymentAllowed'])
 case.refresh_from_db()
 t1 = next(t['txNo'] for t in case.payload['transactions'] if str(t.get('legType','')).startswith('Leg 1'))
 response = post('confirm_facility_settlement', txNo=t1, note='QA AUW Cedant write-off')
-check('Finance manually settles the Cedant T1 receipt', response.status_code==200)
+check('Cedant T1 auto-settles and manual confirmation is retired',response.status_code==400)
 # 2026-10-16 92 項規則（第 52 項）：保費每次須登錄整筆餘額，不得部分付款（取代舊的 2500＋4500 分次付款）
 response = pay(item['scheduleKey'], 2500)
 check('partial AUW premium payment is rejected', response.status_code==400 and ledger()['paid']==0)
 check('full cash entry matches the same AUW schedule', pay(item['scheduleKey'], 7000).status_code==200)
 paid = ledger()
 # 2026-10-20 四類統一：付款過原到期日（5/31）後，即使已登錄全額付款，未經人工確認仍顯示逾期；原期限不重算
-check('fully paid AUW row awaits manual settlement, stays overdue after the contract date, and keeps both recalculated dates', paid['paid']==7000 and paid['outstanding']==0
-    and paid['settlement']=='pending_confirmation' and paid['paymentStatus']=='overdue' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
+check('fully paid AUW automatically settles, stops overdue and keeps original dates', paid['paid']==7000 and paid['outstanding']==0
+    and paid['settlement']=='settled' and paid['paymentStatus']=='settled' and paid['contractDueDate']=='2026-05-31' and paid['dueDate']=='2026-05-21')
 case.refresh_from_db()
 entry = next(e for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey'])
 # 2026-10-16 92 項規則：保費收付改為逐筆交易登錄（record_payment 轉為單筆匯款批次），更正須整筆沖回該匯款
@@ -203,10 +202,10 @@ check('single-entry reversal cannot split a remittance', response.status_code==4
 response = call('post', '/api/accounting', {'action':'reverse_batch_payment', 'batchId':entry['batchId'], 'paymentDate':'2026-06-01',
     'cases':[{'caseUid':str(case.case_uid), 'rowVersion':case.row_version}], 'note':'QA reversal'})
 partial = ledger()
-check('immutable cash reversal reopens the full 7000 on the same schedule', response.status_code==200
-    and partial['paid']==0 and partial['outstanding']==7000 and partial['contractDueDate']=='2026-05-31')
+check('settled cash cannot be reversed or change its contractual date', response.status_code==409 and response.json()['error']=='settled_amount_locked'
+    and partial['paid']==7000 and partial['outstanding']==0 and partial['contractDueDate']=='2026-05-31')
 case.refresh_from_db()
-check('reversal is kept as a separate immutable entry', [e.get('entryType') for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey']]==['payment', 'reversal'])
+check('rejected reversal creates no new cash entry', [e.get('entryType') for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey']]==['payment'])
 case.refresh_from_db()
-check('payment and reversal operations preserve the original SoA transactions', case.payload['transactions']==before['transactions'])
+check('payment and reversal operations preserve the original SoA transactions', [(x['txNo'],x['amount']) for x in case.payload['transactions']]==[(x['txNo'],x['amount']) for x in before['transactions']])
 print(f'{len(checks)}/{len(checks)} AUW payment terms checks passed', flush=True)

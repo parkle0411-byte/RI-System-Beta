@@ -21,8 +21,16 @@ def ready():
         limitOfLiability=1234567.89,deductibles='As original',originalConditions='As original',reinsuredRetention='Advice waived',
         coverages=['Medical Payment'],selfInsuredRetention='',lossRecordYears=5,lossAdvisedDate='2026-01-01',
         originalPremium=1000,paymentTermsDays=90,reinsurers=[dict(name='QA General Re',sharePct=100,premium=1000,riCommPct=5,taxPct=0,paymentTermsDays=90)],
-        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredProducts='Products',
+        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredBusinessSelections=['Other'],insuredBusinessOther='Business',insuredProducts='Products',
             estimatedTurnover=[dict(region='USA/Canada',currency='USD',amount=1000000)],specialAgreementApplies='notApplicable'))
+# Complete fixtures include the newly confirmed QS formal fields.
+_legacy_ready = ready
+def ready():
+    p = _legacy_ready()
+    p.setdefault('originalInsuredCn', 'QS QA CN')
+    p.setdefault('riCommPct', 0)
+    p.setdefault('taxPct', 0)
+    return p
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
@@ -54,7 +62,7 @@ try:
         check('CGL limit label '+str(value),any('Limit of Indemnity' in s for s in result['errors']) or any(i['label']=='Limit of Indemnity' for i in issues))
     p={**base,'classOfBusiness':'Property','typePrefix':'Fire / Lightning','limitOfLiability':-1}
     result=normalize_draft(p);check('Property limit save label remains',any('Limit of Liability' in s for s in result['errors']))
-    for scope,patch in [('Property',dict(classOfBusiness='Property')),('Treaty',dict(reinsuranceStructure='TREATY')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsurers=[dict(name='QA',foreignBroker='PWS')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
+    for scope,patch in [('Property',dict(classOfBusiness='Property')),('Treaty',dict(reinsuranceStructure='TREATY')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
         p={**base,**patch,'typePrefix':'Custom liability'};result=normalize_draft(p)
         check(scope+' free Type unchanged',not result['errors'] and 'as original' not in result['value']['type'],result['errors'])
     blank={**base,'typePrefix':'','type':''}

@@ -3,7 +3,7 @@ import copy,json,os,uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from django.contrib.auth import get_user_model
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.test import Client
 from django.utils import timezone
 from cases.models import Case,CaseDocument,ReferenceSequence
@@ -22,7 +22,7 @@ def check(label,value):
  checks.append(label);print('PASS '+label,flush=True)
 user=get_user_model().objects.create_user(username='zz.auw.identity',password='AUW-Identity-QA-9!')
 person=Personnel.objects.create(name='QA AUW Identity AE',department='admin',role_code='admin',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
-for kind,name in [('ae',person.name),('class','QA Identity Class'),('reinsured','QA Identity Cedant'),('reinsurer',AUW),('reinsurer','QA Identity Ordinary'),('foreign_broker','Howden Specialty Limited')]:
+for kind,name in [('ae',person.name),('class','Property'),('reinsured','QA Identity Cedant'),('reinsurer',AUW),('reinsurer','QA Identity Ordinary'),('foreign_broker','Howden Specialty Limited')]:
  MasterRecord.objects.get_or_create(entity_type=kind,name=name,defaults={'created_by':'qa','updated_by':'qa'})
 def call(method,url,body=None,c=None):
  c=c or client;c.get('/api/auth/csrf');kw={'HTTP_X_CSRFTOKEN':c.cookies['csrftoken'].value}
@@ -33,7 +33,7 @@ def login():
  assert call('post','/api/auth/login',{'username':user.username,'password':'AUW-Identity-QA-9!'},c=c).status_code==200
  return c
 client=login()
-ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='QA Identity Class',classCode='AUID',newOrRenew='New',typePrefix='Fire',reinsured='QA Identity Cedant',originalInsured='QA AUW Identity',policyFrom='2044-05-01',policyTo='2045-05-01',interest='Buildings',situations=[dict(address='QA Road',postcode='100')],reinsurers=[dict(name=AUW,foreignBroker='Howden Specialty Limited',sharePct=100,premium=8000,riCommPct=12.5,taxPct=0,paymentTermsDays=120)],limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete',sumInsured=[dict(category='Building',amount=1000000)],lossAdvisedDate='2044-04-01',lossRecordYears=5,originalPremium=10000,paymentTermsDays=90,riCommPct=10,taxPct=1,ownerPersonnelId=person.pk,ownerPersonnelName=person.name)
+ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='Property',classCode='AUID',newOrRenew='New',typePrefix='Fire',reinsured='QA Identity Cedant',originalInsured='QA AUW Identity', originalInsuredCn='合成測試被保險人', reinsuredRetention='Synthetic retention',policyFrom='2044-05-01',policyTo='2045-05-01',interest='Buildings',situations=[dict(address='QA Road',postcode='100')],reinsurers=[dict(name=AUW,foreignBroker='Howden Specialty Limited',sharePct=100,premium=8000,riCommPct=12.5,taxPct=0,paymentTermsDays=120)],limitOfLiability=1000000,deductibles='As original',basisOfValuation='Replacement Value',originalConditions='As original',occupation='Office',construction='Concrete', constructionSelections=['A2 Class'],sumInsured=[dict(category='Building',amount=1000000)],lossAdvisedDate='2044-04-01',lossRecordYears=5,originalPremium=10000,paymentTermsDays=90,riCommPct=10,taxPct=1,ownerPersonnelId=person.pk,ownerPersonnelName=person.name)
 def create(ref=None,raw=None):
  payload=copy.deepcopy(raw or ready)
  if ref is not None:payload['manualTwRef']=ref
@@ -99,7 +99,11 @@ long_ref='AUW-'+('X'*156);long=create(long_ref);evidence(long,'offer');evidence(
 check('160-character AUW primary is stored without truncation',r.status_code==200 and long.tw_ref==long_ref and len(long.tw_ref)==160)
 check('pure AUW long reference still does not advance any sequence',ReferenceSequence.objects.get(prefix='TWPF4405').last_value==2)
 for source,ref in [(pure,'TW44SM000001'),(pure,'TW44SM-DRAFT')]:
- r=workflow(source,'create_endorsement',ref);check('endorsement rejects reused ref '+ref,r.status_code==409)
+ with transaction.atomic():
+  r=workflow(source,'create_endorsement',ref)
+  candidate=Case.objects.get(case_uid=r.json()['case']['caseUid']) if r.status_code==201 else None
+  check('endorsement ignores obsolete manual-number input '+ref,r.status_code==201 and not candidate.payload.get('manualTwRef') and candidate.tw_ref is None)
+  transaction.set_rollback(True)
 r=workflow(pure,'create_endorsement','TW44SM-ENDO');assert r.status_code==201,r.content
 endo=Case.objects.get(case_uid=r.json()['case']['caseUid'])
 # 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
@@ -107,7 +111,7 @@ check('new pure AUW endorsement inherits the original Cedant days',endo.payload[
 p=copy.deepcopy(endo.payload);p.update(endoEffectiveDate='2044-06-01',endoTypes=['premium'],endoText='Additional premium',originalPremium=1000,paymentTermsDays=90);p['reinsurers'][0]['premium']=800
 assert edit(endo,p).status_code==200
 seq=list(ReferenceSequence.objects.values());evidence(endo,'offer');evidence(endo,'signed',[AUW]);r=announce(endo);endo.refresh_from_db()
-check('pure AUW endorsement has its own manual primary without an E sequence',r.status_code==200 and endo.tw_ref=='TW44SM-ENDO' and list(ReferenceSequence.objects.values())==seq)
+check('pure AUW endorsement derives Original-E01 at successful Announce',r.status_code==200 and endo.tw_ref==pure.tw_ref+'-E01' and endo.payload['manualTwRef']==endo.tw_ref and ReferenceSequence.objects.get(prefix=pure.tw_ref+'-E').last_value==1)
 check('endorsement retains original parent, its own entered Cedant days and one settlement',endo.payload['parentTwRef']==pure.tw_ref and endo.payload['paymentTermsDays']==90 and not endo.payload['installmentEnabled'])
 schedule=build_payment_schedule(endo.payload)
 check('AUW endorsement schedule retains fixed 120-day month-end rule',not schedule['issues'] and next(x for x in schedule['items'] if x['partyType']=='reinsurer')['paymentRule']=='auw_month_end_120')
@@ -116,7 +120,7 @@ child=Case.objects.get(case_uid=r.json()['case']['caseUid']);p=copy.deepcopy(chi
 # 2026-10-13 Sum Insured 位置規則：由全 Facility 改成混合時，原項目要重新分配到 Location（畫面也會提示）
 p['sumInsured']=[{**item,'locationIndex':0} for item in p['sumInsured']]
 assert edit(child,p).status_code==200;evidence(child,'offer');evidence(child,'signed',['QA Identity Ordinary',AUW]);r=announce(child);child.refresh_from_db()
-check('mixed endorsement of a long manual root gets an automatic E reference without truncation',r.status_code==200 and child.tw_ref==long_ref+'-E01' and child.payload['parentTwRef']==long_ref)
+check('long AUW root derives E reference without truncation and rejects added security through source locks',r.status_code==200 and child.tw_ref==long_ref+'-E01' and child.payload['parentTwRef']==long_ref and len(child.payload['reinsurers'])==1 and child.payload['reinsurers'][0]['sharePct']==100)
 long.status='closed';long.save()
 r=workflow(long,'create_renewal','TW45SM-OLD-ROOT')
 check('renewal from an older root is blocked while its newer endorsement is active',

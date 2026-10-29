@@ -85,7 +85,7 @@ try:
         got_rows = [r for r in response['rows'] if r['caseUid'] in mine]
         # 付款排程列另外補了對帳編號欄位；只比較原本就有的欄位
         slim = lambda rs: sorted(({k: v for k, v in r.items() if k not in ('statementNo', 'reconciliationRef', 'originalInsured', 'originalInsuredCn')} for r in json_roundtrip(rs)), key=key)
-        check('GET /api/accounting transaction rows equal the unshared computation', sorted(json_roundtrip(expected_tx), key=key) == sorted(got_tx, key=key))
+        check('GET /api/accounting transaction rows equal the unshared computation', sorted(json_roundtrip(expected_tx), key=key) == sorted([{k:v for k,v in row.items() if k not in ('fxRate','fxMonth','fxEstimated','amountNtd','outstandingNtd')} for row in got_tx], key=key))
         check('GET /api/accounting schedule rows equal the unshared computation', slim(expected_rows) == slim([{k: v for k, v in r.items()} for r in got_rows]))
         check('every fixture case that has transactions is present in the response', {r['caseUid'] for r in got_tx} == {str(c.case_uid) for c in cases if Case.objects.get(pk=c.pk).payload['transactions']} and len(got_tx) == len(expected_tx))
 

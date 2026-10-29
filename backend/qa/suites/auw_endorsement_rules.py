@@ -36,7 +36,7 @@ for stamp,effective,expected,month_end in [
   p['reinsurers'][0]['premium']=premium*.8
   items=build_payment_schedule(p)['items'];c,r=items
   assert endorsement_base_date(p)==expected and c['baseDate']==expected
-  assert c['termsDays']==120 and c['contractDueDate']==plus(expected,120) and c['dueDate']==plus(expected,105)
+  assert c['termsDays']==90 and c['contractDueDate']==plus(expected,90) and c['dueDate']==plus(expected,75)
   assert r['sourceBaseDate']==expected and r['baseDate']==month_end and r['contractDueDate']==plus(month_end,120) and r['dueDate']==plus(month_end,110)
  check('later-date calendar arithmetic, signed/zero premiums and Taiwan date '+stamp,True)
 for missing in ['',None,'2026-01-01','invalid','2026-01-01T00:00:00']:
@@ -50,10 +50,10 @@ items=build_payment_schedule(p)['items']
 check('mixed case ordinary RI payable starts at later Announce/effective date and retains its term',items[2]['baseDate']=='2026-04-02' and items[2]['dueDate']==plus('2026-04-02',35) and items[1]['baseDate']=='2026-04-30')
 p=copy.deepcopy(raw);p.update(originalPremium=-1000,endoEffectiveDate='2026-03-15',endorsementAnnouncedAt='2026-04-02T00:00:00Z');p['reinsurers']=[dict(name='Ordinary RI',sharePct=100,premium=-800,riCommPct=5,taxPct=1,paymentTermsDays=45)]
 items=build_payment_schedule(p)['items']
-check('ordinary RI recovery starts at endorsement effective date even when Announce is later',items[1]['baseDate']=='2026-03-15' and items[1]['dueDate']==plus('2026-03-15',35) and items[0]['baseDate']=='2026-04-02')
+check('ordinary RI recovery uses the later endorsement Announce date',items[1]['baseDate']=='2026-04-02' and items[1]['dueDate']==plus('2026-04-02',35) and items[0]['baseDate']=='2026-04-02')
 p=copy.deepcopy(raw);p.update(originalPremium=500,endoEffectiveDate='2026-03-15',endorsementAnnouncedAt='2026-04-02T00:00:00Z');p['reinsurers']=[dict(name='Payable RI',sharePct=50,premium=800,riCommPct=5,taxPct=1,paymentTermsDays=45),dict(name='Recovery RI',sharePct=50,premium=-200,riCommPct=5,taxPct=1,paymentTermsDays=45)]
 items=build_payment_schedule(p)['items']
-check('mixed RI payable and recovery each follow their cash direction',items[1]['baseDate']=='2026-04-02' and items[2]['baseDate']=='2026-03-15')
+check('mixed RI payable and recovery each follow their cash direction',items[1]['baseDate']=='2026-04-02' and items[2]['baseDate']=='2026-04-02')
 p['endorsementAnnouncedAt']=''
 draft_schedule=build_payment_schedule(p)
 check('ordinary RI payable has no premature due date before actual Announce',draft_schedule['items'][1]['baseDate']=='' and draft_schedule['items'][1]['dueDate']=='' and draft_schedule['reviewRequired'])
@@ -65,7 +65,7 @@ def call(method,url,body=None):
  if body is not None:kw.update(data=json.dumps(body),content_type='application/json')
  return getattr(client,method)(url,**kw)
 assert call('post','/api/auth/login',dict(username=user.username,password='AUW-Endo-Password-9!')).status_code==200
-ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='QA Endorsement Class',classCode='AER',newOrRenew='New',typePrefix='Fire',reinsured='QA Endorsement Cedant',originalInsured='QA Endorsement Root',policyFrom='2050-01-01',policyTo='2051-01-01',interest='Buildings',situations=[dict(address='QA Road',postcode='100')],reinsurers=[dict(name=TARGET,sharePct=100,premium=8000,riCommPct=12.5,taxPct=0)],limitOfLiability=1000000,deductibles='As original',originalConditions='As original',occupation='Office',construction='Concrete',sumInsured=[dict(category='Building',amount=1000000)],lossAdvisedDate='2049-12-01',lossRecordYears=5,originalPremium=10000,paymentTermsDays=120,riCommPct=17,taxPct=1,manualTwRef='TW50SM-ROOT',installmentEnabled=True,performanceInstallments=[dict(id='root1',performanceMonth='2050-01',paymentBaseDate='2050-01-01',premium=4000),dict(id='root2',performanceMonth='2050-02',paymentBaseDate='2050-02-01',premium=6000)])
+ready=dict(reinsuranceStructure='QS',ae=person.name,currency='TWD',classOfBusiness='Property',classCode='AER',reinsuredRetention='Synthetic retention',newOrRenew='New',typePrefix='Fire',reinsured='QA Endorsement Cedant',originalInsured='QA Endorsement Root', originalInsuredCn='合成測試被保險人',policyFrom='2050-01-01',policyTo='2051-01-01',interest='Buildings',situations=[dict(address='QA Road',postcode='100')],reinsurers=[dict(name=TARGET,sharePct=100,premium=8000,riCommPct=12.5,taxPct=0)],limitOfLiability=1000000,deductibles='As original',basisOfValuation='Replacement Value',originalConditions='As original',occupation='Office',construction='Concrete', constructionSelections=['A2 Class'],sumInsured=[dict(category='Building',amount=1000000)],lossAdvisedDate='2049-12-01',lossRecordYears=5,originalPremium=10000,paymentTermsDays=120,riCommPct=17,taxPct=1,manualTwRef='TW50SM-ROOT',installmentEnabled=True,performanceInstallments=[dict(id='root1',performanceMonth='2050-01',paymentBaseDate='2050-01-01',premium=4000),dict(id='root2',performanceMonth='2050-02',paymentBaseDate='2050-02-01',premium=6000)])
 r=call('post','/api/cases',{'case':ready});assert r.status_code==201,r.content
 root=Case.objects.get(case_uid=r.json()['case']['caseUid']);root.status='posted';root.tw_ref='TWAER5001001';root.save()
 root_before=Case.objects.filter(pk=root.pk).values().get()
@@ -75,10 +75,10 @@ def create_child(source,manual='TW50SM-END'):
  return Case.objects.get(case_uid=r.json()['case']['caseUid'])
 child=create_child(root)
 # 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
-check('AUW endorsement starts single settlement, keeps the original Cedant 120 days and editable deductions',child.payload['installmentEnabled'] is False and child.payload['performanceInstallments']==[] and child.payload['paymentTermsDays']==120 and child.payload['reinsurers'][0]['riCommPct']==12.5)
-check('if the user clears the endorsement Cedant days it becomes pending review',build_payment_schedule({**child.payload,'paymentTermsDays':None,'endoEffectiveDate':'2050-01-15','endorsementAnnouncedAt':'2050-02-01T00:00:00Z','originalPremium':1000})['items'][0]['dueDate']=='')
-check('new endorsement clears old actual Announce date and manual ref is new',child.payload['endorsementAnnouncedAt']=='' and child.payload['manualTwRef']=='TW50SM-END')
-def save(row,payload):return call('put','/api/cases',dict(caseUid=str(row.case_uid),rowVersion=row.row_version,case=payload))
+check('AUW endorsement starts single settlement, keeps fixed Cedant 90 days and editable deductions',child.payload['installmentEnabled'] is False and child.payload['performanceInstallments']==[] and child.payload['paymentTermsDays']==90 and child.payload['reinsurers'][0]['riCommPct']==12.5)
+check('fixed Cedant 90 days remains effective when an old raw value is blank',build_payment_schedule({**child.payload,'paymentTermsDays':None,'endoEffectiveDate':'2050-01-15','endorsementAnnouncedAt':'2050-02-01T00:00:00Z','originalPremium':1000})['items'][0]['termsDays']==90)
+check('new endorsement clears old actual Announce date and defers automatic AUW reference until Announce',child.payload['endorsementAnnouncedAt']=='' and not child.payload.get('manualTwRef'))
+def save(row,payload,reason='QA current financial correction'):return call('put','/api/cases',dict(caseUid=str(row.case_uid),rowVersion=row.row_version,case=payload,reason=reason))
 for flag,rows in [(True,[]),(False,[dict(id='bad',premium=1)]),(True,ready['performanceInstallments'])]:
  p=copy.deepcopy(child.payload);p.update(parentTwRef='',installmentEnabled=flag,performanceInstallments=rows)
  before=child.row_version
@@ -104,23 +104,23 @@ assert r.status_code==200,r.content;child.refresh_from_db()
 check('successful Announce stores the exact authoritative time once',child.announced_at==stamp and child.payload['endorsementAnnouncedAt']==stamp.isoformat())
 rows=[row for row in call('get','/api/accounting').json()['rows'] if row['caseUid']==str(child.case_uid)]
 c=next(row for row in rows if row['partyType']=='cedant');r=next(row for row in rows if row['partyType']=='reinsurer')
-check('Accounting uses Feb 1 for Cedant and Feb month end for AUW',c['baseDate']=='2050-02-01' and c['termsDays']==120 and c['dueDate']==plus('2050-02-01',105) and r['baseDate']=='2050-02-28' and r['dueDate']==plus('2050-02-28',110))
+check('Accounting uses Feb 1 for Cedant and Feb month end for AUW',c['baseDate']=='2050-02-01' and c['termsDays']==90 and c['dueDate']==plus('2050-02-01',75) and r['baseDate']=='2050-02-28' and r['dueDate']==plus('2050-02-28',110))
 check('AUW reminder uses internal date, not contract date',reminder_kind(r,r['dueDate'])=='due_today' and reminder_kind(r,r['contractDueDate'])!='due_today')
 p=copy.deepcopy(child.payload);p.update(endorsementAnnouncedAt='2099-01-01T00:00:00Z',endorsementPerformanceMonth='2099-01');p['reinsurers'][0]['riCommPct']=7
 r=save(child,p);assert r.status_code==200,r.content;child.refresh_from_db()
-check('posted edit preserves server Announce date and a customized deduction',child.payload['endorsementAnnouncedAt']==stamp.isoformat() and child.payload['reinsurers'][0]['riCommPct']==7 and not child.payload.get('endorsementPerformanceMonth'))
+check('posted edit preserves server Announce date and locked source deduction',child.payload['endorsementAnnouncedAt']==stamp.isoformat() and child.payload['reinsurers'][0]['riCommPct']==root.payload['reinsurers'][0]['riCommPct'] and not child.payload.get('endorsementPerformanceMonth'))
 p=copy.deepcopy(child.payload);p['endoEffectiveDate']='2050-04-01'
-r=save(child,p)
-check('payment base cannot change after Announce',r.status_code==409 and r.json()['error']=='payment_terms_locked')
+r=save(child,p,reason='')
+check('unprocessed payment base cannot change without a reason',r.status_code==409 and r.json()['error']=='property_edit_locked')
 # 2026-10-16：已有效的天數不可修改；批單自己的 Cedant 天數在 Announce 後同樣鎖定（保留原「批單 Cedant 天數不可任意改」的意旨）
 p=copy.deepcopy(child.payload);p['paymentTermsDays']=90
 r=save(child,p)
-check('endorsement Cedant days are locked after Announce',r.status_code==409 and r.json()['error']=='payment_terms_locked')
+child.refresh_from_db();check('fixed Cedant 90 canonicalizes on posted save',r.status_code==200 and child.payload['paymentTermsDays']==90)
 # 2026-10-21 使用者決定（取代 92 項規則第 35 條）：新批單的 Cedant 與再保人付款天數一律沿用來源保單，Draft 仍可修改。
 child.payload['paymentTermsDays']=90;child.save(update_fields=['payload'])
 chained=create_child(child,'TW50SM-END2')
 check('chained endorsement inherits the days of the case it is created from (intermediate 90)',chained.payload['paymentTermsDays']==90)
-normal=copy.deepcopy(ready);normal['reinsurers'][0]['name']='QA Ordinary Endorsement RI';normal.pop('manualTwRef')
+normal=copy.deepcopy(ready);normal['reinsurers'][0]['name']='QA Ordinary Endorsement RI';normal['reinsurers'][0]['paymentTermsDays']=120;normal.pop('manualTwRef')
 r=call('post','/api/cases',{'case':normal});assert r.status_code==201,r.content
 ordinary=Case.objects.get(case_uid=r.json()['case']['caseUid']);ordinary.status='posted';ordinary.tw_ref='TWAER5001002';ordinary.save()
 normal_child=create_child(ordinary)

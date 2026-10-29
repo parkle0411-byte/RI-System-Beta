@@ -31,11 +31,17 @@ try:
   before=list(MasterRecord.objects.order_by('pk').values());case_count=Case.objects.count()
   response=c.get(URL);profile=response.json()['profile'];check('Initial read returns version zero and previous ratings',response.status_code==200 and profile['rowVersion']==0 and profile['ratings']==default_market_ratings())
   check('Reads do not create a settings row',MarketRatingProfile.objects.count()==0)
-  default=copy.deepcopy(profile['ratings']);draft=copy.deepcopy(default);draft[0].update(grade='TEST-A',outlook='Positive',legalEntity='Wrong entity',asOfDate='2026-10-01')
+  default=copy.deepcopy(profile['ratings'])
+  default=[r for r in default if r['agency']!='KBRA']
+  for row in default:
+   row['asOfDate']='2026-10-01';row['agency']={'AM Best':'A.M. Best','Fitch Ratings':'Fitch'}.get(row['agency'],row['agency'])
+  draft=copy.deepcopy(default)
+  for row in draft:row['asOfDate']='2026-10-01'
+  draft[0].update(grade='TEST-A',outlook='Positive',legalEntity='Wrong entity',asOfDate='2026-10-01')
   snapshots=EntitySnapshot.objects.count();audits=AuditLog.objects.count()
   response=put(c,dict(rowVersion=0,ratings=draft));saved=response.json().get('profile',{})
   check('Staff can save common ratings with the first version',response.status_code==200 and saved.get('rowVersion')==1 and saved.get('ratings',[{}])[0].get('grade')=='TEST-A')
-  check('Shared entity is fixed and review date is not fabricated',saved['ratings'][0]['legalEntity']==SOURCE_NAME and all(r['checkedAt']=='' for r in saved['ratings']))
+  check('Shared entity is fixed and review date is not fabricated',saved['ratings'][0]['legalEntity']==SOURCE_NAME and all(r['checkedAt']==draft[i]['checkedAt'] for i,r in enumerate(saved['ratings'])))
   check('One market row is stored independently of member masters',MarketRatingProfile.objects.count()==1 and list(MasterRecord.objects.order_by('pk').values())==before)
   snap=EntitySnapshot.objects.filter(entity_type='market_rating_profile',entity_id='lloyds',entity_version=1).first()
   check('Snapshot and audit are written in the same transaction',EntitySnapshot.objects.count()==snapshots+1 and AuditLog.objects.count()==audits+1 and snap.snapshot_data['ratings']==saved['ratings'])
@@ -50,8 +56,8 @@ try:
   snapshots=EntitySnapshot.objects.count();audits=AuditLog.objects.count()
   for i,data in enumerate(invalid):check('Invalid shared update '+str(i)+' is rejected',put(c,data).status_code==400)
   check('Invalid writes preserve profile and version history',market_profile()==saved and EntitySnapshot.objects.count()==snapshots and AuditLog.objects.count()==audits)
-  draft=copy.deepcopy(saved['ratings'][:2]);draft[1]['agency']='QA New Agency';draft[1]['grade']='TEST-B'
-  response=put(c,dict(rowVersion=1,ratings=draft));updated=response.json()['profile'];check('Add/remove/change agencies updates one shared version',response.status_code==200 and updated['rowVersion']==2 and len(updated['ratings'])==2 and updated['ratings'][1]['agency']=='QA New Agency')
+  draft=copy.deepcopy(saved['ratings'][:2]);draft[1]['agency']="Moody's";draft[1]['grade']='TEST-B'
+  response=put(c,dict(rowVersion=1,ratings=draft));updated=response.json()['profile'];check('Add/remove/change agencies updates one shared version',response.status_code==200 and updated['rowVersion']==2 and len(updated['ratings'])==2 and updated['ratings'][1]['agency']=="Moody's")
   response=put(c,dict(rowVersion=1,ratings=default));check('Stale edits return a version conflict without changes',response.status_code==409 and response.json()['currentRowVersion']==2 and market_profile()==updated)
   response=readonly.get(URL);check('MDM read-only role can read the saved profile',response.status_code==200 and response.json()['profile']==updated)
   check('MDM read-only role cannot change shared ratings',put(readonly,dict(rowVersion=2,ratings=default)).status_code==403 and market_profile()==updated)

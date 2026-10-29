@@ -22,8 +22,16 @@ def ready():
         deductibles='As original',originalConditions='As original',reinsuredRetention='Advice waived',
         coverages=['Medical Payment'],lossRecordYears=5,lossAdvisedDate='2026-01-01',originalPremium=1000,paymentTermsDays=90,
         reinsurers=[dict(name='QA General Re',sharePct=100,premium=1000,riCommPct=5,taxPct=0,paymentTermsDays=90)],
-        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredProducts='Products',
+        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredBusinessSelections=['Other'],insuredBusinessOther='Business',insuredProducts='Products',
             estimatedTurnover=[dict(region='USA/Canada',currency='USD',amount=1000000)],specialAgreementApplies='notApplicable'))
+# Complete fixtures include the newly confirmed QS formal fields.
+_legacy_ready = ready
+def ready():
+    p = _legacy_ready()
+    p.setdefault('originalInsuredCn', 'QS QA CN')
+    p.setdefault('riCommPct', 0)
+    p.setdefault('taxPct', 0)
+    return p
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
@@ -69,7 +77,7 @@ try:
     response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('complete XOL Cover authorized',response.status_code==204,response.content[:400])
     Case.objects.filter(pk=case.pk).update(payload={**stored,'aggregateLimit':None,'subLimits':''})
     response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('blank optionals do not block Cover',response.status_code==204,response.content[:400])
-    Case.objects.filter(pk=case.pk).update(payload={**stored,'reinsuranceStructure':'QS','underlyingLimits':'STALE QS UNDERLYING','aggregateLimit':None,'subLimits':''})
+    Case.objects.filter(pk=case.pk).update(payload={**stored,'cglInformation':base['cglInformation'],'reinsuranceStructure':'QS','underlyingLimits':'STALE QS UNDERLYING','aggregateLimit':None,'subLimits':''})
     response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('QS has no underlying document requirement',response.status_code==204,response.content[:400])
     result=normalize_draft({**base,'currency':'TWD','aggregateLimit':1234567.89})
     check('aggregate always uses Case currency without changing amount',result['value']['currency']=='TWD' and result['value']['aggregateLimit']==1234567.89)

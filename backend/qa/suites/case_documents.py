@@ -12,7 +12,8 @@ from django.db import transaction
 from django.test import Client, TestCase, override_settings
 from audit.models import AuditLog
 from cases import document_views, storage
-from cases.models import MAX_DOCUMENT_BYTES, Case, CaseDocument
+from cases.models import Case, CaseDocument
+LEGACY_DOCUMENT_BYTES = 10 * 1024 * 1024  # Non-Property fixture retains its original limit.
 from personnel.models import Personnel
 
 User = get_user_model()
@@ -43,10 +44,10 @@ PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b"zz"
 def b64(data): return base64.b64encode(data).decode()
 def ready(**over):
     b = dict(reinsuranceStructure="QS", ae="ZZ AE", currency="USD", classOfBusiness="ZZ Class", classCode="DOC", newOrRenew="New", typePrefix="ZZ Type",
-             reinsured="ZZ Cedant", originalInsured="ZZ Doc Insured", policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
+             reinsured="ZZ Cedant", originalInsured="ZZ Doc Insured", originalInsuredCn='合成測試被保險人', policyFrom="2026-03-01", policyTo="2027-03-01", interest="Buildings",
              situations=[dict(address="1 ZZ Road", postcode="100")],
              reinsurers=[dict(name="ZZ Re A", sharePct=60, premium=600, riCommPct=5, taxPct=0), dict(name="ZZ Re B (Facility)", sharePct=40, premium=400, riCommPct=5, taxPct=0)],
-             limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction="Concrete",
+             limitOfLiability=1000000, deductibles="10%", originalConditions="As original", occupation="Office", construction='Concrete', constructionSelections=['A2 Class'],
              sumInsured=[dict(category="Building", amount=1000000)], lossAdvisedDate="2026-02-01", lossRecordYears=5,
              originalPremium=1000, paymentTermsDays=30, riCommPct=10, taxPct=0)
     b.update(over); return b
@@ -107,7 +108,7 @@ try:
         # 檔案驗證
         before_files = count_files(ROOT); before_rows = CaseDocument.objects.count()
         for label, over, status, msg in [
-            ("bad kind", dict(kind="slip"), 400, None), ("extension not allowed", dict(filename="a.exe"), 415, "Use PDF, DOCX, PNG, JPG, EML or MSG."),
+            ("bad kind", dict(kind="slip"), 400, None), ("extension not allowed", dict(filename="a.exe"), 415, "Use PDF, DOCX, PNG, JPG, EML, MSG, XLSX or XLS."),
             ("content does not match the extension", dict(filename="a.png"), 415, "File content does not match its extension."),
             ("not base64", dict(base64="%%%"), 400, "Invalid file encoding."), ("empty", dict(base64=""), 413, "Each file must be nonempty and no larger than 10 MB."),
             ("base64 not a string", dict(base64=5), 413, None), ("missing filename", dict(filename=None), 415, None)]:
@@ -126,10 +127,10 @@ try:
         check("a lone surrogate sent in JSON is stored as U+FFFD (as Node/PostgreSQL would), not a server error", fn == "a\ufffdb.pdf", (r.status_code, r.content[:120]))
 
         # 大小上限 10 MB（Alpha 5 MB）
-        big = b"%PDF-" + b"0" * (MAX_DOCUMENT_BYTES - 5)
-        r = upload(filename="big.pdf", base64=b64(big)); check("exactly 10 MB -> 201", r.status_code == 201 and r.json()["file"]["byte_size"] == MAX_DOCUMENT_BYTES, (r.status_code, r.content[:120]))
+        big = b"%PDF-" + b"0" * (LEGACY_DOCUMENT_BYTES - 5)
+        r = upload(filename="big.pdf", base64=b64(big)); check("exactly 10 MB -> 201", r.status_code == 201 and r.json()["file"]["byte_size"] == LEGACY_DOCUMENT_BYTES, (r.status_code, r.content[:120]))
         r = upload(filename="big.pdf", base64=b64(big + b"0")); check("10 MB + 1 byte -> 413 'Maximum file size is 10 MB.'", r.status_code == 413 and r.json()["message"] == "Maximum file size is 10 MB.", (r.status_code, r.content[:120]))
-        r = upload(filename="big.pdf", base64="A" * (-(-MAX_DOCUMENT_BYTES // 3) * 4 + 12)); check("base64 longer than the limit -> 413 before decoding", r.status_code == 413 and "no larger than 10 MB" in r.json()["message"])
+        r = upload(filename="big.pdf", base64="A" * (-(-LEGACY_DOCUMENT_BYTES // 3) * 4 + 12)); check("base64 longer than the limit -> 413 before decoding", r.status_code == 413 and "no larger than 10 MB" in r.json()["message"])
         check("5 MB < size <= 10 MB is accepted (Alpha would refuse)", upload(filename="mid.pdf", base64=b64(b"%PDF-" + b"1" * (6 * 1024 * 1024))).status_code == 201)
 
         # 列表與涵蓋

@@ -1,153 +1,99 @@
-"""Cash allocation integration checks, exclusively in the disposable QA database."""
-import copy,json,os
-from django.contrib.auth import get_user_model
+"""Current cash allocation, atomic rejection, permissions and immutable legacy history.
+
+Cross-case remittances and manual settlement are retired. Several independent
+T1 can share one genuine receipt within the same case and installment.
+"""
+import copy,os
 from django.db import transaction
-from django.test import Client
-from cases.calc.accounting import build_premium_transactions
-from cases.cash_ledger import transaction_details
 from cases.models import Case
-from personnel.models import Personnel
+from cases.calc.accounting import build_claim_payment_transactions
+from audit.models import EntitySnapshot
+from qa.current_accounting import client,make,post,pay,nos,details
 assert os.environ.get('RI_DISPOSABLE_QA')=='true'
 checks=[]
-def check(name,condition,extra=None):
-    assert condition,(name,extra) if extra is not None else name
-    checks.append(name);print('PASS '+name)
-def client(tag,role='accounting',dept='finance'):
-    u=get_user_model().objects.create_user(username='zz.unified.'+tag,password='Unified-QA-Password-9!')
-    Personnel.objects.create(name='ZZ Unified '+tag,department=dept,role_code=role,auth_user_id=str(u.pk),account_status='active',created_by='qa',updated_by='qa')
-    c=Client(HTTP_HOST='localhost');c.force_login(u);return c
-def make(ref,**over):
-    p={'twRef':ref,'currency':'TWD','statementNo':'SOA-'+ref,'reinsured':'QA Cedant', 'policyFrom':'2026-09-01','policyTo':'2027-09-01','paymentTermsDays':30,'originalPremium':1000,'riCommPct':0,'taxPct':0,'reinsurers':[{'name':'QA RI','sharePct':100,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}], 'paymentEntries':[]}
-    p.update(over)
-    # 2026-10-16「92 項會計規則」：每家再保人約定天數須獨立填寫、不繼承 Cedant；缺漏列待確認、不得收付，夾具補齊
-    for r in p['reinsurers']:r.setdefault('paymentTermsDays',30)
-    if p.get('parentTwRef'):p.update(endorsementAnnouncedAt='2026-09-01T00:00:00Z',endoEffectiveDate='2026-09-01')
-    p['transactions']=build_premium_transactions(p)
-    return Case.objects.create(tw_ref=ref,status='closed',payload=p,currency=p['currency'],created_by='qa',updated_by='qa')
-def rows(c):c.refresh_from_db();return transaction_details(c.payload)
-def no(c,leg):return next(t['txNo'] for t in c.payload['transactions'] if t['legType']==leg)
-def alloc(c,leg,value):c.refresh_from_db();return {'caseUid':str(c.case_uid),'txNo':no(c,leg),'rowVersion':c.row_version,'amount':value}
-def post(c,body):return c.post('/api/accounting',data=json.dumps(body),content_type='application/json')
-def settle(c,case,leg):
-    # 2026-10-14：不再自動結清，餘額歸零後由會計人工確認
-    case.refresh_from_db();return post(c,{'action':'confirm_facility_settlement','caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no(case,leg),'note':'QA reconciled'})
-def pay(c,allocations,total=None,**over):return post(c,{'action':'record_transaction_payments','paymentDate':'2026-10-07','amount':total if total is not None else sum(a['amount'] for a in allocations),'allocations':allocations,**over})
-def reverse(c,bid,cases,**over):
-    versions=[]
-    for case in cases:case.refresh_from_db();versions.append({'caseUid':str(case.case_uid),'rowVersion':case.row_version})
-    # 2026-10-16「92 項會計規則」：更正（沖回）須填原因並保留歷史
-    return post(c,{'action':'reverse_batch_payment','batchId':bid,'cases':versions,'note':'QA correction',**over})
+def check(name,ok,extra=None):
+ assert ok,(name,extra)
+ checks.append(name);print('PASS '+name,flush=True)
+def saved(case):
+ case.refresh_from_db();return copy.deepcopy((case.payload,case.row_version))
+def allocation(case,no,value):
+ case.refresh_from_db();return dict(caseUid=str(case.case_uid),rowVersion=case.row_version,txNo=no,amount=value)
+def batch(fin,allocations,total=None,**extra):
+ return post(fin,'record_transaction_payments',**dict(paymentDate='2026-10-27',amount=total if total is not None else round(sum(a['amount'] for a in allocations),2),allocations=allocations,reference='QA-UNIFIED-BANK',**extra))
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
-    fin=client('finance');admin=client('admin','admin','admin');read=client('read','sales','reinsurance')
-    a,b=make('QA-A'),make('QA-B')
-    original=copy.deepcopy(a.payload['transactions'])
-    # 2026-10-16「92 項會計規則」：保費每次須登錄整筆餘額（只有賠款可部分收付），跨案同對象改以整筆餘額登錄
-    partial=pay(fin,[alloc(a,'Leg 1',200)])
-    check('partial premium allocation rejected (whole balance required)',partial.status_code==400 and rows(a)[no(a,'Leg 1')]['paid']==0)
-    result=pay(fin,[alloc(a,'Leg 1',1000),alloc(b,'Leg 1',1000)],reference='BANK-001')
-    check('same counterparty across cases records one remittance',result.status_code==200)
-    bid=result.json()['batchId'];ra,rb=rows(a),rows(b)
-    check('manual allocation is isolated per transaction',ra[no(a,'Leg 1')]['paid']==1000 and rb[no(b,'Leg 1')]['paid']==1000 and ra[no(a,'Leg 2')]['paid']==0)
-    # 2026-10-14：不再自動結清；餘額歸零後為 pending_confirmation，須會計人工確認
-    check('T3 is derived and cannot be recorded independently',ra[no(a,'Leg 3')]['settlement']=='open' and not ra[no(a,'Leg 3')]['canRecord'])
-    response=fin.get('/api/accounting').json();batch=next(x for x in response['cashBatches'] if x['batchId']==bid)
-    check('batch history retains all allocations and bank reference',len(batch['allocations'])==2 and batch['amount']==2000 and batch['reference']=='BANK-001')
-    # 2026-10-16「92 項會計規則」：保費須整筆餘額；驗證改在未收付的案件 v 上以整筆金額測試，才能觸及各自的錯誤
-    v,w=make('QA-V'),make('QA-W')
-    for label,allocations,total,error in [
-      ('manual sum',[alloc(v,'Leg 1',1000)],1001,'allocation_mismatch'),
-      ('cash direction',[alloc(v,'Leg 1',1000),alloc(v,'Leg 2',800)],1800,'incompatible_allocations'),
-      ('duplicate transaction',[alloc(v,'Leg 1',1000),alloc(v,'Leg 1',1000)],2000,'duplicate_allocation'),
-      # 2026-10-16：保費超額即「非整筆餘額」，由整筆規則擋下；賠款超額（overpayment）見下方賠款段
-      ('premium overpayment',[alloc(v,'Leg 1',1001)],1001,'swiss_payment_blocked'),
-      ('premium partial',[alloc(v,'Leg 1',999)],999,'swiss_payment_blocked'),
-      ('fully received premium',[alloc(a,'Leg 1',1)],1,'transaction_not_payable'),
-      ('retained brokerage',[alloc(v,'Leg 3',1)],1,'transaction_not_payable')]:
-       target=a if label=='fully received premium' else v
-       before=copy.deepcopy(target.payload);res=pay(fin,allocations,total);target.refresh_from_db()
-       check(label+' rejected without writes',res.status_code==400 and res.json()['error']==error and target.payload==before)
-    for val in [True,0,-1,0.001,'NaN','Infinity']:
-       allocation=alloc(v,'Leg 1',1);allocation['amount']=val
-       check('invalid amount '+str(val)+' rejected',pay(fin,[allocation],1).status_code==400)
-    check('invalid calendar date rejected',pay(fin,[alloc(v,'Leg 1',1000)],paymentDate='2026-02-30').status_code==400)
-    check('read-only role cannot record or reverse',pay(read,[alloc(v,'Leg 1',1000)]).status_code==403 and reverse(read,bid,[a,b]).status_code==403)
-    stale=alloc(w,'Leg 1',1000);stale['rowVersion']-=1;valid=alloc(v,'Leg 1',1000);before=copy.deepcopy(v.payload)
-    check('one stale case blocks complete batch',pay(fin,[valid,stale]).status_code==409)
-    v.refresh_from_db();check('no partial write on stale batch',v.payload==before)
-    other=make('QA-C',currency='USD');different=make('QA-D',reinsured='Another Cedant')
-    check('mixed currency rejected',pay(fin,[alloc(v,'Leg 1',1000),alloc(other,'Leg 1',1000)]).json().get('error')=='incompatible_allocations')
-    check('different actual counterparty rejected',pay(fin,[alloc(v,'Leg 1',1000),alloc(different,'Leg 1',1000)]).json().get('error')=='incompatible_allocations')
-    check('incomplete reversal blocked',reverse(fin,bid,[a]).status_code==400)
-    entry=a.payload['paymentEntries'][0]
-    check('batch cannot be reversed one allocation at a time',post(fin,{'action':'reverse_payment','caseUid':str(a.case_uid),'rowVersion':a.row_version,'entryId':entry['id']}).json()['error']=='batch_reverse_required')
-    check('complete batch reversal succeeds',reverse(fin,bid,[a,b]).status_code==200)
-    check('reversal restores all balances and T3',rows(a)[no(a,'Leg 1')]['paid']==0 and rows(b)[no(b,'Leg 1')]['paid']==0 and rows(a)[no(a,'Leg 3')]['settlement']=='open')
-    check('repeated reversal rejected',reverse(fin,bid,[a,b]).status_code==409)
-    check('immutable original transactions preserved',a.payload['transactions']==original)
-    check('T1 full collection recorded',pay(fin,[alloc(a,'Leg 1',1000)]).status_code==200)
-    check('T3 waits for T2',rows(a)[no(a,'Leg 3')]['settlement']=='open')
-    full=pay(fin,[alloc(a,'Leg 2',800)]);check('T2 actual payment alone does not settle brokerage',full.status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='open')
-    check('cleared T1 and T2 settle only by manual confirmation',rows(a)[no(a,'Leg 2')]['settlement']=='pending_confirmation' and settle(fin,a,'Leg 1').status_code==200 and settle(fin,a,'Leg 2').status_code==200)
-    check('brokerage settles after T1 and T2 confirmation plus its own confirmation',settle(fin,a,'Leg 3').status_code==200 and rows(a)[no(a,'Leg 3')]['settlement']=='settled' and rows(a)[no(a,'Leg 3')]['paid']==200)
-    # 2026-10-16「92 項會計規則」：曾銷帳金額永久鎖定；T3 完成後整組都不能取消 → 已銷帳的 T2 不可再沖回，T3 維持已銷帳
-    locked=reverse(fin,full.json()['batchId'],[a])
-    check('settled T2 cash cannot be reversed and T3 stays settled',locked.status_code==409 and locked.json()['error']=='settled_amount_locked' and rows(a)[no(a,'Leg 3')]['settlement']=='settled' and rows(a)[no(a,'Leg 2')]['settlement']=='settled')
-    refund=make('QA-REFUND',parentTwRef='ROOT',originalPremium=-1000,reinsurers=[{'name':'QA RI','sharePct':100,'premium':-800,'riCommPct':0,'taxPct':0}])
-    check('refund T1 pays Cedant and T2 receives RI recovery',rows(refund)[no(refund,'Leg 1')]['paymentDirection']=='payable' and rows(refund)[no(refund,'Leg 2')]['paymentDirection']=='receivable')
-    # 2026-10-20「四類會計收付」：再保退款須全額實收並逐筆人工銷帳後，才可一次全額退清 Cedant；保費（含退費）均整筆登錄
-    check('Cedant refund waits for the reinsurer refund receipt and settlement',pay(fin,[alloc(refund,'Leg 1',1000)]).status_code==400 and rows(refund)[no(refund,'Leg 1')]['paid']==0)
-    check('partial refund rejected (whole balance required)',pay(fin,[alloc(refund,'Leg 2',400)]).status_code==400)
-    check('reinsurer refund received in full and settled',pay(fin,[alloc(refund,'Leg 2',800)]).status_code==200 and settle(fin,refund,'Leg 2').status_code==200)
-    check('full refund preserves signed cash and balance',pay(fin,[alloc(refund,'Leg 1',1000)]).status_code==200 and rows(refund)[no(refund,'Leg 1')]['paid']==-1000 and rows(refund)[no(refund,'Leg 1')]['outstanding']==0)
-    # 2026-10-16／10-20：賠款建立即建帳，到期日＝建帳台灣日期＋15 日；夾具補上建帳時間（createdAt），否則無到期日、不能收付
-    claim=make('QA-CLAIM');claim.payload['transactions']=[{'txNo':'QA-CLAIM-C1-T1','source':'claim','legType':'Claim Leg 1','reinsurer':'QA RI','amount':100,'settlement':'open','createdAt':'2026-10-01T02:00:00Z'},{'txNo':'QA-CLAIM-C1-T2','source':'claim','legType':'Claim Leg 2','reinsurer':'QA RI','amount':100,'settlement':'open','createdAt':'2026-10-01T02:00:00Z'}];claim.save()
-    check('claim obligation creates no actual cash',all(d['paid']==0 for d in rows(claim).values()))
-    check('claim due date is creation Taiwan date plus 15 days',rows(claim)['QA-CLAIM-C1-T1']['contractDueDate']=='2026-10-16')
-    check('claim Cedant leg resolves actual counterparty',rows(claim)['QA-CLAIM-C1-T2']['partyName']=='QA Cedant')
-    before=copy.deepcopy(claim.payload);res=pay(fin,[alloc(claim,'Claim Leg 1',101)]);claim.refresh_from_db()
-    check('claim overpayment rejected without writes',res.status_code==400 and res.json()['error']=='overpayment' and claim.payload==before)
-    # 2026-10-16：只有賠款可部分收付
-    check('partial claim receipt accepted',pay(fin,[alloc(claim,'Claim Leg 1',40)]).status_code==200 and rows(claim)['QA-CLAIM-C1-T1']['outstanding']==60)
-    check('claim RI receipt recorded independently',pay(fin,[alloc(claim,'Claim Leg 1',60)]).status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['paid']==0)
-    check('claim Cedant payment settles independently',pay(fin,[alloc(claim,'Claim Leg 2',100)]).status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['settlement']=='pending_confirmation' and settle(fin,claim,'Claim Leg 2').status_code==200 and rows(claim)['QA-CLAIM-C1-T2']['settlement']=='settled')
-    multi=make('QA-MULTI',reinsurers=[{'name':'RI A','sharePct':60,'premium':800,'riCommPct':0,'taxPct':0},{'name':'RI B','sharePct':40,'premium':800,'riCommPct':0,'taxPct':0}])
-    # 2026-10-16：保費整筆餘額；第一家 T1 全額登錄，第二家 T1 用舊排程（未指定交易）現金驗證只計一次
-    t1s=[t['txNo'] for t in multi.payload['transactions'] if t['legType']=='Leg 1'];first=abs(rows(multi)[t1s[0]]['outstanding'])
-    check('multi RI single T1 allocation does not settle other T1',pay(fin,[alloc(multi,'Leg 1',first)]).status_code==200 and rows(multi)[t1s[1]]['paid']==0)
-    legacy_key=rows(multi)[t1s[1]]['cashParts'][0]['scheduleKey']
-    multi.payload['paymentEntries'].append({'id':'legacy','entryType':'payment','scheduleKey':legacy_key,'amount':100,'paymentDate':'2026-10-07'});multi.save()
-    details=rows(multi);check('legacy schedule cash counted once beside tagged cash',sum(d['paid'] for no_,d in details.items() if '-T1' in no_)==first+100 and details[t1s[1]]['paid']==100)
-    split=make('QA-SPLIT',splitEnabled=True,splitParties=[{'pct':60},{'pct':40}]);sd=rows(split)
-    check('split T3 dependencies stay within a/b suffix',all(len(d.get('settlementDependencies',[]))==2 for d in sd.values() if d['cashTracking']=='derived'))
-    unposted=make('QA-UNPOSTED');unposted.payload['transactions']=[];unposted.save()
-    check('preclose schedule never fabricates transaction rows',not any(r['caseUid']==str(unposted.case_uid) for r in fin.get('/api/accounting').json()['transactionRows']))
-    check('case SoA settlement agrees with Accounting',admin.get('/api/cases?caseUid='+str(a.case_uid)).json()['case']['payload']['transactions'][0]['paymentScheduleSettlement']==rows(a)[no(a,'Leg 1')]['settlement'])
-    # 2026-10-16：保費整筆餘額；2026-10-20 逐步取位：USD 保留兩位小數 → 改以 USD 整筆含分的餘額驗證保留 cents
-    extra=make('QA-TWO',currency='USD',originalPremium=1000.05,reinsurers=[{'name':'RI A','sharePct':60,'premium':800,'riCommPct':0,'taxPct':0},{'name':'RI B','sharePct':40,'premium':800,'riCommPct':0,'taxPct':0}])
-    legs=[t for t in extra.payload['transactions'] if t['legType']=='Leg 1']
-    version=extra.row_version
-    dues=[abs(rows(extra)[t['txNo']]['outstanding']) for t in legs]
-    allocations=[{'caseUid':str(extra.case_uid),'txNo':t['txNo'],'rowVersion':version,'amount':d} for t,d in zip(legs,dues)]
-    tiny=pay(fin,allocations,round(sum(dues),2))
-    check('two allocations in one case preserve cents and increment version once',tiny.status_code==200 and any(round(d*100)%100 for d in dues) and [rows(extra)[t['txNo']]['paid'] for t in legs]==dues and extra.row_version==version+1,(tiny.content[:200],dues))
-    check('negative claim direction follows actual liability sign',transaction_details({'reinsured':'QA Cedant','currency':'TWD','transactions':[{'txNo':'NEG-C1-T2','source':'claim','legType':'Claim Leg 2','amount':-10}]})['NEG-C1-T2']['paymentDirection']=='receivable')
-    missing=make('QA-MISSING',reinsured='')
-    check('missing actual counterparty blocks cash allocation',pay(fin,[alloc(missing,'Leg 1',1000)]).status_code==400)
-    bad=alloc(extra,'Leg 1',1);bad['txNo']='DOES-NOT-EXIST'
-    check('unknown transaction rejected',pay(fin,[bad]).status_code==400)
-    bad_reverse=post(fin,{'action':'reverse_batch_payment','batchId':tiny.json()['batchId'],'cases':[{'caseUid':[],'rowVersion':1}]})
-    check('malformed reversal case reference rejected',bad_reverse.status_code==400)
-    history=make('QA-HISTORY');history.payload['transactions'][0]['reversed']=True;history.save()
-    check('historical reversed transaction cannot accept new cash',pay(fin,[alloc(history,'Leg 1',1000)]).status_code==400)
-    # 2026-10-16：每期 Cedant 及每期每家再保人天數須獨立填寫、不繼承，夾具逐期補齊
-    inst=make('QA-INSTALLMENTS',installmentEnabled=True,performanceInstallments=[{'id':'i1','performanceMonth':'2026-09','premium':400,'paymentBaseDate':'2026-09-01','paymentTermsDays':30,'reinsurerPaymentTerms':{'r1':30}},{'id':'i2','performanceMonth':'2026-10','premium':600,'paymentBaseDate':'2026-10-01','paymentTermsDays':30,'reinsurerPaymentTerms':{'r1':30}}])
-    from cases.calc.payment_terms import premium_installment_plan
-    plan=premium_installment_plan(inst.payload)
-    inst.payload['transactions']=build_premium_transactions(inst.payload,plan[0]);inst.status='posted';inst.save()
-    check('only generated installment transactions appear',len([r for r in fin.get('/api/accounting').json()['transactionRows'] if r['caseUid']==str(inst.case_uid)])==3)
-    check('generated installment can collect its own balance',pay(fin,[alloc(inst,'Leg 1',400)]).status_code==200 and rows(inst)[no(inst,'Leg 1')]['settlement']=='pending_confirmation')
-    raise Rollback()
+  fin,_=client('unified-fin');admin,_=client('unified-admin','admin','admin');read,_=client('unified-read','sales','reinsurance')
+  a=make('CURRENT-UNIFIED-A',names=['QA A','QA B'],shares=[60,40]);b=make('CURRENT-UNIFIED-B')
+  t1=nos(a,'Leg 1');t2=nos(a,'Leg 2');t3=nos(a,'Leg 3');original=[(t['txNo'],t['amount']) for t in a.payload['transactions']]
+  snapshot=saved(a)
+  check('outgoing waits for every independent Cedant T1',pay(fin,a,t2[:1]).status_code==409 and saved(a)==snapshot)
+  check('partial premium receipt rejected',pay(fin,a,t1[:1],value=200).status_code==400 and saved(a)==snapshot)
+  for label,rows,total,error in [
+   ('allocation sum',[allocation(a,t1[0],600)],601,'allocation_mismatch'),
+   ('duplicate transaction',[allocation(a,t1[0],600)]*2,1200,'duplicate_allocation'),
+   ('premium excess',[allocation(a,t1[0],601)],601,'swiss_payment_blocked'),
+   ('premium partial',[allocation(a,t1[0],599)],599,'swiss_payment_blocked'),
+   ('derived brokerage',[allocation(a,t3[0],120)],120,'transaction_not_payable')]:
+   result=batch(fin,rows,total);check(label+' rejected atomically',result.status_code==400 and result.json()['error']==error and saved(a)==snapshot,result.content)
+  for value in [True,0,-1,.001,'NaN','Infinity']:
+   check('invalid cash amount '+str(value),batch(fin,[allocation(a,t1[0],value)],1).status_code==400 and saved(a)==snapshot)
+  check('invalid calendar date rejected',pay(fin,a,t1,paymentDate='2026-02-30').status_code==400)
+  check('missing registration explanation rejected',pay(fin,a,t1,reference='',note='').status_code==400)
+  check('read-only role cannot register cash',pay(read,a,t1).status_code==403 and saved(a)==snapshot)
+  alloc=[allocation(a,t1[0],600),allocation(a,t1[1],400)];alloc[-1]['rowVersion']-=1
+  check('one stale allocation blocks whole same-case receipt',batch(fin,alloc).status_code==409 and saved(a)==snapshot)
+  snapb=saved(b);result=batch(fin,[allocation(a,t1[0],600),allocation(b,nos(b,'Leg 1')[0],1000)])
+  check('same Cedant cannot combine different cases',result.status_code==400 and result.json()['error']=='single_accounting_case' and saved(a)==snapshot and saved(b)==snapb,result.content)
+  for over in [dict(currency='USD'),dict(reinsured='Another Cedant')]:
+   other=make('CURRENT-OTHER-'+str(len(checks)),**over);before=saved(other)
+   r=batch(fin,[allocation(a,t1[0],600),allocation(other,nos(other,'Leg 1')[0],1000)])
+   check('currency/counterparty mismatch rejected without writes '+str(over),r.status_code==400 and r.json()['error']=='incompatible_allocations' and saved(a)==snapshot and saved(other)==before,r.content)
+  result=pay(fin,a,t1);check('same case same period independent T1 share one actual receipt',result.status_code==200,result.content)
+  bid=result.json()['batchId'];d=details(a)
+  check('all independent T1 automatically settle',all(d[n]['settlement']=='settled' for n in t1))
+  check('T2 and T3 remain independent until outgoing paid',all(d[n]['outstanding'] for n in t2) and all(d[n]['settlement']=='open' for n in t3))
+  a.refresh_from_db();entries=copy.deepcopy(a.payload['paymentEntries'])
+  check('one real bank batch retains both T1 allocations and external reference',len(entries)==2 and {e['batchId'] for e in entries}=={bid} and sum(e['amount'] for e in entries)==1000 and all(e['reference']=='CURRENT-QA-EXTERNAL' for e in entries))
+  check('separate case can reuse external reference without merging records',pay(admin,b,nos(b,'Leg 1')).status_code==200 and Case.objects.get(pk=b.pk).payload['paymentEntries'][0]['batchId']!=bid)
+  before=saved(a)
+  for role,expected in [(read,403),(fin,409)]:
+   result=post(role,'reverse_batch_payment',batchId=bid,cases=[dict(caseUid=str(a.case_uid),rowVersion=a.row_version)],note='QA bank return')
+   check('settled receipt reversal preserves history '+str(expected),result.status_code==expected and saved(a)==before,result.content)
+  check('first RI payment automatically settles only its own brokerage',pay(fin,a,t2[:1]).status_code==200 and details(a)[t3[0]]['settlement']=='settled' and details(a)[t3[1]]['settlement']=='open')
+  check('peer RI remains payable at unchanged original amount',pay(fin,a,t2[1:]).status_code==200 and all(d['settlement']=='settled' for d in details(a).values()))
+  a.refresh_from_db();check('T3 creates no fictional bank cash',len(a.payload['paymentEntries'])==4 and all(e['transactionNo'] not in t3 for e in a.payload['paymentEntries']))
+  check('automatic settlement retains original obligation amounts and IDs',[(t['txNo'],t['amount']) for t in a.payload['transactions']]==original)
+  before=saved(a)
+  for action in ['confirm_facility_settlement','unconfirm_facility_settlement']:
+   result=post(fin,action,caseUid=str(a.case_uid),rowVersion=a.row_version,txNo=t1[0],note='Retired QA action')
+   check(action+' retired without writes',result.status_code==400 and saved(a)==before)
+  # A real old partial premium payment permits only the exact remaining balance.
+  old=make('CURRENT-OLD-PARTIAL');n=nos(old,'Leg 1')[0]
+  legacy=dict(id='historic-partial',entryType='payment',transactionNo=n,scheduleKey='case-effective-date:cedant',amount=200,paymentDate='2026-01-05',reference='IMMUTABLE-OLD-REF')
+  old.payload['paymentEntries']=[copy.deepcopy(legacy)];old.save()
+  check('old partial payment cannot be topped up by another partial',pay(fin,old,[n],value=300).status_code==400)
+  check('old partial payment accepts exact remaining balance',pay(fin,old,[n]).status_code==200 and details(old)[n]['settlement']=='settled')
+  old.refresh_from_db();check('old payment record preserved byte for byte',old.payload['paymentEntries'][0]==legacy)
+  # Claims remain partial, scoped to a request; cumulative payouts never exceed receipts.
+  claim=make('CURRENT-CLAIM');c=dict(id=1);p=dict(id=1,amount=1000,date='2026-10-01',createdAt='2026-10-01T00:00:00Z')
+  claim.payload['claims']=[dict(id=1,dateOfLoss='2026-01-01',payments=[p])]
+  claim.payload['transactions']=build_claim_payment_transactions(claim.payload,claim.payload,c,p);claim.save()
+  ci=nos(claim,'Claim Leg 1')[0];co=nos(claim,'Claim Leg 2')[0]
+  check('claim supports partial actual receipt',pay(fin,claim,[ci],value=400).status_code==200)
+  check('claim cannot pay more than actual receipts',pay(fin,claim,[co],value=401).status_code==400)
+  check('claim payout can use part of actual receipts',pay(fin,claim,[co],value=300).status_code==200)
+  claim.refresh_from_db();entry=next(e for e in claim.payload['paymentEntries'] if e['transactionNo']==ci);before=saved(claim)
+  result=post(fin,'reverse_batch_payment',batchId=entry['batchId'],cases=[dict(caseUid=str(claim.case_uid),rowVersion=claim.row_version)],note='QA returned receipt')
+  check('partial claim reversal cannot violate received-cash cap',result.status_code==409 and saved(claim)==before)
+  result=post(fin,'edit_payment',caseUid=str(claim.case_uid),rowVersion=claim.row_version,entryId=entry['id'],amount=299,reason='QA invalid correction')
+  check('claim receipt correction cannot fall below paid amount',result.status_code==409 and saved(claim)==before)
+  result=post(fin,'edit_payment',caseUid=str(claim.case_uid),rowVersion=claim.row_version,entryId=entry['id'],amount=350,reason='QA supported correction')
+  check('unsettled claim cash correction with reason is retained',result.status_code==200,result.content)
+  claim.refresh_from_db();check('cash correction stores full before/after business history',claim.payload['paymentEditHistory'][-1]['before']['amount']==400 and claim.payload['paymentEditHistory'][-1]['after']['amount']==350)
+  check('remaining claim receipt automatically settles at full amount',pay(fin,claim,[ci]).status_code==200 and details(claim)[ci]['settlement']=='settled')
+  check('remaining claim payout automatically settles at full amount',pay(fin,claim,[co]).status_code==200 and details(claim)[co]['settlement']=='settled')
+  check('cash writes retain versioned snapshots',EntitySnapshot.objects.filter(entity_type='case',entity_id=str(claim.case_uid),entity_version=claim.row_version).exists())
+  raise Rollback()
 except Rollback:pass
-print(f'{len(checks)}/{len(checks)} passed; database changes rolled back')
+print(f'{len(checks)}/{len(checks)} current cash allocation checks passed; rolled back')

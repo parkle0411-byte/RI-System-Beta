@@ -24,7 +24,7 @@ def check(name, ok, detail=''):
 
 def ready():
     return dict(reinsuranceStructure='QS', classOfBusiness='Commercial General Liability', classCode='GL',
-        currency='USD', newOrRenew='New', ae='Coverage QA AE', aeEmail='qa@example.invalid',
+        currency='USD', newOrRenew='New', ae='Coverage QA AE', aeEmail='qa@example.invalid', originalInsuredCn='QS QA CN', riCommPct=0, taxPct=0,
         typePrefix='Commercial General Liability', originalInsured='QA Insured', reinsured='QA Cedant',
         policyFrom='2026-01-01', policyTo='2027-01-01', situations=[dict(address='QA Road', postcode='100')],
         interest='Liability under original policy', limitOfLiability=1000000, deductibles='As original',
@@ -33,7 +33,7 @@ def ready():
         reinsurers=[dict(name='QA General Re', sharePct=100, premium=1000, riCommPct=10, taxPct=0, paymentTermsDays=90)],
         coverages=[COVERAGES[0]], coveragesOther='', selfInsuredRetention='',
         cglInformation=dict(policyForm='Occurrence Form', territorialLimits='Worldwide excluding USA/Canada',
-            insuredBusiness='Business', insuredProducts='Products', specialAgreementApplies='notApplicable',
+            insuredBusiness='Business',insuredBusinessSelections=['Other'],insuredBusinessOther='Business', insuredProducts='Products', specialAgreementApplies='notApplicable',
             estimatedTurnover=[dict(region='USA/Canada', currency='USD', amount=1000000)]))
 
 
@@ -74,7 +74,7 @@ try:
         for blank in ['', ' \n\t ', '\ufeff']:
             check('Other requires nonblank text ' + repr(blank), risk_details_issues({**base, 'coverages': ['Other'], 'coveragesOther': blank})[0]['field'] == 'coveragesOther')
         for scope, patch in [('Property', dict(classOfBusiness='Property')), ('Treaty', dict(reinsuranceStructure='TREATY')),
-                ('Facility', dict(reinsurers=[dict(name='QA (Facility)')])), ('PWS', dict(reinsurers=[dict(name='QA', foreignBroker='PWS')])),
+                ('Facility', dict(reinsurers=[dict(name='QA (Facility)')])), ('PWS XOL', dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA', foreignBroker='PWS')])),
                 ('Swiss', dict(reinsurers=[dict(name='Swiss Re Asia Pte. Ltd.')]))]:
             check(scope + ' has no new requirements', not risk_details_issues({**base, **patch, 'coverages': []}))
         response = call('post', '/api/cases', {'case': {**base, 'coverages': []}})

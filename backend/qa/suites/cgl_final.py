@@ -22,8 +22,16 @@ def ready():
         coverages=['Medical Payment'],lossRecordYears=5,lossAdvisedDate='2026-01-01',originalPremium=1234.56,paymentTermsDays=90,
         riCommPct=10,taxPct=1,lossPayee='Legacy loss payee retained',basisOfValuation='Other',basisOfValuationOther='Legacy valuation',indemnityPeriod='Legacy period',
         reinsurers=[dict(name='QA General Re',sharePct=100,premium=1234.56,riCommPct=5,taxPct=0,paymentTermsDays=90)],
-        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredProducts='Products',
+        cglInformation=dict(policyForm='Occurrence Form',territorialLimits='USA/Canada Only',insuredBusiness='Business',insuredBusinessSelections=['Other'],insuredBusinessOther='Business',insuredProducts='Products',
             estimatedTurnover=[dict(region='USA/Canada',currency='USD',amount=1000000)],specialAgreementApplies='notApplicable'))
+# Complete fixtures include the newly confirmed QS formal fields.
+_legacy_ready = ready
+def ready():
+    p = _legacy_ready()
+    p.setdefault('originalInsuredCn', 'QS QA CN')
+    p.setdefault('riCommPct', 0)
+    p.setdefault('taxPct', 0)
+    return p
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
@@ -47,7 +55,7 @@ try:
             check('actual times and addresses retained',value['policyFromTime']=='00:00' and value['policyToTime']=='12:00' and value['situations']==base['situations'])
     for annual in [0,1,'false','true',[],{}]:
         result=normalize_draft({**base,'cglAnnual':annual});check('invalid Annual rejected '+repr(annual),'Annual must be a boolean.' in result['errors'])
-    for scope,patch in [('property',dict(classOfBusiness='Property')),('facility',dict(reinsurers=[dict(name='QA (Facility)')])),('pws',dict(reinsurers=[dict(name='QA',foreignBroker='PWS')])),('swiss',dict(reinsurers=[dict(name='Swiss Re Asia')])),('treaty',dict(reinsuranceStructure='TREATY'))]:
+    for scope,patch in [('property',dict(classOfBusiness='Property')),('facility',dict(reinsurers=[dict(name='QA (Facility)')])),('pws',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])),('swiss',dict(reinsurers=[dict(name='Swiss Re Asia')])),('treaty',dict(reinsuranceStructure='TREATY'))]:
         result=normalize_draft({**base,**patch});check(scope+' has no new Annual default','cglAnnual' not in result['value'])
         result=normalize_draft({**base,**patch,'cglAnnual':False});check(scope+' preserves inactive saved Annual',result['value']['cglAnnual'] is False)
     for clause in PRESETS:
