@@ -12,13 +12,18 @@ JavaScript 與這裡的 Python 餵同一批輸入，要求輸出完全一致。�
 
 VM 2026-10-06：只有已驗證的批單編輯可透過 allow_negative_premiums 接受本次負保費差額；一般案件沿用非負限制。
 """
+from .facility_selection import selection_issues as facility_selection_issues
+
 import re
+from .property_original import scope as property_scope, POSTCODE as PROPERTY_POSTCODE, field_issues as property_field_issues
 
 from .sum_insured import placement_issues
 from .cgl_information import is_standard_cgl, normalize_information, information_issues
+from .cgl_qs import scope as cgl_qs_scope, issues as cgl_qs_issues
 from .cgl_risk_details import RISK_KEYS, TYPE_PREFIXES, cgl_type_prefix, cgl_type, type_issues, underlying_issues, liability_limit_label, normalize_risk_details, risk_details_issues
-from .allianz_accounting import is_allianz
+from .allianz_accounting import target as allianz_target
 from .great_american_accounting import target as ga_target
+from .qbe_accounting import target as qbe_target
 from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
 from .manual_reference import AUW_FOREIGN_BROKER, is_auw_reinsurer, normalize_manual_tw_ref, requires_manual_tw_ref
 
@@ -177,15 +182,22 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if not isinstance(input_, dict):
         return {"errors": ["case must be an object."], "value": None}
     inp = input_
+    inactive = {}
+    if cgl_qs_scope(inp):
+        # These preserved legacy values have no CGL QS input or output.
+        # They must not prevent completing a case after a Class change.
+        inactive = {key: inp[key] for key in ('aggregateLimit', 'sumInsured') if key in inp}
+        inp = {**inp, 'aggregateLimit': None, 'sumInsured': []}
+    errors.extend(issue["label"] for issue in facility_selection_issues(inp))
     premium_minimum = None if allow_negative_premiums else 0
 
     address_label = 'Principal Address' if is_standard_cgl(inp) else 'Situation'
     situations = []
     for index, row in enumerate(rows(get(inp, "situations"), address_label, errors)):
         address = text(get(row, "address"), 500)
-        postcode = text(get(row, "postcode"), 6)
-        if postcode and not _POSTCODE_RE.match(postcode):
-            errors.append(f"{address_label} {index + 1} postcode must be 3–6 digits.")
+        postcode = text(get(row, "postcode"), 240 if property_scope(inp) or cgl_qs_scope(inp) else 6)
+        if postcode and not (PROPERTY_POSTCODE if property_scope(inp) else _POSTCODE_RE).match(postcode):
+            errors.append(f"{address_label} {index + 1} postcode must contain letters or numbers, with optional spaces and hyphens." if property_scope(inp) else f"{address_label} {index + 1} postcode must be 3–6 digits.")
         situations.append({"address": address, "postcode": postcode})
 
     reinsurers = []
@@ -199,7 +211,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "premium": nullable_number(get(row, "premium"), f"Reinsurer {n} Premium", errors, min=premium_minimum),
             "riCommPct": nullable_number(get(row, "riCommPct"), f"Reinsurer {n} Deductions", errors, min=0, max=100),
             "taxPct": 0 if auw else nullable_number(get(row, "taxPct"), f"Reinsurer {n} Tax", errors, min=0, max=100),
-            "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS if auw else 90 if is_allianz(name) or ga_target(inp, name) else nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
+            "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS if auw else 90 if allianz_target(inp, name) or (ga_target(inp, name) or qbe_target(inp,name)) else nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
             "foreignBroker": AUW_FOREIGN_BROKER if auw else text(get(row, "foreignBroker"), 240),
             "settlementRef": text(get(row, "settlementRef"), 160),
         })
@@ -224,13 +236,15 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "paymentBaseDate": js_or(nullable_date(get(row, "paymentBaseDate"), f"Installment {n} payment base date", errors), ""),
             "paymentTermsDays": nullable_number(get(row, "paymentTermsDays"), f"Installment {n} Payment terms", errors, min=15, integer=True),
             "reinsurerPaymentTerms": compatible_json(get(row, "reinsurerPaymentTerms"), {}, f"Installment {n} Reinsurer Payment terms", errors),
+            "paymentBaseDateManual": get(row, "paymentBaseDateManual") is True,
+            "performanceMonthManual": get(row, "performanceMonthManual") is True,
             "premium": nullable_number(get(row, "premium"), f"Installment {n} Premium", errors, min=premium_minimum),
             "ratio": nullable_number(get(row, "ratio"), f"Installment {n} ratio", errors, min=0, max=100),
         })
 
     for installment in performance_installments:
         for index, reinsurer in enumerate(reinsurers):
-            if is_allianz(reinsurer.get("name")) or ga_target(inp, reinsurer.get("name")):
+            if allianz_target(inp, reinsurer.get("name")) or (ga_target(inp, reinsurer.get("name")) or qbe_target(inp,reinsurer.get("name"))):
                 mapping=installment.get("reinsurerPaymentTerms")
                 if not isinstance(mapping,dict):mapping={};installment["reinsurerPaymentTerms"]=mapping
                 mapping["r"+str(index+1)]=90
@@ -247,13 +261,19 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "pct": nullable_number(get(row, "pct"), f"Performance Split person {n} percentage", errors, min=0, max=100),
         })
 
+    if (property_scope(inp) or cgl_qs_scope(inp)) and get(inp,"splitEnabled") is True:
+        for index,row in enumerate(split_parties):
+            if row["pct"] is not None and row["pct"] not in ((40,70) if index==0 else (60,30)):
+                errors.append("Reinsurance Staff split must be 40% or 70%; Other Staff split must be 60% or 30%.")
+        if len(split_parties)==2 and all(r["pct"] is not None for r in split_parties) and sum(r["pct"] for r in split_parties)!=100:
+            errors.append("Performance Split must use the paired 40%/60% or 70%/30% percentages.")
     loss_record = []
     for index, row in enumerate(rows(get(inp, "lossRecord"), "Loss Record", errors)):
         n = index + 1
         loss_record.append({
             "date": js_or(nullable_date(get(row, "date"), f"Loss {n} Date of Loss", errors), ""),
             "cause": text(get(row, "cause"), 1000),
-            "lossPaid": nullable_number(get(row, "lossPaid"), f"Loss {n} Loss Paid", errors, min=0),
+            "lossPaid": nullable_number(get(row, "lossPaid"), f"Loss {n} Loss Amount", errors, min=0),
         })
 
     effective_date = nullable_date(get(inp, "policyFrom"), "Effective date", errors)
@@ -264,13 +284,15 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         errors.append("Effective time must be 12:00 or 00:00.")
     if policy_to_time not in ("00:00", "12:00"):
         errors.append("Expiration time must be 12:00 or 00:00.")
-    if effective_date and expiration_date and expiration_date < effective_date:
-        errors.append("Expiration date cannot be earlier than Effective date.")
+    if effective_date and expiration_date and (expiration_date < effective_date or (property_scope(inp) or cgl_qs_scope(inp)) and expiration_date == effective_date):
+        errors.append("Expiration date must be later than Effective date." if property_scope(inp) else "Expiration date cannot be earlier than Effective date.")
 
     requested_structure = js_upper(text(get(inp, "reinsuranceStructure"), 20))
     reinsurance_structure = "QS" if requested_structure == "FACULTATIVE" else requested_structure
     if reinsurance_structure and reinsurance_structure not in ("QS", "XOL", "TREATY"):
         errors.append("Reinsurance structure must be Quota Share, Excess of Loss, or Treaty.")
+    if not get(inp,"parentTwRef") and (get(inp,"classCode")=="PD" or get(inp,"classOfBusiness")=="Property") and reinsurance_structure=="TREATY":
+        errors.append("Property supports Quota Share or Excess of Loss; Treaty is not available.")
     suffix = STRUCTURE_SUFFIX.get(reinsurance_structure, "")
     stored_type = text(get(inp, "type"), 200)
     type_prefix = text(get(inp, "typePrefix"), 120)
@@ -339,7 +361,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         value["cedantTermsBasis"] = "case"
     value["installmentEnabled"] = get(inp, "installmentEnabled") is True
     value["performanceInstallments"] = performance_installments
-    if value["installmentEnabled"] and len(performance_installments) < 2:
+    if value["installmentEnabled"] and len(performance_installments) < 2 and not property_scope(inp):
         errors.append(MINIMUM_INSTALLMENTS_MESSAGE)
     if allow_negative_premiums and (value["installmentEnabled"] or performance_installments):
         errors.append("Endorsements must use a single premium settlement; installments are not allowed.")
@@ -408,18 +430,25 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["paymentScheduleReviewRequired"] = get(inp, "paymentScheduleReviewRequired") is True
 
     from .calc.swiss_facility import applies as swiss_applies
-    if swiss_applies(value):
+    if swiss_applies(value) and not value.get("parentTwRef"):
         value["paymentTermsDays"] = 90
         for r in value["reinsurers"]:
             from .calc.swiss_facility import is_swiss_facility
             if is_swiss_facility(r["name"]):
                 r["paymentTermsDays"] = 90
-        if value.get("parentTwRef"):
-            signs = {1 if r["premium"] > 0 else -1 for r in value["reinsurers"] if r.get("premium")}
-            if value.get("originalPremium"):
-                signs.add(1 if value["originalPremium"] > 0 else -1)
-            if len(signs) > 1:
-                errors.append("Swiss Facility Property endorsements cannot mix additional and return premiums; use separate endorsements.")
+        from .swiss_cgl import target as swiss_cgl
+        if swiss_cgl(value):
+            for period in value["performanceInstallments"]:
+                period["paymentTermsDays"] = 90
+                mapping = period.setdefault("reinsurerPaymentTerms", {})
+                for index, r in enumerate(value["reinsurers"]):
+                    if is_swiss_facility(r["name"]):
+                        mapping["r"+str(index+1)] = 90
+
+    from .accounting_policy import fixed_cedant
+    if fixed_cedant(value) and not value.get("parentTwRef"):
+        value['paymentTermsDays']=90
+        for period in value.get('performanceInstallments') or []:period['paymentTermsDays']=90
 
     if is_standard_cgl(value) or any(key in inp for key in RISK_KEYS):
         value.update(normalize_risk_details(inp, errors, text=text))
@@ -429,12 +458,31 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         if is_standard_cgl(value) and value["cglInformation"]["specialAgreementApplies"] == "notApplicable":
             value["specialAgreement"] = ""
 
-    if requires_manual_tw_ref(value):
+    if requires_manual_tw_ref(value) and not value.get("parentTwRef"):
         value["manualTwRef"], manual_errors = normalize_manual_tw_ref(inp.get("manualTwRef"))
         errors.extend(manual_errors)
 
+    if property_scope(value) or cgl_qs_scope(value):
+        for i, row in enumerate(performance_installments):
+            mapping = row.get("reinsurerPaymentTerms") or {}
+            if not isinstance(mapping, dict):
+                errors.append("Installment Reinsurer Payment Terms must be an object.")
+                continue
+            for key, days in mapping.items():
+                nullable_number(days, f"Installment {i+1} {key} Payment terms", errors, min=15, integer=True)
+    if property_scope(value) and isinstance(existing_premiums,dict):
+        prior = {r.get("id"):r for r in existing_premiums.get("performanceInstallments") or [] if isinstance(r,dict)}
+        for row in performance_installments:
+            for key in ("paymentBaseDateManual","performanceMonthManual"):
+                row[key] = bool(row.get(key) or prior.get(row.get("id"),{}).get(key))
     from .calc.premium_money import premium_input_errors
     errors.extend(premium_input_errors(value, existing_premiums))
+    value.update(inactive)
+    from .placing_rules import normalize_extra, share_issues
+    normalize_extra(inp, value)
+    from .construction import normalize as normalize_construction
+    normalize_construction(inp,value,errors,existing_premiums)
+    errors.extend(i['label'] for i in share_issues(value, existing_premiums))
     return {
         "errors": errors,
         "value": value,
@@ -458,6 +506,14 @@ def _filled(value):
 def loss_record_save_errors(payload, *, case_kind="original"):
     """Fields required when a Case is saved, including an incomplete Draft."""
     errors = []
+    if property_scope(payload):
+        years = get(payload, "lossRecordYears")
+        if _filled(years) and years == 0:
+            if case_kind == "renewal" or get(payload, "newOrRenew") != "New":
+                errors.append("Loss history years may be 0 only for a New case.")
+            if get(payload, "lossRecord"):
+                errors.append("Loss Record must be empty when loss history years is 0.")
+        return errors
     if not _filled(get(payload, "lossAdvisedDate")):
         errors.append("Loss record advised by broker on is required before saving.")
     years = get(payload, "lossRecordYears")
@@ -476,7 +532,14 @@ def _is_int_number(value):
 
 
 def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=None):
-    issues = []
+    from .data_integrity import financial_issues
+    integrity=financial_issues(payload)
+    if integrity:return integrity
+    from .draft_input import validate as validate_draft_input
+    payload, raw_issues = validate_draft_input(payload)
+    if raw_issues:
+        return raw_issues
+    issues = facility_selection_issues(payload)
 
     def add(field, label):
         issues.append({"field": field, "label": label})
@@ -487,9 +550,9 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     if not _is_int_number(get(value, "ownerPersonnelId")) or js_to_number(get(value, "ownerPersonnelId")) < 1:
         add("ownerPersonnelId", "Case Owner")
     for field, label in (
-        ("reinsuranceStructure", "Reinsurance structure"), ("ae", "AE"), ("currency", "Currency"),
+        ("reinsuranceStructure", "Reinsurance structure"), ("ae", "Account Executive"), ("currency", "Currency"),
         ("classOfBusiness", "Class"), ("newOrRenew", "New / Renew"), ("type", "Type"),
-        ("reinsured", "Reinsured"), ("originalInsured", "Original insured (EN)"),
+        ("reinsured", "Reinsured"), ("originalInsured", "Original insured (EN)"), ("originalInsuredCn", "Original insured (CN)"),
         ("policyFrom", "Effective date"), ("policyTo", "Expiration date"), ("interest", "Interest"),
     ):
         if field == "type" and is_standard_cgl(value):
@@ -497,7 +560,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         if not _filled(get(value, field)):
             add(field, label)
 
-    if requires_manual_tw_ref(value) and not _filled(get(value, "manualTwRef")):
+    if requires_manual_tw_ref(value) and not value.get("parentTwRef") and not _filled(get(value, "manualTwRef")):
         add("manualTwRef", "TW Ref. (for AUW)")
 
     if _filled(get(value, "parentTwRef")):
@@ -517,7 +580,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     for index, row in enumerate(situations):
         if not _filled(get(row, "address")):
             add(f"situations.{index}.address", f"Principal Address {index + 1}" if is_standard_cgl(value) else f"Situation {index + 1} Risk Address")
-        if not _POSTCODE_RE.match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
+        if not (cgl_qs_scope(value) and not _filled(get(row, "postcode"))) and not (PROPERTY_POSTCODE if property_scope(value) else _POSTCODE_RE).match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
             add(f"situations.{index}.postcode", f"{address_label} {index + 1} Postcode")
 
     reinsurers = get(value, "reinsurers")
@@ -592,7 +655,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         if not _filled(get(row, "cause")):
             add(f"lossRecord.{index}.cause", f"Loss {n} Cause")
         if not _filled(get(row, "lossPaid")):
-            add(f"lossRecord.{index}.lossPaid", f"Loss {n} Loss Paid")
+            add(f"lossRecord.{index}.lossPaid", f"Loss {n} Loss Amount")
 
     for field, label in (("originalPremium", "100% Premium"),):
         if not _filled(get(value, field)):
@@ -652,10 +715,13 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
             if abs(total - 100) > 0.0001:
                 add("splitParties", "Performance Split percentages totaling 100%")
     from .calc.swiss_facility import applies as swiss_applies
-    if swiss_applies(value) and value.get("parentTwRef"):
-        signs = {1 if r["premium"] > 0 else -1 for r in value.get("reinsurers", []) if r.get("premium")}
-        if value.get("originalPremium"):
-            signs.add(1 if value["originalPremium"] > 0 else -1)
-        if len(signs) > 1:
-            add("reinsurers", "Swiss Facility Property endorsements must use one premium direction")
+    from .endorsement_rules import endorsement_issues
+    issues.extend(endorsement_issues(value))
+    issues.extend(property_field_issues(value))
+    issues.extend(cgl_qs_issues(value))
+    from .placing_rules import adjust_issues, share_issues
+    issues = adjust_issues(value, issues)
+    issues.extend(share_issues(value, value))
+    from .construction import issues as construction_issues
+    issues.extend(construction_issues(value))
     return issues
