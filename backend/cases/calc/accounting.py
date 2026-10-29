@@ -35,6 +35,21 @@ def strip_facility_tag(value):
 
 
 def calc_legs_for_reinsurer(case_data, reinsurer):
+    from ..property_original import enabled, totals, allocate, money as exact_money, num
+    from ..accounting_policy import legacy_math
+    if enabled(case_data) and not legacy_math(case_data):
+        rows = case_data.get('reinsurers') or []
+        index = next((i for i,r in enumerate(rows) if r is reinsurer), None)
+        if index is None:
+            index = next((i for i,r in enumerate(rows) if r == reinsurer), None)
+        if index is not None:
+            full = totals(case_data)
+            single = totals({**case_data,'reinsurers':[reinsurer]})
+            ri = full['components'][index]
+            leg1 = allocate(full['leg1'],[r.get('sharePct') for r in rows],case_data)[index]
+            leg3 = exact_money(num(leg1)-num(ri['t2']),case_data)
+            return dict(cp=single['cedantPremium'],ri=single['cedantCommission'],tax=single['cedantTax'],leg1=leg1,
+                        reinsurerCp=ri['premium'],reinsurerRi=ri['deduction'],reinsurerTax=ri['tax'],leg2=ri['t2'],leg3=leg3,brokerage=leg3)
     round_money = lambda value: premium_money(value, case_data)
     order_pct = number_or_zero(get(reinsurer, "sharePct"))
     case_cp = round_money(premium_source(number_or_zero(get(case_data, "originalPremium")), case_data) * order_pct / 100)
@@ -47,6 +62,14 @@ def calc_legs_for_reinsurer(case_data, reinsurer):
     reinsurer_tax = round_money(reinsurer_cp * number_or_zero(get(reinsurer, "taxPct")) / 100)
     leg2 = round_money(reinsurer_cp - reinsurer_ri - reinsurer_tax)
     leg3 = round_money(leg1 - leg2)
+    from ..property_original import enabled, totals, allocate
+    if enabled(case_data) and not legacy_math(case_data):
+        ri_rows = get(case_data, "reinsurers")
+        index = next((i for i,r in enumerate(ri_rows) if r is reinsurer or r == reinsurer), None)
+        if index is not None:
+            full = totals(case_data)
+            leg1 = allocate(full["leg1"], [r.get("sharePct") for r in ri_rows], case_data)[index]
+            leg3 = round_money(leg1 - leg2)
     return {
         "cp": case_cp, "ri": case_ri, "tax": case_tax, "leg1": leg1,
         "reinsurerCp": reinsurer_cp, "reinsurerRi": reinsurer_ri, "reinsurerTax": reinsurer_tax,
@@ -57,6 +80,10 @@ def calc_legs_for_reinsurer(case_data, reinsurer):
 def build_premium_transactions(case_data, installment=None):
     """installment（可省略）：每期關帳只產生「該期」的交易，形狀 {id, label, number, amounts: [{leg1, leg2, leg3}]}，
     由 payment_terms.premium_installment_plan 提供；沒給就是整個案件全額（沒有分期的案件）。"""
+    from ..property_original import enabled, transactions
+    if enabled(case_data):
+        result = transactions(case_data, get(case_data,"announcedAt") or get(case_data,"postedAt") or "")
+        return [t for t in result if not installment or t["installmentId"] == installment["id"]]
     installment = None if is_nullish(installment) else installment
     round_money = lambda value: premium_money(value, case_data)
     transactions = []

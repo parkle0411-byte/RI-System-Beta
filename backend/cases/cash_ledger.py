@@ -2,9 +2,8 @@
 
 New receipts carry the raw transaction number. Legacy schedule receipts are allocated
 to the remaining capacities of matching transactions, so their cash is counted once.
-Brokerage is retained and has no cash of its own. Nothing settles automatically (2026-10-14): this module
-only computes cash balances; facility_accounting.apply_transactions turns a cleared balance into
-"Awaiting confirmation" and Accounting's manual confirmation into "Settled".
+Brokerage is retained and has no cash of its own. Reviewed A–G accounts settle
+automatically after full accountant-entered cash; historical records remain intact.
 """
 import copy
 from .accounting_rules import entry_locked
@@ -151,7 +150,7 @@ def transaction_details(payload, now=None, schedule_result=None):
             'cashDescription':('Brokerage retained from premium receipts and payments' if derived else
                                ('Receivable from ' if cash_direction == 'receivable' else 'Payable to ') + party_name),
             'fullPaymentRequired':source == 'premium',
-            'postedMonth':tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7],
+            'postedMonth':tx.get('postedMonth') if 'productionRecognized' in tx else tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7],
             'canRecord':bool(source and (source != 'claim' or leg in ('1','2')) and leg and not derived and not historic and value and party_name
                              and (source == 'claim' or (matching and len(dates) == len(matching)))),
             '_sign':sign,'_historic':historic,'_source':source,'_leg':leg,'_suffix':suffix,'_tx':tx,
@@ -220,7 +219,7 @@ def transaction_details(payload, now=None, schedule_result=None):
         detail['entries']=[e for _,p in allocated for e in p['entries']]
         detail['nonCashPaid'] = sum(e.get('appliedAmount', 0) for e in detail['entries'] if e.get('nonCash'))
         detail['cashPaid'] = detail['paid'] - detail['nonCashPaid']
-        if detail.get('swissCase') and (detail['partyType'] == 'cedant' or detail.get('swissFacility')):
+        if detail.get('swissCase') and not detail.get('swissCgl') and (detail['partyType'] == 'cedant' or detail.get('swissFacility')):
             deadline = detail['contractDueDate'] if detail['partyType'] == 'cedant' else detail['dueDate']
             detail['dueTime'] = ''
             detail['paymentStatus'] = ('settled' if total == paid else 'pending_review' if not deadline else
@@ -261,8 +260,12 @@ def transaction_details(payload, now=None, schedule_result=None):
     apply_transactions(payload, details, schedule)
     from .great_american_accounting import apply_details as ga_details
     ga_details(payload, details, schedule, now)
+    from .qbe_accounting import apply_details as qbe_details
+    qbe_details(payload, details, schedule, now)
     from .payment_policy import apply_details as shared_policies
     shared_policies(payload, details, schedule, now)
+    from .property_original import apply_details as property_details
+    property_details(payload, details, now)
     return {no:{k:v for k,v in d.items() if not k.startswith('_')} for no,d in details.items()}
 
 

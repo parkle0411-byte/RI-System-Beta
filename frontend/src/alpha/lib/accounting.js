@@ -1,3 +1,4 @@
+import { propertyEnabled, propertyTotals, propertyAllocate, propertyLegs, propertyPeriodAllocate, legacyMath, perReinsurer } from '../propertyOriginal.js';
 function numberOrZero(value) {
   const number = Number(String(value ?? '').replace(/,/g, ''));
   return Number.isFinite(number) ? number : 0;
@@ -27,6 +28,11 @@ export function premiumMoney(value, caseData) {
 }
 
 export function premiumInputErrors(payload, existing = null) {
+  if (propertyEnabled(payload) && String(payload?.currency || '').toUpperCase()!=='TWD') {
+    const fields=c=>[['originalPremium','100% Premium',c?.originalPremium],...['reinsurers','performanceInstallments'].flatMap(k=>(c?.[k]||[]).map((r,i)=>[`${k}.${i}.premium`,`${k==='reinsurers'?'Reinsurer':'Installment'} ${i+1} Premium`,r.premium]))];
+    const old=new Map(legacyMath(existing)?fields(existing).map(([path,,v])=>[path,v]):[]);
+    return fields(payload).filter(([path,,v])=>v!=null && String(v).trim()!=='' && !(old.has(path)&&old.get(path)===v) && Math.abs(Number(String(v).replace(/,/g,''))*100-Math.round(Number(String(v).replace(/,/g,''))*100))>1e-7).map(([,label])=>`${label} must have at most two decimal places for ${payload.currency}.`);
+  }
   if (String(payload?.currency || '').trim().toUpperCase() !== 'TWD') return [];
   const fields = c => [['originalPremium', '100% Premium', c?.originalPremium],
     ...['reinsurers', 'performanceInstallments'].flatMap(key => (c?.[key] || []).map((r, i) =>
@@ -42,18 +48,23 @@ export function stripFacilityTag(value) {
 }
 
 export function calcLegsForReinsurer(caseData, reinsurer) {
+  if (propertyEnabled(caseData)) { const exact=propertyLegs(caseData,reinsurer);if(exact)return exact; }
   const roundMoney = value => premiumMoney(value, caseData);
   const source = value => ['TWD', 'USD'].includes(String(caseData?.currency || '').toUpperCase()) && caseData?.premiumRounding !== 'legacy-cents' ? roundMoney(value) : value;
   const orderPct = numberOrZero(reinsurer?.sharePct);
   const caseCp = roundMoney(source(numberOrZero(caseData?.originalPremium)) * orderPct / 100);
   const caseRi = roundMoney(caseCp * numberOrZero(caseData?.riCommPct) / 100);
   const caseTax = roundMoney(caseCp * numberOrZero(caseData?.taxPct) / 100);
-  const leg1 = roundMoney(caseCp - caseRi - caseTax);
+  let leg1 = roundMoney(caseCp - caseRi - caseTax);
 
   const reinsurerCp = roundMoney(source(numberOrZero(reinsurer?.premium)) * orderPct / 100);
   const reinsurerRi = roundMoney(reinsurerCp * numberOrZero(reinsurer?.riCommPct) / 100);
   const reinsurerTax = roundMoney(reinsurerCp * numberOrZero(reinsurer?.taxPct) / 100);
   const leg2 = roundMoney(reinsurerCp - reinsurerRi - reinsurerTax);
+  if (propertyEnabled(caseData)) {
+    const index=(caseData.reinsurers || []).indexOf(reinsurer);
+    if (index >= 0) leg1=propertyAllocate(propertyTotals(caseData).leg1,caseData.reinsurers.map(r=>r.sharePct),caseData)[index];
+  }
   const leg3 = roundMoney(leg1 - leg2);
   return { cp: caseCp, ri: caseRi, tax: caseTax, leg1, reinsurerCp, reinsurerRi, reinsurerTax, leg2, leg3, brokerage: leg3 };
 }
@@ -181,6 +192,7 @@ export function premiumPeriodAmounts(caseData) {
   if (sum <= 0) { weights = rows.map(() => 1); sum = rows.length; }
   const round = value => premiumMoney(value, caseData);
   const allocate = total => {
+    if(propertyEnabled(caseData)&&!legacyMath(caseData))return propertyPeriodAllocate(total,weights,caseData);
     const amounts = weights.map(w => round(total * w / sum));
     amounts[0] = round(amounts[0] + round(total - amounts.reduce((a, b) => a + b, 0)));
     if (total > 0 && amounts[0] < 0 && caseData?.premiumRounding !== 'legacy-cents') {
@@ -197,5 +209,6 @@ export function premiumPeriodAmounts(caseData) {
     const legs = calcLegsForReinsurer(caseData, row), a = allocate(legs.leg1), b = allocate(legs.leg2);
     sums.forEach((total, i) => { total.leg1 = round(total.leg1 + a[i]); total.leg2 = round(total.leg2 + b[i]); });
   });
+  if (propertyEnabled(caseData)&&!legacyMath(caseData)&&!perReinsurer(caseData)) { const t1s=allocate(propertyTotals(caseData).leg1); sums.forEach((r,i)=>{r.leg1=t1s[i]}); }
   return sums.map(row => ({ ...row, leg3: round(row.leg1 - row.leg2) }));
 }

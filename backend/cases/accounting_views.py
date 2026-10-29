@@ -105,8 +105,21 @@ class AccountingView(NoStoreMixin, APIView):
         # （約 1.5 萬列、17 MB），但 warnings 與 currencies 照常計算；不帶參數時輸出與以前完全相同。2026-10-16
         lean = request.query_params.get("view") == "list"
         extra_currencies = []
+        from fxrates.models import FxRate
+        from .accounting_policy import fx_for_transaction
+        fx_rows=list(FxRate.objects.values('year_month','currency','rate'))
+        rates={(r['year_month'],r['currency']):float(r['rate']) for r in fx_rows}
+        latest={}
+        for r in fx_rows:
+            if r['currency'] not in latest or r['year_month']>latest[r['currency']][0]:latest[r['currency']]=(r['year_month'],float(r['rate']))
         for case in cases:
             try:
+                from .data_integrity import financial_issues
+                integrity=financial_issues(case.payload)
+                if integrity:
+                    warnings.append({'caseUid':str(case.case_uid),'twRef':case.tw_ref or '', 'dataError':True,
+                        'issues':[i['label'] for i in integrity]})
+                    continue
                 c = _case_view(case)
                 shared = {c["caseUid"]: CaseCompute(c, now)}   # 付款排程與交易明細每件案件只算一次，三處共用
                 if lean and c["status"] in LEDGER_STATUSES and not swiss_applies(c["payload"]):
@@ -126,12 +139,18 @@ class AccountingView(NoStoreMixin, APIView):
                     # without duplicating payment histories or claim schedule rows.
                     fields = ('scheduleKey','installmentId','installmentLabel','partyKey','partyType','partyName',
                               'currency','amount','paid','outstanding','termsDays','dueDate','contractDueDate','status',
-                              'paymentAllowed','paymentBlockedReason','paymentRule','source','allianzFacility','allianzCase','greatAmericanFacility','greatAmericanCase','fullPaymentRequired','offsetAllowed','cedantReceiptConfirmed','sourceBaseDate','accountingLeadDays')
+                              'paymentAllowed','paymentBlockedReason','paymentRule','source','allianzFacility','allianzCase','greatAmericanFacility','greatAmericanCase','qbeFacility','qbeCase','underwritingYear','underwritingQuarter','qbeLegacyCompleted','fullPaymentRequired','offsetAllowed','cedantReceiptConfirmed','sourceBaseDate','accountingLeadDays')
                     for item in shared[c["caseUid"]].schedule("raw")["items"]:
                         schedule_rows.append({**{k:item.get(k) for k in fields},'source':'premium',
                             'key':c['caseUid']+':'+item['scheduleKey'],'caseUid':c['caseUid'],
                             'rootCaseUid':c['rootCaseUid'],'caseRowVersion':c['rowVersion'],'twRef':c['twRef']})
                 case_transactions = transaction_rows([c], shared)
+                stored={t.get('txNo'):t for t in _objects(c['payload'].get('transactions'))}
+                for item in case_transactions:
+                    rate,month,estimated=fx_for_transaction(c['payload'],stored.get(item.get('txNo'),{}),rates,latest)
+                    item.update(fxRate=rate,fxMonth=month,fxEstimated=estimated,
+                        amountNtd=None if rate is None else round(float(item['amount'])*rate,2),
+                        outstandingNtd=None if rate is None else round(float(item['outstanding'])*rate,2))
                 case_swiss = []
                 if c["status"] in LEDGER_STATUSES and swiss_applies(c["payload"]):
                     for item in shared[c["caseUid"]].schedule("raw")["items"]:
@@ -166,7 +185,8 @@ class AccountingView(NoStoreMixin, APIView):
         action = _text(body.get("action"))
         from .allianz_accounting import record_followup
         from .great_american_accounting import record_followup as ga_followup
-        handlers = {"record_great_american_claim_followup": lambda req,data:ga_followup(self,req,data), "record_allianz_claim_followup": lambda req,data:record_followup(self,req,data), "record_payment": self.record_payment, "reverse_payment": self.reverse_payment,
+        from .qbe_accounting import record_followup as qbe_followup
+        handlers = {"record_qbe_claim_followup": lambda req,data:qbe_followup(self,req,data), "record_great_american_claim_followup": lambda req,data:ga_followup(self,req,data), "record_allianz_claim_followup": lambda req,data:record_followup(self,req,data), "record_payment": self.record_payment, "reverse_payment": self.reverse_payment,
                     "record_transaction_payments": lambda r, b: record_transaction_payments(self,r,b),
                     "reverse_batch_payment": lambda r, b: reverse_batch_payment(self,r,b)}
         for swiss_handler in ("confirm_swiss_collection", "unconfirm_swiss_collection", "record_swiss_clearance", "record_swiss_offset", "mark_swiss_statement"):
@@ -199,6 +219,9 @@ class AccountingView(NoStoreMixin, APIView):
 
     @staticmethod
     def _status_error(case, verb):
+        from .data_integrity import response_error
+        invalid=response_error(case.payload)
+        if invalid is not None:return invalid
         if case.status in LEDGER_STATUSES:
             return None
         return _error(409, "accounting_status_locked",
@@ -206,6 +229,8 @@ class AccountingView(NoStoreMixin, APIView):
 
     @staticmethod
     def _save(request, body, case, payload, action, metadata):
+        from .property_original import persist_settlements
+        persist_settlements(payload, _iso_now(), actor_from(request.ri_principal))
         actor_info = actor_from(request.ri_principal)
         expected = js_to_number(body.get("rowVersion", UNDEFINED))  # Number(undefined) 是 NaN，不是 0
         if case.row_version != expected:
@@ -236,6 +261,8 @@ class AccountingView(NoStoreMixin, APIView):
         person = request.ri_principal
         if not _can_edit(person):
             return _error(403, "permission_denied", "Accounting access is required to record payments.")
+        if not str(body.get('reference') or '').strip() and not str(body.get('note') or '').strip():
+            return _error(400,'payment_reference_required','Enter an external reference or registration explanation.')
         case_uid = js_trim(_text(body.get("caseUid")))
         schedule_key = js_trim(_text(body.get("scheduleKey")))
         amount = js_to_number(body.get("amount"))

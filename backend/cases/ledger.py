@@ -7,6 +7,7 @@ from .calc.accounting import reconciliation_ref_for
 from .manual_reference import manual_tw_ref_fields
 from .allianz_accounting import FIELDS as ALLIANZ_FIELDS
 from .great_american_accounting import FIELDS as GA_FIELDS
+from .qbe_accounting import FIELDS as QBE_FIELDS
 from .calc.jsnum import get, is_array, js_locale_key_cached, js_or, js_to_number, js_to_string
 from .calc.payment_terms import build_payment_schedule
 
@@ -51,7 +52,7 @@ def ledger_rows(cases, now=None, shared=None):
                 "dueDate": item["dueDate"], "dueTime": item["dueTime"], "paymentStatus": item["status"],
                 **({field: item[field] for field in ["paymentRule", "sourceBaseDate", "contractDueDate", "accountingLeadDays"]}
                    if item.get("paymentRule") == "auw_month_end_120" else {}),
-                **{field:item[field] for field in (*ALLIANZ_FIELDS,*GA_FIELDS) if field in item},
+                **{field:item[field] for field in (*ALLIANZ_FIELDS,*GA_FIELDS,*QBE_FIELDS) if field in item},
                 "partial": item["partial"], "settlement": item.get("settlement", "settled" if item["status"] == "settled" else "open"),
                 **({field: item[field] for field in ("manualSettlementRequired", "manualSettlementConfirmed", "canConfirmSettlement") if field in item}),
                 "reviewRequired": item["status"] == "pending_review",

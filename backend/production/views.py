@@ -97,7 +97,7 @@ def report_view(report, include_rows=True):
 
 
 def _live_cases():
-    return Case.objects.filter(recycled_at__isnull=True, is_archived=False, status__in=("posted", "closed", "reversed"))
+    return Case.objects.filter(recycled_at__isnull=True, is_archived=False, status__in=("posted", "closed", "reversed", "draft")).exclude(status="draft",payload__productionReversals__isnull=True)
 
 
 def _exclusions(month):
@@ -169,6 +169,7 @@ class ProductionReportView(NoStoreMixin, APIView):
         return Response(json_roundtrip({
             "ok": True, "displayVersion": DISPLAY_VERSION, "month": month, "headers": calc.PRODUCTION_REPORT_HEADERS,
             "rows": preview["rows"], "excluded": preview["excluded"], "accountingRows": preview.get("accountingRows", []), "sourceSignature": preview["sourceSignature"],
+            **({"dataErrors":preview["dataErrors"]} if preview.get("dataErrors") else {}),
             "versions": [report_view(r) for r in state["reports"]],
             "summary": summary(preview),
             "scope": {
@@ -352,7 +353,7 @@ class ProductionReportView(NoStoreMixin, APIView):
                 request_id = request_id_from(request)
                 for case, source, result in plans:
                     locked = Case.objects.select_for_update().filter(
-                        pk=case.pk, row_version=source["row_version"], status__in=("posted", "reversed", "closed"),
+                        pk=case.pk, row_version=source["row_version"], status__in=("posted", "reversed", "closed", "draft"),
                         recycled_at__isnull=True, is_archived=False).first()
                     if locked is None:
                         raise _Conflict()

@@ -9,12 +9,17 @@ export function accountingRows(body) {
   const rows = transactions.map(row => {
     const current = row.source !== 'claim' && !row.reversed && !row.isReversalEntry
     const associated = current ? [...new Set((row.cashParts || []).map(part => row.caseUid + ':' + part.scheduleKey))]
-      .map(key => byKey.get(key)).filter(Boolean) : []
+      .map(key => byKey.get(key)).filter(Boolean).map(item => {
+        if (!row.swissCgl || row.settlement !== 'settled') return item
+        const dates = Object.fromEntries(['baseDate','dueDate','contractDueDate','termsDays','reminderDate','paymentRule']
+          .filter(key => row[key] !== undefined && row[key] !== null).map(key => [key,row[key]]))
+        return {...item,...dates,status:row.paymentStatus}
+      }) : []
     associated.forEach(item => covered.add(item.key))
     return {...row, schedules: associated}
   })
   for (const item of schedules) {
-    if (covered.has(item.key) || !(item.swissCase || item.swissFacility || item.requiresCollectionConfirmation || item.greatAmericanCase)) continue
+    if (covered.has(item.key) || !(item.swissCase || item.swissFacility || item.requiresCollectionConfirmation || item.greatAmericanCase || item.qbeCase)) continue
     const entries = (item.entries || []).map(entry => ({...entry,
       appliedAmount: Number(entry.amount || 0) * (entry.entryType === 'reversal' ? -1 : 1)}))
     const nonCashPaid = entries.reduce((sum, entry) => sum + (entry.nonCash ? entry.appliedAmount : 0), 0)

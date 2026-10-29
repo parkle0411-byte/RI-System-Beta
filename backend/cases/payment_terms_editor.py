@@ -1,10 +1,13 @@
 """Complete missing contract days without reopening or changing booked amounts."""
+from .facility_selection import selection_issues as facility_selection_issues
+
 import copy
 from .calc.payment_terms import valid_terms
 from .calc.swiss_facility import case_payload, is_swiss_facility
 from .manual_reference import is_auw_reinsurer
-from .allianz_accounting import is_allianz
+from .allianz_accounting import target as allianz_target, selection_issues as allianz_selection_issues
 from .great_american_accounting import target as ga_target
+from .qbe_accounting import target as qbe_target
 
 
 def complete_payment_terms(view, request, body):
@@ -25,6 +28,9 @@ def complete_payment_terms(view, request, body):
     if days is None or not reason:
         return _error(400, 'payment_terms_required', 'Enter independent days (integer >=15) and the completion reason.')
     payload = case_payload(case)
+    scope_issues = facility_selection_issues(payload)
+    if scope_issues:
+        return _error(409, "allianz_property_required" if allianz_selection_issues(payload) else "facility_class_required", scope_issues[0]["label"])
     party = str(body.get('partyKey') or '')
     installment = None
     if payload.get('installmentEnabled'):
@@ -33,8 +39,9 @@ def complete_payment_terms(view, request, body):
             return _error(400, 'schedule_not_found', 'Select an existing installment.')
     if party == 'cedant':
         from .calc.swiss_facility import applies
-        if applies(payload):
-            return _error(409, 'fixed_terms_locked', 'Swiss Cedant terms are fixed at 90 days.')
+        from .accounting_policy import fixed_cedant
+        if fixed_cedant(payload):
+            return _error(409, 'fixed_terms_locked', 'Facility Cedant terms are fixed at 90 calendar days.')
         target, field = (installment if installment is not None else payload), 'paymentTermsDays'
     else:
         try:
@@ -44,19 +51,26 @@ def complete_payment_terms(view, request, body):
                 raise ValueError()
         except (ValueError, KeyError, IndexError, TypeError):
             return _error(400, 'party_not_found', 'Select an existing reinsurer.')
+        if qbe_target(payload, row.get('name')):
+            return _error(409, 'fixed_terms_locked', 'QBE Property uses underwriting-quarter-end +80 reminder and +90 due, without holiday adjustment.')
         if ga_target(payload, row.get('name')):
             return _error(409, 'fixed_terms_locked', 'Great American Property uses fixed quarterly rules (reminder at 80 days, due at 90 days).')
-        if is_auw_reinsurer(row.get('name')) or is_allianz(row.get('name')) or is_swiss_facility(row.get('name')):
+        if is_auw_reinsurer(row.get('name')) or allianz_target(payload, row.get('name')) or is_swiss_facility(row.get('name')):
             return _error(409, 'fixed_terms_locked', 'AUW, Allianz and Swiss fixed terms cannot be changed here.')
         target, field = ((installment.setdefault('reinsurerPaymentTerms', {}), party)
                          if installment is not None else (row, 'paymentTermsDays'))
     before = target.get(field)
-    if valid_terms(before) is not None:
+    from .property_original import enabled
+    if valid_terms(before) is not None and not enabled(payload):
         return _error(409, 'existing_terms_locked', 'Only missing contract days may be completed; existing valid terms remain locked.')
     target[field] = days
     actor = actor_from(request.ri_principal)
     payload.setdefault('paymentTermsHistory', []).append({'installmentId': body.get('installmentId'),
         'partyKey': party, 'before': before, 'after': days, 'reason': reason,
         'changedAt': _iso_now(), 'changedBy': actor['id']})
+    from .property_original import edit_guard
+    problem = edit_guard(case,payload,body,actor,_iso_now())
+    if problem:
+        return _error(409,"property_edit_locked",problem)
     payload.setdefault('paymentEntries', [])
     return view._save(request, body, case, payload, 'payment_terms_completed', {'partyKey': party, 'reason': reason})

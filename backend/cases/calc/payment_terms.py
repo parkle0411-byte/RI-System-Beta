@@ -14,8 +14,9 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from ..manual_reference import is_auw_reinsurer
-from ..allianz_accounting import is_allianz
+from ..allianz_accounting import target as allianz_target
 from ..great_american_accounting import target as ga_target
+from ..qbe_accounting import target as qbe_target
 from .accounting import calc_legs_for_reinsurer, strip_facility_tag
 from .premium_money import premium_money
 from .jsnum import (
@@ -133,6 +134,22 @@ def days_between_dates(date_from, date_to):
 
 
 def allocate(total, installments, case_data=None):
+    from ..property_original import enabled, num, money as exact_money
+    from ..accounting_policy import legacy_math
+    if enabled(case_data) and not legacy_math(case_data):
+        if not installments:return []
+        weights=[max(num(0),num(r['weight'])) for r in installments]
+        denominator=sum(weights)
+        if not denominator:weights=[num(1)]*len(installments);denominator=num(len(installments))
+        result=[exact_money(num(total)*w/denominator,case_data) for w in weights]
+        result[0]=exact_money(num(result[0])+num(total)-sum(map(num,result)),case_data)
+        if num(total)>0 and result[0]<0:
+            remainder=num(-result[0]);result[0]=0
+            for i in range(1,len(result)):
+                deduction=min(num(result[i]),remainder)
+                result[i]=exact_money(num(result[i])-deduction,case_data);remainder-=deduction
+                if remainder<=0:break
+        return result
     round_money = lambda value: premium_money(value, case_data) if case_data is not None else money(value)
     if not installments:
         return []
@@ -216,7 +233,7 @@ def _resolved_terms(case_data, installment, reinsurer, reinsurer_index):
     from .swiss_facility import is_swiss_facility
     if is_auw_reinsurer(get(reinsurer, "name")):
         return AUW_PAYMENT_TERMS_DAYS
-    if is_allianz(get(reinsurer, "name")) or ga_target(case_data, get(reinsurer, "name")):
+    if allianz_target(case_data, get(reinsurer, "name")) or ga_target(case_data, get(reinsurer, "name")):
         return 90
     if is_swiss_facility(get(reinsurer, "name")):
         return 90
@@ -265,7 +282,7 @@ def _status_for(due_date, outstanding, paid, today, now):
     return "partially_paid" if paid > 0.004 else "upcoming"
 
 
-def build_payment_schedule(case_data, now=None):
+def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
     now = _as_utc(now)
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
@@ -283,13 +300,17 @@ def build_payment_schedule(case_data, now=None):
     cedant_amounts = [premium_money(sum(row[i] for row in t1_amounts), case_data) for i in range(len(weights))]
     if get(case_data, "premiumRounding") == "legacy-cents":
         cedant_amounts = allocate(leg1_total, weights)  # preserve historical schedule/cash balances
+    from ..property_original import enabled, totals as property_totals
+    if enabled(case_data):
+        from ..property_original import periods
+        cedant_amounts = [r['t1'] for r in periods(case_data)]
     reinsurer_amounts = [allocate(row["leg2"], weights, case_data) for row in legs]
     items = []
     signed_premiums = js_truthy(get(case_data, "parentTwRef"))
 
     def balances(raw_amount, applied_amount):
         amount = money(_or_zero(raw_amount))
-        if not signed_premiums:
+        if not signed_premiums and not enabled(case_data):
             amount = js_max(0.0, amount)
         sign = -1 if amount < 0 else 1
         paid = js_max(0.0, money(_or_zero(applied_amount) * sign))
@@ -311,14 +332,15 @@ def build_payment_schedule(case_data, now=None):
         resolved = [_resolved_terms(case_data, installment, r, i) for i, r in enumerate(reinsurers)]
         from ..accounting_rules import period_terms
         from .swiss_facility import applies as swiss_applies
-        cedant_terms = 90 if swiss_applies(case_data) else period_terms(case_data, installment)
+        from ..accounting_policy import fixed_cedant
+        cedant_terms = 90 if fixed_cedant(case_data) else period_terms(case_data, installment)
         if cedant_terms is None:
             issues.append(installment["label"] + ": Cedant collection days must be explicitly entered (at least 15).")
         cedant_base = base_date
         cedant_rule = {"contractDueDate": add_calendar_days(cedant_base, cedant_terms) if cedant_base and cedant_terms is not None else "", "accountingLeadDays": 15}
         if js_truthy(get(case_data, "parentTwRef")) and get(case_data, "installmentEnabled") is not True:
             cedant_base = endorsement_base_date(case_data)
-            cedant_terms = 90 if swiss_applies(case_data) else valid_terms(get(case_data, "paymentTermsDays"))
+            cedant_terms = 90 if fixed_cedant(case_data) else valid_terms(get(case_data, "paymentTermsDays"))
             cedant_rule = {"paymentRule": "endorsement_later_announce_effective",
                            "contractDueDate": add_calendar_days(cedant_base, cedant_terms) if cedant_base and cedant_terms is not None else "",
                            "accountingLeadDays": 15}
@@ -341,15 +363,22 @@ def build_payment_schedule(case_data, now=None):
         })
 
         for reinsurer_index, reinsurer in enumerate(reinsurers):
+            from ..premium_ledger import per_reinsurer
+            if per_reinsurer(case_data) and _or_zero(get(reinsurer,'sharePct')) <= 0: continue
             auw = is_auw_reinsurer(get(reinsurer, "name"))
-            allianz = is_allianz(get(reinsurer, "name"))
-            terms = AUW_PAYMENT_TERMS_DAYS if auw else _resolved_terms(case_data, installment, reinsurer, reinsurer_index)
-            if terms is None:
-                issues.append(installment["label"] + ": invalid Payment Terms for Reinsurer " + str(reinsurer_index + 1) + ".")
+            allianz = allianz_target(case_data, get(reinsurer, "name"))
             key = installment["id"] + ":reinsurer:r" + str(reinsurer_index + 1)
             row_amounts = reinsurer_amounts[reinsurer_index] if reinsurer_index < len(reinsurer_amounts) else []
             amount, paid, outstanding = balances(
                 row_amounts[installment_index] if installment_index < len(row_amounts) else None, applied.get(key))
+            from ..qbe_accounting import legacy_completed
+            qbe = qbe_target(case_data, get(reinsurer, "name"))
+            qbe_legacy = qbe and legacy_completed(case_data, key, {
+                'amount':amount, 'outstanding':outstanding, 'currency':js_to_string(js_or(get(case_data, "currency"), "")),
+                'partyName':js_to_string(js_or(get(reinsurer, "foreignBroker"), strip_facility_tag(get(reinsurer, "name")), "Reinsurer " + str(reinsurer_index + 1)))})
+            terms = AUW_PAYMENT_TERMS_DAYS if auw else 90 if qbe and not qbe_legacy else _resolved_terms(case_data, installment, reinsurer, reinsurer_index)
+            if terms is None:
+                issues.append(installment["label"] + ": invalid Payment Terms for Reinsurer " + str(reinsurer_index + 1) + ".")
             row_base_date = base_date
             rule_fields = {}
             if auw:
@@ -358,6 +387,13 @@ def build_payment_schedule(case_data, now=None):
                                "contractDueDate": actual_due, "accountingLeadDays": AUW_ACCOUNTING_LEAD_DAYS}
                 if not row_base_date:
                     issues.append(installment["label"] + ": AUW payment base date must be a valid effective or installment date.")
+            elif qbe and not qbe_legacy:
+                from ..qbe_accounting import payment_dates
+                source_date, row_base_date, actual_due, due_date = payment_dates(case_data, installment)
+                rule_fields = {"paymentRule":"qbe_underwriting_quarter_end_90", "qbeFacility":True,
+                               "sourceBaseDate":source_date, "contractDueDate":actual_due, "accountingLeadDays":10}
+                if not row_base_date:
+                    issues.append(installment["label"] + ": QBE payment base date requires an effective date and, for endorsements, actual Announce.")
             elif ga_target(case_data, get(reinsurer, "name")):
                 from ..great_american_accounting import payment_dates
                 source_date, row_base_date, actual_due, due_date = payment_dates(case_data, installment)
@@ -381,7 +417,7 @@ def build_payment_schedule(case_data, now=None):
                         row_base_date = endorsement_base_date(case_data)
                     else:
                         effective = get(case_data, "endoEffectiveDate")
-                        row_base_date = effective if month_end_date(effective) else ""
+                        row_base_date = endorsement_base_date(case_data) if enabled(case_data) else effective if month_end_date(effective) else ""
                     if not row_base_date:
                         issues.append(installment["label"] + ": ordinary Reinsurer payment base date requires a valid endorsement effective date and, for payables, Announce.")
                 due_date = add_calendar_days(row_base_date, terms - 10) if row_base_date and terms is not None else ""
@@ -400,8 +436,8 @@ def build_payment_schedule(case_data, now=None):
                 **rule_fields,
             })
 
-    from .swiss_facility import apply_schedule
-    items = apply_schedule(case_data, items, now)
+    from .swiss_facility import apply_schedule, apply_legacy_schedule
+    items = (apply_legacy_schedule if legacy_swiss_cgl else apply_schedule)(case_data, items, now)
     for item in items:
         item["fullPaymentRequired"] = True
         item["dueTime"] = ""
@@ -414,8 +450,12 @@ def build_payment_schedule(case_data, now=None):
     items = allianz_schedules(case_data, items)
     from ..great_american_accounting import apply_schedules as ga_schedules
     items = ga_schedules(case_data, items, now)
+    from ..qbe_accounting import apply_schedules as qbe_schedules
+    items = qbe_schedules(case_data, items, now)
     from ..payment_policy import apply_schedules as shared_policies
     items = shared_policies(case_data, items, now)
+    from ..property_original import apply_schedules as property_schedules
+    items = property_schedules(case_data, items)
 
     cedant_out = 0.0
     reinsurer_out = 0.0

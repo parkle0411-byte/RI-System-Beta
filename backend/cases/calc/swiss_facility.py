@@ -9,7 +9,7 @@ SWISS_NAME = 'Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)'
 TAIPEI = ZoneInfo('Asia/Taipei')
 CONFIRMATION_FIELDS = ('requiresCollectionConfirmation', 'collectionConfirmed', 'collectionConfirmedAt',
                        'collectionConfirmationSource', 'canConfirmCollection', 'latestReceiptDate')
-DISPLAY_FIELDS = (*CONFIRMATION_FIELDS, 'swissFacility', 'swissCase', 'originalDueDate', 'projectedDueDate',
+DISPLAY_FIELDS = (*CONFIRMATION_FIELDS, 'swissCgl', 'swissFacility', 'swissCase', 'originalDueDate', 'projectedDueDate',
                   'confirmationCutoff', 'fullPaymentRequired', 'paymentAllowed', 'paymentBlockedReason',
                   'reminderDate', 'statementNeedsRevision', 'statementDueDate', 'statementReference')
 
@@ -23,8 +23,7 @@ def is_swiss_facility(name):
 
 
 def applies(payload):
-    return (isinstance(payload, dict) and str(payload.get('classOfBusiness') or '').strip().casefold() == 'property'
-            and any(is_swiss_facility(r.get('name')) for r in objects(payload.get('reinsurers'))))
+    return (isinstance(payload, dict) and any(is_swiss_facility(r.get('name')) for r in objects(payload.get('reinsurers'))))
 
 
 def case_payload(case, copy_payload=True):
@@ -144,6 +143,11 @@ def locked_due(payload, item):
 
 
 def apply_schedule(payload, items, now):
+    from ..swiss_cgl import target, apply_schedule as cgl_schedule
+    return cgl_schedule(payload, items, now) if target(payload) else apply_legacy_schedule(payload, items, now)
+
+
+def apply_legacy_schedule(payload, items, now):
     if not applies(payload):
         return items
     today = local_date(now)
@@ -162,12 +166,12 @@ def apply_schedule(payload, items, now):
                         latestReceiptDate=receipt_date(payload, item['scheduleKey']))
         if item['partyType'] == 'cedant':
             contract = add_days(item['baseDate'], 90)
-            accounting = add_days(item['baseDate'], 75)
+            accounting = add_days(item['baseDate'], 80)
             item.update(partyName=str(payload.get('reinsured') or payload.get('reinsuredName') or payload.get('cedantName') or 'Cedant'), termsDays=90, dueDate=accounting, dueTime='', contractDueDate=contract,
-                        accountingLeadDays=15, paymentRule='swiss_cedant_75_90', reminderDate=accounting)
+                        accountingLeadDays=10, paymentRule='swiss_cedant_80_90', reminderDate=accounting)
         if is_swiss:
             cedant = by_key.get(item['installmentId'] + ':cedant', {})
-            accounting = add_days(cedant.get('baseDate', ''), 75)
+            accounting = add_days(cedant.get('baseDate', ''), 90)
             original = quarter(accounting)
             if refund:
                 original = max(previous_quarter(original), quarter(local_date(payload.get('endorsementAnnouncedAt'))))
@@ -207,6 +211,8 @@ def apply_schedule(payload, items, now):
 
 
 def reset_after_changes(before, after, now):
+    from ..property_original import enabled
+    if enabled(after):return  # Automatic confirmations are persisted with the actual operation timestamp.
     if not applies(after):
         return
     state = after.setdefault('swissAccounting', {})

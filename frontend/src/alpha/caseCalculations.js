@@ -4,6 +4,8 @@
 // 金額合計（totals）改用 Alpha lib/accounting.js 的逐步進位算法（每家再保人各項進位到分，合計再進位），
 // 與後端 cases/calc/totals.py 完全相同，所以列表、畫面、記帳三處的數字一致。
 // 非金額的合計（Order hereon、Sum Insured、Avg. Rate）仍照 case-calculations.js。
+import { propertyEnabled, propertyTotals } from './propertyOriginal.js';
+import { financialIssues, pendingTotals } from './dataIntegrity.js';
 import { calcLegsForReinsurer } from './lib/accounting.js';
 
 function numberOrZero(value) {
@@ -45,11 +47,14 @@ const FIELDS = {
 };
 
 function forReinsurer(caseData, reinsurer) {
+  if (financialIssues({...caseData,reinsurers:[reinsurer]}).length) return pendingTotals();
   const legs = calcLegsForReinsurer(caseData, reinsurer);
   return Object.fromEntries(Object.entries(FIELDS).map(([name, source]) => [name, legs[source]]));
 }
 
 function totals(caseData) {
+  if (financialIssues(caseData).length) return pendingTotals();
+  if (propertyEnabled(caseData)) { const result=propertyTotals(caseData); return Object.fromEntries(Object.keys(FIELDS).map(k => [k,result[k]])); }
   const sums = Object.fromEntries(Object.keys(FIELDS).map((name) => [name, 0]));
   (Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : []).forEach((row) => {
     const line = forReinsurer(caseData, row);

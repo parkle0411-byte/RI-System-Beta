@@ -31,6 +31,21 @@ def premium_fields(payload):
                 yield f"{key}.{index}.premium", f"{label} {index + 1} Premium", row.get("premium")
 
 def premium_input_errors(payload, existing=None):
+    from ..property_original import enabled
+    if enabled(payload) and str(payload.get("currency") or "").strip().upper()!="TWD":
+        from decimal import Decimal, InvalidOperation
+        from ..accounting_policy import legacy_math
+        old=dict((path,value) for path,_,value in premium_fields(existing or {})) if legacy_math(existing) else {}
+        errors=[]
+        for path,label,value in premium_fields(payload):
+            if value is None or str(value).strip()=="":continue
+            if path in old and value==old[path]:continue
+            try:
+                n=Decimal(str(value).replace(",",""))
+                if n.is_finite() and n != n.quantize(Decimal(".01")):
+                    errors.append(f"{label} must have at most two decimal places for {payload.get('currency')}.")
+            except InvalidOperation:pass
+        return errors
     if str(payload.get("currency") or "").strip().upper() != "TWD":
         return []
     old = dict((path, value) for path, _, value in premium_fields(existing or {})) if (existing or {}).get("premiumRounding") == LEGACY else {}

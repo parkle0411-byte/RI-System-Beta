@@ -171,6 +171,8 @@ def settlement_action(view, request, body):
     if confirm and not detail.get('canConfirmSettlement'):
         return _error(400, 'settlement_not_ready', 'Clear the balance first; brokerage requires manually settled T1 and T2.')
     from .accounting_rules import finalized
+    if not confirm and detail.get('qbeFacility') and detail.get('amount',0)>0:
+        return _error(409, 'qbe_payment_completed', 'Retain QBE payment completion; track bank returns and re-payment externally.')
     if not confirm and detail.get('greatAmericanFacility') and detail.get('amount',0)>0:
         return _error(409, 'great_american_payment_completed', 'Retain Great American payment completion; track bank returns and re-payment externally.')
     if not confirm and no and finalized(payload, no):
@@ -186,6 +188,8 @@ def settlement_action(view, request, body):
     state = payload.setdefault('facilityAccounting', {})
     entry = {'key': key, 'confirmed': confirm, 'fingerprint': fingerprint,
              'confirmedAt': now, 'confirmedBy': actor['id'], 'confirmedByName': actor['name'], 'note': note}
+    if detail.get('qbeFacility') or detail.get('qbeCase') or detail.get('qbeCaseClaim'):
+        entry['qbeRuleVersion'] = 1
     state.setdefault('confirmations', {})[key] = entry
     state.setdefault('history', []).append(copy.deepcopy(entry))
     if confirm and detail.get('cashTracking') == 'derived':

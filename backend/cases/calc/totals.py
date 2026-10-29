@@ -27,12 +27,21 @@ _FIELDS = {
 
 def for_reinsurer(case_data, reinsurer):
     """單一再保人的各項金額（畫面 forReinsurer 的欄位名稱）。"""
+    from ..data_integrity import financial_issues
+    if financial_issues({**(case_data if isinstance(case_data,dict) else {}),'reinsurers':[reinsurer]}):
+        return {name:None for name in _FIELDS}
     legs = calc_legs_for_reinsurer(case_data, reinsurer)
     return {name: legs[source] for name, source in _FIELDS.items()}
 
 
 def case_totals(case_data):
     """整個案件所有再保人的合計（畫面 totals 的欄位名稱）。"""
+    from ..data_integrity import financial_issues
+    if financial_issues(case_data):return {name:None for name in _FIELDS}
+    from ..property_original import enabled, totals
+    if enabled(case_data):
+        result = totals(case_data)
+        return {name:result[name] for name in _FIELDS}
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
     sums = {name: 0.0 for name in _FIELDS}
@@ -46,4 +55,7 @@ def case_totals(case_data):
 def list_financials(case_data):
     """案件列表每一列的兩個金額（Alpha 的 ourSharePremium 與 brokerage）。"""
     totals = case_totals(case_data)
-    return {"ourSharePremium": totals["cedantPremium"], "brokerage": totals["brokerage"]}
+    from ..data_integrity import financial_issues
+    issues=financial_issues(case_data)
+    return {"ourSharePremium": totals["cedantPremium"], "brokerage": totals["brokerage"],
+            **({'dataError':True,'dataIssues':issues} if issues else {})}

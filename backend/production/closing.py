@@ -79,6 +79,9 @@ def transaction_batches(source, payload, confirmed, remaining, was_closed, base_
 
 def confirm_case(source, report_rows, posting_month=None):
     """回傳 {payload, nextStatus, remaining, closedCases}（closedCases 是 0 或 1：這次讓案件全部確認（變成 closed））。"""
+    from cases.property_original import enabled, confirm_production
+    if enabled(get(source,"payload") or {}):
+        return confirm_production(source,report_rows,posting_month)
     closed_cases = 0
     payload = json_roundtrip(js_or(get(source, "payload"), {}))
     was_closed = get(source, "status") == "closed"

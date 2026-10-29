@@ -127,7 +127,8 @@ onMounted(loadProductionPreview)
       </div>
       <el-alert v-if="productionPreview.scope?.monthClosed" class="case-readiness-alert" type="success" :closable="false" show-icon :title="productionMonth + ' is closed'" description="The report version and source rows are fixed. The monthly FX rate is locked."></el-alert>
       <el-alert v-else-if="productionPreview.summary?.missingRateCurrencies?.length" class="case-readiness-alert" type="warning" :closable="false" show-icon :title="'Official ' + productionMonth + ' exchange rate required for ' + productionPreview.summary.missingRateCurrencies.join(', ')" description="Preview remains available, but report generation is blocked until the official monthly rate is stored in FX Rates."></el-alert>
-      <el-alert v-if="productionPreview.accountingRows?.length" type="info" :closable="false" :title="productionPreview.accountingRows.length+' zero-income accounting item(s) will be booked on close without appearing in Production performance rows.'" />
+      <el-alert v-if="productionPreview.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation. Correct the saved case data before including those cases in a Production report." />
+      <el-alert v-if="productionPreview.accountingRows?.length" type="info" :closable="false" :title="productionPreview.accountingRows.length+' zero-income item(s) will be confirmed on close without appearing in Production performance rows.'" />
       <div class="document-summary production-summary">
         <article><span>Included rows</span><strong>{{ productionPreview.summary?.rowCount || 0 }}</strong></article>
         <article><span>Deferred rows</span><strong>{{ productionPreview.summary?.excludedRowCount || 0 }}</strong></article>
@@ -143,7 +144,7 @@ onMounted(loadProductionPreview)
           <el-table-column prop="type" label="Type" width="80"></el-table-column>
           <el-table-column prop="currency" label="Currency" width="100"></el-table-column>
           <el-table-column label="Exch. Rate" width="110" align="right"><template #default="{ row }">{{ row.missingRate ? 'Required' : formatAmount(row.rate) }}</template></el-table-column>
-          <el-table-column prop="ae" label="A/E" width="130"></el-table-column>
+          <el-table-column prop="ae" label="Account Executive" width="130"></el-table-column>
           <el-table-column prop="effDate" label="Eff Date" width="120"></el-table-column>
           <el-table-column prop="expDate" label="Exp Date" width="120"></el-table-column>
           <el-table-column label="Comm (%)" width="110" align="right"><template #default="{ row }">{{ formatAmount(row.comm) }}%</template></el-table-column>

@@ -139,12 +139,16 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     current_month = f"{year}-{_pad2(month_number)}"
     case_rate = build_rate_lookup(fx_rows, current_month)
     rows = []
+    data_errors=[]
+    from cases.data_integrity import financial_issues
     for row in case_rows:
+        integrity=financial_issues(get(row,"payload"))
+        if integrity:data_errors.append({"caseId":get(row,"id"),"issues":integrity})
         payload = js_spread(js_or(get(row, "payload"), {}))
         payload["announcedAt"] = js_or(get(row, "announced_at"), get(get(row, "payload"), "announcedAt"))
         if production_rules:
             payload["createdAt"] = js_or(get(row, "created_at"), get(get(row, "payload"), "createdAt"))
-        rows.append({**row, "payload": payload})
+        rows.append({**row, "payload": payload, **({"_financialInvalid":True} if integrity else {})})
     roots = [r for r in rows if not js_truthy(get(r, "parent_case_id"))]
     active_endorsements = [r for r in rows if js_truthy(get(r, "parent_case_id")) and _live(r)
                            and is_array(get(r["payload"], "endoTypes")) and get(r["payload"], "endoTypes")
@@ -168,6 +172,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     gross = out1 = out2 = 0.0
     class_totals, reinsurer_totals = {}, {}
     for r in in_force:
+        if r.get("_financialInvalid"):continue
         payload = r["payload"]
         rate = case_rate(payload)
         for reinsurer in _reinsurers(payload):
@@ -182,7 +187,13 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     from cases.cash_ledger import transaction_details
     rates = {(r['year_month'], r['currency']): float(r['rate']) for r in fx_rows}
     missing_fx = []
+    estimated_fx = []
+    latest = {}
+    for fx in fx_rows:
+        cur=fx["currency"];m=fx["year_month"]
+        if cur not in latest or m>latest[cur][0]:latest[cur]=(m,float(fx["rate"]))
     for r in rows:
+        if r.get("_financialInvalid"):continue
         if r.get("status") not in ("posted", "closed", "reversed"):
             continue
         payload = r['payload']
@@ -192,8 +203,9 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             tx = stored.get(no, {})
             if tx.get('reversed') or tx.get('isReversalEntry') or detail['cashTracking'] == 'derived' or abs(detail['outstanding']) < .005:
                 continue
-            posting_month = tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7]
-            rate = 1 if currency == 'TWD' else rates.get((posting_month, currency))
+            from cases.accounting_policy import fx_for_transaction
+            rate,posting_month,estimated=fx_for_transaction(payload,tx,rates,latest)
+            if estimated:estimated_fx.append({'currency':currency,'month':posting_month or None,'caseId':r.get('id'),'txNo':no})
             if rate is None:
                 missing_fx.append({'currency': currency, 'month': posting_month or None, 'caseId': r.get('id')})
                 continue
@@ -205,6 +217,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
 
     monthly = {f"{y}-{_pad2(m)}": 0.0 for y in (year - 1, year) for m in range(1, 13)}
     for r in rows:
+        if r.get("_financialInvalid"):continue
         if not _live(r):
             continue
         rate = case_rate(r["payload"])
@@ -240,7 +253,9 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
             "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
             "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2,
-            "accountingTotalIncomplete": bool(missing_fx), "missingPostingRates": missing_fx,
+            "accountingTotalIncomplete": bool(missing_fx or data_errors), "missingPostingRates": missing_fx,
+            "accountingTotalEstimated":bool(estimated_fx), "estimatedPostingRates":estimated_fx,
+            **({"dataErrors":data_errors} if data_errors else {}),
         },
         "brokerage": {
             "labels": months,

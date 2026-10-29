@@ -16,6 +16,10 @@ def edit_payment(view, request, body):
     case = view._load_case_for_update(str(body.get('caseUid') or ''))
     if not case:
         return _error(404, 'case_not_found', 'Case not found.')
+    from .data_integrity import response_error
+    invalid = response_error(case.payload)
+    if invalid is not None:
+        return invalid
     locked = view._status_error(case, 'edited')
     if locked:
         raw_entry = next((e for e in objects(case.payload.get('paymentEntries')) if e.get('id') == body.get('entryId')), {})
@@ -68,6 +72,8 @@ def record_transaction_payments(view, request, body):
     from ri_system.authz import actor_from
     if not _can_edit(request.ri_principal):
         return _error(403,'permission_denied','Accounting write access is required.')
+    if not str(body.get('reference') or '').strip() and not str(body.get('note') or '').strip():
+        return _error(400,'payment_reference_required','Enter an external reference or registration explanation.')
     allocations=body.get('allocations')
     try:
         total=cents(body.get('amount'))
@@ -95,6 +101,9 @@ def record_transaction_payments(view, request, body):
         case=cases.get(row['caseUid'])
         if not case or case.recycled_at or case.is_archived:
             return _error(404,'case_not_found','Case not found.')
+        from .data_integrity import response_error
+        invalid=response_error(case.payload)
+        if invalid is not None:return invalid
         is_claim = any(t.get('txNo') == row['txNo'] and t.get('source') == 'claim' for t in objects(case.payload.get('transactions')))
         if case.status not in ('posted','closed') and not (case.status == 'reversed' and is_claim):
             return _error(409,'accounting_status_locked','Only posted transactions can receive payments.')
@@ -105,10 +114,15 @@ def record_transaction_payments(view, request, body):
         detail=details[row['caseUid']].get(row['txNo'])
         if not detail or not detail['canRecord']:
             return _error(400,'transaction_not_payable','This transaction cannot receive a cash allocation.')
+        from .property_original import enabled
+        if enabled(case.payload) and detail.get("paymentAllowed") is False:
+            return _error(409,"cedant_settlement_required",detail.get("paymentBlockedReason") or "Settle T1 before paying T2.")
         if (detail.get('greatAmericanFacility') or detail.get('greatAmericanCase')) and detail.get('paymentAllowed') is False:
             return _error(400, 'great_american_collection_required', detail['paymentBlockedReason'])
         if detail.get("allianzFacility") and detail.get("paymentAllowed") is False:
             return _error(400,"allianz_collection_required",detail["paymentBlockedReason"])
+        if (detail.get('qbeFacility') or detail.get('qbeCase')) and detail.get('paymentAllowed') is False:
+            return _error(400, 'qbe_collection_required', detail['paymentBlockedReason'])
         blocked = payment_error(detail, amount(row['value']))
         if blocked:
             return _error(400, 'swiss_payment_blocked', blocked)
@@ -118,14 +132,24 @@ def record_transaction_payments(view, request, body):
             return _error(400,'incompatible_allocations','Use the same currency, cash direction and counterparty in one receipt/payment record.')
         payment_group=detail['paymentGroup']
     chosen=[details[r['caseUid']][r['txNo']] for r in parsed]
+    from .accounting_policy import scope as accounting_scope
+    if any(accounting_scope(case_payload(c)) for c in cases.values()):
+        if len(cases)!=1:return _error(400,'single_accounting_case','Record one case and one installment or claim request at a time.')
+        from .qbe_accounting import registration_scope
+        scopes={registration_scope(case_payload(cases[r['caseUid']]),next(t for t in objects(cases[r['caseUid']].payload.get('transactions')) if t.get('txNo')==r['txNo']),d) for r,d in zip(parsed,chosen)}
+        if None in scopes or len(scopes)!=1:return _error(400,'single_accounting_period','Record one installment or claim request at a time.')
+
     if any(d.get('allianzFacility') or d.get('allianzCaseClaim') for d in chosen):
         sources={next(t.get('source','premium') for t in objects(cases[r['caseUid']].payload.get('transactions')) if t.get('txNo')==r['txNo']) for r in parsed}
         if len(sources)>1:return _error(400,'allianz_separate_claim_payment','Record Allianz claims separately from premiums and refunds.')
-        if 'claim' not in sources and len({d.get('contractDueDate') for d in chosen})>1:
+        if not any(accounting_scope(case_payload(c)) for c in cases.values()) and 'claim' not in sources and len({d.get('contractDueDate') for d in chosen})>1:
             return _error(400,'allianz_separate_due_dates','Record Allianz premiums with different contract due dates in separate remittances.')
     from .great_american_accounting import allocation_error
     ga_problem = allocation_error(chosen, parsed, cases, details)
     if ga_problem:return _error(400, 'great_american_payment_rule', ga_problem)
+    from .qbe_accounting import allocation_error as qbe_allocation_error
+    qbe_problem = qbe_allocation_error(chosen, parsed, cases, details)
+    if qbe_problem:return _error(400, 'qbe_payment_rule', qbe_problem)
     from .payment_policy import allocation_error
     problem = allocation_error(parsed, chosen, details)
     if problem:return _error(400, 'whole_refund_required', problem)
@@ -156,7 +180,7 @@ def record_transaction_payments(view, request, body):
                 'batchId':batch_id,'batchAmount':amount(total),'paymentDate':body['paymentDate'],
                 'reference':str(body.get('reference') or '').strip()[:200], 'note':str(body.get('note') or '').strip()[:1000],
                 'createdAt':timestamp,'createdBy':actor['id'],'createdByName':actor['name'],
-                **({'settlementDueDate':schedule_dates[part['scheduleKey']]['dueDate']}
+                **({'settlementDueDate':schedule_dates[part['scheduleKey']].get('contractDueDate') if schedule_dates[part['scheduleKey']].get('swissCgl') else schedule_dates[part['scheduleKey']]['dueDate']}
                    if schedule_dates.get(part['scheduleKey'],{}).get('swissFacility') and detail['amount'] > 0 else {})})
     from .accounting_rules import claim_balance_error
     from .payment_policy import collection_change_error
@@ -190,13 +214,17 @@ def reverse_batch_payment(view, request, body):
         return _error(400,'invalid_payment','All affected case versions are required.')
     expected={r.get('caseUid'):r['rowVersion'] for r in versions}
     # The production source guard serializes all payment writes; locks below protect case saves.
-    matches=[c.pk for c in Case.objects.all() if any(e.get('batchId')==bid and e.get('entryType')=='payment' for e in objects((c.payload or {}).get('paymentEntries')))]
+    matches=[c.pk for c in Case.objects.all() if any(e.get('batchId')==bid and e.get('entryType')=='payment' for e in objects((c.payload if isinstance(c.payload,dict) else {}).get('paymentEntries')))]
     cases=list(Case.objects.select_for_update().filter(pk__in=matches).order_by('id'))
     if not cases:return _error(404,'batch_not_found','Remittance not found.')
     if set(expected)!={str(c.case_uid) for c in cases} or len(expected)!=len(versions):
         return _error(400,'incomplete_batch','Provide all affected case versions to reverse the whole remittance.')
     originals=[]
     for case in cases:
+        from .data_integrity import response_error
+        invalid = response_error(case.payload)
+        if invalid is not None:
+            return invalid
         batch_entries = [e for e in objects(case.payload.get('paymentEntries')) if e.get('batchId') == bid and e.get('entryType') == 'payment']
         claims = {t['txNo'] for t in objects(case.payload.get('transactions')) if t.get('source') == 'claim'}
         claim_only = bool(batch_entries) and all(e.get('transactionNo') in claims for e in batch_entries)

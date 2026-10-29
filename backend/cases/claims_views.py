@@ -206,6 +206,10 @@ class ClaimsView(NoStoreMixin, APIView):
                           currentRowVersion=root.row_version)
 
         old_payload = _payload(root)
+        from .data_integrity import response_error
+        for source in chain:
+            invalid=response_error(source.payload)
+            if invalid is not None:return invalid
         payload = json_roundtrip(old_payload)
         payload["claims"] = payload["claims"] if is_array(payload.get("claims")) else []
 
@@ -287,6 +291,8 @@ class ClaimsView(NoStoreMixin, APIView):
                 built = build_claim_payment_transactions({**payload, "twRef": root.tw_ref}, _payload(split), claim, payment)
                 due = add_calendar_days(taipei_date(created_at), 15)
                 payload["transactions"].extend({**t, "createdAt": created_at, "postedMonth": taipei_date(created_at)[:7], "dueDate": due, "splitSource": payment["splitSource"]} for t in built)
+                from .property_original import persist_settlements
+                persist_settlements(payload,timezone.now().isoformat(),actor_from(request.ri_principal))
                 # The successful obligation-posting operation is Claim Announce.
                 # Its timestamp is server-owned and retained on correction.
                 from .allianz_accounting import claim_is_allianz

@@ -11,6 +11,7 @@ Production Report 的計算 - 逐函式移植自 Alpha lib/production-report.js�
 VM 2026-10-06：負保費批單即使經紀費為零，仍列入 Production 與確認 key，以產生應退／應收交易。
 """
 import re
+from cases.property_original import enabled as property_enabled, periods as property_periods, report_values, report_amounts
 
 from cases.calc.jsnum import (
     EPSILON, UNDEFINED, WS_CLASS, days_from_civil, get, is_array, is_nullish, iso_date_prefix, js_is_finite,
@@ -20,7 +21,7 @@ from cases.calc.jsnum import (
 
 PRODUCTION_REPORT_HEADERS = [
     "Original Insured", "Reinsured", "Reinsurer / RI Broker", "Class", "Type",
-    "Currency", "Exch. Rate", "A/E", "Eff Date", "Exp Date", "Comm (%)",
+    "Currency", "Exch. Rate", "Account Executive", "Eff Date", "Exp Date", "Comm (%)",
     "Premium (NTD)", "Income (NTD)", "Policy No", "Endorse No", "Remark", "Tranx Date",
     "First Policy No",  # VM 新增（Alpha 沒有）：續保鏈最初那張保單的 TW Ref，放最後一欄
 ]
@@ -123,6 +124,11 @@ def total_income(case_data):
 
 def installment_allocations(case_data):
     total_premium = number_or_zero(get(case_data, "originalPremium"))
+    if property_enabled(case_data):
+        return [{"id":r["id"] if get(case_data,"installmentEnabled") else "FULL",
+                 "performanceMonth":r.get("performanceMonth", base_month(case_data)),
+                 "ratio":number_or_zero(r.get("weight"))/total_premium if total_premium and get(case_data,"installmentEnabled") else 1,
+                 "income":r["t3"]} for r in property_periods(case_data)]
     income = total_income(case_data)
     if not js_truthy(get(case_data, "installmentEnabled")):
         return [{"id": "FULL", "performanceMonth": base_month(case_data), "ratio": 1.0, "income": income}]
@@ -246,6 +252,9 @@ def _return_premium_activity(case_data, reinsurer, installment):
 def production_key_groups_for_case(source):
     """依分期分組的 Production key（與 installment_allocations 同順序；沒有收入的期別 keys 是空串列）。"""
     case_data = normalize_source(source)
+    from cases.endorsement_rules import all_zero
+    if case_data.get('endorsementRules') and all_zero(case_data):
+        return []
     groups = []
     reinsurers = _reinsurers(case_data)
     for installment in installment_allocations(case_data):
@@ -255,7 +264,7 @@ def production_key_groups_for_case(source):
         from cases.calc.accounting import calc_legs_for_reinsurer
         for index, reinsurer in enumerate(reinsurers):
             legs = calc_legs_for_reinsurer(case_data, reinsurer)
-            if raw[index] + (tail if index == 0 else 0) != 0 or any(legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):
+            if property_enabled(case_data) or raw[index] + (tail if index == 0 else 0) != 0 or any(legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):
                 keys.append(f"{key}:R{index}")
         groups.append({"id": installment["id"], "keys": keys})
     return groups
@@ -323,8 +332,26 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
     if links is UNDEFINED:  # 呼叫端沒給完整連結表時，只用傳進來的案件
         links = reference_links((data["twRef"], data) for data in map(normalize_source, case_rows if is_array(case_rows) else []))
     rows, excluded_rows, missing_rates, accounting_rows = [], [], [], []
+    data_errors=[]
+    from cases.data_integrity import financial_issues
     for source in (case_rows if is_array(case_rows) else []):
+        integrity=financial_issues(get(source,"payload") if isinstance(source,dict) and "payload" in source else source)
+        if integrity:
+            data_errors.append({"caseUid":get(source,"caseUid") or get(source,"case_uid"),"issues":integrity})
+            continue
         case_data = normalize_source(source)
+        from cases.endorsement_rules import all_zero
+        if case_data.get("endorsementRules") and all_zero(case_data):
+            continue
+        if property_enabled(case_data):
+            for batch in case_data.get("productionReversals") or []:
+                for snapshot in batch.get("rows") or []:
+                    if snapshot["id"] in batch.get("confirmedKeys",[]):continue
+                    if batch["month"] != month and not deferred_from(exclusions,case_data["id"],snapshot["key"],snapshot["reinsurerKey"],month):continue
+                    excluded = exclusion_for(exclusions,case_data["id"],snapshot["key"],snapshot["reinsurerKey"],month)
+                    row={**snapshot,"caseRowVersion":case_data["rowVersion"],"month":month,"tranxDate":month_end(month),"exclusion":excluded}
+                    (excluded_rows if excluded else rows).append(row)
+            if case_data["status"] == "reversed":continue
         if case_data["status"] not in ("posted", "closed", "reversed") or not isinstance(case_data["status"], str):
             continue
         reinsurers = _reinsurers(case_data)
@@ -334,6 +361,11 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
             key = f"{js_num_str(case_id)}:{installment['id']}"
             belongs = installment["performanceMonth"] == month
             raw, tail = _income_split(case_data, reinsurers, installment)
+            property_premiums = None
+            if property_enabled(case_data):
+                period = property_periods(case_data)[installment_index]
+                property_premiums, raw = report_values(case_data,period)
+                tail = 0
             for reinsurer_index, reinsurer in enumerate(reinsurers):
                 reinsurer_key = f"{key}:R{reinsurer_index}"
                 if confirmed(case_data, reinsurer_key):
@@ -342,8 +374,18 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                     continue
                 exclusion = exclusion_for(exclusions, case_id, key, reinsurer_key, month)
                 legs = reinsurer_legs(case_data, reinsurer)
-                source_premium = legs["cedantPremium"] * installment["ratio"]
+                source_premium = property_premiums[reinsurer_index] if property_premiums is not None else legs["cedantPremium"] * installment["ratio"]
                 source_income = raw[reinsurer_index] + (tail if reinsurer_index == 0 else 0)
+                if source_income == 0 and property_enabled(case_data):
+                    rate=rate_for(case_data,month,fx_rates)
+                    currency=js_upper(_js(js_or(get(case_data,"currency"),"TWD")))
+                    if rate is None and currency not in missing_rates:missing_rates.append(currency)
+                    if exclusion is None:
+                        accounting_rows.append({'key':key,'reinsurerKey':reinsurer_key,'caseId':case_id,
+                            'caseUid':case_data['caseUid'],'caseRowVersion':case_data['rowVersion'],
+                            'installmentId':installment['id'],'month':month,'currency':currency,'rate':rate,
+                            'amounts':[period['t1shares'][reinsurer_index],period['t2s'][reinsurer_index]]})
+                    continue
                 if source_income == 0 and not _return_premium_activity(case_data, reinsurer, installment):
                     from cases.calc.accounting import calc_legs_for_reinsurer
                     account_legs = calc_legs_for_reinsurer(case_data, reinsurer)
@@ -366,6 +408,8 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                 ae = get(case_data, "ae")
                 premiums = [None] * len(people) if rate is None else rounded_shares(source_premium * rate, people, ae)
                 incomes = [None] * len(people) if rate is None else rounded_shares(source_income * rate, people, ae)
+                if property_enabled(case_data) and rate is not None:
+                    premiums,incomes=report_amounts(case_data,installment["id"],rate)[reinsurer_index]
                 endorse = None
                 if js_truthy(get(case_data, "parentTwRef")):
                     endorse = _ENDORSE_NO.search(_js(js_or(get(case_data, "twRef"), "")))
@@ -408,5 +452,6 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
     return {
         "errors": [], "rows": rows, "excluded": excluded_rows, "accountingRows": accounting_rows,
         "missingRateCurrencies": sorted(missing_rates, key=_utf16),
-        "sourceSignature": js_json_stringify([production_source_signature(rows), accounting_rows]),
+        "sourceSignature": js_json_stringify([production_source_signature(rows), accounting_rows, *([data_errors] if data_errors else [])]),
+        **({"dataErrors":data_errors} if data_errors else {}),
     }

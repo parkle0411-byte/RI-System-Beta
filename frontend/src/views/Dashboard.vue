@@ -71,7 +71,8 @@ onMounted(loadDashboard)
 
 <template>
 <div class="rdash" v-loading="dashboardLoading">
-  <el-alert v-if="dashboard.metrics?.accountingTotalIncomplete" type="warning" :closable="false" show-icon title="Accounting TWD totals are incomplete — posting-month FX required" :description="dashboard.metrics.missingPostingRates.map(item=>item.currency+' / '+(item.month||'posting month pending')).filter((v,i,a)=>a.indexOf(v)===i).join(', ')" />
+  <el-alert v-if="dashboard.metrics?.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation and excluded from financial totals. Correct the saved case data before using complete totals." />
+  <el-alert v-if="dashboard.metrics?.missingPostingRates?.length" type="warning" :closable="false" show-icon title="Accounting TWD totals are incomplete — posting-month FX required" :description="dashboard.metrics.missingPostingRates.map(item=>item.currency+' / '+(item.month||'posting month pending')).filter((v,i,a)=>a.indexOf(v)===i).join(', ')" />
   <div class="row3">
     <section class="card">
       <div class="card-head"><h3>Total Bound YTD</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
@@ -132,7 +133,7 @@ onMounted(loadDashboard)
       <div class="kpi"><div class="label">Open Quotes</div><div class="val">{{ dashboard.metrics?.openQuotes || 0 }}</div></div>
       <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val">{{ dashboard.metrics?.retentionRatio == null ? 'N/A' : formatAmount(dashboard.metrics.retentionRatio) }}<small v-if="dashboard.metrics?.retentionRatio != null">%</small></div></div>
       <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
-      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.accountingTotalIncomplete">Awaiting FX — subtotal only</small></div>
+      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — subtotal only</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small></div>
     </div>
   </section>
 

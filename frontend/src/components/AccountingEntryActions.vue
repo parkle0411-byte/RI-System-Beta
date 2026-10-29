@@ -39,7 +39,7 @@ defineExpose({open})
    <p>Full refund offset: {{ active.currency }} {{ formatMoney(Math.abs(active.outstanding)) }}. Settlement remains a separate manual action.</p>
    <el-form-item label="Note"><el-input v-model="form.note" type="textarea" maxlength="1000" /></el-form-item>
   </template>
-  <template v-else><p>Swiss settlement: {{ active.dueDate }}. The entire Cedant installment must be manually settled first.</p><el-form-item label="Settlement statement reference" required><el-input v-model="form.reference" maxlength="200" /></el-form-item></template>
+  <template v-else><p>Swiss due date: {{ active.contractDueDate || active.dueDate }}. All Cedant receipts for this installment must be fully received and automatically settled first.</p><el-form-item label="Settlement statement reference" required><el-input v-model="form.reference" maxlength="200" /></el-form-item></template>
  </el-form></template>
  <template #footer><el-button @click="dialog=''">Cancel</el-button><el-button type="primary" :loading="busy" @click="save">Save</el-button></template>
 </el-dialog>

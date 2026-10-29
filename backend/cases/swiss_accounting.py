@@ -28,7 +28,7 @@ def swiss_action(view, request, body):
         return _error(409, 'version_conflict', 'This case changed. Refresh Accounting and try again.')
     payload = case_payload(case)
     if not applies(payload):
-        return _error(400, 'swiss_scope_required', 'This action requires Swiss Facility Property.')
+        return _error(400, 'swiss_scope_required', 'This action requires a Swiss Facility case.')
     item = next((i for i in build_payment_schedule(payload)['items'] if i['scheduleKey'] == body.get('scheduleKey')), None)
     if not item:
         return _error(400, 'schedule_not_found', 'The selected installment and party no longer exist.')
@@ -49,7 +49,7 @@ def swiss_action(view, request, body):
         if not reference:
             return _error(400, 'statement_reference_required', 'Enter the settlement statement reference.')
         state.setdefault('statementHistory', []).append({'scheduleKey': key, **state.setdefault('statements', {}).get(key, {}), 'changedAt': now})
-        state['statements'][key] = {'dueDate': item['dueDate'], 'reference': reference, 'confirmedAt': now, 'confirmedBy': actor['id']}
+        state['statements'][key] = {'dueDate': item.get('contractDueDate') if item.get('swissCgl') else item['dueDate'], 'reference': reference, 'confirmedAt': now, 'confirmedBy': actor['id']}
     return view._save(request, body, case, payload, action, metadata)
 
 
@@ -84,6 +84,9 @@ def _offset(view, request, body):
         return _error(400, 'same_policy_required', 'Offset only the original policy and its own refund endorsement.')
     if original.currency != refund.currency:
         return _error(400, 'offset_scope_required', 'Both cases must use the same currency.')
+    from .accounting_policy import scope as accounting_scope
+    if accounting_scope(case_payload(original)) or accounting_scope(case_payload(refund)):
+        return _error(400,'offset_not_allowed','Premium/refund offsets are disabled for both Cedant and reinsurer accounts. Record the full cash receipts and payments separately.')
     schedules = [build_payment_schedule(case_payload(c))['items'] for c in [original, refund]]
     selected = [next((i for i in items if i['scheduleKey'] == key), None) for items, key in zip(schedules, [body.get('originalKey'), body.get('refundKey')])]
     if not all(selected):
@@ -94,6 +97,9 @@ def _offset(view, request, body):
         return _error(400, 'refund_cash_receipt_required', 'Record the original premium payment and the reinsurer refund receipt separately in full; a refund offset does not count as received.')
     if premium['partyType'] == 'cedant' and any(kind(original.payload, r.get('name')) == 'auw' for r in objects(original.payload.get('reinsurers'))):
         return _error(400, 'cedant_cash_receipt_required', 'AUW requires the complete Cedant cash receipt; record the original premium and refund separately in full.')
+    from .qbe_accounting import applies as qbe_applies
+    if any(qbe_applies(case_payload(c)) for c in (original, refund)):
+        return _error(400, "qbe_offset_not_allowed", "Receive refunds and pay QBE premiums separately; no premium/refund offset is allowed.")
     from .great_american_accounting import applies as ga_applies
     if any(ga_applies(case_payload(c)) for c in (original, refund)):
         return _error(400, "great_american_offset_not_allowed", "Receive refunds and pay Great American premiums separately; no premium/refund offset is allowed.")

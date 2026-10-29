@@ -1,15 +1,18 @@
 """Owner-confirmed cash/settlement rules, 2026-10-20; pure read calculations."""
 import re
-from .allianz_accounting import is_allianz, objects
+from .allianz_accounting import target as allianz_target, objects
 from .great_american_accounting import target as ga_target
+from .qbe_accounting import target as qbe_target
 from .manual_reference import is_auw_reinsurer
 
 
 def kind(payload, name):
     if is_auw_reinsurer(name):
         return 'auw'
-    if is_allianz(name):
+    if allianz_target(payload, name):
         return 'allianz'
+    if qbe_target(payload, name):
+        return 'qbe'
     if ga_target(payload, name):
         return 'great_american'
     # Preserve Swiss, other Facility and PWS rules outside the reviewed scope.
@@ -70,7 +73,7 @@ def apply_schedules(payload, items, now):
         if not scope:
             continue
         item['fullPaymentRequired'] = True
-        if scope in ('auw', 'allianz', 'great_american') and item['amount'] > 0:
+        if scope in ('ordinary', 'auw', 'allianz', 'great_american', 'qbe') and item['amount'] > 0:
             cedants = [r for r in items if r['partyType'] == 'cedant' and r['installmentId'] == item['installmentId']]
             ready = bool(cedants) and all(r['amount'] >= 0 and cleared_receipt(payload, r) for r in cedants)
             item.update(cedantReceiptConfirmed=ready, paymentAllowed=ready,
@@ -130,6 +133,8 @@ def apply_details(payload, details, schedule, now):
                     detail.get('manualSettlementConfirmed'), detail['outstanding'], today)
                 detail['paymentCompletionRequired'] = True
             continue
+        if detail.get('qbeLegacyCompleted'):
+            continue
         source, name = claim_source(payload, tx)
         if not kind({**payload, **source}, name):
             continue
@@ -159,7 +164,7 @@ def collection_change_error(before, after):
     prior = {r['scheduleKey']: r for r in build_payment_schedule(before)['items']}
     for item in build_payment_schedule(after)['items']:
         scope = row_kind(after, item)
-        guarded = scope in ('auw', 'allianz', 'great_american') and item['amount'] > 0 or scope == 'cedant' and item['amount'] < 0
+        guarded = scope in ('ordinary', 'auw', 'allianz', 'great_american', 'qbe') and item['amount'] > 0 or scope == 'cedant' and item['amount'] < 0
         if guarded and abs(item['paid']) > .004 and item.get('paymentAllowed') is False:
             old = prior.get(item['scheduleKey'], {})
             if old.get('paymentAllowed') or abs(item['paid']) > abs(old.get('paid', 0)) + .004:

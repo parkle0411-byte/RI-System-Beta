@@ -20,8 +20,21 @@ def is_allianz(name):
     return ' '.join(str(name or '').split()).casefold()==NAME.casefold()
 
 
+def target(payload, name):
+    return (isinstance(payload, dict)
+            and str(payload.get('classOfBusiness') or '').strip().casefold() == 'property'
+            and is_allianz(name))
+
+
 def applies(payload):
-    return any(is_allianz(r.get('name')) for r in objects(payload.get('reinsurers')))
+    return any(target(payload, r.get('name')) for r in objects(payload.get('reinsurers')))
+
+
+def selection_issues(payload):
+    from .facility_selection import selection_issues as facility_issues
+    return [issue for issue in facility_issues(payload)
+            if issue["field"].startswith("reinsurers.")
+            and is_allianz(payload["reinsurers"][int(issue["field"].split(".")[1])].get("name"))]
 
 
 def payment_dates(payload,installment):
@@ -43,6 +56,9 @@ def apply_schedules(payload, items):
 
 def claim_is_allianz(payload,tx):
     if tx.get('source')!='claim':return False
+    source=tx.get('splitSource')
+    source=source if isinstance(source,dict) else {}
+    if not target({**payload,**source},NAME):return False
     if tx.get('allianzFacility') is True:return True
     split=tx.get('splitSource')
     if isinstance(split,dict):
