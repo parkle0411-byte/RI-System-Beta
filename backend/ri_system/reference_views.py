@@ -30,10 +30,12 @@ MAX_BYTES = 10 * 1024 * 1024
 MANUALS = {
     'mdm': 'MDM_主檔管理說明.docx',
     'schema': 'Schema_資料庫結構說明.docx',
-    'swiss-pd': 'Swiss_Re_Asia_Facility_PD_Rules_2026-10-14.docx',
-    'auw-accounting': 'AUW_Facility_Rules_2026-10-14.docx',
-    'great-american-questionnaire': 'Great_American_Facility_Property_Rules_Peer_Review_v2_2_2026-10-20.docx',
-    'allianz-questionnaire': 'Allianz_Facility_Settlement_Rules_Peer_Review_2026-10-19.docx',
+    'swiss-pd': 'Swiss_Re_Facility_PD_Exclusive_Rules_2026-10-29.docx',
+    'qbe-pd': 'QBE_Facility_PD_Exclusive_Rules_2026-10-29.docx',
+    'swiss-cgl': 'Swiss_Re_Facility_CGL_Exclusive_Rules_2026-10-29.docx',
+    'auw-accounting': 'Syndicate_609_AUW_Facility_PD_Exclusive_Rules_2026-10-29.docx',
+    'great-american-questionnaire': 'Great_American_Facility_PD_Exclusive_Rules_2026-10-29.docx',
+    'allianz-questionnaire': 'Allianz_Facility_PD_Exclusive_Rules_2026-10-29.docx',
 }
 OFFICE = {
     'docx': ('word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
@@ -62,14 +64,16 @@ def validated_type(filename, data):
 MANUAL_DOWNLOAD_NAMES = {
     'mdm': 'MDM_Master_Data_Management.docx',
     'schema': 'Schema_Database_Structure.docx',
-    'swiss-pd': 'Swiss_Re_Asia_Facility_PD_Rules_2026-10-14.docx',
-    'auw-accounting': 'AUW Facility 專屬規則_2026-10-14.docx',
-    'great-american-questionnaire': 'Great American Facility Property 結算規則摘要及同仁覆核問卷_v2.2_2026-10-20.docx',
-    'allianz-questionnaire': 'Allianz Facility 結算日規則摘要及同仁覆核問卷_2026-10-19.docx',
+    'swiss-pd': 'Swiss Re Facility - PD 專屬規則_2026-10-29.docx',
+    'qbe-pd': 'QBE Facility - PD 專屬規則.docx',
+    'swiss-cgl': 'Swiss Re Facility - CGL 專屬規則_2026-10-29.docx',
+    'auw-accounting': 'Syndicate 609 AUW Facility - PD 專屬規則.docx',
+    'great-american-questionnaire': 'Great American Facility - PD 專屬規則_2026-10-29.docx',
+    'allianz-questionnaire': 'Allianz Facility - PD 專屬規則_2026-10-29.docx',
 }
 
 
-MANUAL_RELEASE_DATES = {'mdm': '2026-10-21', 'schema': '2026-10-21', 'auw-accounting': '2026-10-14', 'swiss-pd': '2026-10-14', 'great-american-questionnaire': '2026-10-20', 'allianz-questionnaire': '2026-10-19'}
+MANUAL_RELEASE_DATES = {'mdm': '2026-10-27', 'schema': '2026-10-27', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-29'}
 
 def manual_row(key):
     return {'id': key, 'filename': MANUAL_DOWNLOAD_NAMES[key], 'release_date': MANUAL_RELEASE_DATES[key], 'kind': 'manual'}
