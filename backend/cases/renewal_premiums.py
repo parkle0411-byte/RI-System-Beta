@@ -1,115 +1,184 @@
-"""Calculate a renewal's annual premiums from its current policy chain.
+"""Full-policy daily average renewal premiums, approved 2026-10-28.
 
-An endorsement premium is the price for [effective date, original expiry),
-not an annual price. Each signed change is annualized and rounded separately.
+Signed amounts are summed before conversion. Actual source/renewal days and
+the existing currency precision apply. Each input has its own failure state.
 """
-
-from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import copy
 import math
-
-
-CENT = Decimal("0.01")
-YEAR_DAYS = Decimal(365)
+from datetime import date
+from .calc.premium_money import premium_money
 
 
 class RenewalPremiumError(ValueError):
-    """The existing policy chain cannot safely seed a renewal premium."""
-
-
-def _money(value, field):
-    if value is None or isinstance(value, bool):
-        raise RenewalPremiumError(f"{field} is missing or invalid. Review the policy chain before renewal.")
-    try:
-        amount = Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError):
-        raise RenewalPremiumError(f"{field} is missing or invalid. Review the policy chain before renewal.") from None
-    if not amount.is_finite():
-        raise RenewalPremiumError(f"{field} is missing or invalid. Review the policy chain before renewal.")
-    return amount
-
-
-def _cents(amount):
-    try:
-        return amount.quantize(CENT, rounding=ROUND_HALF_UP)
-    except InvalidOperation:
-        raise RenewalPremiumError("A policy premium is too large to calculate safely.") from None
-
-
-def _number(amount):
-    try:
-        result = float(amount)
-    except (OverflowError, ValueError):
-        raise RenewalPremiumError("A renewal premium is too large to store safely.") from None
-    if not math.isfinite(result) or _cents(Decimal(str(result))) != amount:
-        raise RenewalPremiumError("A renewal premium is too large to store safely.")
-    return result
+    pass
 
 
 def _day(value, field):
     try:
         return date.fromisoformat(value)
     except (TypeError, ValueError):
-        raise RenewalPremiumError(f"{field} is invalid. Review the policy chain before renewal.") from None
+        raise RenewalPremiumError(field + ' is invalid. Review the policy chain before renewal.') from None
+
+
+def _money(value, field):
+    try:
+        if value is None or isinstance(value, bool) or isinstance(value, str) and not value.strip():
+            raise ValueError()
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError()
+        return number
+    except (TypeError, ValueError, OverflowError):
+        raise RenewalPremiumError(field + ' is missing or invalid. Enter the renewal premium manually.') from None
 
 
 def _name_key(value):
-    if not isinstance(value, str):
-        return ""
-    return " ".join(value.split()).casefold()
+    return ' '.join(value.split()).casefold() if isinstance(value, str) else ''
 
 
-def _reinsurer_amounts(payload, label):
-    rows = payload.get("reinsurers")
+def _row_amount(p, name, label):
+    rows = p.get('reinsurers')
     if not isinstance(rows, list):
-        raise RenewalPremiumError(f"{label} has no valid reinsurer schedule.")
-    amounts = {}
-    for index, row in enumerate(rows, 1):
-        if not isinstance(row, dict):
-            raise RenewalPremiumError(f"{label} reinsurer {index} is invalid.")
-        key = _name_key(row.get("name"))
-        if not key or key in amounts:
-            raise RenewalPremiumError(f"{label} has a missing or repeated reinsurer name; enter a new policy manually.")
-        amounts[key] = _money(row.get("premium"), f"{label} reinsurer {index} premium")
-    return amounts
+        raise RenewalPremiumError(label + ' has no valid reinsurer schedule.')
+    matching = [r for r in rows if isinstance(r, dict) and _name_key(r.get('name')) == name]
+    if not name or len(matching) != 1:
+        raise RenewalPremiumError(label + ' has a missing or repeated reinsurer. Enter its renewal premium manually.')
+    return _money(matching[0].get('premium'), label + ' premium')
+
+
+def _amount(p, field):
+    if field == 'originalPremium':
+        return p.get(field)
+    try:
+        return p['reinsurers'][int(field.split('.')[1])].get('premium')
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _assign(p, field, value):
+    if field == 'originalPremium':
+        p[field] = value
+    else:
+        index = int(field.split('.')[1])
+        if index < len(p.get('reinsurers') or []):
+            p['reinsurers'][index]['premium'] = value
+
+
+def build_renewal_basis(root_payload, endorsements, latest_payload):
+    sources = [root_payload, *endorsements]
+    basis = {'version': 'full-period-average-v1', 'sourceDays': None, 'totals': {},
+             'names': [], 'issues': [], 'auto': {}, 'manual': []}
+    try:
+        start = _day(latest_payload.get('policyFrom'), 'Latest effective date')
+        end = _day(latest_payload.get('policyTo'), 'Latest expiry date')
+        if end <= start:
+            raise RenewalPremiumError('The latest insurance period has no positive duration.')
+        basis['sourceDays'] = (end-start).days
+    except RenewalPremiumError as exc:
+        basis['issues'].append({'field': 'policyTo', 'label': str(exc)})
+    fields = [('originalPremium', None)]
+    for index, row in enumerate(latest_payload.get('reinsurers') or []):
+        name = _name_key(row.get('name')) if isinstance(row, dict) else ''
+        basis['names'].append(name)
+        fields.append((f'reinsurers.{index}.premium', name))
+    for field, name in fields:
+        try:
+            total = 0.0
+            for i, payload in enumerate(sources):
+                label = 'Original' if i == 0 else f'Endorsement {i}'
+                total += _money(payload.get('originalPremium'), label + ' 100% Premium') if name is None else _row_amount(payload, name, label)
+            if not math.isfinite(total) or total < 0 or field == 'originalPremium' and total == 0:
+                raise RenewalPremiumError('Calculated renewal premium is not valid; enter it manually.')
+            basis['totals'][field] = total
+        except RenewalPremiumError as exc:
+            basis['totals'][field] = None
+            basis['issues'].append({'field': field, 'label': str(exc)})
+    return basis
+
+
+def projected_amounts(p, basis):
+    try:
+        days = (_day(p.get('policyTo'), 'Renewal expiry date') - _day(p.get('policyFrom'), 'Renewal effective date')).days
+    except RenewalPremiumError:
+        days = 0
+    result = {}
+    for field, total in basis['totals'].items():
+        value = None
+        if days > 0 and basis.get('sourceDays') and total is not None:
+            number = total / basis['sourceDays'] * days
+            if math.isfinite(number):
+                try:
+                    rounded = premium_money(number, p)
+                    positive_only = field == 'originalPremium' or (p.get('reinsuranceStructure') == 'QS' and str(p.get('classOfBusiness') or '').strip().casefold() == 'commercial general liability')
+                    if math.isfinite(rounded) and (rounded > 0 if positive_only else rounded >= 0):
+                        value = rounded
+                except (ValueError, OverflowError):
+                    pass
+        if field != 'originalPremium':
+            index = int(field.split('.')[1])
+            rows = p.get('reinsurers') or []
+            if index >= len(rows) or _name_key(rows[index].get('name')) != basis['names'][index]:
+                value = None
+        result[field] = value
+    return result
+
+
+def calculation_issues(basis, values):
+    issues = copy.deepcopy(basis['issues'])
+    existing = {i['field'] for i in issues}
+    for field, value in values.items():
+        if value is None and field not in existing:
+            issues.append({'field': field, 'label': field + ': a valid automatic premium is unavailable; enter this amount manually.'})
+    return issues
+
+
+def seed_renewal_premiums(p, root_payload, endorsements, latest_payload):
+    basis = build_renewal_basis(root_payload, endorsements, latest_payload)
+    values = projected_amounts(p, basis)
+    basis['auto'] = values
+    p['renewalPremiumBasis'] = basis
+    p['renewalPremiumManual'] = []
+    p['renewalPremiumIssues'] = calculation_issues(basis, values)
+    for field, value in values.items():
+        _assign(p, field, value)
+    return p
+
+
+def refresh_renewal_premiums(p, stored, submitted):
+    basis = copy.deepcopy(stored['renewalPremiumBasis'])
+    values = projected_amounts(p, basis)
+    manual = set(basis.get('manual') or [])
+    manual.update(k for k in (submitted.get('renewalPremiumManual') or []) if k in values)
+    for field, value in values.items():
+        candidate = _amount(submitted, field)
+        previous = _amount(stored, field)
+        try:
+            numeric = _money(candidate, field)
+        except RenewalPremiumError:
+            numeric = candidate
+        if candidate != previous and numeric != previous and numeric != value:
+            manual.add(field)
+        if field not in manual:
+            _assign(p, field, value)
+            if isinstance(p.get('draftInput'), dict):
+                _assign(p['draftInput'], field, value)
+    basis['auto'] = values
+    basis['manual'] = sorted(manual)
+    p['renewalPremiumBasis'] = basis
+    p['renewalPremiumManual'] = sorted(manual)
+    p['renewalPremiumIssues'] = calculation_issues(basis, values)
 
 
 def calculate_renewal_premiums(root_payload, endorsements, latest_payload):
-    """Return (100% annual premium, per-row annual reinsurer premiums).
-
-    ``endorsements`` is an ordered iterable of announced, active endorsement
-    payloads from the same policy root, ending at the renewal source. The
-    caller handles status, chain locks, and selection of the latest case.
-    """
-    start = _day(root_payload.get("policyFrom"), "Original effective date")
-    expiry = _day(root_payload.get("policyTo"), "Original expiry date")
-    if expiry <= start:
-        raise RenewalPremiumError("Original policy dates are invalid for renewal.")
-
-    latest_rows = latest_payload.get("reinsurers")
-    if not isinstance(latest_rows, list) or not latest_rows:
-        raise RenewalPremiumError("The latest case has no reinsurer schedule.")
-    latest_names = list(_reinsurer_amounts(latest_payload, "Latest case"))
-    root_amounts = _reinsurer_amounts(root_payload, "Original policy")
-    annual = _cents(_money(root_payload.get("originalPremium"), "Original premium"))
-    by_reinsurer = {name: _cents(root_amounts.get(name, Decimal(0))) for name in latest_names}
-
-    for sequence, payload in enumerate(endorsements, 1):
-        effective = _day(payload.get("endoEffectiveDate"), f"Endorsement {sequence} effective date")
-        if not start <= effective < expiry:
-            raise RenewalPremiumError(f"Endorsement {sequence} effective date is outside the original policy period.")
-        days = Decimal((expiry - effective).days)
-        annual += _cents(_money(payload.get("originalPremium"), f"Endorsement {sequence} premium") * YEAR_DAYS / days)
-        amounts = _reinsurer_amounts(payload, f"Endorsement {sequence}")
-        for name in latest_names:
-            if name in amounts:
-                by_reinsurer[name] += _cents(amounts[name] * YEAR_DAYS / days)
-
-    annual = _cents(annual)
-    result = [_cents(by_reinsurer[name]) for name in latest_names]
-    if annual <= 0 or any(amount < 0 for amount in result):
-        raise RenewalPremiumError("Calculated renewal premiums are not valid for a new policy; review the chain manually.")
-    return _number(annual), [_number(amount) for amount in result]
+    # Compatibility for callers of the pure calculator: a one-calendar-year renewal.
+    from .workflow import shift_year
+    p = {**latest_payload, 'policyFrom': latest_payload.get('policyTo'),
+         'policyTo': shift_year(latest_payload.get('policyTo')), 'premiumRounding': 'currency-stepwise-v1',
+         'reinsurers': copy.deepcopy(latest_payload.get('reinsurers') or [])}
+    seed_renewal_premiums(p, root_payload, endorsements, latest_payload)
+    if p['originalPremium'] is None or any(r.get('premium') is None for r in p['reinsurers']):
+        raise RenewalPremiumError('Some renewal premiums cannot be calculated; enter them manually.')
+    return p['originalPremium'], [r['premium'] for r in p['reinsurers']]
 
 
 def renewal_installment_issues(payload):

@@ -43,7 +43,7 @@ def normalize_manual_tw_ref(value):
 
 def prepare_auw_workflow_draft(payload, body):
     """Require the new AUW reference before inserting a renewal or endorsement."""
-    if not requires_manual_tw_ref(payload):
+    if payload.get("parentTwRef") or not requires_manual_tw_ref(payload):
         return []
     payload["manualTwRef"], errors = normalize_manual_tw_ref(body.get("manualTwRef"))
     for row in payload["reinsurers"]:

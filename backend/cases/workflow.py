@@ -100,7 +100,7 @@ def shift_year(value):
 def reset_shared_payload(payload):
     """Endorsement / Renewal 的新 Draft：清掉屬於「舊案件實際發生過的事」的欄位。"""
     return {
-        **payload,
+        **{k:v for k,v in payload.items() if k not in ('renewalPremiumBasis', 'renewalPremiumManual', 'renewalPremiumIssues', 'endorsementSource', 'endorsementRules')},
         **({"premiumRounding": "currency-stepwise-v1"} if payload.get("currency") == "TWD" else {}),
         **({"manualTwRef": ""} if "manualTwRef" in payload else {}),
         "twRefSource": "", "previousTwRefs": [],
@@ -112,6 +112,7 @@ def reset_shared_payload(payload):
         **({"swissAccounting": {}} if "swissAccounting" in payload else {}),
         **({"facilityAccounting": {}} if "facilityAccounting" in payload else {}),
         **({"greatAmericanClaimTracking": []} if "greatAmericanClaimTracking" in payload else {}),
+        **({"qbeClaimTracking": []} if "qbeClaimTracking" in payload else {}),
         **({"allianzClaimTracking": []} if "allianzClaimTracking" in payload else {}),
     }
 
@@ -136,6 +137,9 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     payload["reinsurers"] = [{**js_spread(row), "premium": None, "settlementRef": ""} for row in _rows(payload.get("reinsurers"))]
     # 2026-10-21 使用者決定（取代 92 項規則第 35 條「批單 Cedant 自填天數，不沿用原單」）：
     # 新批單的 Cedant 與各再保人付款天數一律沿用來源保單，業務仍可在 Draft 修改。
+    if "manualTwRef" in payload:
+        payload["manualTwRef"] = ""
+    payload.pop("_legacyCalculation", None)
     return payload
 
 
@@ -145,8 +149,11 @@ def build_renewal_payload(source_payload, source_tw_ref):
     payload["endorsementSeq"] = None
     payload["renewedFromTwRef"] = js_or(source_tw_ref, "")
     payload["newOrRenew"] = "Renew"
-    payload["policyFrom"] = shift_year(payload.get("policyFrom", UNDEFINED))
-    payload["policyTo"] = shift_year(payload.get("policyTo", UNDEFINED))
+    payload["policyFrom"] = source_payload.get("policyTo") or ""
+    payload["policyTo"] = shift_year(payload["policyFrom"])
+    payload.pop("endorsementSource", None)
+    payload.pop("endorsementRules", None)
+    payload.pop("_legacyCalculation", None)
     payload["endoEffectiveDate"] = ""
     payload["endoTypes"] = []
     payload["endoText"] = ""

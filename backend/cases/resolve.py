@@ -8,8 +8,9 @@
 from django.db.models import Q
 
 from .manual_reference import is_auw_reinsurer
-from .allianz_accounting import is_allianz
+from .allianz_accounting import target as allianz_target
 from .great_american_accounting import target as ga_target
+from .qbe_accounting import target as qbe_target
 from .calc.payment_terms import AUW_PAYMENT_TERMS_DAYS
 from masterdata.models import MasterRecord
 from personnel.models import Personnel
@@ -74,8 +75,12 @@ def resolve_personnel_splits(payload, allowed_historical_ids=()):
         by_name.setdefault(person.name.lower(), []).append(person)
     historical = {int(i) for i in allowed_historical_ids}
 
-    for party in parties:
+    from .property_original import scope as property_scope
+    from .cgl_qs import scope as cgl_qs_scope
+    for index, party in enumerate(parties):
         supplied = _supplied_id(party)
+        if (property_scope(payload) or cgl_qs_scope(payload)) and supplied is None and not _lower(get(party, "name")):
+            continue
         if supplied is not None:
             person = by_id.get(supplied)
         else:
@@ -96,10 +101,12 @@ def resolve_personnel_splits(payload, allowed_historical_ids=()):
                 "error": "invalid_personnel_split",
                 "message": "New Performance Split selections must use active, split-eligible Personnel records.",
             }
+        if (property_scope(payload) or cgl_qs_scope(payload)) and ((index == 0) != (person.role_code == "sales")):
+            return {"error": "invalid_personnel_split", "message": "Select Reinsurance Staff for the first party and non-Reinsurance Staff for Other Staff."}
         party["personnelId"] = person.pk
         party["name"] = person.name
 
-    resolved = [p["personnelId"] for p in parties]
+    resolved = [p["personnelId"] for p in parties if p.get("personnelId")]
     if len(resolved) != len(set(resolved)):
         return {
             "error": "invalid_personnel_split",
@@ -138,18 +145,20 @@ def payment_terms_signature(payload):
     """
     from .calc.swiss_facility import applies as swiss_applies, is_swiss_facility
     swiss = swiss_applies(payload)
+    from .accounting_policy import fixed_cedant
+    fixed = swiss or fixed_cedant(payload)
     def installment_mapping(row,reinsurers):
         value=get(row,"reinsurerPaymentTerms")
-        if not any((is_allianz(get(r,"name")) or ga_target(payload,get(r,"name"))) for r in (reinsurers if is_array(reinsurers) else [])):
+        if not any((allianz_target(payload, get(r,"name")) or (ga_target(payload,get(r,"name")) or qbe_target(payload,get(r,"name")))) for r in (reinsurers if is_array(reinsurers) else [])):
             return js_or(value,{})
         mapping=dict(value) if isinstance(value,dict) else {}
         for i,r in enumerate(reinsurers if is_array(reinsurers) else []):
-            if (is_allianz(get(r,"name")) or ga_target(payload,get(r,"name"))):mapping["r"+str(i+1)]=90
+            if (allianz_target(payload, get(r,"name")) or (ga_target(payload,get(r,"name")) or qbe_target(payload,get(r,"name")))):mapping["r"+str(i+1)]=90
         return mapping
     installments = get(payload, "performanceInstallments")
     reinsurers = get(payload, "reinsurers")
     return {
-        "paymentTermsDays": 90 if swiss else _nn(get(payload, "paymentTermsDays")),
+        "paymentTermsDays": 90 if fixed else _nn(get(payload, "paymentTermsDays")),
         **({"endoEffectiveDate": _nn(get(payload, "endoEffectiveDate"))} if get(payload, "parentTwRef") else {}),
         **({"cedantTermsBasis": "case"} if get(payload, "cedantTermsBasis") == "case" else {}),
         "installmentEnabled": get(payload, "installmentEnabled") is True,
@@ -157,16 +166,16 @@ def payment_terms_signature(payload):
             {
                 "id": js_or(get(row, "id"), ""),
                 "paymentBaseDate": js_or(get(row, "paymentBaseDate"), ""),
-                "paymentTermsDays": 90 if swiss else _nn(get(row, "paymentTermsDays")),
+                "paymentTermsDays": 90 if fixed else _nn(get(row, "paymentTermsDays")),
                 "reinsurerPaymentTerms": ({**(get(row, "reinsurerPaymentTerms") if isinstance(get(row, "reinsurerPaymentTerms"), dict) else {}), **{
                     "r" + str(i+1): 90 for i, r in enumerate(reinsurers if is_array(reinsurers) else [])
-                    if is_swiss_facility(get(r, "name")) or (is_allianz(get(r,"name")) or ga_target(payload,get(r,"name")))}} if swiss else installment_mapping(row,reinsurers)),
+                    if is_swiss_facility(get(r, "name")) or (allianz_target(payload, get(r,"name")) or (ga_target(payload,get(r,"name")) or qbe_target(payload,get(r,"name"))))}} if swiss else installment_mapping(row,reinsurers)),
             }
             for row in (installments if is_array(installments) else [])
         ],
         "reinsurers": [
             {"name": js_or(get(row, "name"), ""), "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS
-             if is_auw_reinsurer(get(row, "name")) else 90 if is_allianz(get(row,"name")) or ga_target(payload,get(row,"name")) else 90 if swiss and is_swiss_facility(get(row, "name")) else _nn(get(row, "paymentTermsDays"))}
+             if is_auw_reinsurer(get(row, "name")) else 90 if allianz_target(payload, get(row,"name")) or (ga_target(payload,get(row,"name")) or qbe_target(payload,get(row,"name"))) else 90 if swiss and is_swiss_facility(get(row, "name")) else _nn(get(row, "paymentTermsDays"))}
             for row in (reinsurers if is_array(reinsurers) else [])
         ],
     }
@@ -181,3 +190,48 @@ def same_content(a, b):
     if isinstance(a, bool) != isinstance(b, bool):
         return False
     return a == b
+
+
+def resolve_clause_titles(payload):
+    """Use the latest MDM Title verbatim; keep selected membership and custom titles."""
+    from .draft import clause_code
+    masters=MasterRecord.objects.filter(entity_type="clause").order_by("-is_active","display_order","id")
+    titles={}
+    selected=MasterRecord.objects.filter(Q(entity_type="class",name=payload.get("classOfBusiness")) | Q(entity_type="reinsurer",name__in=[r.get("name") for r in payload.get("reinsurers") or []])).order_by("entity_type","-is_active","display_order","id")
+    for record in selected:
+        for row in (record.payload or {}).get("fixedClauses") or []:
+            code=clause_code(row.get("code"));title=str(row.get("title") or "").strip()
+            if code and title:titles.setdefault(code,title)
+    canonical={}
+    for record in masters:
+        code=clause_code(record.code)
+        if code and code not in canonical:canonical[code]=record.name
+    titles.update(canonical)
+    for key in ("clauseDetails","manualClauses"):
+        for row in payload.get(key) or []:
+            if isinstance(row,dict) and clause_code(row.get("code")) in titles:
+                row["title"]=titles[clause_code(row["code"])]
+    return payload
+
+
+def add_required_property_clauses(payload):
+    from .property_original import scope
+    from .draft import clause_code, _clause_sort_key
+    if not scope(payload):return payload
+    cls=MasterRecord.objects.filter(entity_type="class",name=payload.get("classOfBusiness"),is_active=True).order_by("display_order","id").first()
+    selected=list(MasterRecord.objects.filter(entity_type="reinsurer",name__in=[r.get("name") for r in payload.get("reinsurers") or []],is_active=True).order_by("display_order","id"))
+    if cls:selected.insert(0,cls)
+    details=payload.setdefault("clauseDetails",[])
+    codes={clause_code(r.get("code")) for r in details}
+    manual={clause_code(r.get("code")) for r in payload.get("manualClauses") or []}
+    for master in selected:
+        for row in (master.payload or {}).get("fixedClauses") or []:
+            classes=row.get("classIds")
+            if isinstance(classes,list) and (not cls or cls.pk not in [int(i) for i in classes if str(i).isdigit()]):continue
+            code=clause_code(row.get("code"));title=str(row.get("title") or "").strip()
+            if code and title and code not in codes:
+                details.append({"code":code,"title":title});codes.add(code)
+    details.sort(key=_clause_sort_key)
+    payload["clauses"]=[r["code"] for r in details]
+    payload["autoClauses"]=[r["code"] for r in details if r["code"] not in manual and r["code"] not in ("LMA3333","INTERMEDIARY")]
+    return payload
