@@ -31,7 +31,7 @@ CASE_DOCUMENT_ROOT = os.getenv("RI_CASE_DOCUMENT_ROOT", "/data/documents")
 RESULT_CACHE_ENABLED = os.getenv("RI_RESULT_CACHE", "true").lower() == "true"
 RESULT_CACHE_TTL_SECONDS = int(os.getenv("RI_RESULT_CACHE_TTL", "60"))
 # 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
-DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 44 * 1024 * 1024
 # Signed Slip／忘記密碼沿用 RI_EMAIL_ENABLED；舊名仍相容。
 # 財務到期提醒另用 RI_PAYMENT_REMINDER_ENABLED + 已配置 SMTP（見下方），不連動其他寄信流程。
 EMAIL_ENABLED = os.getenv("RI_EMAIL_ENABLED", os.getenv("RI_REMINDER_EMAIL_ENABLED", os.getenv("RI_SIGNED_SLIP_OUTBOUND_ENABLED", "false"))).lower() == "true"

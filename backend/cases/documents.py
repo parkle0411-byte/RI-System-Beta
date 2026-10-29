@@ -6,17 +6,21 @@
 與 Alpha 的差異：單檔上限由呼叫者傳入（VM 是 10 MB，Alpha 是 5 MB；差異測試用 5 MB 比對邏輯）。
 """
 import base64
+import io
+import zipfile
 import re
 from urllib.parse import quote
 
 from .calc.jsnum import get, is_array, js_or, js_slice, js_to_string, js_truthy
 from .calc.signed_slip import reinsurer_key, required_reinsurers
 
-EXTENSIONS = ("pdf", "docx", "png", "jpg", "jpeg", "eml", "msg")
+EXTENSIONS = ("pdf", "docx", "png", "jpg", "jpeg", "eml", "msg", "xlsx", "xls")
 CONTENT_TYPES = {
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "xls": "application/vnd.ms-excel",
     "eml": "message/rfc822", "msg": "application/vnd.ms-outlook",
 }
 _UNSAFE = re.compile(r"[\x00-\x1f\x7f/\\]")
@@ -62,7 +66,7 @@ def decode_and_validate(filename, encoded, max_bytes):
     """回傳 {"ext", "bytes", "contentType"} 或 {"error": [HTTP 狀態碼, 訊息]}。"""
     ext = filename.split(".")[-1].lower() if "." in filename else ""
     if ext not in EXTENSIONS:
-        return {"error": [415, "Use PDF, DOCX, PNG, JPG, EML or MSG."]}
+        return {"error": [415, "Use PDF, DOCX, PNG, JPG, EML, MSG, XLSX or XLS."]}
     limit = -(-max_bytes // 3) * 4 + 8  # Math.ceil(MAX_BYTES / 3) * 4 + 8
     if not isinstance(encoded, str) or not encoded or _utf16_len(encoded) > limit:
         return {"error": [413, f"Each file must be nonempty and no larger than {_size_text(max_bytes)}."]}
@@ -71,7 +75,15 @@ def decode_and_validate(filename, encoded, max_bytes):
     raw = base64.b64decode(encoded)
     if not raw or len(raw) > max_bytes:
         return {"error": [413, f"Maximum file size is {_size_text(max_bytes)}."]}
-    if ext == "pdf":
+    if ext == 'xlsx':
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as book:
+                matches = '[Content_Types].xml' in book.namelist() and 'xl/workbook.xml' in book.namelist()
+        except (zipfile.BadZipFile, ValueError):
+            matches = False
+    elif ext == 'xls':
+        matches = raw.startswith(bytes([208, 207, 17, 224, 161, 177, 26, 225]))
+    elif ext == "pdf":
         matches = raw.startswith(b"%PDF-")
     elif ext == "png":
         matches = raw.startswith(bytes([137, 80, 78, 71, 13, 10, 26, 10]))

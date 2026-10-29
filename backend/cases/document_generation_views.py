@@ -1,4 +1,6 @@
+from .facility_selection import selection_issues as facility_selection_issues
 from .cgl_information import is_standard_cgl, information_issues
+from .cgl_qs import scope as cgl_qs_scope, number as cgl_number
 from .cgl_risk_details import type_issues, underlying_issues, liability_limit_label, risk_details_issues
 """Word-only Cover Note, Debit Note and Endorsement generation authorization.
 
@@ -7,10 +9,13 @@ stored Case fields, then records generation metadata without document content.
 The retired PDF route returns 410 for previously opened clients.
 """
 import re
+from .property_original import scope as property_scope, POSTCODE as property_postcode
 import uuid
 from datetime import date
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
+from django.utils import timezone
 from personnel.models import Personnel
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,7 +28,7 @@ from .document_views import visible_cases
 from .sum_insured import placement_issues
 
 
-KINDS = ("cover", "endorsement", "debit")
+KINDS = ("cover", "endorsement", "debit", "credit")
 
 
 def _error(status, code, message):
@@ -85,11 +90,52 @@ def _find_case(request, case_uid):
     return visible_cases(request.ri_principal).filter(case_uid=parsed, recycled_at__isnull=True, is_archived=False).first()
 
 
+def _endorsement_note_error(case, payload, kind):
+    """2026-10-29：批單加費出 Debit Note、退費出 Credit Note（只開放 TWD）；保費為 0 不出。
+    付款日 = 批單生效日 + 沿用原單的 Cedant Collection Days，所以兩者都要有。"""
+    label = "Credit Note" if kind == "credit" else "Debit Note"
+    if case.status not in ("posted", "closed") or not case.tw_ref:
+        return _error(409, "endorsement_note_requires_announce", f"{label} is available after the endorsement is Announced.")
+    premium = js_to_number(get(payload, "originalPremium"))
+    if not js_is_finite(premium) or premium == 0:
+        return _error(409, "endorsement_note_zero_premium", "This endorsement has no premium change, so no Debit Note or Credit Note is generated.")
+    if kind == "debit" and premium < 0:
+        return _error(409, "endorsement_return_premium", "This endorsement returns premium. Generate a Credit Note instead.")
+    if kind == "credit" and premium > 0:
+        return _error(409, "endorsement_additional_premium", "This endorsement adds premium. Generate a Debit Note instead.")
+    if kind == "credit" and _text(payload, "currency").upper() != "TWD":
+        return _error(409, "credit_currency_unsupported", "Credit Note generation is available only for TWD. The template for other currencies is pending confirmation.")
+    if get(payload, "installmentEnabled") is not True:
+        if not _valid_installment_base_date(get(payload, "endoEffectiveDate")):
+            return _error(409, "endorsement_effective_date_required", "Complete the endorsement Effective Date before generating this document.")
+        if not _valid_payment_terms(get(payload, "paymentTermsDays")):
+            return _error(409, "cedant_collection_days_required", "Complete valid Cedant Collection Days (an integer of at least 15) before generating this document.")
+    return None
+
+
 def _check_case(request, body):
+    """回傳 (case, kind, 錯誤回應)。批單的 Debit／Credit Note 先做批單專屬檢查，再走 Debit Note 的資料檢查。"""
+    kind = _text(body, "kind")
+    if kind in ("debit", "credit"):
+        case_uid = _text(body, "caseUid")
+        case = _find_case(request, case_uid) if case_uid else None
+        payload = case.payload if case is not None and isinstance(case.payload, dict) else {}
+        if case is not None and payload.get("parentTwRef") and _text(payload, "reinsuranceStructure") != "TREATY":
+            err = _endorsement_note_error(case, payload, kind)
+            if err:
+                return None, kind, err
+            checked, _, err = _check_case_base(request, {**body, "kind": "debit"})
+            return checked, kind, err
+        if kind == "credit":
+            return None, kind, _error(409, "credit_endorsement_only", "Credit Note is available only for endorsements that return premium.")
+    return _check_case_base(request, body)
+
+
+def _check_case_base(request, body):
     """回傳 (case, 錯誤回應)。"""
     kind = _text(body, "kind")
     if kind not in KINDS:
-        return None, kind, _error(400, "invalid_document_kind", "Document kind must be cover, endorsement or debit.")
+        return None, kind, _error(400, "invalid_document_kind", "Document kind must be cover, endorsement, debit or credit.")
     case_uid = _text(body, "caseUid")
     if not case_uid:
         if kind == "debit":
@@ -101,13 +147,63 @@ def _check_case(request, body):
             return None, kind, _error(409, "debit_requires_tw_ref", "Debit Note is only available after Announce assigns a TW Reference.")
         return None, kind, _error(404, "case_not_found", "Case was not found.")
     payload = case.payload if isinstance(case.payload, dict) else {}
+    from .data_integrity import response_error
+    invalid=response_error(case.payload)
+    if invalid is not None:return None,kind,invalid
+    from .allianz_accounting import selection_issues as allianz_selection_issues
+    scope_issues = facility_selection_issues(payload)
+    if scope_issues:
+        return None, kind, _error(409, "allianz_property_required" if allianz_selection_issues(payload) else "facility_class_required", scope_issues[0]["label"])
     # Treaty document requirements are deferred until its workflow is defined.
     if _text(payload, "reinsuranceStructure") == "TREATY":
         return case, kind, None
+    if kind == "endorsement" and (getattr(case, 'case_kind', '') == "endorsement" or payload.get('parentTwRef')) and (case.status not in ("posted", "closed") or not case.tw_ref):
+        return None, kind, _error(409, "endorsement_requires_announce", "The formal Endorsement is available only after successful Announce.")
     if kind == "debit" and not case.tw_ref:
         return None, kind, _error(409, "debit_requires_tw_ref", "Debit Note is only available after Announce assigns a TW Reference.")
     if kind == "cover" and not case.tw_ref:
         return None, kind, _error(409, "cover_requires_tw_ref", "Cover Note is only available after Announce assigns a TW Reference.")
+    if isinstance(payload.get('draftInput'), dict):
+        return None, kind, _error(409, 'draft_announcement_required', 'Review and Announce the revised Draft before generating documents.')
+    from .construction import issues as construction_issues
+    if kind=='cover':
+        construction_problems=construction_issues(payload)
+        if construction_problems:return None,kind,Response({'error':'construction_required','message':'; '.join(x['label'] for x in construction_problems),'issues':[dict(x,message=x['label']) for x in construction_problems]},status=409)
+    from .placing_rules import enabled as new_rules, underwriting_issues
+    if new_rules(payload) and kind == 'cover':
+        issues = underwriting_issues(payload)
+        for key, label in [('originalPremium','100% Premium'), ('ae','Account Executive')]:
+            if not _text(payload,key): issues.append({'field':key,'label':label})
+        if not _ae_email(payload): issues.append({'field':'aeEmail','label':'AE Email'})
+        for i,r in enumerate(payload.get('reinsurers') or []):
+            for key in ('name','sharePct'):
+                if not _text(r,key): issues.append({'field':f'reinsurers.{i}.{key}','label':f'Reinsurer {i+1} {key}'})
+        if not payload.get('reinsurers'): issues.append({'field':'reinsurers','label':'Schedule of Security'})
+        if property_scope(payload):
+            from .qs_documents import readiness_issues
+            finance = readiness_issues(payload,kind,_ae_email(payload))
+            issues.extend(dict(field=x['field'],label=x['message']) for x in finance
+                          if x['field'] in ('originalPremium','paymentTermsDays','performanceInstallments')
+                          or x['field'].startswith(('reinsurers.','performanceInstallments.')))
+        if issues:
+            field=issues[0]['field']
+            code={'ae':'ae_required','aeEmail':'ae_email_required','type':'cgl_type_required',
+                  'typePrefix':'cgl_type_required','limitOfLiability':'limit_of_liability_required',
+                  'coverages':'cgl_coverages_required','coveragesOther':'cgl_coverages_required',
+                  'originalPremium':'original_premium_required'}.get(field,'document_not_ready')
+            if field=='riskFormat':
+                if issues[0]['label'].startswith('Type must'):code='cgl_type_required'
+                elif 'postcode' in issues[0]['label'].lower():code='situation_postcode_required'
+            if field.startswith('cglInformation.'):code='cgl_information_required'
+            if field.startswith('situations.') and field.endswith('.postcode'):code='situation_postcode_required'
+            return None,kind,Response({'error':code,'message':'Complete document data.','issues':[dict(x,message=x['label']) for x in issues]},status=409)
+        return case,kind,None
+    from .qs_documents import scope as qs_document_scope, readiness_issues
+    if qs_document_scope(payload, kind):
+        issues = readiness_issues(payload, kind, _ae_email(payload))
+        if issues:
+            return None, kind, Response({"error": issues[0]["code"], "message": issues[0]["message"], "issues": issues}, status=409)
+        return case, kind, None
     if kind in ("cover", "debit") and not _text(payload, "reinsured"):
         return None, kind, _error(409, "reinsured_required", "Complete Reinsured in the case before generating a Cover Note or Debit Note.")
     if kind in ("cover", "debit") and not _text(payload, "originalInsured"):
@@ -143,7 +239,7 @@ def _check_case(request, body):
         situations = get(payload, "situations")
         if not isinstance(situations, list) or not situations or any(not isinstance(row, dict) or not _text(row, "address") for row in situations):
             return None, kind, _error(409, "situation_address_required", "Complete Principal Address in the case before generating a Cover Note." if is_standard_cgl(payload) else "Complete Risk Address for every Situation in the case before generating a Cover Note.")
-        if any(not re.fullmatch(r"[0-9]{3,6}", _text(row, "postcode")) for row in situations):
+        if any(not (cgl_qs_scope(payload) and not _text(row,"postcode")) and not (property_postcode.fullmatch(_text(row,"postcode")) if property_scope(payload) else re.fullmatch(r"[0-9]{3,6}", _text(row, "postcode"))) for row in situations):
             return None, kind, _error(409, "situation_postcode_required", "Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note." if is_standard_cgl(payload) else "Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.")
     if kind in ("cover", "debit") and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "originalPremium"):
         return None, kind, _error(409, "original_premium_required", "Complete 100% Premium in the case before generating a Cover Note or Debit Note.")
@@ -180,7 +276,7 @@ def _check_case(request, body):
     if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         losses = get(payload, "lossRecord")
         if isinstance(losses, list) and any(not isinstance(row, dict) or not _text(row, "lossPaid") for row in losses):
-            return None, kind, _error(409, "loss_record_paid_required", "Complete Loss Paid for every Loss Record entry in the case before generating a Cover Note.")
+            return None, kind, _error(409, "loss_record_paid_required", "Complete Loss Amount for every Loss Record entry in the case before generating a Cover Note.")
     if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         reinsurers = get(payload, "reinsurers")
         if isinstance(reinsurers, list) and any(not isinstance(row, dict) or not _text(row, "name") for row in reinsurers):
@@ -196,6 +292,8 @@ def _check_case(request, body):
             return None, kind, _error(409, "debit_installment_base_date_required", 'Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.')
     if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and get(payload, "installmentEnabled") is True:
         for installment in get(payload, "performanceInstallments"):
+            if is_standard_cgl(payload) and _text(payload, 'reinsuranceStructure') == 'QS' and not _valid_payment_terms(get(installment, 'paymentTermsDays')):
+                return None, kind, _error(409, 'debit_installment_cedant_terms_required', 'Complete valid Cedant Collection Days (an integer of at least 15) for every installment before generating a Debit Note.')
             for index, reinsurer in enumerate(get(payload, "reinsurers")):
                 from .calc.payment_terms import _resolved_terms
                 sources = (_resolved_terms(payload, installment, reinsurer, index),)
@@ -208,6 +306,17 @@ def _check_case(request, body):
             return None, kind, _error(409, "debit_installment_allocation_positive_required", 'Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
     if kind == "debit" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and _text(payload, "currency").upper() not in ("USD", "TWD"):
         return None, kind, _error(409, "debit_bank_currency_unsupported", 'Debit Note generation is available only for USD and TWD. The receiving bank account for other currencies is pending confirmation.')
+    if cgl_qs_scope(payload):
+        if kind == 'cover':
+            if cgl_number(payload.get('limitOfLiability')) is None or cgl_number(payload.get('limitOfLiability')) <= 0:
+                return None, kind, _error(409, 'cgl_limit_positive', 'Limit of Indemnity must be greater than 0.')
+            if any(cgl_number(r.get('lossPaid')) is None or cgl_number(r.get('lossPaid')) <= 0 for r in payload.get('lossRecord') or []):
+                return None, kind, _error(409, 'cgl_loss_positive', 'Every Loss Amount must be greater than 0.')
+        if kind in ('cover', 'debit') and not payload.get('parentTwRef'):
+            if cgl_number(payload.get('originalPremium')) is None or cgl_number(payload.get('originalPremium')) <= 0:
+                return None, kind, _error(409, 'cgl_premium_positive', '100% Premium must be greater than 0.')
+        if kind == 'debit' and not payload.get('parentTwRef') and any(cgl_number(r.get('premium')) is None or cgl_number(r.get('premium')) <= 0 for r in payload.get('reinsurers') or []):
+            return None, kind, _error(409, 'cgl_ri_premium_positive', 'Every Reinsurer Premium must be greater than 0.')
     return case, kind, None
 
 
@@ -239,5 +348,14 @@ class DocumentGenerationLogView(NoStoreMixin, APIView):
         case, kind, err = _check_case(request, body)
         if err:
             return err
+        from .qs_documents import scope as qs_document_scope
+        if qs_document_scope(case.payload, kind):
+            if body.get("saveWorkflow") != 1:
+                return _error(409, "document_client_refresh_required", "Refresh the page to use the latest Word generation and saving workflow.")
+            if type(body.get("rowVersion")) is not int or body.get("rowVersion") != case.row_version:
+                return _error(409, "document_case_changed", "The case changed. Refresh it and generate the Word document again.")
+            _audit(request, case, kind, "docx")
+            return Response({"ok": True, "rowVersion": case.row_version,
+                             "generationDate": timezone.now().astimezone(ZoneInfo("Asia/Taipei")).date().isoformat()})
         _audit(request, case, kind, "docx")
         return Response(status=204)

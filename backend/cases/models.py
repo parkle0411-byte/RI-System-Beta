@@ -30,10 +30,35 @@ DOCUMENT_KIND_CHOICES = [
     ("offer", "Offer"),
     ("signed", "Signed"),
     ("confirmation", "Confirmation"),
+    ("generated_cover", "Generated Cover Note"),
+    ("generated_debit", "Generated Debit Note"),
 ]
 
 # 單檔上限：VM 10 MB（2026-09-25 你的決定；Alpha 是 5 MB）。改這裡要一併產生 migration（資料表有 CHECK 約束）。
-MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 30 * 1024 * 1024
+
+
+class PlacingSlipVersion(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    case = models.ForeignKey('Case', on_delete=models.CASCADE, related_name='placing_slip_versions')
+    version = models.PositiveIntegerField()
+    source = models.CharField(max_length=12, choices=[('generated', 'Generated'), ('uploaded', 'Uploaded')])
+    filename = models.CharField(max_length=180)
+    content_type = models.CharField(max_length=120)
+    byte_size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    storage_key = models.CharField(max_length=300)
+    description = models.CharField(max_length=500)
+    case_version = models.PositiveIntegerField()
+    signature = models.CharField(max_length=64)
+    snapshot = models.JSONField(default=dict)
+    uploaded_by = models.CharField(max_length=120)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'ri_placing_slip_versions'
+        constraints = [models.UniqueConstraint(fields=['case', 'version'], name='placing_case_version_unique')]
 
 
 class Case(models.Model):
@@ -79,6 +104,10 @@ class Case(models.Model):
         related_name="+",
     )
     reinsured_name_snapshot = models.CharField(max_length=240, null=True, blank=True)
+    insured_master = models.ForeignKey(
+        "masterdata.MasterRecord", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="insured_cases", limit_choices_to={"entity_type": "insured"},
+    )
     ae_master = models.ForeignKey(
         "masterdata.MasterRecord",
         null=True,

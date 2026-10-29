@@ -32,6 +32,7 @@ from . import storage
 from .calc.jsnum import get, is_array, js_or, js_to_string, js_trim
 from .calc.signed_slip import signed_slip_tracking
 from .models import MAX_DOCUMENT_BYTES, Case, CaseDocument
+from .qs_documents import GENERATED_KINDS
 from .views import visible_cases
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def file_row(document):
 
 
 def _rows(case):
-    return [file_row(d) for d in CaseDocument.objects.filter(case=case).order_by("uploaded_at", "id")]
+    return [file_row(d) for d in CaseDocument.objects.filter(case=case).exclude(kind__in=GENERATED_KINDS).order_by("uploaded_at", "id")]
 
 
 def _payload(case):
@@ -134,7 +135,10 @@ class CaseDocumentsView(NoStoreMixin, APIView):
             response = FileResponse(handle, content_type=document.content_type)
             response["Content-Disposition"] = docs.content_disposition(document.filename)
             return response
-        return Response({**_state(case), "displayVersion": DISPLAY_VERSION, "files": _rows(case)})
+        from .generated_document_views import generated_state
+        from .qs_documents import scope as qs_document_scope
+        generated = generated_state(case) if qs_document_scope(_payload(case)) else {}
+        return Response({**_state(case), "displayVersion": DISPLAY_VERSION, "files": _rows(case), **generated})
 
     # ---- 勾選 ----
     def put(self, request):
@@ -147,9 +151,15 @@ class CaseDocumentsView(NoStoreMixin, APIView):
             return _error(400, "invalid_file_id", "Invalid file ID.")
         selected = body.get("selected") is True
         with transaction.atomic():
+            case = Case.objects.select_for_update().get(pk=case.pk)
             document = _find_file(case, file_id, lock=True)
             if document is None:
                 return _error(404, "file_not_found", "File was not found for this case.")
+            from .property_original import scope as property_scope
+            if property_scope(_payload(case)) and (case.announced_at or case.tw_ref) and document.is_selected and not selected:
+                return _error(409, "announced_document_locked", "Selected documents cannot be deselected after Announce.")
+            if document.kind in GENERATED_KINDS:
+                return _error(409, "generated_document_evidence", "Generated Word documents are kept separately from placement evidence.")
             before = document.is_selected
             document.is_selected = selected
             document.save(update_fields=["is_selected"])
@@ -172,6 +182,8 @@ class CaseDocumentsView(NoStoreMixin, APIView):
             document = _find_file(locked_case, file_id, lock=True)
             if document is None:
                 return _error(404, "file_not_found", "File was not found for this case.")
+            if document.kind in GENERATED_KINDS:
+                return _error(409, "generated_document_history", "Generated Word versions are retained in document history.")
             if locked_case.status != "draft":
                 return _error(409, "document_delete_locked",
                               "Documents cannot be deleted after Announce. Deselect the document instead.")
@@ -195,9 +207,10 @@ class CaseDocumentsView(NoStoreMixin, APIView):
         kind = body.get("kind")
         if kind not in ("offer", "signed", "confirmation"):
             return _error(400, "invalid_document_kind",
-                          "Choose Offer Slip, Reinsurer Signed Slip or Reinsurer Confirmation E-mail.")
+                          "Choose Endorsement, Reinsurer Signed Slip or Reinsurer Confirmation E-mail." if case.case_kind == 'endorsement' else "Choose Offer Slip, Reinsurer Signed Slip or Reinsurer Confirmation E-mail.")
         filename = docs.safe_filename(body.get("filename"))
-        decoded = docs.decode_and_validate(filename, body.get("base64"), MAX_DOCUMENT_BYTES)
+        from .property_original import scope as property_scope
+        decoded = docs.decode_and_validate(filename, body.get("base64"), MAX_DOCUMENT_BYTES if property_scope(_payload(case)) else 10*1024*1024)
         if "error" in decoded:
             return _error(decoded["error"][0], "invalid_file", decoded["error"][1])
         allowed = docs.required_reinsurers(_payload(case))
@@ -216,7 +229,7 @@ class CaseDocumentsView(NoStoreMixin, APIView):
         try:
             with transaction.atomic():
                 Case.objects.select_for_update().filter(pk=case.pk).first()  # 同一個案件的上傳依序處理（50 份上限）
-                if CaseDocument.objects.filter(case=case).count() >= MAX_DOCUMENTS_PER_CASE:
+                if CaseDocument.objects.filter(case=case).exclude(kind__in=GENERATED_KINDS).count() >= MAX_DOCUMENTS_PER_CASE:
                     return _error(400, "document_limit", "This case already has 50 stored documents.")
                 storage.put(storage_key, data)
                 written = True
