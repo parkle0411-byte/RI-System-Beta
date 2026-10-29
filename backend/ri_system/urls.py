@@ -10,9 +10,12 @@ from reminders.views import CaseRemindersView
 from dashboard.views import DashboardTargetsView, DashboardView
 from cases.document_generation_views import DocumentGenerationLogView, RenderDocumentPdfView
 from cases.document_views import CaseDocumentsView
+from cases.generated_document_views import GeneratedCaseDocumentView
+from cases.placing_views import PlacingSlipView
 from cases.recycle_views import DraftRecycleBinView
 from cases.reference_views import ReconciliationReferencesView
 from cases.views import CasesView
+from cases.insured_views import InsuredMasterView
 from cases.workflow_views import AnnounceView, WorkflowView
 from personnel.views import PersonnelOptionsView, PersonnelView
 
@@ -38,10 +41,13 @@ urlpatterns = [
     path("api/master-data/lloyds-ratings", LloydsRatingsView.as_view(), name="lloyds-ratings"),
     path("api/master-data", include("masterdata.urls")),
     path("api/audit-log", include("audit.urls")),
+    path("api/insured-masters", InsuredMasterView.as_view(), name="insured-masters"),
     path("api/cases", CasesView.as_view(), name="cases"),
     path("api/case-reconciliation-references", ReconciliationReferencesView.as_view(), name="case-reconciliation-references"),
     path("api/draft-recycle-bin", DraftRecycleBinView.as_view(), name="draft-recycle-bin"),
     path("api/case-documents", CaseDocumentsView.as_view(), name="case-documents"),
+    path("api/generated-case-documents", GeneratedCaseDocumentView.as_view(), name="generated-case-documents"),
+    path("api/placing-slips", PlacingSlipView.as_view(), name="placing-slips"),
     path("api/case-announce", AnnounceView.as_view(), name="case-announce"),
     path("api/case-workflow", WorkflowView.as_view(), name="case-workflow"),
     path("api/accounting", AccountingView.as_view(), name="accounting"),
