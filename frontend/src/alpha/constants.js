@@ -79,12 +79,17 @@ export function compareClauses(a, b) {
   const rank = (code) => code === 'LMA3333' ? 0 : code === 'INTERMEDIARY' ? 1 : code.startsWith('LMA') ? 2 : code.startsWith('NMA') ? 3 : code.startsWith('LPO') ? 4 : 5;
   return rank(codeA) - rank(codeB) || codeA.localeCompare(codeB, 'en', { numeric: true, sensitivity: 'base' });
 }
+export const RATING_AGENCIES = Object.freeze(['S&P Global', 'A.M. Best', "Moody's", 'Fitch']);
+function normalizeRatingAgency(value) {
+  const agency = String(value || '').trim().slice(0, 120);
+  return agency === 'AM Best' ? 'A.M. Best' : agency === 'Fitch Ratings' ? 'Fitch' : agency;
+}
 export function normalizeRatingList(value) {
   return (Array.isArray(value) ? value : []).map((row) => ({
-    agency: String(row?.agency || '').trim().slice(0, 120),
+    agency: normalizeRatingAgency(row?.agency),
     grade: String(row?.grade || '').trim().slice(0, 80),
     outlook: String(row?.outlook || '').trim().slice(0, 80),
-    ratingType: String(row?.ratingType || '').trim().slice(0, 120),
+    ratingType: 'Financial Strength',
     asOfDate: String(row?.asOfDate || '').trim().slice(0, 40),
     legalEntity: String(row?.legalEntity || '').trim().slice(0, 240),
     sourceUrl: String(row?.sourceUrl || '').trim().slice(0, 1000),
@@ -103,6 +108,8 @@ export function currentMonth() {
 
 export function emptyDraft() {
   return {
+    placingRulesVersion: 'placing-qs-20261028-v1', coReinsuranceWarranty: '',
+    propertyOriginalRules: 'property-original-v1',
     ownerPersonnelId: null, ownerPersonnelName: '', parentTwRef: '', endorsementSeq: null, manualTwRef: '',
     renewedFromTwRef: '', endoEffectiveDate: '', endoTypes: [], endoText: '',
     type: '', typePrefix: '', originalInsured: '', originalInsuredCn: '', reinsured: '',
@@ -139,8 +146,8 @@ export function emptyDraft() {
     expressWarranties: FIXED_TEXT.standardNone,
     conditionsPrecedent: FIXED_TEXT.standardNone,
     subjectivities: FIXED_TEXT.standardNone,
-    occupation: '', construction: '', lossPayee: '', notices: '', specialAgreement: '',
-    cglInformation: emptyCglInformation(),
+    occupation: '', construction: '', constructionSelections: [], constructionLegacyText: '', constructionLegacyConfirmed: false, lossPayee: '', notices: '', specialAgreement: '',
+    cglInformation: { ...emptyCglInformation(), insuredBusinessSelections: [], insuredBusinessOther: '' },
     ae: '', newOrRenew: '', exchRate: null, remark: '', postedAt: '',
     confirmedProductionKeys: [], productionExclusions: {}, endorsements: [], transactions: [], claims: [],
     statementNo: '', reversalCycle: 0, pendingReversalOffset: false, accountingNotifications: []

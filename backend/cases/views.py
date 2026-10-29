@@ -13,6 +13,7 @@
   - 見 resolve.py：主檔名稱精確比對、同名人員的拒絕、付款條件鎖定的比較方式。
 """
 import json
+import copy
 import uuid
 
 from django.db import IntegrityError, transaction
@@ -32,11 +33,14 @@ from .calc.payment_terms import derive_ledger_settlement
 from .cash_ledger import transaction_details
 from .calc.totals import list_financials
 from .draft import loss_record_save_errors, normalize_draft
+from . import draft_input
+from .property_original import adopt, enabled as property_enabled, edit_guard, persist_settlements, scope as property_scope
 from .sum_insured import prepare_transition
 from .models import Case
+from . import insured_master
 from .manual_reference import manual_tw_ref_fields, requires_manual_tw_ref, manual_reference_error
 from .resolve import (
-    payment_terms_signature, resolve_case_owner, resolve_master_references,
+    add_required_property_clauses, resolve_clause_titles, payment_terms_signature, resolve_case_owner, resolve_master_references,
     resolve_personnel_splits, same_content,
 )
 
@@ -153,12 +157,13 @@ class CasesView(NoStoreMixin, APIView):
                 "id": row.pk, "caseUid": str(row.case_uid), "twRef": row.tw_ref, "status": row.status,
                 "rowVersion": row.row_version,
                 **manual_tw_ref_fields(payload),
-                **list_financials(payload),
+                **list_financials(row.payload),
                 "caseKind": row.case_kind, "reinsuranceStructure": row.reinsurance_structure,
                 "ownerPersonnelId": row.owner_personnel_id,
                 "ownerPersonnelName": _json_text(payload, "ownerPersonnelName") or "",
                 "originalInsured": _first_text(payload, "originalInsured", "original_insured"),
                 "originalInsuredCn": _first_text(payload, "originalInsuredCn"),
+                "insuredMasterId": row.insured_master_id,
                 "reinsurers": reinsurers,
                 "reinsurerDisplayNames": [display_name("reinsurer", name) for name in reinsurers],
                 "currency": _first_text(payload, "currency"),
@@ -184,8 +189,15 @@ class CasesView(NoStoreMixin, APIView):
         # 記帳交易上儲存的 settlement 對「保費來源」的列永遠是過時的（付款條件上線後沒有東西再寫它）。
         # 即時計算逐筆保費、理賠收付與保留經紀費狀態；回傳欄位不寫回資料庫。
         from .calc.swiss_facility import case_payload
-        payload = case_payload(row)
-        if isinstance(payload.get("transactions"), list):
+        from .data_integrity import financial_issues
+        issues=financial_issues(row.payload)
+        payload = copy.deepcopy(row.payload) if issues else resolve_clause_titles(case_payload(row))
+        if not issues and row.case_kind == "endorsement" and row.parent_case_id and row.status == "draft":
+            from .endorsement_rules import context_for, apply_fixed
+            apply_fixed(payload, context_for(row))
+        from .placing_rules import adj_rate
+        computed_adj_rate = adj_rate(payload)
+        if not issues and isinstance(payload.get("transactions"), list):
             cash = transaction_details({**payload, "currency":payload.get("currency") or row.currency, "reinsured":payload.get("reinsured") or row.reinsured_name_snapshot})
             payload["transactions"] = [
                 {**t, "paymentScheduleSettlement": cash.get(t.get("txNo"), {}).get("settlement", derive_ledger_settlement(payload, t)),
@@ -196,8 +208,9 @@ class CasesView(NoStoreMixin, APIView):
             "ok": True, "displayVersion": DISPLAY_VERSION,
             "case": {
                 "id": row.pk, "caseUid": str(row.case_uid), "twRef": row.tw_ref, "status": row.status,
-                "caseKind": row.case_kind, "parentCaseId": row.parent_case_id,
-                "rowVersion": row.row_version, "payload": payload,
+                "caseKind": row.case_kind, "parentCaseId": row.parent_case_id, "insuredMaster": insured_master.information(row.insured_master),
+                "rowVersion": row.row_version, "payload": payload, "adjRate": computed_adj_rate,
+                **({'dataError':True,'dataIssues':issues} if issues else {}),
                 "announcedAt": row.announced_at, "updatedAt": row.updated_at,
             },
         })
@@ -206,17 +219,33 @@ class CasesView(NoStoreMixin, APIView):
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        normalized = normalize_draft(body.get("case"))
+        if isinstance(body.get("case"),dict) and body["case"].get("parentTwRef"):
+            return _error(400,"workflow_required","Create endorsements through the Case workflow.")
+        from .placing_rules import promote
+        if isinstance(body.get('case'), dict):
+            body['case'] = promote(dict(body['case']))
+        incomplete = body.get('incompleteDraft') is True
+        if incomplete and not draft_input.scope(body.get('case')):
+            return _error(400, 'incomplete_draft_scope', 'Incomplete drafts require Property or CGL Quota Share with ordinary reinsurers.')
+        normalized = draft_input.normalize(body.get('case')) if incomplete else normalize_draft(body.get("case"))
         if normalized["errors"]:
             return _error(400, "validation_failed", normalized["errors"][0], errors=normalized["errors"])
-        loss_errors = loss_record_save_errors(normalized["value"])
+        loss_errors = [] if incomplete else loss_record_save_errors(normalized["value"])
         if loss_errors:
             return _error(400, "validation_failed", loss_errors[0], errors=loss_errors)
 
         person = request.ri_principal
         actor_info = actor_from(person)
-        case_uid = uuid.uuid4()
+        draft_key = body.get('draftKey') if incomplete else None
+        if draft_key is not None and (not isinstance(draft_key, str) or not 16 <= len(draft_key) <= 128):
+            return _error(400, 'invalid_draft_key', 'Draft retry key is invalid.')
+        case_uid = uuid.uuid5(uuid.NAMESPACE_URL, f'ri-draft:{person.pk}:{draft_key}') if draft_key else uuid.uuid4()
         payload = normalized["value"]
+        from .property_original import VERSION, VERSION_KEY, ordinary
+        if property_scope(payload) and ordinary(payload):payload[VERSION_KEY]=VERSION
+        adopt(payload)
+        add_required_property_clauses(payload)
+        resolve_clause_titles(payload)
         if payload.get("currency") == "TWD":
             payload["premiumRounding"] = "currency-stepwise-v1"
         # Draft creation never imports posting, receipt or settlement records.
@@ -232,7 +261,7 @@ class CasesView(NoStoreMixin, APIView):
             payload["ownerPersonnelId"] = person.pk
             payload["ownerPersonnelName"] = person.name
 
-        split_error = resolve_personnel_splits(payload)
+        split_error = None if incomplete else resolve_personnel_splits(payload)
         if split_error:
             return Response(split_error, status=400)
         owner = resolve_case_owner(payload)
@@ -243,11 +272,22 @@ class CasesView(NoStoreMixin, APIView):
                             columns=columns, master_references=masters, payload=payload)
 
         with serialized(PRODUCTION_SOURCES):
+            if draft_key:
+                prior = Case.objects.filter(case_uid=case_uid, created_by=actor_info['id']).first()
+                if prior:
+                    if prior.status != 'draft' or prior.is_archived or prior.recycled_at:
+                        return _error(409, 'draft_retry_unavailable', 'The saved draft has moved to another workflow state.')
+                    return Response({'ok': True, 'recoveredDraft': True, 'case': {
+                        'id': prior.pk, 'caseUid': str(prior.case_uid), 'status': prior.status,
+                        'rowVersion': prior.row_version, 'savedAt': prior.updated_at,
+                    }})
             ref_error = manual_reference_error(payload)
             if ref_error:
                 return _error(409, "manual_reference_conflict", ref_error)
             try:
+                insured = insured_master.sync(None,payload,actor_info,body,new=True)
                 case = Case.objects.create(
+                    insured_master=insured,
                     case_uid=case_uid, case_kind="original", status="draft",
                     reinsurance_structure=columns["reinsuranceStructure"],
                     class_master_id=masters["classMasterId"],
@@ -271,7 +311,7 @@ class CasesView(NoStoreMixin, APIView):
         return Response({
             "ok": True, "displayVersion": DISPLAY_VERSION,
             "case": {"id": case.pk, "caseUid": str(case.case_uid), "status": case.status,
-                     "rowVersion": case.row_version, "savedAt": case.updated_at},
+                     "rowVersion": case.row_version, "insuredMaster": insured_master.information(case.insured_master), "savedAt": case.updated_at},
         }, status=201)
 
     # ---- 編輯 ---------------------------------------------------------------
@@ -298,23 +338,71 @@ class CasesView(NoStoreMixin, APIView):
             )
             if current is None:
                 return _error(404, "case_not_found", "Case was not found.")
-            if current.status not in ("draft", "posted", "reversed"):
+            if current.status not in ("draft", "posted", "reversed") and not (current.status == "closed" and property_enabled(current.payload)):
                 return _error(409, "case_not_editable", "Only Draft, Announced, or Reversed cases can be edited.")
             if current.row_version != expected_version:
                 return _error(409, "version_conflict", "This Draft was changed elsewhere. Reload it before saving again.",
                               currentRowVersion=current.row_version)
 
-            normalized = normalize_draft(prepare_transition(current.payload, body.get("case")),
+            supplied_case = dict(body.get("case")) if isinstance(body.get("case"),dict) else body.get("case")
+            if isinstance(supplied_case,dict):
+                from .placing_rules import KEY
+                supplied_case.pop(KEY, None)
+                if KEY in (current.payload or {}): supplied_case[KEY] = current.payload[KEY]
+                supplied_case["parentTwRef"] = (current.payload or {}).get("parentTwRef") or "" if current.case_kind=="endorsement" else ""
+            incomplete = body.get('incompleteDraft') is True
+            if incomplete and (current.status != 'draft' or not draft_input.scope(supplied_case, current.payload)):
+                return _error(409, 'incomplete_draft_scope', 'Automatic saving is available only for incomplete ordinary QS Drafts.')
+            candidate = prepare_transition(current.payload, supplied_case)
+            if not isinstance(candidate, dict):
+                # 2026-10-29：沒有 case 物件時回 400（原本批單會在下面的批單檢查出錯 500）；訊息同 normalize_draft
+                return _error(400, "validation_failed", "case must be an object.", errors=["case must be an object."])
+            endorsement_context = None
+            if current.case_kind == "endorsement" and current.parent_case_id:
+                from .endorsement_rules import context_for, apply_fixed, date_edit_error
+                endorsement_context = context_for(current)
+                if candidate.get('installmentEnabled') is True or candidate.get('performanceInstallments'):
+                    return _error(400, 'endorsement_installments_not_allowed', 'Endorsements must use a single premium settlement.')
+                error = date_edit_error(candidate, draft_input.input_for(current.payload or {}), unlocked=body.get("endorsementUnlocked") is True)
+                if error:
+                    return _error(409, "endorsement_period_locked", error)
+                apply_fixed(candidate, endorsement_context)
+            normalized = draft_input.normalize(candidate, existing=current.payload) if incomplete else normalize_draft(candidate,
                                          allow_negative_premiums=current.case_kind == "endorsement" and current.parent_case_id is not None,
                                          existing_premiums=current.payload)
             if normalized["errors"]:
                 return _error(400, "validation_failed", normalized["errors"][0], errors=normalized["errors"])
             payload = normalized["value"]
-            loss_errors = loss_record_save_errors(payload, case_kind=current.case_kind)
+            if endorsement_context:
+                apply_fixed(payload, endorsement_context)
+                payload["manualTwRef"] = (current.payload or {}).get("manualTwRef") or ""
+            if (current.payload or {}).get("renewalPremiumBasis"):
+                from .renewal_premiums import refresh_renewal_premiums
+                if current.status == 'draft':
+                    refresh_renewal_premiums(payload, current.payload, supplied_case)
+                else:
+                    for key in ('renewalPremiumBasis', 'renewalPremiumManual', 'renewalPremiumIssues'):
+                        if key in current.payload:
+                            payload[key] = copy.deepcopy(current.payload[key])
+            loss_errors = [] if incomplete else loss_record_save_errors(payload, case_kind=current.case_kind)
             if loss_errors:
                 return _error(400, "validation_failed", loss_errors[0], errors=loss_errors)
+            if current.status != "draft":
+                from .endorsement_rules import endorsement_issues
+                term_issues = endorsement_issues(payload)
+                if term_issues:
+                    return _error(400, "case_not_ready", term_issues[0]["label"], issues=term_issues)
             columns = normalized["columns"]
             stored = current.payload if isinstance(current.payload, dict) else {}
+            adopt(payload, stored)
+            if incomplete:
+                for key in ('accountingRules', 'accountingLegacyMath', 'propertyOriginalRules'):
+                    if key in stored and key not in payload:
+                        payload[key] = stored[key]
+            if stored.get(insured_master.KEY): payload[insured_master.KEY]=True
+            add_required_property_clauses(payload)
+            resolve_clause_titles(payload)
+            payload["confirmedProductionKeys"] = stored.get("confirmedProductionKeys") or []
             if stored.get("premiumRounding") == "legacy-cents":
                 payload["premiumRounding"] = "legacy-cents"
             elif payload.get("currency") == "TWD":
@@ -332,7 +420,7 @@ class CasesView(NoStoreMixin, APIView):
             # 2026-10-14：「新案 Cedant 天數以案件為準」一旦記錄就由伺服器保留，不依賴前端是否回傳
             if stored.get("cedantTermsBasis") == "case":
                 payload["cedantTermsBasis"] = "case"
-            if current.status in ("posted", "reversed") and requires_manual_tw_ref(payload) and not payload.get("manualTwRef"):
+            if current.case_kind != "endorsement" and current.status in ("posted", "reversed") and requires_manual_tw_ref(payload) and not payload.get("manualTwRef"):
                 message = "TW Ref. (for AUW) is required for an Announced case with 0609 AUW (Facility)."
                 return _error(400, "validation_failed", message, errors=[message])
             # Endorsement identity comes from the persisted workflow, not editable request fields.
@@ -352,7 +440,7 @@ class CasesView(NoStoreMixin, APIView):
             payload["claims"] = stored.get("claims") or []
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
-            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory", "allianzClaimTracking", "greatAmericanClaimTracking"):
+            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory", "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking"):
                 if key in stored:
                     payload[key] = stored[key]
             if "facilityAccounting" in stored:
@@ -361,7 +449,7 @@ class CasesView(NoStoreMixin, APIView):
             if "swissAccounting" in stored or swiss_applies(payload):
                 payload["swissAccounting"] = stored.get("swissAccounting") or {}
 
-            if current.status == "posted" and not same_content(
+            if current.status == "posted" and not property_enabled(stored) and not property_enabled(payload) and not same_content(
                 payment_terms_signature(payload), payment_terms_signature(stored)
             ):
                 return _error(409, "payment_terms_locked",
@@ -371,24 +459,46 @@ class CasesView(NoStoreMixin, APIView):
             if current.status == "reversed" and body.get("reverseCorrectionConfirmed") is not True:
                 return _error(409, "reverse_correction_confirmation_required",
                               "This case was Reversed. Saving will correct it and move it back to Announced status. Confirm to continue.")
-            next_status = "posted" if current.status == "reversed" else current.status
+            next_status = ("draft" if property_enabled(stored) else "posted") if current.status == "reversed" else current.status
             payload["status"] = next_status
 
             historical_split_ids = [
                 int(p["personnelId"]) for p in (stored.get("splitParties") or [])
                 if isinstance(p, dict) and isinstance(p.get("personnelId"), int) and p["personnelId"] > 0
             ] if isinstance(stored.get("splitParties"), list) else []
-            split_error = resolve_personnel_splits(payload, historical_split_ids)
+            split_error = None if incomplete else resolve_personnel_splits(payload, historical_split_ids)
             if split_error:
                 return Response(split_error, status=400)
+            if endorsement_context:
+                apply_fixed(payload, endorsement_context)
             owner = resolve_case_owner(payload, current.owner_personnel_id)
             if "error" in owner:
                 return Response(owner, status=400)
             if ((owner["id"] or 0) != (current.owner_personnel_id or 0)
-                    and person.role_code != "admin" and person.pk != current.owner_personnel_id):
+                    and person.role_code != "admin" and person.pk != current.owner_personnel_id
+                    and not (incomplete and current.status == 'draft' and current.owner_personnel_id is None and current.created_by == actor_info['id'])):
                 return _error(403, "owner_transfer_denied",
                               "Only the current Case Owner or System Administrator can change the Case Owner.")
 
+            now = timezone.now().isoformat()
+            if property_enabled(stored) and current.status != "draft":
+                if payload.get("reinsurers") != stored.get("reinsurers"):
+                    from .documents import coverage_for
+                    from .models import CaseDocument
+                    files = [{"id":str(d.pk),"kind":d.kind,"reinsurers":d.reinsurers,"is_selected":d.is_selected} for d in CaseDocument.objects.filter(case=current)]
+                    if not coverage_for(payload,files)["ready"]:
+                        return _error(409,"documents_not_ready","Select an Offer and Signed Slip or Confirmation Email covering every revised Reinsurer before saving.")
+                problem = edit_guard(current,payload,body,actor_info,now)
+                if problem:
+                    return _error(409,"property_edit_locked",problem)
+            if current.status == "posted" and property_enabled(payload) and not property_enabled(stored):
+                reason=str(body.get("reason") or "").strip()
+                if not reason:return _error(400,"change_reason_required","Enter a reason for changing this placement.")
+                from .property_original import refresh_transactions
+                payload["twRef"]=current.tw_ref
+                refresh_transactions(payload,now)
+                persist_settlements(payload,now,actor_info)
+                payload.setdefault("propertyEditHistory",[]).append({"at":now,"by":actor_info["id"],"reason":reason,"operation":"ordinary_rules_selected"})
             masters = resolve_master_references(payload)
             before = _case_state(
                 case_uid=current.case_uid, status=current.status, case_kind=current.case_kind,
@@ -400,6 +510,11 @@ class CasesView(NoStoreMixin, APIView):
                                    "aeMasterId": current.ae_master_id},
                 payload=stored,
             )
+            try:
+                insured=insured_master.sync(current,payload,actor_info,body)
+            except insured_master.MergeRequired as exc:
+                return Response(exc.data,status=409)
+            current.insured_master=insured
             was_draft = current.status == "draft"
             current.reinsurance_structure = columns["reinsuranceStructure"]
             current.class_master_id = masters["classMasterId"]
@@ -437,5 +552,5 @@ class CasesView(NoStoreMixin, APIView):
         return Response({
             "ok": True, "displayVersion": DISPLAY_VERSION,
             "case": {"id": current.pk, "caseUid": str(current.case_uid), "status": current.status,
-                     "caseKind": current.case_kind, "rowVersion": current.row_version, "savedAt": current.updated_at},
+                     "caseKind": current.case_kind, "rowVersion": current.row_version, "insuredMaster": insured_master.information(current.insured_master), "savedAt": current.updated_at},
         })
