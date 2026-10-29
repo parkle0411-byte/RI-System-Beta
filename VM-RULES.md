@@ -944,3 +944,466 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。H
 - **寄信暫停時的逾期提醒**：寄信未啟用（suppressed）時，逾期提醒也維持每 7 天一次，不再每天產生一筆；到期前 7 日與到期日只在當天觸發，日後開啟寄信不受影響。與 2026-09-26「suppressed 算已提醒」一致（僅用於每週間隔）。
 - **批單付款天數一律沿用（使用者決定，取代 92 項規則第 35 條「批單 Cedant 自填天數，不沿用原單」）**：新批單的 Cedant 與各再保人付款天數沿用來源保單，Draft 仍可修改；Announce 後鎖定規則不變。AUW 批單因此沿用原單 Cedant 120 天。
 - **測試**：依 10-16～10-20 已確認的新規則更新過時的 19 組測試（未放寬檢查；依各規則改用整筆保費、逐筆交易、人工銷帳、出險日分攤、每期獨立天數等情境），兩支瀏覽器測試用的準備資料腳本移到 backend/qa/browser_fixtures/。全部 68 組資料庫／API 測試通過。
+
+
+### 2026-10-22：Reinsurer 信評欄位與日期規則
+- 依業主表格，一般再保人及 Lloyd's Market 每筆信評必填 Rating agency、Grade、As-of date；Rating type 固定 Financial Strength（畫面唯讀、API 強制同值）。Checked at 為兩者選填，填寫時需有效 YYYY-MM-DD 日期，儲存／重開保留，不再由 Lloyd's 儲存 API 強制清空。
+- Outlook、Status、一般 Legal entity、Source URL 從信評表單移除；Lloyd's legal entity 固定 Lloyd's of London。未恢復已移除的官方來源／Checked 顯示一行。既有隱藏歷史 metadata 保留，不批次清除。
+- 一般再保人既有評等改為可直接編輯上述欄位；新增仍先按 Add rating 再儲存，未加入的草稿會提示；一般再保人仍可無信評，共用 Lloyd's 至少一筆，兩者最多 50 筆。
+- 既有沒有日期的信評不補造或批次改寫；編輯信評須補有效基準日期。未變更舊信評的停用／其他欄位 API 更新，以及個別 Lloyd's 成員繼承共用資料，保留舊日期，避免無法在成員頁填寫共用日期或影響生命周期操作。共用 Edit 的新儲存仍一律要求每筆日期。
+- 驗證：rating_field_rules 33 項、更新新日期 fixture 的 lloyds_market_editor 36 項與 lloyds_market_ratings 17 項、master_payload_compat 13 項、fixed_clause_classes 32 項，共 131 項 API／MDM 檢查；密碼與 3000 案件合計一致性、桌面／手機一般及 Lloyd's 新欄位、日期必填、查核日期選填、儲存／重整／繼承、唯讀權限通過。部署前後既有 managed models（除 Session）資料指紋與開關一致，無 migration 或正式業務資料批次改寫。
+
+
+### 2026-10-22：Rating agency 限定四家
+- 一般再保人與 Lloyd's Market 共用信評的 Rating agency 改為下拉選單，只可選 S&P Global、A.M. Best、Moody's、Fitch。新增與編輯 API 同步拒絕其他機構。
+- 舊 AM Best、Fitch Ratings 在表單正規化顯示為 A.M. Best、Fitch；其他歷史機構保留，編輯時顯示歷史提示並要求改選或移除。未自行新增 Moody's 信評、刪除 KBRA 信評或改造評等／日期。未改信評的生命周期操作與個別 Lloyd's 成員繼承維持相容。
+- 無 migration 或正式業務資料批次改寫；隔離 API 回歸與桌面／手機下拉選單、歷史資料處理、儲存／重整／繼承驗證通過。部署前後正式資料指紋一致。
+
+
+### 2026-10-22：QBE Hongkong & Shanghai Insurance Limited (Facility) Property 會計規則
+- 僅適用 Class of Business 為 Property 且再保人為 QBE Hongkong & Shanghai Insurance Limited (Facility)。核保年度由8月1日至次年7月31日；Q1為8–10月、Q2為11–1月、Q3為2–4月、Q4為5–7月。原單／續保取生效日、分期各取 Payment Base Date；加費及退費批單取批改生效日與成功 Announce 台北日期較晚者。
+- 保費與退款採核保季度末＋80日曆天提醒、＋90日曆天到帳，不調週末假日。原＋75天提醒由本次確認取代。各筆原期限不因收款延遲、部分歷史收付或分筆作業重算，不設延期流程。
+- QBE保費須收齊該案／期／加費批單對應整筆Cedant現金本金（含其他再保人分攤）並逐交易人工確認後才放行。保費整筆登錄剩餘餘額，取代原可分次付款；同案同一期分攤交易可一起登錄，禁止跨案、跨期合併，即使同到期日亦分開；外部參考號可於各獨立登錄重複使用。
+- 全額付款登錄後仍須財務查核銀行成功並人工確認完成，才停止付款逾期。完成後不撤回／沖回原付款；QBE實際到帳、退匯及重新付款在系統外追蹤，無新增到帳／重付欄位或重新付款逾期。已付出不得藉撤回Cedant收款或確認繞過先收後付。
+- 退費批單須先全數收齊所有再保人退款本金並逐筆人工確認，才可一次全額退清Cedant，可提前安排、不等季結算。退款及保費分別收付、不抵減；銀行費及非現金沖帳不得視為收齊本金。QBE退款未人工確認收齊時依原90天期限保留逾期判斷。
+- 理賠獨立收付；每筆請款成功登錄並建立帳款的台北日期＋15日曆天為最晚全額到帳日，到期前7日、到期日及之後每7日提醒，不調假日。新增請款各自起算，部分收款不改原期限。全額收款登錄即停止提醒及逾期、改顯示待人工確認，銷帳仍由財務逐筆確認；取代原第7天起提醒及必須人工確認才停止的文字。沿用財務追蹤備註、權限與既有寄信開關，不新增外部通知。
+- 新案及既有未結清帳款適用；不批次改寫Case、交易、付款、銷帳或歷史紀錄。既有有效完成確認的QBE帳款保留原日期，新QBE確認保留版本標記；失效確認不視為已結清。無schema migration。其他Class、一般QBE及其他Facility沿用原規則。
+- 驗證：完整隔離資料庫／API測試組（含QBE日期／收款放行／退款／理賠／逐案逐期／歷史保留）、3000案件合計與密碼一致性、非目標會計結果逐項比較、桌面及手機實際登錄／人工確認／理賠追蹤及唯讀權限。正式切換前備份資料庫與程式，部署後核對Django／Nginx、映像與靜態資產雜湊、正式資料及開關指紋。
+
+
+### 2026-10-22：Allianz Facility 限 Property 選用及會計適用範圍
+- 依業主明確確認，本 Session 的專屬規則限 Class of Business 為 Property，且再保人為 Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)。非 Property 不能選用這個再保人，不改為套用一般規則後允許建案；一般 Allianz（無 Facility）及其他再保人沿用原規則。
+- 案件再保人選單於非 Property 隱藏該精確名稱，歷史選項補入機制不會重新提供不符組合。已選 Allianz 後切換或清空 Class 時，阻擋變更並提示先移除 Allianz；保留 Class、已填再保人與金額等資料，不自動刪除整列。
+- Draft 新增／編輯、Announce 完整性及 Word 文件授權均檢查伺服器保存或收到的 Class／再保人組合；無法以直接 API、舊有 Draft、偽造文件請求或付款天數補填繞過限制。錯誤保留英文，拒絕操作不變更案件版本、會計及歷史。
+- Allianz 原單／續保、分期、加退費排程、固定天數、付款放行及理賠專屬標記統一檢查 Property；理賠依已凍結的分攤來源 Class 判斷，沒有來源 Class 則沿用案件 Class。不能只靠舊有 Allianz 標記套用到非 Property。
+- 本次只限縮適用範圍及選用組合，Property 的現行月底＋80日提醒／＋90日到期、整期 Cedant 實收及人工銷帳放行、付款完成及理賠提醒規則不變；先前 2026-10-20「四類會計統一」的確認仍有效。未加入手動延期功能。
+- 部署前唯讀盤點正式 Allianz 案件為0筆；不批次改寫舊案、交易、收付款、銷帳或 MDM，無 schema migration。保留其他 Session 的主檔、QBE、文件及會計更新，以及 Audit／寄信開關。
+- 驗證：Property 適用範圍及 API 原子性專項、相關隔離案件／工作流程／文件／會計回歸；實際桌面與手機選單、阻擋 Class 切換並保留資料、移除再保人後可切換、既有草稿重開。另核對前後端適用範圍、3000組合計、密碼及非目標會計結果一致；備份後切換，核對正式映像、實際靜態資產、Django／Nginx及資料指紋。
+
+
+### 2026-10-22：五家 Facility 的 Case 可選險種限制
+- 依業主確認，Lloyd's 0609 AUW、Allianz Hong Kong、Great American Singapore、QBE Hongkong & Shanghai 的指定 Facility 精確名稱僅可選 Property；Swiss Re Asia Hong Kong 的指定 Facility 僅可選 Property 或 Commercial General Liability。
+- 前端選單、歷史選項補入及險種切換採一致限制。含不相容 Facility 時阻擋切換或清空 Class，提示先移除對應再保人，保留已填 Class、再保人與金額；舊不相容案件仍可檢視及移除／替換再保人修正。
+- 後端新增／編輯、Announce、續保／批單建立、Word 文件授權及付款天數補填都檢查保存或收到的險種／Facility 組合；拒絕操作不改案件、版本、會計或歷史。大小寫與名稱空白正規化，非指定名稱及不含 Facility 的一般再保人維持原規則。
+- 本次只修改 Case 選用範圍，不改變會計、付款、信評或既有 Property 原單規則，不批次改寫歷史案件，無 schema migration。正式盤點五家現有案件均為0。
+- 驗證：隔離資料庫 API 專項、相關案件／工作流程／文件／會計及最新 Property 回歸、前後端範圍一致性、桌面／手機選單與切換阻擋、重開及歷史案件修正。部署前備份、核對最新正式版本，部署後核對資料指紋、實際映像與靜態資產、Django／Nginx；保留 Audit／寄信原開關。
+
+
+# 會計 A–G 統一規則（2026-10-22）
+
+依本 session 最後逐項確認內容實作。適用一般再保人、AUW 0609、Allianz HK、Great American Singapore、QBE HK & Shanghai、Swiss Re Asia HK。案件的 Facility／Class 選用限制沿用其他 session 已部署設定。
+
+## A．建帳與銷帳
+
+- Announce 時立即建立保費帳款；分期一次建立全部期別。
+- 每案每期一筆 Cedant T1、每家再保人一筆 T2，以及一筆 T3。
+- 會計人工登錄實際收付資料；全額後自動 Settled 並鎖定。零金額自動完成，不建立虛構收付款。
+- 同期 T1 及全部 T2 完成後，T3 自動完成；T3＝0 也自動完成。
+- Production 只確認業績與認列月份，不重複建帳。零業績仍保留會計帳款。
+- 已銷帳不可取消、不可修改收付金額。Reverse 不得移除已有保費收付、抵銷或最終確認的帳款；既有賠款獨立保留。
+
+## B．原單、續保與分期日期
+
+B：單期保單生效日；分期各期 Payment Base Date。C：各期 Cedant 天數；R：各期各家一般再保人天數。日數採日曆天。
+
+| 類別 | Cedant 到期日 | Cedant 畫面提醒 | 再保人到期日 | 再保人畫面提醒 |
+|---|---|---|---|---|
+| 一般 | B＋C | 到期前 15 天 | B＋R | 到期前 10 天 |
+| AUW | B＋90 | B＋75 | B 所在月底＋120 | 月底＋110 |
+| Allianz | B＋90 | B＋75 | B 所在月底＋90 | 月底＋80 |
+| Great American | B＋90 | B＋75 | B 所在曆年季末＋90 | 季末＋80 |
+| QBE | B＋90 | B＋75 | B 所在承保年度季末＋90 | 承保年度季末＋80 |
+| Swiss | B＋90 | **B＋80** | 固定結算期 | 固定結算日 |
+
+Facility Cedant 天數固定 90；一般案每期獨立填寫 C／R，未填列待確認並禁止收付。可填天數維持至少 15 天的整數。
+
+QBE 承保年度由 8 月起算：8–10 月、11–翌年 1 月、2–4 月、5–7 月。
+
+## C．付款前提與 Swiss 歸期
+
+- 所有類別付再保人保費前，須收齊該期全部 Cedant 款（含其他再保人分攤）並自動銷帳。
+- 保費不得分次登錄，須一次登錄整筆剩餘額；完成後停止逾期。
+- Swiss 固定結算日為每年 2/14、5/14、8/14、11/14。
+- 日期歸期：11–翌年 1 月→2/14；2–4 月→5/14；5–7 月→8/14；8–10 月→11/14。
+- 原始期依 Cedant **B＋90** 歸期；比較原始期、最後有效收款日歸期及財務確認日歸期，取最晚一期。未收妥先顯示預計期。
+- 財務確認日為 Cedant 自動銷帳的實際操作台灣日期，不允許回填；會計填寫的收款日期另存。
+- Cedant 全部銷帳後填寫結算清單參考號；未填不得登錄 Swiss 已付款。
+
+## D．補保費與退保費批單
+
+L＝批單生效日與實際 Announce 台灣日期較晚者。補／退保費批單均單期。
+
+| 類別 | 補保費 Cedant 收款／退給 Cedant | 補保費付再保人／向再保人收退款 |
+|---|---|---|
+| 一般 | L＋C | L＋R |
+| AUW | L＋90 | L 所在月底＋120 |
+| Allianz | L＋90 | L 所在月底＋90 |
+| Great American | L＋90 | L 所在曆年季末＋90 |
+| QBE | L＋90 | L 所在承保年度季末＋90 |
+| Swiss | L＋90 | 固定結算期；退保費依既有 Announce 截止規則可提前一期 |
+
+畫面提醒：Cedant 到期前 15 天，Swiss 單獨採 **L＋80**；再保人到期前 10 天，Swiss 顯示固定結算日。超過實際到期日才逾期。
+
+**所有類別**均須全額實收所有再保人退款並完成自動銷帳，才能一次全額退清該批單 Cedant。可提前退，不必等待月底／季結算日。原保費與退保費在 Cedant、再保人兩端均禁止抵銷，分別全額登錄收付；舊抵銷歷史保留。
+
+## E．人工收付登錄
+
+- Finance Staff、Finance Manager、System Administrator 操作；案件編輯角色不因此取得財務權限。
+- 登錄時「對帳參考號」或「說明」至少一項必填。
+- 可補登過往收付日期，系統另存實際操作時間；不允許負值、超額或零金額收付。
+- 金額僅在未曾銷帳且未破壞收付先後條件時可填原因修改，保留修改前後歷史。
+- 同筆登錄限同案、同期或同一筆賠款請款；同幣別、同方向、同對象限制維持。Accounting 批次操作畫面另在專屬 session 討論。
+- 本系統僅供人工記錄收付及對帳，未接銀行或外部會計系統；銀行手續費由外部會計系統處理。
+
+## F．賠款
+
+- Claim Payment 建立時立即建立再保人應收及 Cedant 應付；準備金只追蹤、不建帳。
+- 比例依出險當天適用保單／批單；同一請款的累計付出不得超過累計已登錄收款。
+- 可分次收付；部分收付不改原到期日。全額後比照保費自動 Settled 並鎖定。
+- 一般、AUW、Allianz、Great American、QBE：以建立賠款帳款的台灣日期＋15 天到期，固定不可人工修改。
+- Swiss：依建立賠款帳款的台灣日期歸入固定結算期，同筆向 Swiss 收款與付 Cedant 採同一到期日。例如 10/15→11/14；11/2→翌年 2/14。
+- 各類均採一般帳款提醒；原 Allianz／Great American／QBE 專屬追蹤歷史保留顯示。
+- 完全未有收付、抵銷或銷帳時，可依權限填原因更正應賠金額；已有紀錄另走調整流程。
+
+## G．金額、匯率與提醒信
+
+- T1：先加總再保比例，再計算 Cedant 分出保費，扣 Cedant 佣金及稅。T2：各再保人獨立計算。T3＝同期 T1－全部 T2。
+- 保費 TWD 整數、外幣兩位；受保護歷史帳款保留原算法與精度。賠款與收付款均以兩位小數處理。
+- 分期尾差集中第一期；再保人分配尾差優先最大正分攤比例，同比例依案件順序。
+- 有案件編輯權限者可填原因更正未處理帳款並保留歷史；已完成 T1 不變時，可只更正未處理 T2 並重算 T3。Production 已認列事實與正式報表保持鎖定。
+- 保費未 Production 認列時，以最新儲存的月匯率暫估台幣金額並標示 Estimated；認列後固定各期實際認列月份及正式匯率。賠款採建立帳款月份正式匯率。
+- 缺匯率不阻擋原幣建帳、人工收付或自動銷帳；顯示 Awaiting FX，Dashboard 標示換算尚未完整。
+- 全六類保費、退保費及賠款都納入提醒信：實際到期前 7 天、到期當天，之後每隔 7 天追蹤至餘額歸零。同日同類提醒避免重複。
+- 收件人：案件 AE、AE 主管及所有啟用中的 Finance Staff。先寄有效 Email，缺漏聯絡資料在系統列出。
+- **SMTP 依使用者指示最後處理。此次保持正式寄送關閉；提醒規則使用隔離資料與模擬寄送驗證。**
+
+## 部署與驗證原則
+
+以部署當下 VM 原始碼與映像為基底，保留其他 session 變更。部署前備份程式與資料庫；本次不需 schema migration。正式 VM 若沒有案件，不虛構補建或修改歷史業務資料。
+
+
+### 2026-10-23：一般 CGL QS 欄位規則與草稿自動儲存
+
+依本 session 逐項確認及最後修訂整批實作。一般 CGL QS 適用本次欄位規則；Facility 專屬規則另行處理，XOL 不套用新增的 QS 欄位限制。已部署的會計 A–G 為本次基底，算法、收付、銷帳及 Production 規則沿用。
+
+- CGL QS Case 幣別只提供 TWD／USD，新案預設 USD；New／Renew 預設 New，Type 預設 Commercial General Liability。保留 Products Liability 選項與既有結構後綴、as original。
+- 一般再保人搭配 PWS Foreign RI Broker 仍使用一般 CGL QS Information，不再因 Broker 名稱切回 Property 欄位。XOL 舊有適用範圍保留。
+- CGL QS 的 Aggregate Limit 在輸入、Overview、Review、Cover Note 隱藏，既有儲存值保留。Basis of Valuation、Indemnity Period、Loss Payee 等既有 CGL 文件隱藏規則沿用。
+- Principal Address 至少一筆，每筆地址必填；Postcode 選填，有填時為 3–6 位數字。Expiration Date 必須晚於 Effective Date，不接受同日；時間選項與實際輸出沿用。
+- Limit of Indemnity 必填且大於 0。每家 Order Hereon 0–100%，合計不超過 100%。Original／Renewal 的 Case／RI／分期保費大於 0；批改沿用既有補／退保費規則。
+- 新增一般再保人的付款天數預設 90，可修改；有填／正式檢查時須為至少 15 天的整數。
+- 第一個分期的 Payment Base Date／Performance Month 預帶 Effective Date／月份，其後人工選擇。各期預帶 Case Cedant 天數與各再保人天數，允許逐期修改；每期保費合計等於 100% Premium。
+- Performance Split 預設關閉；啟用後一位 Reinsurance Staff、一位 Other Staff，預設 40%／60%，僅允許 40%／60% 或 70%／30%，比例連動。
+
+**最後修訂的必填時點以 PD 現行做法為準，取代先前不同選項：**
+
+- Review／Announce 要求 Original Insured (CN)、Reinsured’s Retention、Cedant Commission／Tax／Collection Days，以及一般再保人 Payment Terms Days；分期逐期檢查天數。佣金與稅允許 0%。
+- Original Exclusions 改為選填。Case Owner 於 Announce 必填，Review 不另阻擋。AE Email 只在產生文件前要求。
+- 文件端沿用既有 PD 檢查；另補齊 CGL QS 分期 Debit Note 的後端 Cedant Collection Days 檢查，使畫面與伺服器一致。
+- Policy Form、Claims-Made Retroactive Date／ERP 適用與期間、Territorial／Other、Business、Products、Estimated Turnover、Special Agreement 等既有 Information 正式檢查保留。
+- Loss Record：New 可為 0 年且不得有明細；Renew 至少 1 年。新增明細時日期、原因、Loss Amount 皆必填，CGL QS Loss Amount 大於 0。
+- Sub-Limits、Self-Insured Retention、Reinstatement Provisions、Notices、Express Warranties、Conditions Precedent、Subjectivities、Website、補充 Loss Notes 等選填；空白的文件輸出沿用已確認規則。Website 不驗證網址。
+- Annual 預設勾選，可取消。三項 CGL 範本條款人工選用、預設不勾選；人工條款加入清單時 Code／Name 均必填。
+
+**CGL QS 與一般 Property QS 共用的草稿規則（使用者明確要求一致）：**
+
+- Structure／Class 都選定後才啟動；系統預填本身不觸發自動建案。人工填寫、選擇或修改後，離開欄位自動儲存，保留填寫頁面。
+- 缺漏、錯誤格式、未完成數字／日期及尚未加入清單的條款文字都可保留。有效數字於離開欄位時轉成數值；錯誤輸入仍保留原文。
+- 原始輸入以受限制的 draftInput／pendingClause 保存，供重新開啟／重新整理還原；可計算欄位與日期欄位另用安全的正規化值。
+- Review／Announce 及文件仍執行所需檢查。Announce 重新驗證原始輸入，成功後移除草稿輸入資料；Announce 前不建立會計帳款。帶有草稿原始輸入的修正案即使保留舊 TW Ref.，也須重新 Announce 後才能產生文件。
+- 新案首次儲存使用可重試識別，避免遺失回應後重複建案；寫入依序送出並使用 rowVersion，發生錯誤保留編輯內容。
+- 已有草稿暫時清空 Class／Structure 可繼續保存；XOL 不能藉清空 Structure 進入 QS 自動儲存。已公告／已確認／Reversed 案件不啟用自動儲存。
+- 前後端繼續保護帳款、收付款、Claims、Production 與歷史算法旗標；草稿儲存不接受前端覆寫這些資料。
+
+本次無 schema migration，不批次改寫業務資料。USD／TWD 使用既有對應的 Debit Note 收款帳戶；其他險種的銀行幣別限制保持原規格。
+
+驗證使用本次獨立 MySQL、後端及瀏覽器環境；正式資料僅唯讀核對。舊 Case API 的付款鎖定／Reverse 測例明確使用保留舊流程的 Facility 夾具，一般案件的新會計行為由 accounting_ag 與 cgl_qs 覆蓋。
+
+
+# Per-reinsurer premium ledger and insured master — 2026-10-24
+
+Owner-approved changes superseding the aggregate T1/T3 portion of the 2026-10-22 A–G rules. All other accounting deadlines, claims, permissions, FX and reminder rules remain in force. SMTP remains deferred; real outbound email remains disabled.
+
+## Premium ledgers
+
+- Each case / installment / strictly positive-share reinsurer has independent T1, T2 and T3 transactions. Zero-share reinsurers do not create accounts.
+- Calculate the whole Cedant T1 first, allocate it by positive reinsurer shares (largest share absorbs remainder; ties use case order), then split each reinsurer T1 into installments (first installment absorbs that reinsurer's tail). T1=1,000 at 33.33/33.33/33.34 becomes 333/333/334; two 50% periods total 499/501.
+- T2 retains independent reinsurer calculations. Each reinsurer T3 equals its own T1 minus its own T2.
+- Every T1 in the installment must be fully received and automatically settled before any T2 payment. Swiss statement-reference requirements remain.
+- Each T3 automatically settles after its own T1 and T2 settle, including T3=0. No cash record is fabricated. Once any T3 settles, all T2/T3 amounts in that installment are locked; remaining T2 can still be paid at their original amounts.
+- A single actual Cedant receipt registration may select several independent T1 of the same case / period. Existing currency / direction / counterparty and complete-refund safeguards remain.
+- New cases and entirely untreated historical premium cases use the new layout. Any premium cash (including reversed entries), offsets, settlement, or Production recognition protects the original ledger and history. Conversion retains explicit before/after history and never registers cash. Formal Production reports are not rewritten.
+- Debit Note installment amounts follow the same per-reinsurer-first allocation (499/501 in the example). Protected historical document calculations remain unchanged.
+- Accounting and the case SoA display the actual reinsurer allocation on all three legs, separately from a foreign broker used as the cash counterparty. Case SoA displays the same stored transactions. Existing claim ledger and partial cash rules are unchanged.
+
+## Insured master
+
+- New fixed original-insured identities use Chinese names as the primary identity/display/search field; there is no group hierarchy. Same Chinese name reuses the master even if English names differ.
+- Drafts may omit Chinese name. Chinese name is mandatory before Announce; newly linked cases must have a master. Existing cases are not backfilled.
+- New original cases, renewals and endorsements link to the directory. A renewal/endorsement inherits its source master where present; an unlinked historical source remains unchanged.
+- Saving a changed Chinese name on a linked original, renewal or endorsement renames that same master. It changes that case's name only; other case names and English names remain snapshots. Saving an unchanged old snapshot must not rename the master back.
+- Reinsurance Staff, General Manager and System Administrator can create/rename. Finance is read-only. Case visibility follows existing permissions.
+- A proposed name matching a separate existing identity requires explicit human confirmation of a merge; without confirmation the case/master remains unchanged. The confirmation includes both current versions; stale confirmation does not merge changed identities. Merge retains both identities' histories and old names; old fixed links resolve to the survivor.
+- Finance case links use stored case data without requiring MDM read access; this does not grant MDM or case editing permissions.
+- Master name/merge history is persisted in the master even while the general Audit Log is paused. No financial records or policy/renewal references are changed by master renaming.
+
+## User entry points
+
+- Sidebar **Insured Master** (`/insured`): search Chinese current/former names; open identity to see linked policies, renewal/endorsement references, historical case names, and name/merge history. Authorized staff can create/rename here.
+- Account List → case → Overview → **Insured master**: direct link to the same identity. Case entry retains **Original Insured (CN)** as the input; normal save/CGL auto-save handles linking and rename confirmation.
+- Sidebar **Accounting** (`/accounting`): per-reinsurer T1/T2/T3, independent balances and settlement; select several same-period T1 for one receipt. Account List → case → SoA shows its stored rows.
+
+Implementation uses a nullable Case → insured MasterRecord FK and additive insured entity type migrations. No historical insured names are batch-linked. Prepared against live CGL QS release on 2026-10-23; source/image guards prevent overwriting concurrent releases.
+
+
+# Swiss Re CGL Facility QS 規則與財務提醒日期 — 2026-10-24
+
+本次依業主重新逐項確認的規則及最新部署衝突題 1A／2A／3B 實作。以 2026-10-24 20:29 的按再保人拆帳及被保險人主檔版本為基底；原先「先不要實作」已由業主「開始實作」明確解除。
+
+- 專屬範圍須同時符合 QS、Commercial General Liability、Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility) 精確名稱（允許大小寫及多餘空白正規化）。不靠 Class Code 判斷；Swiss Property、CGL XOL、其他再保人的專屬期限維持原規則。
+- 採最新一般 CGL QS 表單、CGL Information、Coverages、可選條款與正式檢查。Case 幣別僅 TWD／USD，新案預設 USD；Type 提供 Commercial General Liability（預設）及 Products Liability。Aggregate Limit 隱藏並保留舊值，佣金／稅允許 0；Case Owner 於 Announce 必填，AE Email 於產生文件前必填。
+- 原單／續保 Draft 的人工修改於離開欄位後自動儲存，保留未完成或錯誤原文及待加入條款；Review／Announce 正式驗證。Announced、Confirmed、Reversed 不啟用 Draft 自動儲存，帳款與收付由伺服器保護。保留新部署的中文被保險人主檔連結、更名與人工合併確認。
+
+| 帳款 | 基準 | 實際到期日 | Accounting 首次提醒 |
+|---|---|---|---|
+| 原單／續保 T1 | 保單生效日 | 基準日＋90 日 | 到期前15日 |
+| 原單／續保 Swiss T2 | 保單生效日所在月份 | 該月底＋90 日 | 到期前10日 |
+| 分期 T1／Swiss T2 | 各期 Payment Base Date | 分別沿用上述 T1／T2 公式 | 分別提前15／10日 |
+| 加費／退費批單 T1／Swiss T2 | 批單生效日與成功 Announce 的台灣日期較晚者 | T1＝基準日＋90；Swiss T2＝該月底＋90 | 分別提前15／10日 |
+| Swiss CGL 理賠應收／應付 | 該次賠款帳款實際成功建立的台灣日期 | 建帳日＋15日 | 到期前7日 |
+
+- 全部為日曆天，週末／假日不順延。遲收 Cedant 款、部分理賠收付及補登實際收付日期都不重算期限；不使用舊 Swiss 季結歸期或退款提前一季規則。
+- Announce 立即建立全部期別保費帳款；每案／每期／每家正分攤再保人有獨立 T1、T2、T3。T1 先按再保人分配再分期、尾差及 Debit Note 沿用最新部署；零分攤不建帳。Production 僅認列，不重複建帳。
+- 正常保費各筆 T1 可分開全額登錄，也可同案同期多筆合併一筆匯款；每筆 T1／T2 都不允許部分金額。同期所有 T1（包括其他再保人分攤）全額實收並自動銷帳後，才可支付再保人。付 Swiss 正保費前另須填結算清單參考號，與 Cedant Statement No.／Reinsurer Ref. 分開。
+- 退保費 Swiss T2 須一次全額收回。同批單所有再保人的退款本金全額實收並自動銷帳後，才可將全部 Cedant T1 勾選於同筆匯款一次全額退清；允許提前退，原期限保留。兩端均不允許保費／退保費抵銷。
+- 理賠兩端可分次收付；同一請款累計付出不超過實收。全額後自動銷帳及鎖定，不另人工確認。
+- 各家 T3 於自己的 T1／T2 都完成後自動銷帳（包含 T3＝0，不虛構現金紀錄）；任一家 T3 完成即鎖定同期全部 T2／T3 金額，其他 T2 仍可依原額付款。
+- 新建及既有未結清帳款採新日期。已銷帳帳款保留原日期及紀錄，Accounting 的排程顯示與交易日期一致；既有收付歷史及受保護歷史帳本格式不改寫。
+
+**全系統財務提醒信日期對齊 Accounting：** 所有保費、退保費及理賠的首次信依各筆 Accounting 提醒日，不再一律提前7日；各類本身的畫面日期及合約期限不變。之後仍於實際到期日及逾期每7日提醒，個別餘額歸零停止。同日同類去重、既有成功／暫停紀錄、收件人及寄信開關保留。沿用既有首封提醒識別保存歷史相容性，顯示名稱改為「會計收付款提醒」。
+
+本次不啟用 SMTP 或實際提醒信，Audit Log 原暫停設定保留。不需 schema migration，不新增正式測試案件或虛構收付。以獨立資料庫及瀏覽器驗證；正式部署前備份、核對原始碼與映像，部署後核對執行版本、靜態資產、資料指紋與開關。
+
+### 2026-10-27：QS Word 文件生成與版本保存
+
+依本輪文件逐項確認及 10/27 佣金／Tax 更正實作。以 10/24 21:28 正式版本為基準；282 份後端 Python、Word 靜態檔及重新建置的前端 bundle 已核對與線上一致。Git HEAD 較舊，不能作為回復或覆蓋基底。
+
+- 本批一般 Property／PD QS 原保單及續保 Cover Note／Debit Note：收件人地址合理分行、空白 Retention 固定句、QS 隱藏 Underlying Limits、付款條件逐期取值及空白限定回退、賠款正值檢查及日期排序、Security 比例降冪、Debit 標題 100% PREMIUM。兩份文件的佣金／Tax 未填或明確為 0 隱藏整列；非零比例固定兩位小數。
+- 本批 QS 的 Original Exclusions／Conditions 使用編號條目、僅附加一次不編號固定句，包含已確認的其他險種；XOL 仍暫緩。合約聲明僅更正 alterations 拼字。
+- 文件資料問題一次列出欄位及期別／明細。Debit 整份既有 Net Due 為 0 阻擋；個別分期 T1 為 0 照實保留。金額與日期沿用現行引擎，不修改 Case 儲存、Review／Announce 或任何會計規則及業務資料。
+- 同一份 QS Word 先成功存入 Case Documents 才下載。UUID＋Case rowVersion 檢查支援失敗／回應遺失重試，防止重複版本。生成檔不列為 placement evidence；原附件、簽署判定、提醒及權限保留。
+- Documents 主清單只列每類自動生成文件最新版，舊版留歷史並可下載。手動附件最多 50 份；自動生成 QS Word 與全部歷史另計，不占 50 份額度（業主 10/27 選 A）。檔名為 CoverNote／DebitNote_[Ref]_[Original Insured]_[台灣生成日期].docx。
+- Migration cases.0007 僅放寬文件種類的既有 CHECK／choices，不改 Case 或會計資料。部署仍須先備份 DB 與文件 volume、以 owner 套用 migration 並執行 db_harden。Audit 暫停、郵件設定及 Word-only 流程維持。
+- 文件專項：後端 60 項、Word 46 項、瀏覽器 18 項及 240 組共用金額驗證通過；Django／migration 檢查通過。XOL／Treaty Word XML 與批單本文回歸比對不變。LibreOffice 內部預覽確認 A4／字體／銀行 9pt／無空白頁；未代稱原生 Microsoft Word 驗證。
+- 完整舊測試 78 組中 49 通過、29 失敗；29 組皆以未修改正式映像重跑同樣失敗。舊 totals 隨機向量工具也在修改前後同樣對 malformed reinsurers 失敗；密碼規則 20 組通過。舊 UI A 在原版／候選版同為 14/18，涉及新增 Insured Master 導覽及既有新增案件表單問題。業主已明確選 A：「同意既有測試失敗另案處理，本次部署文件修改」。本次以文件專項驗證及修改前後回歸比對部署；既有 Case／會計問題另案紀錄，未在此修改。本次例外不構成之後部署的通用豁免。
+
+
+### 2026-10-27：Swiss Re Facility CGL 僅限 QS，禁止 XOL
+
+依業主「Swiss Re Facility - CGL 不可以有 XOL」補齊選用限制。以當天 11:20 最新 QS Word 文件及版本保存部署為基底，保留既有文件、被保險人主檔與會計規則。
+
+- Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility) 搭配 Commercial General Liability 時，Reinsurance Structure 僅能為 QS；XOL、Treaty 及其他非 QS 結構均不允許。名稱與 Class 的大小寫／多餘空白正規化，不依 Class Code 判斷。
+- 已選 Swiss CGL 時，Structure 只提供 Quota Share，不能清空或切成 XOL；先選 XOL 的 CGL 案件不提供這家 Facility。切換 Class 若造成無效組合，保留原填寫資料並阻擋切換；移除該 Facility 後可按其他案件原規則操作。
+- 後端共用選用驗證涵蓋新增／修改、草稿自動儲存、Review／Announce、續保／批單繼承、文件授權及付款天數補填。未完成草稿仍可保留一般欄位錯誤，但不能清除本項 Structure 限制。拒絕操作不修改案件、版本及歷史。
+- 歷史無效草稿保留檢視與修正入口，可改為 QS；不自動刪除再保人或已填內容，不批次改寫歷史。正式唯讀盤點沒有 Swiss CGL XOL 案件。
+- Swiss CGL QS 仍使用月底＋90／T1＋90、15／10日提醒、各家獨立 T1／T2／T3及先收齊整期再付款等已確認規則。Swiss Property、一般 CGL 的 XOL 選用範圍維持原規則。
+- 舊盤點中的 Swiss CGL XOL 純計算夾具屬先前未阻擋的組合，不能作為業主已核准 XOL 的依據；規則盤點須先檢查共用選用限制，再列可用會計規則。
+
+本次無 schema migration，不變更會計資料、實際收付或文件內容。部署前備份並核對最新原始碼／映像；部署後核對資料指紋與實際版本，Audit 暫停及實際寄信關閉保持原設定。
+
+### 2026-10-27：Debug 候選修正版（待業主決定部署）
+
+本節記錄本次已獲業主確認的修正範圍；目前只交付候選原始碼與隔離測試結果，未部署正式服務。
+
+- 新增／取消／重設及載入 Case 草稿時，先提供完整欄位，保護同步付款條件 watcher，不在逐欄刪除造成的短暫空值上呼叫 `map`。既有 Draft 自動儲存及未完成輸入保留流程維持。
+- 再保人清單、分期清單或計算所需數字出現無法讀取的格式時，整案金額顯示 `Pending confirmation` 並列出資料異常。讀取不修補、不以 0 代替錯誤數字，也不捨棄原始資料。
+- 付款天數、日期與一般必填欄位繼續使用既有逐欄正式檢查；這些欄位尚未完成或錯誤時，不把仍可計算的金額改為資料損壞。
+- 該案在修正前，由後端阻擋相關 Announce、文件產生、收付款、沖回、更正、續保／批單／Reverse 工作流程及理賠正式操作；Reverse 案件合法理賠更正的例外不能繞過此防護。合法案件繼續正常讀取。Dashboard／Production 明示異常案件未計入的金額，已關帳報表不回寫。
+- 為避免正常編輯器靜默捨棄損壞的資料結構，異常儲存資料先保留檢視；須查明原文後由技術人員修復。一般尚未填完的空白 Draft 不視為資料格式損壞。
+- Great American／QBE（及共用固定 Cedant 政策）的付款條件比對統一採固定 90 天，包含各期 Cedant。真正的 Payment Base Date 及一般可變天數差異仍檢查；不批次回寫歷史紀錄。
+- Swiss Property 初始日期依既有 Cedant B+90 歸結算期：2026/1/31+90=2026/5/1，原始結算期為 2026/8/14。舊 5/14 測試預期已更新，測試凍結完整時鐘；不改動 Swiss 業務公式。Swiss CGL 仍依既有月底+90及 QS-only 選用規則。
+- 原 29 組失敗測試依現行規則更新，保留錯誤輸入、權限、併發／原子性及歷史帳款檢查。退休的人工銷帳、跨案合併登錄、保費抵銷及固定提前 7 天首封提醒，改為驗證目前的自動銷帳、同案同期／請款限制與 Accounting 提醒日。
+- 本次驗證僅用獨立合成資料環境；不需 schema migration。完整紀錄與候選差異交付於工作區 `RI-docs/Debug-Fixes-2026-10-27/`。部署由業主另行決定，部署前須重新核對正式版本並備份。
+
+
+### 2026-10-27：Debug 修正版正式部署
+
+業主於本 session 明確指示「都修好了，那開始部署」，解除上一筆候選版本的待部署狀態。
+
+- 發布已驗證的兩項錯誤修正、固定90天比對及現行測試整理；金額異常資料保留原文並阻擋相關正式操作，付款天數與一般必填檢查沿用既有流程。
+- 79／79組隔離測試、3017筆金額一致性、14項瀏覽器及31項前端正式檢查通過；Release僅同步QA檔案，所有應用程式Python與已測映像完全相同。
+- 無schema migration，無正式測試案件或業務資料改寫。備份程式、資料庫及文件後切換；正式API唯讀、Django／Nginx與映像／靜態資產驗證通過，managed tables（Session除外）、文件及Audit／寄信開關指紋不變。
+- 備份：`/opt/ri-system/backups/debug_fixes_20261027_232757`；完整部署證據：工作區`RI-docs/Debug-Fixes-2026-10-27/`。
+
+
+### 2026-10-27：本週公告與完整 MDM／Schema 指南更新
+- 公告比較期間為2026-10-21 09:11至本次唯讀核對時間；英文信僅說明General Manager、Reinsurance Staff、Finance Manager、Finance Staff可見的操作變更，不包含System Reference Data。
+- 兩份完整指南重整為現行規則：Announce即建帳、依再保人獨立T1/T2/T3與自動銷帳、Insured Master中文身分／更名／明確合併、各Facility期限與Swiss CGL QS限制、草稿raw input、自動保存Property QS Word版本、30MiB案件附件、信評新欄位與資料異常保護。
+- information_schema逐欄核對28表、274欄、81索引、21外鍵、38 CHECK、5 trigger、42 migration；文件內容、XML連結、離線排版及隔離／正式權限與下載SHA-256驗證通過。
+- 只更新兩份指南及其預設發行日期為2026-10-27；其他指南／模板、應用程式功能及業務資料不變，不套migration。原始碼、舊映像與metadata先備份；Audit暫停與寄信關閉保持。
+
+
+### 2026-10-28：Endorsement 及全保期平均續保候選實作
+
+依業主本 session 確認的 55 項決定實作，適用所有臨分險種的 QS／XOL。以 10/27 最新正式程式、文件版本保存、Swiss CGL QS-only、資料異常保護及 Debug 修正版為基底；289 份後端 Python 與執行中版本一致，前端基底可重建出相同正式 bundle。此為候選規格與程式，尚未部署正式服務。
+
+- 第一張批單由 Original 建立，後續從最新已 Announce／Confirmed 版本繼承，連回同年度根保單；不得跳過未完成批單。保費差額、批改生效日、類型及 wording 由業務填寫，批改類型至少一項、可複選，wording 必填。成功 Announce 前不配置正式 E 編號。
+- 幣別、險種、QS／XOL、Reinsured、再保人名單及 Order Hereon、Foreign RI Broker、Cedant 及再保人的佣金／Deductions／Tax／付款天數、Performance Split 全部沿用來源並固定。伺服器保存來源版本及固定欄位快照，API 不接受覆寫；既有一般未公告 Draft 也套用。來源 Performance Split 的歷史人員及名稱快照保留。AE／Case Owner 在 Draft 可修改，Original Insured 中英文及其他可批改風險資料須先解鎖。
+- 修改保單起訖日期／時間須選 Period 並解鎖。一般批改生效日依最新已 Announce／Confirmed 的期間檢查，允許等於生效日及到期日；本項取代先前「必須早於到期日」。Period 可超出原期間，但後續批單生效日仍不得早於前一張，可同日。
+- 所有臨分 Original、續保及 Period 改期後的完整期間最長 18 個曆月，允許剛好上限；月底按曆月末日處理，不以固定日數代替。多張延長以最新完整起訖期間判斷，不能逐張另算上限。原兩年期示例撤回。
+- 批單單期、不允許分期。Case／再保人 Premium 為本次帶正負號的差額：補費正、退費負、無異動 0；同張不同再保人允許混合補退，包含 Swiss Property。只有 Case 及每家再保人金額全部為 0，才於成功 Announce 後直接 Confirmed 並排除 Production；相抵為零的非零明細仍須認列。
+- 所有臨分批單 Draft 啟用離欄自動儲存及手動儲存，保留未完成數字、日期與條款原文，重新開啟還原；Review／Announce 正式檢查必填、格式、日期順序及 18 個月。資料結構損壞仍沿用最新異常資料防護，不靜默修補或以零替代。
+- 批單上傳 Offer Slip 更名為 Endorsement。Announce 前需業務另備上傳的本批單 Endorsement，加涵蓋全部再保人的 Signed Slip 或 Confirmation E-mail；完全零保費亦適用。E-mail 先行仍須補 Signed Slip，含 Confirmed 零保費案件均沿用追蹤。正式 Endorsement Word 只於成功 Announce 後提供。
+- 批單統一以 Original 編號衍生 -E01、E02…；雙系統／AUW 編號兩邊使用同一 E 序號，純 AUW 單基底只衍生 AUW 編號，不補建系統基底。AUW 批單 Draft 不手填新號碼；正式編號檢查全域保留、歷史及回收編號，成功 Announce 才配置。缺少歷史 AUW 原單基底時不以系統號冒充。Original／續保既有 AUW 手填規則維持。
+- Announce 即建立各再保人應收應付，Production 僅認列、不重複建帳。收付期限基準為批改生效日與實際 Announce 台灣日期較晚者，各 Facility 再套既有公式。Production 月份同樣取較晚月份，已關帳則順延第一個未關帳月，正式匯率採實際認列月匯率。保留最新依再保人 T1／T2／T3、正分攤建帳、自動銷帳、退款本金、收齊再付款及 FX 鎖定規則。
+- Announce／Confirmed 後依 Original 允許欄位與更正原因流程辦理，保留收付、銷帳及 Production 鎖定；固定來源欄位仍不可改。拒絕日期更正須在修改被保險人主檔及帳款前完成驗證。
+- 所有臨分續保採全保期平均，即使沒有 Period 批單也適用：同年度 Original 加已完成批單的補／退費，除最新完整保障實際天數，再乘續保實際天數。Case 與每家再保人各自計算；沿用既有幣別取位，來源及已關帳金額不改寫。所有臨分續保均從最新到期日接續（包含無 Period 批單及原本非一年期），預帶一年期，實際 365／366 天，可改期但最長 18 個月。改期只重算未人工修改的保費，人工值及其狀態重開後保留。無法有效推算的欄位留白並說明原因，仍建立續保 Draft，正式送出須補齊。
+- 歷史案件由上線時另一個分頁處理，本次不批次回寫歷史案件或提供一般 Draft 補填固定歷史缺漏的例外。最新 Facility 選用限制（含 Swiss CGL 只限 QS）、權限、被保險人主檔／合併確認、文件版本保存、Audit 暫停與正式寄信關閉維持。
+
+驗證僅使用本次獨立 MySQL、後端及無頭瀏覽器，合成資料與隨機測試密鑰；與正式資料庫、文件 volume 及網路隔離。專項、全部現行測試、前後端金額及續保公式一致性、瀏覽器與 Django／migration 結果另存工作區 `RI-docs/Endorsement-Implementation-2026-10-28/`。不需 schema migration；正式部署仍須另行確認並重新檢查正式版本與備份。
+
+
+### 2026-10-28：Endorsement 與全保期平均續保正式部署
+
+業主已明確指示「都通過也都沒問題，那就開始部署吧」，解除上一段候選版本的待部署狀態。
+
+- 發布本 session 已確認範圍的批單規則、固定來源欄位、Draft 原文與自動儲存、含到期日的生效日期界線、Period 解鎖、18 個曆月上限、混合補退與嚴格全零 Confirmed、AUW 自動 E 編號、公告文件要求及全保期平均續保。歷史缺漏資料依第 43 項另分頁確認，不在本次批次回寫。
+- 80／80 組現行隔離回歸（含批單 54 項）、22 項瀏覽器、13 項新增前端規則、3017 組金額與2000組續保一致性及20組密碼一致性通過。正式使用已測試的同一後端／前端映像，292份Python與原始碼一致。
+- 無 schema migration，無正式測試案件或業務資料改寫。程式、資料庫與案件文件已備份；正式API唯讀檢查、Django／Nginx及靜態資產驗證通過，所有可見資料表（Session除外）與文件、Audit暫停及寄信關閉保持原狀。
+- 備份：`/opt/ri-system/backups/endorsement_20261028_151317`；完整證據：工作區 `RI-docs/Endorsement-Implementation-2026-10-28/`。
+
+
+## 2026-10-28 Placing Slip / 新案 QS 規則（候選版，尚未部署）
+
+- 規則版本 `placing-qs-20261028-v1` 由伺服器配置。更新後新增的 Property / CGL QS、從舊案建立的新續保與批單使用新版；編輯既有案不得自行升版。
+- Placing Slip 僅 Draft 生成／上傳／刪除。未選再保人或含一般再保人可用；純 Facility 不提供。Announce 後只下載既有版本。
+- 原單／續保依 Risk Details、Terms & Conditions、Information 檢核；AE 與 Email 必填，不要求先填保費或指定再保人。Offer Slip / Signed Slip 證明文件要求不變。
+- Premium、Ceding Commission、Total Deductions、Tax、Order Hereon 保留空白列；Premium Payment Terms 每次固定 90 天；Annual 每次預設勾選。無再保人 Breakdown。
+- 每次生成／上傳必填版本說明，生成 Word 先保存再下載。編輯版接受 DOCX / PDF；目前有任何未刪除的編輯版便停止生成，刪除全部編輯版後恢復。修改 Case 後提醒舊文件可能過時，不阻擋 Announce。
+- 批單使用 Addendum Template：批改前 TYPE、REINSURED、ORIGINAL INSURED、PERIOD；原單編號與預估 E 編號。正式編號僅 Announce 配置，不標 Provisional。有效日期、批改類型、wording 必填。改期／名稱修改在批改內容另列。
+- Addendum 保留 It is hereby noted and agreed that / All other terms and conditions remain unchanged.，列所有再保人（含混合案 Facility）與空白保費，不列 Share、Security Details、費用附頁及任何簽署區。
+- 新填／修改的 Order Hereon 每家 >0、<=100%、最多 8 位小數，合計 <=100%；未修改歷史比例保留，批單繼承並鎖定來源比例。
+- Property：地址列稱 SITUATION；至少一筆，每筆地址與 Postcode 必填。Basis of Valuation 必填（Other 說明必填）；Retention 可空，文件補標準文字。
+- Property 新增 SIR 於 Deductibles 下；Loss Payee、Co-Reinsurance Warranty、Notices 依序於 Reinstatement Provisions 下。前三項純 Facility 隱藏；Notices 所有案件選填。Cover Note / Placing Slip 有內容才顯示。
+- Property Aggregate Limit 0 當未填；Sub-Limits、Exclusions、Reinstatement、Indemnity Period、Special Agreement 選填；三項聲明空白補標準 None 文字，含 Facility。既有純 Facility 專屬財務規則保留。
+- CGL / Swiss CGL QS：Principal Address 非必填；Limit of Indemnity 後顯示 each occurrence；Aggregate Limit 選填且 0 省略；Deductibles / SIR 都維持自由文字，至少填一組。Co-Reinsurance Warranty 選填並同步兩份文件。
+- CGL Interest 預填且可改，空白使用標準文字；Retention、三項聲明空白使用標準文字。Claims-Made 才顯示且要求 Retroactive Date / ERP；其他 CGL Information 必填及條件顯示由共用規則檢核。
+- Business 複選 Manufacturer / Distributor / Importer / Exporter / Other（說明）；Turnover Region 單選 USA/Canada / Rest of World / Other（說明）。新續保／批單繼承舊自由文字一律放 Other，保留原文，每區塊確認後才可 Review / Announce / Placing。
+- CGL Overview 的 Adj. Rate = Cedant 100% Premium / Turnover 換成 Case 幣別後加總 *100%，使用保單生效月份匯率，六位小數，不年化。缺所需匯率或分母無效顯示 N/A，不阻擋其他操作。
+- Upload Evidence 額外支援 .xlsx / .xls；原有文件權限、Announce 證明要求、Accounting / Production / 寄信規則保持原有規定。
+
+
+### 2026-10-28T21:17:34+08:00：Placing Slip 正式部署
+
+業主明確指示「先部署，再弄排版。」；本次候選版本已獲部署授權。
+
+- 使用隔離驗證的同一後端／前端 image；新增 cases.0008_placing_slip_versions，重套既有最小權限與 Audit triggers。
+- 既有案件、會計、證明文件及其他業務資料不批次改寫；新欄位／選項使用新版新案標記，舊案維持原畫面。Audit 暫停與寄信設定不變。
+- 既有 80 組回歸的各組最新結果通過；候選 image 的 47 項 Placing、12 項 Word／比例、28 項瀏覽器及來源／資產一致性通過。Word 原生分頁依業主指示在部署後另外檢查。
+- 備份：`/opt/ri-system/backups/placing_slip_20261028_211640`；部署及後續排版證據：工作區 `RI-docs/Placing-Slip-Implementation-2026-10-28/`。
+
+
+### 2026-10-28T21:30:05+08:00：Placing Slip 文件顯示檢查
+
+- 依「先部署，再弄排版」接續完成三份合成 Word 的離線 Writer 排版預覽：Property／CGL 各 8 頁、Addendum 1 頁，無空白頁或簽署頁切頁。此為 LibreOffice 預覽，並非 Microsoft Word 原生驗收。
+- 修正條款標題已含代碼時的重複顯示，例如 LMA3333 LMA3333，保留最新 MDM 標題一次。零年且無損失的新案摘要與通知日期格式同步既有 Cover Note 的 Loss Clean since operation. 及英文長日期；沒有更動條款選用、承保、保費、會計或文件版本規則。49 項 Placing 專項與預覽驗證通過，部署同一修正 image。
+- 無 migration；程式、資料庫與文件已備份，部署前後業務資料／文件／設定指紋一致。備份：`/opt/ri-system/backups/placing_layout_20261028_212934`。
+
+
+### 2026-10-28：Property Construction 複選（本次候選規則）
+
+- 適用所有可編輯的 Property QS／XOL 案件，一般再保人與 Facility 一致。歷史 FACULTATIVE 名稱沿用系統既有 QS 相容處理。其他險種維持自由文字。
+- Construction 至少選一項，允許複選，固定選項及輸出順序：A2 Class、A1 Class、B Class、C Class、D Class，不提供 Other，不預設選項。
+- 原 Construction 文字保留為 constructionLegacyText，未確認前 construction 仍維持原文。業務選好類別並明確確認後，construction 改為所選類別逐行列出；歷史原文持續保留，不批次改寫舊案。
+- 新增、編輯、續保／批單繼承、Review／Announce 與新的 Cover Note／Placing Slip 使用共用選項及確認檢核。未完成仍可保存 Draft，不能產生新的文件；既有文件下載不受影響。
+- 既有已確認選項可繼承。來源仍為舊文字時不猜測類別，保留原文供業務選擇與確認。API 不可藉由刪除版本標記、清空歷史原文或只選不確認來繞過檢核。
+- 資料保留在 Case JSON，維持既有 construction 字串供 Overview／Review／Cover Note／Placing Slip 輸出，無 schema migration。新欄位屬描述資料，不改保費、會計、稅費、Share、承接或現金演算法。
+- Property Construction 的新 metadata 只在相關資料實際存在時影響 Placing Slip 指紋，避免將未變更的舊 Property 或 CGL 文件誤標過時。
+
+
+### 2026-10-29T09:15:05+08:00：Property Construction 正式部署
+
+依本 session 已確認的所有可編輯 Property QS／XOL 複選、舊文字保留及新文件確認門檻發布。同一候選 image 的 API／瀏覽器／Word 檢核通過；無 schema migration，正式案件與會計／文件／開關指紋不變。備份：`/opt/ri-system/backups/property_construction_20261029_091425`。部署後接續檢查文件排版。
+
+
+### 2026-10-29T09:29:38+08:00：Property Construction 文件分頁檢查
+
+依「弄完之後，再弄排版」完成 QS／XOL Cover Note 與 Property Placing Slip 離線預覽。Cover Note 範本原先在單一表格儲存格內的換頁改為整列開始新表格，並保留欄位名稱及內容同頁，避免頁底文字接近頁碼。實際 Word 下載文字及非本文資產一致（生成日期正常更新），其餘前端檔案與後端 image 不變。這是 LibreOffice 離線預覽，未以 Microsoft Word 原生引擎人工驗收。QS／XOL Cover Note 各 5 頁、Placing Slip 8 頁，無空白頁及頁面外文字。備份：`/opt/ri-system/backups/construction_layout_20261029_092924`；資料／文件／設定指紋不變。
+
+
+### 2026-10-29：更新Swiss Re Facility PD專屬規則指南
+- 依執行中297份Python、現行Accounting及Swiss Facility主檔整理2026-10-29版Word；System Guides原swiss-pd入口更新，舊版隨備份保留。
+- 僅說明Property專屬三項固定條款、80天提醒／90天歸季、固定14日與月底截止、自動銷帳操作日及收款日歸期、Swiss清單參考號、退費提前一期與Announce截止、理賠固定季結；不重列全險種共用規則。
+- 此次只發布Word及其登錄檔名／發行日期，不修改業務邏輯；四頁排版、日期例子、隔離與正式下載權限及SHA-256通過。其他指南、模板、前端、業務資料、Audit暫停及寄信關閉保持原狀，無migration。
+- 證據：工作區RI-docs/Swiss-Re-Facility-PD-2026-10-29/。
+
+
+### 2026-10-29：新增Swiss Re Facility CGL專屬規則指南
+- 參考System Guides的PD指南版式，依執行中297份Python、現行Accounting及Swiss Facility主檔整理CGL專屬Word，新增swiss-cgl入口；既有swiss-pd及其他指南保留。
+- 僅說明QS限定、NMA2915與SWISSRE_GC_FAC、T1固定90天與提前15天提醒、Swiss T2月底加90天與提前10天提醒、晚收款不延期、Swiss結算參考號、批單基準日及無PD提前一期、理賠建帳台灣日期加15天及提前7天提醒；不重列全險種共用規則。
+- 本次只發布Word及其登錄檔名／發行日期，不修改業務邏輯；三頁排版、33項記憶體規則檢查、16項下載權限檢查及SHA-256通過。其他指南、模板、前端、業務資料、Audit暫停及寄信關閉保持原狀，無migration。
+- 證據：工作區RI-docs/Swiss-Re-Facility-CGL-2026-10-29/。
+
+
+### 2026-10-29：更新 Great American Facility PD 專屬規則指南
+- 依正式執行中後端、現行 Accounting 及 Great American Facility／Clause 主檔，整理最新 PD 專屬規則 Word；沿用 Swiss PD 指南格式，更新原 Great American 指南入口，舊問卷隨備份保留。
+- 列示僅限 Property／QS 及 XOL、12項現行固定條款、Cedant固定90天及75天提醒、GA曆年季末＋80天提醒／＋90天到期、分期及批單歸季、台灣Announce日期、跨年閏年、原期限與不自動延期，以及兩端退款期限差異。排除全險種共用的理賠、收付登錄、自動銷帳、權限、金額、匯率及提醒信規則。
+- 僅更新指南檔、下載登錄與既有指南驗證；不修改業務邏輯、前端、主檔或其他指南，無migration。三頁Word排版、日期案例、隔離及正式下載權限與SHA-256驗證通過；發布前後核對資料及設定指紋。
+- 證據：工作區 RI-docs/Great-American-Facility-PD-2026-10-29/。
+
+
+### 2026-10-29：新增QBE Facility PD專屬規則指南
+- 依執行中297份Python、Accounting及QBE／Clause主檔整理三頁Word，參照Swiss Re Facility PD指南格式，新增System Guides的qbe-pd入口，顯示檔名QBE Facility - PD 專屬規則.docx。
+- 僅整理Property適用範圍、12項現行固定條款、8月起承保年度季度、正保費與退保費季度末加80天提醒／90天到期、批單台灣Announce跨季、保險公司端與QBE日期區分及QBE畫面資訊；不重列全險種共用的建帳、收付、銷帳、理賠與權限規則。
+- 本次只新增文件及指南登錄，不修改業務邏輯。56項記憶體日期與規則驗算、三頁離線排版、16項隔離及正式下載權限與SHA-256核對通過。其他指南／模板、前端、主檔與業務資料保留，Audit及寄信開關維持原狀，無migration。
+- 證據：工作區RI-docs/QBE-Facility-PD-2026-10-29/。
+
+
+### 2026-10-29：更新Allianz Facility PD專屬規則指南
+- 依正式執行中程式、Accounting與Allianz Facility主檔整理2026-10-29版Word；參考Swiss Re Facility PD指南的原生Word版型，System Guides原allianz-questionnaire入口改為Allianz Facility - PD專屬規則，舊問卷備份保留。
+- 三頁列出Property選用限制、19項固定條款（使用最新MDM Title原文）、再保人月底＋80提醒／＋90到期、保險公司固定90天的起算差異、原單／續保／各期／加退費歸月、四個日期例子、無手動延期與Accounting日期資訊。未重列全險種共用的建帳、收付、銷帳、權限及理賠流程。
+- 僅發布Word、下載登錄與指南顯示名稱／日期；不改會計邏輯、MDM、Case、實際收付款或原有指南權限。原生XML、逐頁預覽、合成日期驗算、隔離與正式指南下載／權限及SHA-256通過；其他指南、模板、前端、業務資料及Audit／寄信開關保持原狀，無migration。
+- 證據：工作區RI-docs/Allianz-Facility-PD-2026-10-29/。
+
+### 2026-10-29：批單的 Debit Note（加費）與 Credit Note（退費）
+- 先前「批單 Debit Note 內容與版面待後續討論」（10-15、10-20 兩處）今日由業主定案：
+  - 金額：寫這張批單 Cedant 那邊的 Premium、Ceding Commission、Tax 與 Net（和 Accounting Leg 1 同一套計算）。
+  - 加費（100% Premium > 0）出 **Debit Note**；退費（< 0）出 **Credit Note**；保費 0 不出。
+  - 付款日：沿用原單的 Cedant Collection Days，從**批單生效日**起算。Debit Note 照原本寫法再提前 15 天（「至少到期前 15 天收到款項」）；Credit Note 直接寫生效日 + 天數（我方付款日）。分期批單仍用各期的 Payment Base Date。
+  - 版面：沿用原本 Debit Note 版面；標題只寫 DEBIT NOTE／CREDIT NOTE（業主 10-29 改：標題下不寫 Endorsement No.），DETAILS 寫「Additional Premium – Endorsement No. N」／「Return Premium – Endorsement No. N」。
+  - 頁尾（公司資訊與頁碼）用 8 pt，只限批單 Debit／Credit Note；Cover Note、原單 Debit Note、Endorsement 維持 10 pt。
+  - Credit Note 採業主上傳的 Credit Note Template (NTD) 文字：寄給 Cedant、「Less CEDING COMMISSION」、「NET AMOUNT DUE TO YOU」、「We shall arrange the payment of premium on the following date(s):」；不列銀行帳戶；金額一律顯示正數；台幣不寫「Payment will be made in United States Dollar…」那句。
+  - Credit Note 先只開放 TWD；其他幣別擋下並說明，待業主提供範本。Debit Note 維持 USD／TWD。
+- 只在批單 Announce（或 Confirmed）後出現；草稿不顯示。只提供下載（與 Endorsement Word 相同），不自動存入 Case Documents。
+- 伺服器端同步檢查（document-generation-log 新增 kind = credit）：未 Announce、方向不符、保費 0、Credit Note 非 TWD、缺批單生效日或 Cedant Collection Days 都回 409；其餘沿用 Debit Note 原有資料檢查。原單的 Debit Note 不變。
+- 測試：backend/qa/suites/endorsement_notes.py；Word 內容檢查 frontend/scripts/check_endorsement_notes.cjs。
+
+
+### 2026-10-29：更新 Syndicate 609 AUW Facility PD 專屬規則指南
+- 依正式執行中程式、Accounting 與 AUW Facility／Clause 主檔，參照 Swiss Re Facility PD 原生 Word 格式，更新既有 auw-accounting 指南；顯示檔名 Syndicate 609 AUW Facility - PD 專屬規則.docx，舊版備份保留。
+- 四頁僅整理 Property 選用、12項目前固定條款、Howden 綁定、Deductions 可改的10%預設、Tax 0%、原單／續保手填 Ref.、批單 Announce 自動 E 編號，以及月底＋110提醒／＋120到期、跨月批單／退費、閏年與台灣日期例子；省略全險種共用的建帳、收付、銷帳、權限、理賠及一般文件規則。
+- 僅發布 Word、下載登錄及指南顯示名稱／日期，不修改業務邏輯、主檔、案件、帳款或原有權限。原生XML與Swiss版型比對、逐頁排版、合成例子驗算、隔離及正式下載／權限／SHA-256驗證通過；保留其他指南、模板、前端、業務資料及Audit／寄信設定，無migration。
+- 證據：工作區 RI-docs/AUW-Facility-PD-2026-10-29/。
+
+
+### 2026-10-29：Case 時間連動與表單 Review 內上傳／Announce（本次候選）
+
+- 所有險種及 QS／XOL／Treaty 的使用者手動修改 Effective Date 時間（00:00／12:00）時，同步帶入 Expiration Date 時間。Expiration 仍可另行選擇；讀取、載入或繼承舊案不強制同步，不批次改寫舊期間。批單仍須選 Period 並解鎖才能修改期間。
+- 表單最下方 Review & confirm 通過既有業務必填後，先保存目前 Draft 並取得伺服器的案件／版本；Review 視窗可直接上傳與選取 Offer Slip（批單顯示 Endorsement）、各再保人 Signed Slip 或 Confirmation E-mail，不需回 Overview。
+- Review 內沿用既有 documents.read／documents.write／cases.announce 權限、檔案上傳 API、檔案驗證與每家再保人的證明涵蓋規則。證明未齊、正在上傳或未勾選確認時不能 Announce；上傳／修改選取後須重新確認。仍須由業務另按 Announce，不因開啟 Review 或上傳而自動公告。
+- Announce 沿用現行伺服器 API 與 rowVersion、documentIds、明確確認、Reference／建帳／Production／提醒及完全零保費批單 Confirmed 規則；成功後重新讀取完整案件。版本衝突會清除確認；選擇重新載入時回到最新表單，須重新 Review 與確認，不以舊摘要搭配新版本公告。Announced／Confirmed 案件的原更正與儲存流程不變。
+- Placing Slip 維持 Draft 詢價用途；不要求 Offer Slip／Signed Slip／Confirmation E-mail。原有 Cover Note／Debit／Credit／正式 Endorsement 的公告及編號條件維持。此處並未提前開放正式文件。
+- 無 schema migration；不變更財務計算、條款、保費、Facility、指南、Audit 暫停或寄信設定。測試期間的 AUW 指南發布已納入最新基底；本次僅修改 Case 前端及本規則紀錄。
+
+
+### 2026-10-29T14:59:54+08:00：Case 時間連動與 Review 內上傳正式部署
+
+本 session 已要求的跨險種時間連動與 Review 證明上傳／直接 Announce 已發布。使用已驗證的相同前端 image；正式後端保留包含最新 AUW 指南的版本，不重建、不變更 schema。81 組隔離回歸、58 項瀏覽器主流程、最新後端、手機版與版本衝突檢查、3017 組金額、20 組密碼及24項批單 Word 檢查通過。Placing Slip 無附件可生成，正式文件公告／編號門檻不變。備份：`/opt/ri-system/backups/case_review_time_20261029_145939`。入口重新開放前，正式業務資料、文件與設定指紋一致；僅排除登入時間與 Session 活動。
+
+### 2026-10-29：全系統檢查與修正（Case Viewer／Insured Master、Basis of Valuation 紅框、格式錯誤請求）
+- 檢查範圍：82 組伺服器測試與 13 階段畫面測試（皆以線上版本）、前後端每家再保人算法隨機比對 13,000 件（含分期）、正式系統唯讀巡檢（6 種角色 × 全部讀取頁面，交易內撤銷、不印資料）、約 14 萬次異常輸入與越權探測（無權限漏洞）。
+- 業主決定：**Case Viewer 不能看 Insured Master**（選單不顯示、直接開網址會被導回、API `GET /api/insured-masters` 改為需要 cases.read.all，Case Viewer 回 403；案件總覽仍顯示被保險人名稱但不是連結）。原本 Case Viewer 讀清單時伺服器出錯（500）。
+- Property QS 的 Basis of Valuation（10-28 Placing Slip 規則起必填）漏填時，欄位比照其他必填欄位顯示紅框，Review & confirm 會捲到該欄位。
+- `PUT /api/cases` 沒有 case 物件（或不是物件）時一律回 400 validation_failed「case must be an object.」；原本批單會出錯 500。
+- 業主決定維持現狀：能編輯案件的人（業務、主管、管理員）都可以改被保險人主檔的中文名稱或合併，與「業務可看全部案件」一致。
+- 測試：backend/qa/suites/review_fixes_1029.py；qa/ui/ui_test.py 階段 A（紅框）、C（Case Viewer 選單與直接開網址）。
