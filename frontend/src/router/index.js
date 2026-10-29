@@ -7,6 +7,7 @@ import Login from '../views/Login.vue'
 import ForgotPassword from '../views/ForgotPassword.vue'
 import ResetPassword from '../views/ResetPassword.vue'
 import CaseWorkspace from '../views/CaseWorkspace.vue'
+import InsuredMaster from '../views/InsuredMaster.vue'
 import RecycleBin from '../views/RecycleBin.vue'
 import FxRates from '../views/FxRates.vue'
 import MasterData from '../views/MasterData.vue'
@@ -24,6 +25,7 @@ import SystemReference from '../views/SystemReference.vue'
 export const allNavigation = [
   { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: NAV_ICONS.dashboard, permission: 'dashboard.read' },
   { id: 'cases', path: '/cases', label: 'Account List', icon: NAV_ICONS.cases, anyPermission: ['cases.read.all', 'cases.read.own'] },
+  { id: 'insured', path: '/insured', label: 'Insured Master', icon: NAV_ICONS.mdm, anyPermission: ['cases.read.all'] },   // 2026-10-29：Case Viewer 不顯示
   { id: 'mdm', path: '/mdm', label: 'Reinsurance MDM', icon: NAV_ICONS.mdm, permission: 'mdm.read' },
   { id: 'personnel', path: '/personnel', label: 'Personnel & Accounts', icon: NAV_ICONS.personnel, anyPermission: ['personnel.read', 'personnel.read.team'] },
   { id: 'production', path: '/production', label: 'Production Report', icon: NAV_ICONS.production, permission: 'production.read' },
@@ -37,6 +39,7 @@ export const allNavigation = [
 export const headers = {
   'system-reference': { kicker: 'Reference', title: 'System Reference Data', subtitle: 'Document templates and system guides' },
   dashboard: { kicker: 'Operations', title: 'Dashboard', subtitle: 'Production & Records Overview' },
+  insured: { kicker: 'Insured', title: 'Insured Master', subtitle: 'Chinese names, former names and linked policies' },
   cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All outward cases' },
   recycle: { kicker: 'Placement governance', title: 'Draft Recycle Bin', subtitle: 'Five-year restore window · permanent deletion prohibited' },
   mdm: { kicker: 'Master data', title: 'Reinsurance MDM', subtitle: 'Versioned master records, fixed clauses and lifecycle controls' },
@@ -53,7 +56,7 @@ export function navAllowed(item) {
   return item.permission ? can(item.permission) : (item.anyPermission || []).some(can)
 }
 
-const component = { 'system-reference': SystemReference, cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
+const component = { 'system-reference': SystemReference, cases: CaseWorkspace, insured: InsuredMaster, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
   // 忘記密碼（VM 專有；寄信啟用後登入頁才有入口）

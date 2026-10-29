@@ -15,6 +15,7 @@ class MasterRecord(models.Model):
         ("class", "Class"),
         ("foreign_broker", "Foreign RI Broker"),
         ("clause", "Clause"),
+        ("insured", "Original Insured"),
     ]
 
     entity_type = models.CharField(max_length=40, choices=ENTITY_TYPE_CHOICES)
