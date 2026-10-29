@@ -16,12 +16,15 @@ def is_standard_cgl(payload):
         return False
     if str(payload.get('reinsuranceStructure') or '').strip().upper() not in ('', 'QS', 'XOL', 'FACULTATIVE'):
         return False
+    from .swiss_cgl import target as swiss_cgl
+    if swiss_cgl(payload):
+        return True
     for row in payload.get('reinsurers') or []:
         if not isinstance(row, dict):
             continue
         name = str(row.get('name') or '').strip()
         broker = str(row.get('foreignBroker') or '').strip()
-        if re.search(r'\(Facility\)\s*$', name, re.I) or 'swiss re asia' in name.casefold() or 'pws' in broker.casefold():
+        if re.search(r'\(Facility\)\s*$', name, re.I) or 'swiss re asia' in name.casefold() or ('pws' in broker.casefold() and str(payload.get('reinsuranceStructure') or '').upper() not in ('QS', 'FACULTATIVE')):
             return False
     return True
 
@@ -56,7 +59,7 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
             errors.append(f'Estimated Turnover {index + 1} Currency must use an available option.')
         turnover.append({'region': text(row.get('region'), 240), 'currency': currency,
                          'amount': number(row.get('amount'), f'Estimated Turnover {index + 1} Amount', errors, min=0)})
-    return {
+    result = {
         'policyForm': form,
         'retroactiveDate': (date_value(raw.get('retroactiveDate'), 'Retroactive Date', errors) or '') if claims else '',
         'extendedReportingApplies': erp,
@@ -69,6 +72,13 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
         'insuredWebsite': text(raw.get('insuredWebsite'), 1000),
         'specialAgreementApplies': special,
     }
+
+    from .placing_rules import cgl, normalize_extra
+    if cgl(payload):
+        temp = {**payload, 'cglInformation': result}
+        normalize_extra(payload, temp)
+        result = temp['cglInformation']
+    return result
 
 
 def information_issues(payload):

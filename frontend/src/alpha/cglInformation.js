@@ -1,3 +1,6 @@
+import { newCgl, businessText, placingExtraIssues } from './placingRules'
+import { swissCglScope } from './swissCgl'
+
 export const CGL_POLICY_FORMS = ['Occurrence Form', 'Claims-Made Form']
 export const CGL_TERRITORIES = ['Worldwide including USA/Canada', 'Worldwide excluding USA/Canada', 'USA/Canada Only', 'Other']
 export const CGL_CURRENCIES = ['TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR']
@@ -8,11 +11,12 @@ export function emptyCglInformation() {
     insuredWebsite: '', specialAgreementApplies: '' }
 }
 export function isStandardCgl(payload) {
+  if (swissCglScope(payload)) return true
   return String(payload?.classOfBusiness || '').trim().toLowerCase() === 'commercial general liability'
     && ['', 'QS', 'XOL', 'FACULTATIVE'].includes(String(payload?.reinsuranceStructure || '').trim().toUpperCase())
     && !(payload?.reinsurers || []).some(row => /\(Facility\)\s*$/i.test(String(row?.name || '').trim())
       || String(row?.name || '').toLowerCase().includes('swiss re asia')
-      || String(row?.foreignBroker || '').toLowerCase().includes('pws'))
+      || (String(row?.foreignBroker || '').toLowerCase().includes('pws') && !['QS', 'FACULTATIVE'].includes(String(payload?.reinsuranceStructure || '').trim().toUpperCase())))
 }
 export function cglInformationIssues(payload) {
   if (!isStandardCgl(payload)) return []
@@ -42,7 +46,7 @@ export function cglInformationIssues(payload) {
   })
   if (!APPLICABILITY.includes(info.specialAgreementApplies)) add('specialAgreementApplies', 'Special Agreement applicability')
   else if (info.specialAgreementApplies === 'applicable' && !filled(payload.specialAgreement)) issues.push({ field: 'specialAgreement', label: 'Special Agreement' })
-  return issues
+  return issues.filter(i => !(newCgl(payload) && i.field === 'cglInformation.insuredBusiness')).concat(newCgl(payload) ? placingExtraIssues(payload).filter(i => i.field.startsWith('cglInformation.')) : [])
 }
 
 export function cglInformationRows(payload) {
@@ -53,8 +57,8 @@ export function cglInformationRows(payload) {
     rows.push({ label: 'Extended Reporting Period', value: info.extendedReportingApplies === 'applicable' ? info.extendedReportingPeriod || '—' : info.extendedReportingApplies === 'notApplicable' ? 'Not applicable' : '—' })
   }
   rows.push({ label: 'Territorial / Jurisdiction Limits', value: info.territorialLimits === 'Other' ? info.territorialOther || '—' : info.territorialLimits || '—' },
-    { label: 'Insured’s Business', value: info.insuredBusiness || '—' }, { label: 'Insured’s Products', value: info.insuredProducts || '—' },
-    { label: 'Estimated Turnover', value: (info.estimatedTurnover || []).map(row => `${row.region || '—'} · ${row.currency || '—'} ${row.amount == null ? '—' : Number(row.amount).toLocaleString('en-US', { maximumFractionDigits: 20 })}`).join('\n') || '—' },
+    { label: 'Insured’s Business', value: (newCgl(payload) ? businessText(info) : info.insuredBusiness) || '—' }, { label: 'Insured’s Products', value: info.insuredProducts || '—' },
+    { label: 'Estimated Turnover', value: (info.estimatedTurnover || []).map(row => `${(newCgl(payload) && row.region === 'Other' ? row.regionOther : row.region) || '—'} · ${row.currency || '—'} ${row.amount == null ? '—' : Number(row.amount).toLocaleString('en-US', { maximumFractionDigits: 20 })}`).join('\n') || '—' },
     { label: 'Insured’s Website', value: info.insuredWebsite || '—' })
   return rows
 }

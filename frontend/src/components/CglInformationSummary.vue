@@ -9,7 +9,7 @@ defineProps({ payload: { type: Object, required: true } })
     <h3>Loss Record</h3>
     <dl><dt>Advised by broker on</dt><dd>{{ payload.lossAdvisedDate || '—' }}</dd><dt>Past Year(s)</dt><dd>{{ payload.lossRecordYears ?? '—' }}</dd></dl>
     <p v-if="!payload.lossRecord?.length">Clean — No losses recorded.</p>
-    <dl v-for="(row, index) in payload.lossRecord || []" :key="index"><dt>Date of Loss</dt><dd>{{ row.date || '—' }}</dd><dt>Cause</dt><dd>{{ row.cause || '—' }}</dd><dt>Loss Paid</dt><dd>{{ payload.currency }} {{ formatAmount(row.lossPaid) }}</dd></dl>
+    <dl v-for="(row, index) in payload.lossRecord || []" :key="index"><dt>Date of Loss</dt><dd>{{ row.date || '—' }}</dd><dt>Cause</dt><dd>{{ row.cause || '—' }}</dd><dt>Loss Amount</dt><dd>{{ payload.currency }} {{ formatAmount(row.lossPaid) }}</dd></dl>
     <p v-if="payload.lossRecordText" class="notes">{{ payload.lossRecordText }}</p>
     <h3>Special Agreement</h3>
     <p class="notes">{{ payload.cglInformation?.specialAgreementApplies === 'applicable' ? payload.specialAgreement || '—' : payload.cglInformation?.specialAgreementApplies === 'notApplicable' ? 'Not applicable' : '—' }}</p>
