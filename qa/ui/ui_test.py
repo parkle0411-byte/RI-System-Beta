@@ -244,7 +244,6 @@ def phase_a(page):
     terms = section(page, "Terms & Conditions")
     fill(terms, page, "Limit of Liability", "1000000")
     fill(terms, page, "Deductibles", "10% of loss")
-    pick(terms, page, "Basis of Valuation", "Replacement Value")   # 2026-10-28 Placing Slip 規則：Property QS 必填
     fill(terms, page, "Original Conditions", "As original")
     occ = info(page, "occupation")
     fill(occ, page, "Occupation", "Office")
@@ -270,6 +269,13 @@ def phase_a(page):
     check("fixed clause of the selected reinsurer is added (LMA5390, Fixed)", "LMA5390" in conditions and "Fixed" in conditions and "LMA3333" in conditions, conditions[:300])
     snap(page, "form-filled")
 
+    # 2026-10-28 Placing Slip 規則：Property QS 的 Basis of Valuation 必填；2026-10-29 起漏填時欄位要變紅框
+    page.locator(".form-actions button", has_text="Review & confirm").click()
+    check("Review blocked: one required field missing", message(page, "Please complete 1 required field before Review & confirm."))
+    basis = item(terms, page, "Basis of Valuation")
+    check("the missing Basis of Valuation is outlined in red", "is-required-error" in (basis.get_attribute("class") or ""), basis.get_attribute("class"))
+    pick(terms, page, "Basis of Valuation", "Replacement Value")
+    check("after choosing it the red outline is gone", "is-required-error" not in (basis.get_attribute("class") or ""))
     page.locator(".form-actions button", has_text="Review & confirm").click()
     try:
         page.locator(".review-dialog .review-heading", has_text="Review case details").wait_for()
@@ -522,7 +528,10 @@ def phase_b(page):
 def phase_c(page):
     login(page, "ui.viewer")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("Case Viewer sees only Dashboard, Account List and Insured Master (2026-10-24)", labels == ["Dashboard", "Account List", "Insured Master"], labels)
+    check("Case Viewer sees only Dashboard and Account List (no Insured Master, owner 2026-10-29)", labels == ["Dashboard", "Account List"], labels)
+    page.goto(f"{BASE}/insured")
+    page.wait_for_timeout(1200)
+    check("Case Viewer cannot open the Insured Master page directly", "/insured" not in page.url and page.get_by_text("Chinese names, former names and linked policies").count() == 0, page.url)
     nav(page, "Account List")
     check("Case Viewer sees no other people's cases and no + New case", page.locator(".case-table .el-table__row").count() == 0
           and page.get_by_role("button", name="+ New case").count() == 0)
