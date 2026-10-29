@@ -53,7 +53,7 @@ docker exec ri-ut-backend python manage.py shell -c "
 from audit.models import AuditLog
 q = AuditLog.objects.filter(action='generate_document')
 got = sorted((a.metadata['kind'], a.metadata['format']) for a in q)
-want = sorted([('cover','docx'),('debit','docx'),('endorsement','docx')])
+want = sorted([('cover','docx'),('debit','docx')])   # 2026-10-28：Draft 批單的 Endorsement Word 要 Announce 後才能下載
 print('PASS audit: one generate_document event per download' if got == want else f'FAIL audit events {got}')" > "$UT_SECRETS/audit.txt" 2>&1
 grep -E 'PASS|FAIL' "$UT_SECRETS/audit.txt"; grep -q '^PASS' "$UT_SECRETS/audit.txt" || STATUS=1
 esac

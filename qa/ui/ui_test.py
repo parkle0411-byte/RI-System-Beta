@@ -148,8 +148,8 @@ def phase_a(page):
     page.locator(".rdash").wait_for()
     check("admin lands on the first navigation entry (Dashboard)", page.url.endswith("/dashboard") and page.get_by_text("Total Bound YTD").is_visible(), page.url)
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("sidebar shows the full navigation for an admin", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
-    for label, marker in [("Account List", "All cases"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
+    check("sidebar shows the full navigation for an admin (Insured Master added 2026-10-24)", labels == ["Dashboard", "Account List", "Insured Master", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
+    for label, marker in [("Account List", "All cases"), ("Insured Master", "Chinese names, former names and linked policies"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
                           ("Production Report", "Versioned monthly close"), ("Accounting", "SoA / Transactions (")]:
         nav(page, label)
@@ -159,7 +159,7 @@ def phase_a(page):
     # ---------------- 業務人員：新增草稿 ----------------
     login(page, "ui.sales")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("sales sees Dashboard, Account List, MDM, Production, Accounting (read-only, 2026-09-27), FX", labels == ["Dashboard", "Account List", "Reinsurance MDM", "Production Report", "Accounting", "FX Rates"], labels)
+    check("sales sees Dashboard, Account List, MDM, Production, Accounting (read-only, 2026-09-27), FX", labels == ["Dashboard", "Account List", "Insured Master", "Reinsurance MDM", "Production Report", "Accounting", "FX Rates"], labels)
     nav(page, "Account List")
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
@@ -190,8 +190,14 @@ def phase_a(page):
     loss = info(page, "loss")
     date(loss, page, "Loss record advised by broker on", "2026-02-01")
     fill(loss, page, "Past Year(s)", "5")
-    page.locator(".form-actions button", has_text="Save draft").click()
-    check("incomplete Draft can be saved", message(page, "Draft saved"))
+    page.keyboard.press("Tab")
+    # 2026-10-23 草稿自動儲存：人工填寫後離開欄位就自動存檔，按鈕從 Save draft 變成 Save changes
+    page.get_by_text("Draft saved automatically").first.wait_for(timeout=10000)
+    check("incomplete Draft is saved automatically after leaving a field (2026-10-23)", True)
+    check("after the automatic save the buttons read Save changes (no Save draft)",
+          page.locator(".page-header button", has_text="Save changes").is_visible() and page.locator(".form-actions button", has_text="Save changes").is_visible()
+          and page.locator(".page-header button", has_text="Save draft").count() == 0, page.locator(".page-header button").all_inner_texts())
+    page.locator(".page-header button", has_text="Cancel").click()
     page.locator(".case-table").wait_for()
     check("the new Draft is listed", page.locator(".insured-preview-link", has_text="UI Test Insured Ltd").count() == 1)
     snap(page, "list-after-draft")
@@ -213,6 +219,7 @@ def phase_a(page):
     pick(risk, page, "New / Renew", "New")
     item(risk, page, "Type").locator("input, textarea").first.fill("Fire")
     pick(risk, page, "Reinsured", "UI Cedant Insurance")
+    fill(risk, page, "Original Insured (CN)", "測試被保險人有限公司")   # 2026-10-23 起 Review／Announce 必填
     date(risk, page, "Effective Date", "2026-03-01")
     date(risk, page, "Expiration Date", "2027-03-01")
     risk.locator(".situation-row input").nth(0).fill("1 Test Road")
@@ -227,19 +234,22 @@ def phase_a(page):
     fill(cards.nth(0), page, "Order Hereon (%)", "60")
     pick(cards.nth(1), page, "Reinsurer", "UI Re Beta (Facility)")
     fill(cards.nth(1), page, "Order Hereon (%)", "40")
-    # 2026-10-16 92 項會計規則：每家普通再保人的付款天數要各自填寫，沒有預設繼承
-    check("each reinsurer row has its own empty Payment Terms (Days)",
-          all(item(cards.nth(i), page, "Payment Terms (Days)").locator("input").first.input_value() == "" for i in (0, 1)))
+    # 2026-10-16 92 項會計規則：每家普通再保人的付款天數要各自填寫，沒有繼承；2026-10-23 起新增的再保人預設 90、可修改
+    check("each new reinsurer row has its own Payment Terms (Days), defaulting to 90 (2026-10-23)",
+          all(item(cards.nth(i), page, "Payment Terms (Days)").locator("input").first.input_value() == "90" for i in (0, 1)),
+          [item(cards.nth(i), page, "Payment Terms (Days)").locator("input").first.input_value() for i in (0, 1)])
     fill(cards.nth(0), page, "Payment Terms (Days)", "45")
     fill(cards.nth(1), page, "Payment Terms (Days)", "60")
 
     terms = section(page, "Terms & Conditions")
     fill(terms, page, "Limit of Liability", "1000000")
     fill(terms, page, "Deductibles", "10% of loss")
+    pick(terms, page, "Basis of Valuation", "Replacement Value")   # 2026-10-28 Placing Slip 規則：Property QS 必填
     fill(terms, page, "Original Conditions", "As original")
     occ = info(page, "occupation")
     fill(occ, page, "Occupation", "Office")
-    fill(occ, page, "Construction", "Concrete")
+    # 2026-10-28 Property Construction 改為複選固定類別（A2／A1／B／C／D Class）
+    pick(occ, page, "Construction", "A1 Class")
     sums = info(page, "sumInsured")
     sums.locator(".sum-row input").nth(0).fill("Building")
     sums.locator(".sum-row input").nth(1).fill("1000000")
@@ -261,7 +271,12 @@ def phase_a(page):
     snap(page, "form-filled")
 
     page.locator(".form-actions button", has_text="Review & confirm").click()
-    page.locator(".review-dialog .review-heading", has_text="Review case details").wait_for()
+    try:
+        page.locator(".review-dialog .review-heading", has_text="Review case details").wait_for()
+    except Exception:
+        missing = [x.locator(".el-form-item__label").first.inner_text() for x in page.locator(".is-required-error").all() if x.locator(".el-form-item__label").count()]
+        check("Review & confirm: no required field missing", False, (page.locator(".el-message").all_inner_texts()[:2], missing))
+        raise
     check("Review & confirm opens the read-only review", page.locator(".review-dialog").filter(has_text="Total order: 100%").count() >= 1)
     snap(page, "review-dialog")
     page.locator(".review-dialog .el-dialog__footer button", has_text="Save changes").click()
@@ -269,8 +284,9 @@ def phase_a(page):
     page.locator(".case-detail-tabs").wait_for()
     page.wait_for_timeout(500)
     overview = page.locator(".overview-grid").inner_text()
-    check("overview: version 2 and computed amounts (unified ledger rounding: brokerage 406.00)",
-          "version 2" in overview and "406.00" in overview and "1,000.00" in overview, overview[:400])
+    # 2026-10-23 起草稿自動儲存，每次存檔版本都會增加，所以只確認有版本號
+    check("overview: saved version shown and computed amounts (unified ledger rounding: brokerage 406.00)",
+          re.search(r"version \d+", overview) is not None and "406.00" in overview and "1,000.00" in overview, overview[:400])
     check("overview: Avg. Rate", "0.100000%" in overview)
     snap(page, "overview")
 
@@ -413,8 +429,11 @@ def phase_b(page):
     loss = info(page, "loss")   # 存檔就需要 Loss Record 的 advised date 與 Past year(s)（Property 的 Information 卡片內）
     date(loss, page, "Loss record advised by broker on", "2026-02-01")
     fill(loss, page, "Past Year(s)", "5")
-    page.locator(".form-actions button", has_text="Save draft").click()
-    check("recycle test draft saved", message(page, "Draft saved"))
+    page.keyboard.press("Tab")
+    page.get_by_text("Draft saved automatically").first.wait_for(timeout=10000)   # 2026-10-23 草稿自動儲存
+    check("recycle test draft saved automatically", True)
+    page.locator(".page-header button", has_text="Cancel").click()
+    page.locator(".case-table").wait_for()
     page.locator(".insured-preview-link", has_text="UI Recycle Me").click()
     page.locator(".case-preview-dialog").wait_for()
     page.get_by_role("button", name="Recycle Draft").click()
@@ -503,7 +522,7 @@ def phase_b(page):
 def phase_c(page):
     login(page, "ui.viewer")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("Case Viewer sees only Dashboard and Account List", labels == ["Dashboard", "Account List"], labels)
+    check("Case Viewer sees only Dashboard, Account List and Insured Master (2026-10-24)", labels == ["Dashboard", "Account List", "Insured Master"], labels)
     nav(page, "Account List")
     check("Case Viewer sees no other people's cases and no + New case", page.locator(".case-table .el-table__row").count() == 0
           and page.get_by_role("button", name="+ New case").count() == 0)
@@ -548,7 +567,7 @@ def phase_d(page):
     login(page, "ui.finance")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
     check("Finance Staff sees Dashboard, Account List, Production Report, Accounting, FX Rates (Account List read-only since 2026-10-07)",
-          labels == ["Dashboard", "Account List", "Production Report", "Accounting", "FX Rates"], labels)
+          labels == ["Dashboard", "Account List", "Insured Master", "Production Report", "Accounting", "FX Rates"], labels)
     nav(page, "Dashboard")
     page.locator(".rdash").wait_for()
     page.wait_for_timeout(1000)
@@ -945,7 +964,7 @@ def phase_h(page):
         d = info.value
         path = f"out/{d.suggested_filename}"
         d.save_as(path)
-        ok = message(page, expect_message)
+        ok = message(page, expect_message) if expect_message else True
         return d.suggested_filename, open(path, "rb").read(), ok
 
     def docx_text(data):
@@ -953,13 +972,19 @@ def phase_h(page):
             xml = z.read("word/document.xml").decode("utf-8")
         return re.sub(r"<[^>]+>", "", xml)
 
-    name, data, ok = download("Cover Note", "Download Word (.docx)", "Cover Note DOCX saved.")
+    # 2026-10-27 一般 Property QS：Word 先存進 Case Documents 才下載；檔名 類型_Ref_Original Insured_台灣生成日期
+    stamp = r"_UI Test Insured Ltd_\d{4}-\d{2}-\d{2}\.docx"
+    # Placing Slip 規則（2026-10-28）下的 Cover Note 不另跳成功訊息，改看 Generated documents 清單
+    name, data, ok = download("Cover Note", "Download Word (.docx)", None)
     text = docx_text(data)
-    check("Cover Note Word: file name, success message", name == "CoverNote_TWPAR2603001.docx" and ok, name)
+    check("Cover Note Word: file name, saved to Case Documents (2026-10-27)", re.fullmatch("CoverNote_TWPAR2603001" + stamp, name) is not None and ok, name)
     check("Cover Note Word: contains the TW Reference and the insured", "TWPAR2603001" in text and "UI Test Insured Ltd" in text, text[:300])
-    name, data, ok = download("Debit Note", "Download Word (.docx)", "Debit Note DOCX saved.")
+    name, data, ok = download("Debit Note", "Download Word (.docx)", "Debit Note Word saved to Case Documents and downloaded.")
     text = docx_text(data)
-    check("Debit Note Word: file name and TW Reference", name == "DebitNote_TWPAR2603001.docx" and "TWPAR2603001" in text and ok, name)
+    check("Debit Note Word: file name, TW Reference, saved to Case Documents", re.fullmatch("DebitNote_TWPAR2603001" + stamp, name) is not None and "TWPAR2603001" in text and ok, name)
+    page.wait_for_timeout(800)
+    generated = page.locator(".documents-grid").inner_text()
+    check("both Word files are listed in Case Documents", "CoverNote_TWPAR2603001" in generated and "DebitNote_TWPAR2603001" in generated, generated[:300])
     check("PDF download buttons retired", cards.get_by_role("button", name="Download PDF").count() == 0)
     snap(page, "documents-generated")
 
@@ -979,10 +1004,12 @@ def phase_h(page):
         page.locator(".case-detail-tabs .el-tabs__item", has_text="Documentation").click()
         page.wait_for_timeout(800)
         cards = page.locator(".generated-document-card")
-        check("endorsement: only the Endorsement card (Word only)", cards.count() == 1 and "Endorsement" in cards.first.inner_text()
-              and cards.first.get_by_role("button").count() == 1)
-        name, data, ok = download("Endorsement", "Download Word (.docx)", "Endorsement DOCX saved.")
-        check("Endorsement Word: file name and valid document", name.startswith("Endorsement_") and name.endswith(".docx") and "ENDORSEMENT" in docx_text(data) and ok, name)
+        # 2026-10-29：批單 Debit／Credit Note 只在 Announce 之後出現，Draft 只有 Endorsement 卡片
+        check("endorsement Draft: only the Endorsement card, no Debit/Credit Note yet", cards.count() == 1 and "Endorsement" in cards.first.inner_text()
+              and cards.first.get_by_role("button").count() == 1 and page.locator("[data-testid=endorsement-note-card]").count() == 0)
+        # 2026-10-28：正式 Endorsement Word 要成功 Announce 之後才能下載
+        cards.first.get_by_role("button", name="Download Word (.docx)").click()
+        check("endorsement Draft: Endorsement Word waits for Announce", message(page, "The formal Endorsement is available after successful Announce."))
     logout(page)
 
 
