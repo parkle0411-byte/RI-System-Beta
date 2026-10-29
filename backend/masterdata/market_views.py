@@ -29,16 +29,14 @@ class LloydsRatingsView(NoStoreMixin, APIView):
             return Response(dict(error="version_required", message="A valid rating profile version is required."), status=400)
         ratings = body.get("ratings")
         if not isinstance(ratings, list) or not ratings:
-            return Response(dict(error="invalid_ratings", message="Enter at least one rating with an agency and a grade."), status=400)
+            return Response(dict(error="invalid_ratings", message="Enter at least one rating with an agency, a grade and an As-of date."), status=400)
         payload, err = validate_payload("reinsurer", {"ratings": ratings})
         if err:
             return Response(dict(error="invalid_ratings", message=err), status=400)
         ratings = payload["ratings"]
         for row in ratings:
             row["legalEntity"] = SOURCE_NAME
-            row["ratingType"] = row["ratingType"] or "Financial Strength"
-            # Manual edits do not imply a new official-source review.
-            row["checkedAt"] = ""
+            row["ratingType"] = "Financial Strength"
         actor = actor_from(request.ri_principal)
         with transaction.atomic():
             current = MarketRatingProfile.objects.select_for_update().filter(market_code="lloyds").first()

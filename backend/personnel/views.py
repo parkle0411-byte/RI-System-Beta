@@ -377,7 +377,7 @@ class PersonnelOptionsView(NoStoreMixin, APIView):
             "ok": True,
             "defaultOwnerId": default_owner.pk if default_owner else None,
             "personnel": [
-                {"id": p.pk, "name": p.name, "email": p.email or "", "isActive": True, "isSplitEligible": p.is_split_eligible}
+                {"id": p.pk, "name": p.name, "email": p.email or "", "isActive": True, "isSplitEligible": p.is_split_eligible, "department": p.department, "roleCode": p.role_code}
                 for p in rows
             ],
         })

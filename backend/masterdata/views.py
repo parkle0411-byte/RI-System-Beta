@@ -8,6 +8,7 @@ TODO: 尚未實作 ri_entity_snapshots / ri_audit_log 寫入，
 import json
 import math
 import re
+from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -39,6 +40,24 @@ _MISSING = object()
 
 def _reject_constant(name):
     raise ValueError(name)  # JSON.parse 不接受 NaN / Infinity
+
+
+RATING_AGENCIES = frozenset(("S&P Global", "A.M. Best", "Moody's", "Fitch"))
+
+
+def rating_date(value, label, required=False, allow_legacy=False):
+    text = clean_text(value, 80)
+    if allow_legacy:
+        return text, None
+    if not text:
+        return (None, f"{label} is required for every rating.") if required else ("", None)
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            raise ValueError()
+        date.fromisoformat(text)
+    except ValueError:
+        return None, f"{label} must be a valid date in YYYY-MM-DD format."
+    return text, None
 
 
 def validate_payload(entity_type, supplied, fallback=None, name=""):
@@ -87,6 +106,10 @@ def validate_payload(entity_type, supplied, fallback=None, name=""):
     if len(ratings_in) > 50:
         return None, "A reinsurer cannot contain more than 50 ratings."
 
+    # Unchanged legacy ratings may accompany a lifecycle/other-field update.
+    # Their unknown dates are never invented. Editing a rating requires dates.
+    inherited = is_lloyds_market(name)
+    unchanged = ratings_in == fallback.get("ratings")
     ratings = []
     for row in ratings_in:
         if not isinstance(row, dict):
@@ -95,15 +118,25 @@ def validate_payload(entity_type, supplied, fallback=None, name=""):
         grade = clean_text(row.get("grade"), 80)
         if not agency or not grade:
             return None, "Every rating requires both an agency and a grade."
+        # Preserve unchanged historical data and authoritative inherited ratings;
+        # every new or edited rating must use the requested agency enum.
+        if agency not in RATING_AGENCIES and not (inherited or unchanged):
+            return None, "Rating agency must be S&P Global, A.M. Best, Moody's or Fitch."
+        as_of_date, err = rating_date(row.get("asOfDate"), "As-of date", required=True, allow_legacy=inherited or unchanged)
+        if err:
+            return None, err
+        checked_at, err = rating_date(row.get("checkedAt"), "Checked at", allow_legacy=inherited or unchanged)
+        if err:
+            return None, err
         ratings.append({
             "agency": agency,
             "grade": grade,
             "outlook": clean_text(row.get("outlook"), 80),
-            "ratingType": clean_text(row.get("ratingType"), 120),
-            "asOfDate": clean_text(row.get("asOfDate"), 40),
+            "ratingType": "Financial Strength",
+            "asOfDate": as_of_date,
             "legalEntity": clean_text(row.get("legalEntity"), 240),
             "sourceUrl": clean_text(row.get("sourceUrl"), 1000),
-            "checkedAt": clean_text(row.get("checkedAt"), 80),
+            "checkedAt": checked_at,
             "status": clean_text(row.get("status"), 80),
         })
 
@@ -224,7 +257,7 @@ class MasterDataView(NoStoreMixin, APIView):
                 {"error": "invalid_entity_type", "message": "Unsupported master-data type."},
                 status=400,
             )
-        qs = MasterRecord.objects.all()
+        qs = MasterRecord.objects.filter(entity_type__in=ALLOWED_TYPES)
         if requested_type:
             qs = qs.filter(entity_type=requested_type)
         qs = qs.order_by("entity_type", "-is_active", "name", "id")

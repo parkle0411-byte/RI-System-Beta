@@ -7,7 +7,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiFetch } from '../api'
 import { can } from '../auth'
-import { UNIVERSAL_CLAUSES, compareClauses, normalizeClauseCode, normalizeClauseList, normalizeRatingList } from '../alpha/constants'
+import { RATING_AGENCIES, UNIVERSAL_CLAUSES, compareClauses, normalizeClauseCode, normalizeClauseList, normalizeRatingList } from '../alpha/constants'
 import { jsonOrThrow, reportWriteError } from '../alpha/format'
 import { shell } from '../alpha/shell'
 
@@ -68,9 +68,10 @@ function addLloydsRatingRow() {
   lloydsRatingRows.value.push({ agency: '', grade: '', outlook: '', ratingType: 'Financial Strength', asOfDate: '', status: '', legalEntity: "Lloyd's of London", sourceUrl: '', checkedAt: '' })
 }
 async function saveLloydsRatings() {
-  if (!lloydsRatingRows.value.length || lloydsRatingRows.value.some((row) => !row.agency.trim() || !row.grade.trim())) {
-    return ElMessage.error('Enter an agency and a grade for every rating.')
+  if (!lloydsRatingRows.value.length || lloydsRatingRows.value.some((row) => !RATING_AGENCIES.includes(row.agency) || !row.grade.trim() || !validRatingDate(row.asOfDate))) {
+    return ElMessage.error('Select an allowed Rating agency and enter a grade and a valid As-of date for every rating.')
   }
+  if (lloydsRatingRows.value.some((row) => row.checkedAt && !validRatingDate(row.checkedAt))) return ElMessage.error('Checked at must be a valid date.')
   lloydsRatingSaving.value = true
   try {
     const body = await jsonOrThrow(await apiFetch('/api/master-data/lloyds-ratings', {
@@ -196,9 +197,17 @@ function addMdmFixedClause() {
   Object.assign(mdmClauseDraft, { code: '', title: '' })
 }
 function removeMdmFixedClause(index) { mdmForm.fixedClauses.splice(index, 1) }
+function validRatingDate(value) {
+  const text = String(value || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || text.startsWith('0000-')) return false
+  const parsed = new Date(text + 'T00:00:00Z')
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text
+}
 function addMdmRating() {
   const rating = normalizeRatingList([mdmRatingDraft])[0]
-  if (!rating) return ElMessage.error('Enter both Rating agency and Grade')
+  if (rating && !RATING_AGENCIES.includes(rating.agency)) return ElMessage.error('Select S&P Global, A.M. Best, Moody\'s or Fitch for Rating agency.')
+  if (!rating || !validRatingDate(rating.asOfDate)) return ElMessage.error('Enter Rating agency, Grade and a valid As-of date')
+  if (rating.checkedAt && !validRatingDate(rating.checkedAt)) return ElMessage.error('Checked at must be a valid date.')
   mdmForm.ratings.push(rating)
   Object.assign(mdmRatingDraft, { agency: '', grade: '', outlook: '', ratingType: '', asOfDate: '', legalEntity: '', sourceUrl: '', checkedAt: '', status: '' })
 }
@@ -227,6 +236,11 @@ async function saveMasterRecord() {
   if (mdmForm.entityType === 'clause' && !String(mdmForm.code || '').trim()) {
     ElMessage.error('Clause code is required')
     return
+  }
+  if (mdmForm.entityType === 'reinsurer' && !isLloydsForm.value) {
+    if (mdmForm.ratings.some((row) => !RATING_AGENCIES.includes(row.agency) || !row.grade.trim() || !validRatingDate(row.asOfDate))) return ElMessage.error('Select an allowed Rating agency and enter a grade and a valid As-of date for every rating.')
+    if (mdmForm.ratings.some((row) => row.checkedAt && !validRatingDate(row.checkedAt))) return ElMessage.error('Checked at must be a valid date.')
+    if (mdmRatingDraft.agency.trim() || mdmRatingDraft.grade.trim() || mdmRatingDraft.asOfDate || mdmRatingDraft.checkedAt) return ElMessage.error('Select + Add rating to include the rating before saving.')
   }
   const unscoped = mdmForm.entityType === 'reinsurer' ? mdmForm.fixedClauses.find((row) => !row.appliesTo?.length) : null
   if (unscoped) {
@@ -321,12 +335,11 @@ onMounted(loadMasterData)
       <div v-for="(rating,index) in lloydsRatingRows" :key="index" class="lloyds-rating-editor-row">
         <div class="repeat-heading"><strong>Rating {{ index + 1 }}</strong><el-button text type="danger" :disabled="lloydsRatingSaving" @click="lloydsRatingRows.splice(index,1)">Remove</el-button></div>
         <div class="form-grid cols-3">
-          <el-form-item label="Rating agency" required><el-input v-model="rating.agency" maxlength="120" :disabled="lloydsRatingSaving"></el-input></el-form-item>
+          <el-form-item label="Rating agency" required><el-select v-model="rating.agency" placeholder="Select agency" :disabled="lloydsRatingSaving" style="width:100%"><el-option v-if="rating.agency && !RATING_AGENCIES.includes(rating.agency)" :value="rating.agency" :label="rating.agency + ' (historical — select an allowed agency)'" disabled></el-option><el-option v-for="agency in RATING_AGENCIES" :key="agency" :label="agency" :value="agency"></el-option></el-select></el-form-item>
           <el-form-item label="Grade" required><el-input v-model="rating.grade" maxlength="80" :disabled="lloydsRatingSaving"></el-input></el-form-item>
-          <el-form-item label="Outlook"><el-input v-model="rating.outlook" maxlength="80" :disabled="lloydsRatingSaving"></el-input></el-form-item>
-          <el-form-item label="Rating type"><el-input v-model="rating.ratingType" maxlength="120" :disabled="lloydsRatingSaving"></el-input></el-form-item>
-          <el-form-item label="As-of date"><el-date-picker v-model="rating.asOfDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" :disabled="lloydsRatingSaving" style="width:100%"></el-date-picker></el-form-item>
-          <el-form-item label="Status"><el-input v-model="rating.status" maxlength="80" :disabled="lloydsRatingSaving"></el-input></el-form-item>
+          <el-form-item label="Rating type"><el-input model-value="Financial Strength" disabled></el-input></el-form-item>
+          <el-form-item label="As-of date" required><el-date-picker v-model="rating.asOfDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" :disabled="lloydsRatingSaving" style="width:100%"></el-date-picker></el-form-item>
+          <el-form-item label="Checked at"><el-date-picker v-model="rating.checkedAt" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" :disabled="lloydsRatingSaving" style="width:100%"></el-date-picker></el-form-item>
         </div>
       </div>
       <el-button class="secondary-button" :disabled="lloydsRatingSaving || lloydsRatingRows.length >= 50" @click="addLloydsRatingRow">+ Add rating</el-button>
@@ -344,22 +357,30 @@ onMounted(loadMasterData)
       <el-form-item v-if="mdmForm.entityType === 'reinsured'" label="Address"><el-input v-model="mdmForm.address" type="textarea" :rows="3" maxlength="1000" show-word-limit></el-input></el-form-item>
       <!-- Additional fields vary by master-data type. -->
       <template v-if="mdmForm.entityType === 'reinsurer'">
-        <div class="repeat-heading"><div><h3>Financial ratings</h3><p v-if="isLloydsForm">Fixed source: Lloyd's of London. All syndicates in Lloyd's Market share the market's financial strength ratings.</p><p v-else>Keep the agency, grade, entity, source and review details used by Development.</p></div></div>
-        <div class="review-list">
-          <div v-for="(rating,index) in displayedFormRatings" :key="'mdm-rating-' + index"><strong>{{ rating.agency }} · {{ rating.grade }}</strong><span>{{ [rating.ratingType, rating.outlook, rating.asOfDate, rating.status].filter(Boolean).join(' · ') || 'No additional details' }}<br v-if="rating.legalEntity"><small v-if="rating.legalEntity">{{ rating.legalEntity }}</small></span><el-button v-if="!isLloydsForm" text type="danger" @click="removeMdmRating(index)">Remove</el-button></div>
+        <div class="repeat-heading"><div><h3>Financial ratings</h3><p v-if="isLloydsForm">Fixed source: Lloyd's of London. All syndicates in Lloyd's Market share the market's financial strength ratings.</p><p v-else>Enter an agency, grade and As-of date. Rating type is Financial Strength; Checked at is optional.</p></div></div>
+        <div v-if="isLloydsForm" class="review-list">
+          <div v-for="(rating,index) in displayedFormRatings" :key="'mdm-rating-' + index"><strong>{{ rating.agency }} · {{ rating.grade }}</strong><span>Financial Strength · As-of date: {{ rating.asOfDate || '—' }}<template v-if="rating.checkedAt"> · Checked at: {{ rating.checkedAt }}</template><br><small>Lloyd's of London</small></span></div>
         </div>
-        <div v-if="!isLloydsForm" class="form-grid cols-3" style="margin-top:16px;">
-          <el-form-item label="Rating agency"><el-input v-model="mdmRatingDraft.agency" maxlength="120" placeholder="e.g. S&amp;P"></el-input></el-form-item>
-          <el-form-item label="Grade"><el-input v-model="mdmRatingDraft.grade" maxlength="80" placeholder="e.g. A+"></el-input></el-form-item>
-          <el-form-item label="Outlook"><el-input v-model="mdmRatingDraft.outlook" maxlength="80"></el-input></el-form-item>
-          <el-form-item label="Rating type"><el-input v-model="mdmRatingDraft.ratingType" maxlength="120"></el-input></el-form-item>
-          <el-form-item label="As-of date"><el-date-picker v-model="mdmRatingDraft.asOfDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
-          <el-form-item label="Status"><el-input v-model="mdmRatingDraft.status" maxlength="80"></el-input></el-form-item>
-          <el-form-item label="Legal entity"><el-input v-model="mdmRatingDraft.legalEntity" maxlength="240"></el-input></el-form-item>
-          <el-form-item label="Source URL"><el-input v-model="mdmRatingDraft.sourceUrl" maxlength="1000"></el-input></el-form-item>
-          <el-form-item label="Checked at"><el-date-picker v-model="mdmRatingDraft.checkedAt" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
-          <el-form-item label=" "><el-button class="secondary-button" @click="addMdmRating">+ Add rating</el-button></el-form-item>
-        </div>
+        <template v-else>
+          <div v-for="(rating,index) in mdmForm.ratings" :key="'mdm-rating-' + index" class="mdm-rating-editor-row">
+            <div class="repeat-heading"><strong>Rating {{ index + 1 }}</strong><el-button text type="danger" @click="removeMdmRating(index)">Remove</el-button></div>
+            <div class="form-grid cols-3">
+              <el-form-item label="Rating agency" required><el-select v-model="rating.agency" placeholder="Select agency" style="width:100%"><el-option v-if="rating.agency && !RATING_AGENCIES.includes(rating.agency)" :value="rating.agency" :label="rating.agency + ' (historical — select an allowed agency)'" disabled></el-option><el-option v-for="agency in RATING_AGENCIES" :key="agency" :label="agency" :value="agency"></el-option></el-select></el-form-item>
+              <el-form-item label="Grade" required><el-input v-model="rating.grade" maxlength="80"></el-input></el-form-item>
+              <el-form-item label="Rating type"><el-input model-value="Financial Strength" disabled></el-input></el-form-item>
+              <el-form-item label="As-of date" required><el-date-picker v-model="rating.asOfDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
+              <el-form-item label="Checked at"><el-date-picker v-model="rating.checkedAt" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
+            </div>
+          </div>
+          <div class="form-grid cols-3" style="margin-top:16px;">
+            <el-form-item label="Rating agency" required><el-select v-model="mdmRatingDraft.agency" placeholder="Select agency" style="width:100%"><el-option v-for="agency in RATING_AGENCIES" :key="agency" :label="agency" :value="agency"></el-option></el-select></el-form-item>
+            <el-form-item label="Grade" required><el-input v-model="mdmRatingDraft.grade" maxlength="80" placeholder="e.g. A+"></el-input></el-form-item>
+            <el-form-item label="Rating type"><el-input model-value="Financial Strength" disabled></el-input></el-form-item>
+            <el-form-item label="As-of date" required><el-date-picker v-model="mdmRatingDraft.asOfDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
+            <el-form-item label="Checked at"><el-date-picker v-model="mdmRatingDraft.checkedAt" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></el-date-picker></el-form-item>
+            <el-form-item label=" "><el-button class="secondary-button" :disabled="mdmForm.ratings.length >= 50" @click="addMdmRating">+ Add rating</el-button></el-form-item>
+          </div>
+        </template>
       </template>
       <template v-if="['reinsurer','class'].includes(mdmForm.entityType)">
         <div class="repeat-heading"><div><h3>Fixed clauses</h3><p v-if="mdmForm.entityType === 'reinsurer'">Applied to future new case snapshots whose Class is listed under Applies to. Picked from the Clause master list; Universal clauses (LMA3333, INTERMEDIARY) are always included and cannot be added here.</p><p v-else>Applied to future new case snapshots of this Class, whichever reinsurers are selected. Picked from the Clause master list; Universal clauses (LMA3333, INTERMEDIARY) are always included and cannot be added here.</p></div></div>
@@ -380,7 +401,7 @@ onMounted(loadMasterData)
 .mdm-market-groups { margin: 0 20px 20px; }
 .lloyds-market-ratings { padding: 16px 18px; }
 .lloyds-rating-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.lloyds-rating-editor-row { border-bottom: 1px solid var(--border); margin-bottom: 16px; padding-bottom: 8px; }
+.lloyds-rating-editor-row, .mdm-rating-editor-row { border-bottom: 1px solid var(--border); margin-bottom: 16px; padding-bottom: 8px; }
 .lloyds-market-ratings p { margin: 8px 0; }
 .lloyds-rating-grades { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .mdm-market-groups :deep(.el-collapse-item) { margin-bottom: 0; }
