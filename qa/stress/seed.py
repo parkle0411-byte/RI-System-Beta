@@ -27,6 +27,7 @@ from masterdata.models import MasterRecord  # noqa: E402
 from personnel.models import Personnel  # noqa: E402
 from production.calc import production_keys_for_case  # noqa: E402
 from production.closing import confirm_case  # noqa: E402
+from cases.property_original import enabled as property_enabled, refresh_transactions, persist_settlements  # noqa: E402
 
 assert Case.objects.count() == 0, "資料庫不是空的"
 
@@ -185,6 +186,11 @@ def make_case(kind, status, n_reinsurers=1, parent=None, announced=None):
         payload["status"] = "posted"
         payload["postedAt"] = announced.isoformat()
         payload["statementNo"] = f"SOA-{tw_ref}" if status == "closed" else ""
+        # 2026-10-28 起和正式 Announce 相同：Property 原單／批單在 Announce 時就建立各再保人帳款，Production 關帳只認列
+        if property_enabled(payload):
+            payload.update(announcedAt=announced.isoformat())
+            refresh_transactions(payload, announced.isoformat())
+            persist_settlements(payload, announced.isoformat(), {"id": "stress", "name": "Stress Seed"})
         if status == "closed":
             source = {"id": cid, "case_uid": "", "parent_case_id": parent["id"] if parent else None, "tw_ref": tw_ref, "status": "posted",
                       "row_version": 1, "payload": payload, "announced_at": announced.isoformat(), "created_at": announced.isoformat()}
@@ -262,9 +268,9 @@ for index, case in enumerate(closed_cases):
         if index < n_pay // 2:
             r = post({"action": "confirm_facility_settlement", "caseUid": str(case.case_uid), "rowVersion": Case.objects.get(pk=case.pk).row_version,
                       "txNo": tx["txNo"], "note": "STRESS reconciled"})
-            if r.status_code != 200:
-                print("  確認失敗", r.status_code, r.content[:200]); raise SystemExit(1)
-            settled_calls += 1
+            # 2026-10-24 起一般再保人的 T1 收齊後自動結清，只有需要人工確認的 Facility 才會成功
+            if r.status_code == 200:
+                settled_calls += 1
     if index % 200 == 0:
         print(f"  …{index}/{n_pay} ({time.time() - T0:.0f} 秒)", flush=True)
 

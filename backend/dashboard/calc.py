@@ -12,6 +12,7 @@ Dashboard 的計算 - 移植自 Alpha api/dashboard.js（v53，雜湊 26002e5c�
 """
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from cases.calc.jsnum import (
     WS_CLASS, _key_order, get, is_array, js_is_finite, js_num_str, js_or, js_slice, js_spread, js_string_to_number,
@@ -128,6 +129,32 @@ def _live(row):
     return get(row, "status") in ("posted", "closed") and isinstance(get(row, "status"), str)
 
 
+OUTSTANDING_YEARS = 5
+_TAIPEI = ZoneInfo("Asia/Taipei")
+
+
+def _taipei_day(value):
+    """帳款建立時間的台北日期；缺漏或無法解讀回 None。"""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        return stamp.date().isoformat()
+    return stamp.astimezone(_TAIPEI).date().isoformat()
+
+
+def _years_before(day_text, years):
+    """台北今天往回 N 年（2/29 往回到非閏年時用 2/28）。"""
+    y, m, d = (int(x) for x in day_text.split("-"))
+    y -= years
+    if m == 2 and d == 29 and not (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)):
+        d = 28
+    return f"{y:04d}-{m:02d}-{d:02d}"
+
+
 def _pad2(n):
     return f"{n:02d}"
 
@@ -185,6 +212,8 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     # Accounting obligations remain outstanding after policy expiry. Convert each
     # at its own posting month; unknown FX stays visibly incomplete, never zero.
     from cases.cash_ledger import transaction_details
+    from cases.case_result_cache import cached as cached_case_result
+    from cases.accounting_policy import stored_all_settled
     rates = {(r['year_month'], r['currency']): float(r['rate']) for r in fx_rows}
     missing_fx = []
     estimated_fx = []
@@ -192,16 +221,31 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     for fx in fx_rows:
         cur=fx["currency"];m=fx["year_month"]
         if cur not in latest or m>latest[cur][0]:latest[cur]=(m,float(fx["rate"]))
+    # 2026-10-29 業主：未結清應收／應付只算 5 年內建立的帳款（正常 2 年內結清）。往回 5 年、每天滾動（台北今天）。
+    # 每筆帳款看它自己建立的時間（createdAt，台北日期）：保費帳款是 Announce 時、理賠帳款是記錄理賠付款時。
+    # 建立時間缺漏或無法解讀的照算（不藏欠款）。
+    outstanding_since = _years_before(today, OUTSTANDING_YEARS)
+    def recent(tx):
+        day = _taipei_day(tx.get('createdAt'))
+        return day is None or day >= outstanding_since
     for r in rows:
         if r.get("_financialInvalid"):continue
         if r.get("status") not in ("posted", "closed", "reversed"):
             continue
         payload = r['payload']
+        live_txs = [t for t in payload.get('transactions', []) if isinstance(t, dict)] if isinstance(payload.get('transactions'), list) else []
+        if live_txs and not any(recent(t) for t in live_txs):
+            continue   # 這件案件的帳款全都超過 5 年：不計算
+        if stored_all_settled(payload):
+            continue   # 2026-10-29 業主：整件都已銷帳（依帳款標記）就不重算；標記是否正確由 Accounting 每次核對
         currency = str(payload.get('currency') or 'TWD').upper()
         stored = {t.get('txNo'): t for t in payload.get('transactions', []) if isinstance(t, dict)}
-        for no, detail in transaction_details(payload, now).items():
+        # 2026-10-29：與 Accounting 共用每件案件記住的答案（同一份資料、同一個台北日期才共用），見 cases/case_result_cache
+        for no, detail in cached_case_result('details', payload, now, lambda: transaction_details(payload, now)).items():
             tx = stored.get(no, {})
             if tx.get('reversed') or tx.get('isReversalEntry') or detail['cashTracking'] == 'derived' or abs(detail['outstanding']) < .005:
+                continue
+            if not recent(tx):
                 continue
             from cases.accounting_policy import fx_for_transaction
             rate,posting_month,estimated=fx_for_transaction(payload,tx,rates,latest)
@@ -252,7 +296,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             "inForcePolicies": len(in_force), "activeEndorsements": len(active_endorsements),
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
             "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
-            "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2,
+            "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2, "outstandingSince": outstanding_since,
             "accountingTotalIncomplete": bool(missing_fx or data_errors), "missingPostingRates": missing_fx,
             "accountingTotalEstimated":bool(estimated_fx), "estimatedPostingRates":estimated_fx,
             **({"dataErrors":data_errors} if data_errors else {}),

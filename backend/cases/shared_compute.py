@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from .calc.payment_terms import build_payment_schedule
 from .cash_ledger import transaction_details
+from .case_result_cache import cached
 
 
 class CaseCompute:
@@ -30,11 +31,14 @@ class CaseCompute:
     def schedule(self, variant="raw"):
         key = ("schedule", self._variant(variant))
         if key not in self._memo:
-            self._memo[key] = build_payment_schedule(self.payload(variant), self.now)
+            payload = self.payload(variant)
+            # 2026-10-29：跨請求記住答案（同一份資料、同一個台北日期），見 case_result_cache
+            self._memo[key] = cached("schedule", payload, self.now, lambda: build_payment_schedule(payload, self.now))
         return self._memo[key]
 
     def details(self, variant="raw"):
         key = ("details", self._variant(variant))
         if key not in self._memo:
-            self._memo[key] = transaction_details(self.payload(variant), self.now, self.schedule(variant))
+            payload = self.payload(variant)
+            self._memo[key] = cached("details", payload, self.now, lambda: transaction_details(payload, self.now, self.schedule(variant)))
         return self._memo[key]

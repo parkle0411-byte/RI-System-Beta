@@ -122,13 +122,14 @@ def total_income(case_data):
     return total
 
 
-def installment_allocations(case_data):
+def installment_allocations(case_data, periods_list=None):
+    """periods_list：呼叫端已算好的 property_periods(case_data)（2026-10-29 效能；不給就照原本自己算）。"""
     total_premium = number_or_zero(get(case_data, "originalPremium"))
     if property_enabled(case_data):
         return [{"id":r["id"] if get(case_data,"installmentEnabled") else "FULL",
                  "performanceMonth":r.get("performanceMonth", base_month(case_data)),
                  "ratio":number_or_zero(r.get("weight"))/total_premium if total_premium and get(case_data,"installmentEnabled") else 1,
-                 "income":r["t3"]} for r in property_periods(case_data)]
+                 "income":r["t3"]} for r in (property_periods(case_data) if periods_list is None else periods_list)]
     income = total_income(case_data)
     if not js_truthy(get(case_data, "installmentEnabled")):
         return [{"id": "FULL", "performanceMonth": base_month(case_data), "ratio": 1.0, "income": income}]
@@ -357,21 +358,27 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
         reinsurers = _reinsurers(case_data)
         people = performance_people(case_data)
         case_id = case_data["id"]
-        for installment_index, installment in enumerate(installment_allocations(case_data)):
+        # 2026-10-29 效能：同一件案件的分期金額只算一次；報表金額（report_values）等確定有列要出現在這個月才算。
+        # 都是純計算，輸出與以前相同。
+        property_case = property_enabled(case_data)
+        plist = property_periods(case_data) if property_case else None
+        for installment_index, installment in enumerate(installment_allocations(case_data, plist)):
             key = f"{js_num_str(case_id)}:{installment['id']}"
             belongs = installment["performanceMonth"] == month
             raw, tail = _income_split(case_data, reinsurers, installment)
             property_premiums = None
-            if property_enabled(case_data):
-                period = property_periods(case_data)[installment_index]
-                property_premiums, raw = report_values(case_data,period)
-                tail = 0
+            period = plist[installment_index] if property_case else None
+            pending_values = property_case
             for reinsurer_index, reinsurer in enumerate(reinsurers):
                 reinsurer_key = f"{key}:R{reinsurer_index}"
                 if confirmed(case_data, reinsurer_key):
                     continue
                 if not belongs and not deferred_from(exclusions, case_id, key, reinsurer_key, month):
                     continue
+                if pending_values:
+                    property_premiums, raw = report_values(case_data, period, plist)
+                    tail = 0
+                    pending_values = False
                 exclusion = exclusion_for(exclusions, case_id, key, reinsurer_key, month)
                 legs = reinsurer_legs(case_data, reinsurer)
                 source_premium = property_premiums[reinsurer_index] if property_premiums is not None else legs["cedantPremium"] * installment["ratio"]
@@ -409,7 +416,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                 premiums = [None] * len(people) if rate is None else rounded_shares(source_premium * rate, people, ae)
                 incomes = [None] * len(people) if rate is None else rounded_shares(source_income * rate, people, ae)
                 if property_enabled(case_data) and rate is not None:
-                    premiums,incomes=report_amounts(case_data,installment["id"],rate)[reinsurer_index]
+                    premiums,incomes=report_amounts(case_data,installment["id"],rate,plist)[reinsurer_index]
                 endorse = None
                 if js_truthy(get(case_data, "parentTwRef")):
                     endorse = _ENDORSE_NO.search(_js(js_or(get(case_data, "twRef"), "")))

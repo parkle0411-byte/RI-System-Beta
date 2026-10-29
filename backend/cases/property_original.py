@@ -6,6 +6,7 @@ recognized Production facts retain their original amounts and precision.
 import copy
 import re
 from decimal import Decimal, ROUND_HALF_UP
+from .calc.jsnum import js_trim as _js_trim
 
 VERSION = 'property-original-v1'
 VERSION_KEY = 'propertyOriginalRules'
@@ -66,8 +67,11 @@ def adopt(p, old=None):
 
 def num(value):
     try:
-        from .calc.jsnum import js_trim
-        n = Decimal(js_trim(str(value or 0)).replace(',', ''))
+        # 2026-10-29 效能：一般數字（不含 bool）直接轉；字串照原本先去空白與逗號。結果與原本相同
+        if value and type(value) in (int, float):
+            n = Decimal(str(value))
+        else:
+            n = Decimal(_js_trim(str(value or 0)).replace(',', ''))
         return n if n.is_finite() else Decimal(0)
     except Exception:
         return Decimal(0)
@@ -330,7 +334,8 @@ def field_issues(p):
     return result
 
 
-def report_values(p, period):
+def report_values(p, period, all_periods=None):
+    """all_periods：呼叫端已算好的 periods(p)（2026-10-29 效能：同一件案件只算一次；不給就照原本自己算）。"""
     from .accounting_policy import legacy_math
     if legacy_math(p):
         from .calc.accounting import calc_legs_for_reinsurer
@@ -340,9 +345,9 @@ def report_values(p, period):
         premiums=[installment_allocate(r['cp'],payment_installments(p),p)[index] for r in old]
         return premiums,[money(num(a)-num(b),p) for a,b in zip(period['t1shares'],period['t2s'])]
     premium = totals(p)['cedantPremium']
-    weights=[r['weight'] for r in periods(p)]
+    plist = periods(p) if all_periods is None else all_periods
     from .calc.payment_terms import allocate as installment_allocate
-    premium_periods=installment_allocate(premium,periods(p),p)
+    premium_periods=installment_allocate(premium,plist,p)
     index=period['number']-1
     premiums=allocate(premium_periods[index],[r.get('sharePct') for r in rows(p.get('reinsurers'))],p)
     incomes=[money(num(t1)-num(t2),p) for t1,t2 in zip(period['t1shares'],period['t2s'])]
@@ -496,10 +501,11 @@ def edit_guard(case, p, body, actor, now):
     return ''
 
 
-def report_amounts(p, period_id, rate):
+def report_amounts(p, period_id, rate, all_periods=None):
     """Balanced NTD rows. Other Staff first; Reinsurance Staff keeps the remainder."""
-    period=next(r for r in periods(p) if (r['id'] if p.get('installmentEnabled') else 'FULL')==period_id)
-    premiums,incomes=report_values(p,period)
+    plist = periods(p) if all_periods is None else all_periods
+    period=next(r for r in plist if (r['id'] if p.get('installmentEnabled') else 'FULL')==period_id)
+    premiums,incomes=report_values(p,period,plist)
     weights=[num(r.get('sharePct')) for r in rows(p.get('reinsurers'))]
     ntd={**p,'currency':'TWD'}
     def convert(values):

@@ -133,7 +133,7 @@ onMounted(loadDashboard)
       <div class="kpi"><div class="label">Open Quotes</div><div class="val">{{ dashboard.metrics?.openQuotes || 0 }}</div></div>
       <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val">{{ dashboard.metrics?.retentionRatio == null ? 'N/A' : formatAmount(dashboard.metrics.retentionRatio) }}<small v-if="dashboard.metrics?.retentionRatio != null">%</small></div></div>
       <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
-      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — subtotal only</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small></div>
+      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — subtotal only</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small><small v-if="dashboard.metrics?.outstandingSince" data-testid="outstanding-since">Entries created in the last 5 years (since {{ dashboard.metrics.outstandingSince }})</small></div>
     </div>
   </section>
 

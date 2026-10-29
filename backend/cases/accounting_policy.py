@@ -4,6 +4,7 @@ Pure policy functions. Actual receipts/payments remain accountant entries.
 Property-only underwriting validation stays in property_original.scope.
 """
 import re
+from functools import lru_cache
 
 VERSION = 'accounting-ag-20261022'
 FACILITIES = (
@@ -13,11 +14,19 @@ FACILITIES = (
     'QBE Hongkong & Shanghai Insurance Limited (Facility)',
     'Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)',
 )
+@lru_cache(maxsize=4096)
+def _normalized_text(text):
+    return ' '.join(text.split()).casefold()
+
 def normalized(name):
-    return ' '.join(str(name or '').split()).casefold()
+    # 2026-10-29 效能：同一個名稱只整理一次（純字串函式，結果不變）
+    return _normalized_text(str(name or ''))
+
+_FACILITY_KEYS = frozenset(_normalized_text(n) for n in FACILITIES)
+_FACILITY_OR_PWS = re.compile(r'facility|\bpws\b', re.I)
 
 def facility(name):
-    return normalized(name) in {normalized(n) for n in FACILITIES}
+    return normalized(name) in _FACILITY_KEYS
 
 def rows(value):
     return [r for r in value if isinstance(r,dict)] if isinstance(value,list) else []
@@ -28,7 +37,7 @@ def scope(p):
     names=[r.get('name') for r in rows(p.get('reinsurers')) if r.get('name')]
     if p.get('endorsementRules') == 'facultative-v1' and p.get('reinsuranceStructure') in ('QS', 'XOL'):
         return bool(names)
-    return bool(names) and all(facility(n) or not re.search(r'facility|\bpws\b',str(n),re.I) for n in names)
+    return bool(names) and all(facility(n) or not _FACILITY_OR_PWS.search(str(n)) for n in names)
 
 def fixed_cedant(p):
     return scope(p) and any(facility(r.get('name')) for r in rows(p.get('reinsurers')))
@@ -103,3 +112,28 @@ def fx_for_transaction(payload,tx,rates,latest):
         return 1,'',True
     current=latest.get(currency)
     return (current[1],current[0],True) if current else (None,'',True)
+
+
+def stored_all_settled(p):
+    """2026-10-29 業主：帳款上記錄的結清標記顯示「整件都已銷帳」（不含已沖回／沖回分錄）。
+    Dashboard 據此跳過不重算；Accounting 每次會核對標記與實際收付款是否一致（不一致列入警告）。"""
+    txs = [t for t in rows(p.get('transactions'))
+           if not t.get('reversed') and not t.get('isReversalEntry')] if isinstance(p, dict) else []
+    return bool(txs) and all(t.get('settlement') == 'settled' for t in txs)
+
+
+SETTLED_FLAG_WARNING = ('Settlement flags say this case is fully settled, but its payments still leave an outstanding balance. '
+                        'The Dashboard skips fully settled cases, so this balance is missing there. Contact the System Administrator.')
+
+
+def settled_flag_mismatch(p, details):
+    """用和 Dashboard 未結清金額相同的條件（略過已沖回、沖回分錄、推算的經紀費），看實際是否還有欠款。"""
+    stored = {t.get('txNo'): t for t in rows(p.get('transactions'))}
+    for no, detail in (details or {}).items():
+        tx = stored.get(no, {})
+        if tx.get('reversed') or tx.get('isReversalEntry') or detail.get('cashTracking') == 'derived':
+            continue
+        if abs(float(detail.get('outstanding') or 0)) >= .005:
+            return True
+    return False
+

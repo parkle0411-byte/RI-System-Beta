@@ -13,7 +13,7 @@ r = c.get("/api/accounting")
 elapsed = time.perf_counter() - t
 open(f"/data/documents/accounting_{label}.json", "wb").write(r.content)
 print(f"accounting {label}: status {r.status_code}, {len(r.content)} bytes, {elapsed:.1f}s, sha256 {hashlib.sha256(r.content).hexdigest()[:16]}")
-for name, path in (("dashboard", "/api/dashboard"), ("production_2026_09", "/api/production-report?month=2026-09"),
+for name, path in (("accounting_list", "/api/accounting?view=list"), ("dashboard", "/api/dashboard"), ("production_2026_09", "/api/production-report?month=2026-09"),
                    ("production_2026_08", "/api/production-report?month=2026-08"), ("production_2025_12", "/api/production-report?month=2025-12")):
     t = time.perf_counter()
     rr = c.get(path)

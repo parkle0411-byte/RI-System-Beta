@@ -1407,3 +1407,13 @@ Implementation uses a nullable Case → insured MasterRecord FK and additive ins
 - `PUT /api/cases` 沒有 case 物件（或不是物件）時一律回 400 validation_failed「case must be an object.」；原本批單會出錯 500。
 - 業主決定維持現狀：能編輯案件的人（業務、主管、管理員）都可以改被保險人主檔的中文名稱或合併，與「業務可看全部案件」一致。
 - 測試：backend/qa/suites/review_fixes_1029.py；qa/ui/ui_test.py 階段 A（紅框）、C（Case Viewer 選單與直接開網址）。
+
+### 2026-10-29：效能優化（每件案件記住答案、Dashboard 未結清 5 年內、跳過整件已銷帳）
+- 壓力測試重測（1 萬件案件、23,907 筆帳款；10-28 起 Announce 即建帳，比 10-21 多約 3 成）：Accounting 27 秒、Dashboard 23 秒、Production 19 秒（未快取）。壓測造資料程式同步改為 Announce 即建帳。
+- 純效能（輸出逐位元組相同）：再保人名稱整理只算一次、數字轉換少做重複工作。Accounting／Dashboard／Production 約快 10–30%。
+- **每件案件記住答案**（cases/case_result_cache.py）：付款排程與交易明細只取決於案件資料內容與台北日期，用「資料內容指紋＋台北日期」記住結果；資料改任何一字或過台北午夜即重算，不依賴 row_version。每個 worker 最多 30,000 筆（1 萬件約 2.1 萬筆，每筆約 4.5 KB；4 個 worker 約多 210 MB），超過丟掉最久沒用的；`RI_CASE_RESULT_CACHE=false` 可關閉。Accounting 第二次打開 27→約 13 秒、Dashboard 21→約 8 秒；冷／熱輸出與修改前逐位元組相同。Accounting 與 Dashboard 傳入的資料不同（Dashboard 另帶 Announce／建立時間），各自記，不共用。
+- **業主決定：Dashboard 的未結清應收／應付只算 5 年內建立的帳款**（正常 2 年內結清）。每筆帳款看自己的建立時間（createdAt 的台北日期；保費帳款為 Announce 時、理賠帳款為記錄理賠付款時），往回 5 年、每天滾動；建立時間缺漏或無法解讀的照算。畫面註明「Entries created in the last 5 years (since 日期)」。Accounting 頁面仍列出全部帳款。
+- **業主決定：Dashboard 跳過「帳款標記為整件已銷帳」的案件，並加安全檢查**：系統計算欠款看的是收付款紀錄，結清標記是另外同步的欄位；Accounting 每次打開都核對，若標記為整件已銷帳但實際仍有欠款，在 warnings 列出（提醒 Dashboard 少算）。模擬 70% 案件已整件銷帳時 Dashboard 第一次打開 20.7→10.7 秒。
+- 未做：Accounting 回應約 67 MB，組資料與輸出即使記住答案仍需約 12 秒。
+- 測試：dashboard_outstanding_window、dashboard_settled_skip；壓測工具 qa/stress（seed.py、dump_responses.py）。
+- **Production Report 加速**（同日追加）：同一件案件的分期金額只算一次並共用；報表金額等確定有列落在該月份（或延後到該月）才算。純計算，12 個月份報表與修改前逐位元組相同；1 萬件案件約 15 秒 → 9 秒（未快取）。剩餘時間主要是讀取全部案件資料與連結表（業主 10-16 決定連結表先不改）。

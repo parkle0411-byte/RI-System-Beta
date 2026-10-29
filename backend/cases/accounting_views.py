@@ -106,7 +106,7 @@ class AccountingView(NoStoreMixin, APIView):
         lean = request.query_params.get("view") == "list"
         extra_currencies = []
         from fxrates.models import FxRate
-        from .accounting_policy import fx_for_transaction
+        from .accounting_policy import fx_for_transaction, stored_all_settled, settled_flag_mismatch, SETTLED_FLAG_WARNING
         fx_rows=list(FxRate.objects.values('year_month','currency','rate'))
         rates={(r['year_month'],r['currency']):float(r['rate']) for r in fx_rows}
         latest={}
@@ -145,6 +145,9 @@ class AccountingView(NoStoreMixin, APIView):
                             'key':c['caseUid']+':'+item['scheduleKey'],'caseUid':c['caseUid'],
                             'rootCaseUid':c['rootCaseUid'],'caseRowVersion':c['rowVersion'],'twRef':c['twRef']})
                 case_transactions = transaction_rows([c], shared)
+                # 2026-10-29：Dashboard 會跳過「標記為整件已銷帳」的案件；這裡核對標記與實際收付款，不一致就提醒
+                if stored_all_settled(c["payload"]) and settled_flag_mismatch(c["payload"], shared[c["caseUid"]].details("override")):
+                    case_warnings = [*case_warnings, {"caseUid": c["caseUid"], "twRef": c["twRef"], "issues": [SETTLED_FLAG_WARNING]}]
                 stored={t.get('txNo'):t for t in _objects(c['payload'].get('transactions'))}
                 for item in case_transactions:
                     rate,month,estimated=fx_for_transaction(c['payload'],stored.get(item.get('txNo'),{}),rates,latest)
