@@ -13,6 +13,10 @@ from .jsnum import (
 )
 from .payment_terms import taipei_date
 
+def first_days(case_data):
+    from ..property_original import scope, ordinary
+    return 30 if scope(case_data) and ordinary(case_data) else 60
+
 DAY = 86400000
 _WS_RUN = strip_ws_regex(r"\s+")
 _DATE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})\Z")
@@ -87,10 +91,10 @@ def reminder_due(case_data, files, last_successful_alert_on, today):
     if not missing:
         return None
     days_since = days_between(get(case_data, "policyFrom"), today)
-    if not _finite(days_since) or days_since < 60:
+    if not _finite(days_since) or days_since < first_days(case_data):
         return None
     due_since = add_days(last_successful_alert_on, 7) if js_truthy(last_successful_alert_on) \
-        else add_days(get(case_data, "policyFrom"), 60)
+        else add_days(get(case_data, "policyFrom"), first_days(case_data))
     if not due_since or _js_less(today, due_since):
         return None
     return {"missing": missing, "daysSinceEffective": days_since,
@@ -116,14 +120,14 @@ def signed_slip_tracking(case_data, files, today=UNDEFINED, now=None):
     days_since = days_between(get(case_data, "policyFrom"), today)
     eligible = get(case_data, "status") in ("posted", "closed")
     policy_from = get(case_data, "policyFrom")
-    first_on = add_days(policy_from, 60) if js_truthy(policy_from) else ""
+    first_on = add_days(policy_from, first_days(case_data)) if js_truthy(policy_from) else ""
     return {
         "complete": len(required) > 0 and len(missing) == 0,
         "missing": missing,
         "eligibleStatus": eligible,
         "daysSinceEffective": days_since if _finite(days_since) else None,
         "firstReminderOn": first_on,
-        "due": bool(eligible and missing and _finite(days_since) and days_since >= 60),
+        "due": bool(eligible and missing and _finite(days_since) and days_since >= first_days(case_data)),
         "today": today,
         "cadenceDays": 7,
         "outboundEnabled": True,  # VM 在 API 層依設定覆寫（見 cases/document_views.py）

@@ -53,7 +53,7 @@ def valid_email(value):
 
 
 def label(kind):
-    return "7 天後到期" if kind == "seven_days_before" else "今日到期" if kind == "due_today" else "逾期每週提醒"
+    return "會計收付款提醒" if kind == "seven_days_before" else "今日到期" if kind == "due_today" else "逾期每週提醒"
 
 
 def to_locale_2(value):
@@ -82,18 +82,18 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
         if get(item, "returnPremium") is True:
             direction = "應退分保人" if get(item, "paymentDirection") == "payable" else "應向再保人／再保經紀人收回"
             amount = direction + " " + amount
-        if get(item, 'paymentRule') == 'swiss_cedant_75_90':
-            timing = f"75天會計提醒 {_s(get(item, 'dueDate'))}；90天約定期限 {_s(get(item, 'contractDueDate'))} (Taiwan)"
-        elif get(item, 'swissFacility') is True:
+        if get(item, 'paymentRule') == 'swiss_cedant_80_90' and get(item, 'swissCgl') is not True:
+            timing = f"80天會計提醒 {_s(get(item, 'dueDate'))}；90天約定期限 {_s(get(item, 'contractDueDate'))} (Taiwan)"
+        elif get(item, 'swissFacility') is True and get(item, 'swissCgl') is not True:
             timing = f"Swiss結算日 {_s(get(item, 'dueDate'))} (Taiwan)"
         else:
             # 2026-10-21：信件寫真正到期日（觸發提醒所依據的日期），並附會計提醒日（較早的內部提醒日）
             actual = _s(js_or(get(item, 'contractDueDate'), get(item, 'dueDate')))
-            accounting = _s(get(item, 'dueDate'))
+            accounting = _s(js_or(get(item, 'reminderDate'), get(item, 'dueDate')))
             timing = f"到期日 {actual} (Taiwan)" + (f"；會計提醒 {accounting}" if accounting and accounting != actual else "")
         amount = ("應收 " if get(item, "paymentDirection") == "receivable" else "應付 ") + amount
         rows.append(f"{_s(get(item, 'installmentLabel'))} · {_s(get(item, 'partyName'))} · {_s(get(item, 'currency'))} {amount} · " + timing)
-    heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') == 'swiss_cedant_75_90' for i in items) else label(kind))
+    heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') == 'swiss_cedant_80_90' for i in items) else label(kind))
     return {
         "subject": f"[Payment {heading}] {_s(reference)}",
         "html": f"<p>案件 <strong>{esc(reference)}</strong> 有以下付款期限項目：</p><ul>{''.join('<li>' + esc(r) + '</li>' for r in rows)}</ul>"
@@ -105,8 +105,8 @@ def _name_matches(case_data, personnel):
     target = js_lower(js_trim(_or_text(get(case_data, "ae"))))
     matches = [row for row in personnel if js_lower(js_trim(_or_text(get(row, "name")))) == target]
     if not target or len(matches) != 1:
-        return None, ("AE name matches multiple active Personnel records." if len(matches) > 1
-                      else "AE does not match one active Personnel record.")
+        return None, ("Account Executive name matches multiple active Personnel records." if len(matches) > 1
+                      else "Account Executive does not match one active Personnel record.")
     return matches[0], None
 
 
@@ -116,7 +116,7 @@ def resolve_recipients(case_data, personnel, finance_emails):
     if error:
         missing.append(error)
     else:
-        for field, label_ in [('email', 'AE email'), ('supervisor_email', 'AE supervisor email')]:
+        for field, label_ in [('email', 'Account Executive email'), ('supervisor_email', 'Account Executive supervisor email')]:
             value = js_lower(js_trim(_or_text(get(ae, field))))
             if valid_email(value):
                 recipients.append(value)
@@ -137,19 +137,19 @@ def finance_emails(personnel):
 
 
 def due_kind(item, today, success_dates):
-    # Special premium reminders remain on screen; reviewed claims use claim_created_15.
-    if str(item.get('paymentRule') or '').startswith(('allianz_', 'great_american_')):
-        return ''
+    # Global owner decision: the first email uses the same reminder date as Accounting.
+    # Keep seven_days_before as the stored identifier to retain existing deduplication.
     due_date = item.get('contractDueDate') or item.get('dueDate')
     if not due_date or abs(js_to_number(item.get('outstanding') or 0)) <= .004:
         return ''
     days = days_between_dates(today, due_date)
     if days is None or days != days:
         return ''
-    if days == 7 and not success_dates.get('seven_days_before'):
+    if days == 0:
+        return '' if success_dates.get('due_today') else 'due_today'
+    first = item.get('reminderDate') or item.get('dueDate') or add_calendar_days(due_date, -7)
+    if today == first and not success_dates.get('seven_days_before'):
         return 'seven_days_before'
-    if days == 0 and not success_dates.get('due_today'):
-        return 'due_today'
     if days < 0:
         anchor = success_dates.get('weekly_overdue') or due_date
         if today >= add_calendar_days(anchor, 7):
@@ -170,10 +170,17 @@ def contact_for(case_data, personnel):
     if error:
         return {"error": error}
     ae_email = js_trim(_or_text(get(person, "email")))
+    from cases.property_original import scope, ordinary
+    if scope(case_data) and ordinary(case_data):
+        owner=next((r for r in personnel if get(r,"id")==get(case_data,"ownerPersonnelId")),None)
+        owner_email=js_trim(_or_text(get(owner,"email")))
+        if not valid_email(ae_email) or not owner or not valid_email(owner_email):
+            return {"error":"Account Executive and Case Owner must have valid Email addresses for Signed Slip reminders."}
+        return {"aeEmail":ae_email,"supervisorName":get(owner,"name"),"supervisorEmail":owner_email}
     supervisor_name = js_trim(_or_text(get(person, "supervisor_name")))
     supervisor_email = js_trim(_or_text(get(person, "supervisor_email")))
     if not valid_email(ae_email) or not supervisor_name or not valid_email(supervisor_email):
-        return {"error": "AE or supervisor contact fields are incomplete or invalid."}
+        return {"error": "Account Executive or supervisor contact fields are incomplete or invalid."}
     return {"aeEmail": ae_email, "supervisorName": supervisor_name, "supervisorEmail": supervisor_email}
 
 

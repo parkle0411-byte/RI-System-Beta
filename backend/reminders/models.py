@@ -37,7 +37,7 @@ class SignedSlipAlert(models.Model):
     class Meta:
         db_table = "ri_signed_slip_alerts"
         constraints = [
-            models.CheckConstraint(condition=Q(days_since_effective__gte=60), name="ri_signed_slip_alerts_days_check"),
+            models.CheckConstraint(condition=Q(days_since_effective__gte=30), name="ri_signed_slip_alerts_days_check"),
             models.CheckConstraint(condition=Q(status__in=STATUSES), name="ri_signed_slip_alerts_status_check"),
             models.UniqueConstraint(fields=["case", "alert_on"], name="ri_signed_slip_alerts_case_date_unique"),
         ]
