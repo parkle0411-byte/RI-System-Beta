@@ -8,6 +8,7 @@ from pathlib import Path
 from xml.etree import ElementTree as E
 from django.utils import timezone
 from . import placing_rules as rules
+from .cgl_information import retroactive_text
 
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 NS = {'w': W}
@@ -187,7 +188,7 @@ def render(p, ae_email, *, annual=True, previous=None, references=None):
         sums.append('Total | '+money(sum(float(r.get('amount') or 0) for r in p.get('sumInsured') or []),p.get('currency')))
         iv={'OCCUPATION':p.get('occupation'),'CONSTRUCTION':p.get('construction'),'BREAKFOWN OF SUM INSURED':'\n'.join(sums),
             'LOSS RECORD':loss_text(p),'SPECIAL AGREEMENT':p.get('specialAgreement') or None,
-            'POLICY FORM':ci.get('policyForm'),'RETROACTIVE DATE':ci.get('retroactiveDate') if ci.get('policyForm')=='Claims-Made Form' else None,
+            'POLICY FORM':ci.get('policyForm'),'RETROACTIVE DATE':retroactive_text(ci) or None,
             'EXTENDED REPORTINGPERIOD':(ci.get('extendedReportingPeriod') if ci.get('extendedReportingApplies')=='applicable' else 'Not Applicable') if ci.get('policyForm')=='Claims-Made Form' else None,
             'TERRITORIAL/ JURISDICTION LIMITS':ci.get('territorialOther') if ci.get('territorialLimits')=='Other' else ci.get('territorialLimits'),
             'INSURED’S BUSINESS':rules.business_text(ci),'INSURED’S PRODUCTS':ci.get('insuredProducts'),'ESTIMATED TURNOVER':turnover,'INSURED’S WEBSITE':ci.get('insuredWebsite') or None}

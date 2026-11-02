@@ -61,7 +61,8 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
                          'amount': number(row.get('amount'), f'Estimated Turnover {index + 1} Amount', errors, min=0)})
     result = {
         'policyForm': form,
-        'retroactiveDate': (date_value(raw.get('retroactiveDate'), 'Retroactive Date', errors) or '') if claims else '',
+        'retroactiveDate': '',
+        'retroactiveDates': [],
         'extendedReportingApplies': erp,
         'extendedReportingPeriod': text(raw.get('extendedReportingPeriod'), 3000) if erp == 'applicable' else '',
         'territorialLimits': territory,
@@ -72,6 +73,16 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
         'insuredWebsite': text(raw.get('insuredWebsite'), 1000),
         'specialAgreementApplies': special,
     }
+
+    if claims:
+        for index, row in enumerate(rows(retroactive_rows(raw), 'Retroactive Dates', errors)):
+            if not isinstance(row, dict):
+                errors.append(f'Retroactive Date {index + 1} must be an object.')
+                continue
+            result['retroactiveDates'].append({'date': date_value(row.get('date'), f'Retroactive Date {index + 1}', errors) or '',
+                                              'description': text(row.get('description'), 3000)})
+        result['retroactiveDates'] = sorted_retroactive(result)
+        result['retroactiveDate'] = next((r['date'] for r in result['retroactiveDates'] if r['date']), '')
 
     from .placing_rules import cgl, normalize_extra
     if cgl(payload):
@@ -95,13 +106,7 @@ def information_issues(payload):
     if form not in POLICY_FORMS:
         add('policyForm', 'Policy Form')
     if form == 'Claims-Made Form':
-        value = info.get('retroactiveDate')
-        try:
-            valid_date = isinstance(value, str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', value)) and date.fromisoformat(value).year >= 100
-        except ValueError:
-            valid_date = False
-        if not valid_date:
-            add('retroactiveDate', 'Retroactive Date')
+        issues.extend(retroactive_issues(info))
         if info.get('extendedReportingApplies') not in APPLICABILITY:
             add('extendedReportingApplies', 'Extended Reporting Period applicability')
         if info.get('extendedReportingApplies') == 'applicable' and not filled(info.get('extendedReportingPeriod')):
@@ -132,3 +137,78 @@ def information_issues(payload):
     elif info.get('specialAgreementApplies') == 'applicable' and not filled(payload.get('specialAgreement')):
         issues.append({'field': 'specialAgreement', 'label': 'Special Agreement'})
     return issues
+
+
+def retroactive_rows(info):
+    if 'retroactiveDates' in info:
+        return info['retroactiveDates']
+    return [{'date': info['retroactiveDate'], 'description': ''}] if info.get('retroactiveDate') else []
+
+
+def valid_retroactive(value):
+    try:
+        return isinstance(value, str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', value)) and date.fromisoformat(value).year >= 100
+    except ValueError:
+        return False
+
+
+def sorted_retroactive(info):
+    return sorted(retroactive_rows(info), key=lambda r: r.get('date') if valid_retroactive(r.get('date')) else '~~~~')
+
+
+def retroactive_issues(info):
+    rows = retroactive_rows(info)
+    if not isinstance(rows, list) or not rows:
+        return [{'field': 'cglInformation.retroactiveDates', 'label': 'Retroactive Date — at least one entry'}]
+    issues, seen = [], set()
+    for i, row in enumerate(rows):
+        row = row if isinstance(row, dict) else {}
+        value = row.get('date')
+        field = f'cglInformation.retroactiveDates.{i}.'
+        if not valid_retroactive(value):
+            issues.append({'field': field+'date', 'label': f'Retroactive Date {i+1} must use a valid YYYY-MM-DD date'})
+        elif value in seen:
+            issues.append({'field': field+'date', 'label': 'Duplicate Retroactive Date — combine the descriptions for the same date.'})
+        if isinstance(value,str): seen.add(value)
+        if len(rows) > 1 and not str(row.get('description') or '').strip():
+            issues.append({'field':field+'description', 'label':f'Retroactive Date {i+1} description is required when there are multiple dates'})
+    return issues
+
+
+def retroactive_text(info):
+    if info.get('policyForm') != 'Claims-Made Form': return ''
+    result = []
+    for row in sorted_retroactive(info):
+        value = row.get('date') or ''
+        formatted = date.fromisoformat(value).strftime('%B %d, %Y') if valid_retroactive(value) else str(value)
+        description = str(row.get('description') or '').strip()
+        result.append(f'({formatted} in respect of {description})' if description else formatted)
+    return '\n'.join(result)
+
+
+def normalize_aggregate(inp, value):
+    if not is_standard_cgl(value): return
+    mode = inp.get('cglAggregateMode')
+    if mode not in ('auto', 'manual'):
+        raw = inp.get('aggregateLimit')
+        mode = 'auto' if raw is None or str(raw).strip() == '' or (js_is_finite(js_to_number(raw)) and js_to_number(raw) == 0) else 'manual'
+    value['cglAggregateMode'] = mode
+    if mode == 'auto': value['aggregateLimit'] = value.get('limitOfLiability')
+
+
+def aggregate_issues(p):
+    if not is_standard_cgl(p): return []
+    value = p.get('aggregateLimit')
+    if value is None or str(value).strip() == '' or not js_is_finite(js_to_number(value)) or js_to_number(value) <= 0:
+        return [{'field':'aggregateLimit', 'label':'Aggregate Limit must be greater than 0'}]
+    return []
+
+
+def inherit_aggregate(payload):
+    if not is_standard_cgl(payload): return
+    raw = payload.get('aggregateLimit')
+    if raw is None or str(raw).strip() == '' or (js_is_finite(js_to_number(raw)) and js_to_number(raw) == 0):
+        payload['cglAggregateMode'] = 'auto'
+        payload['aggregateLimit'] = payload.get('limitOfLiability')
+    elif 'cglAggregateMode' not in payload:
+        payload['cglAggregateMode'] = 'manual'

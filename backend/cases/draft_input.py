@@ -16,7 +16,7 @@ reinsuranceStructure policyFrom policyFromTime policyTo policyToTime currency
 originalPremium riCommPct taxPct paymentTermsDays installmentEnabled
 performanceInstallments splitEnabled splitParties reinsurers sumInsured
 lossAdvisedDate lossRecordYears lossRecord lossRecordText interest
-limitOfLiability aggregateLimit underlyingLimits subLimits deductibles
+limitOfLiability aggregateLimit cglAggregateMode underlyingLimits subLimits deductibles
 reinsuredRetention reinstatementProvisions indemnityPeriod originalExclusions
 basisOfValuation basisOfValuationOther originalConditions expressWarranties
 conditionsPrecedent subjectivities occupation construction lossPayee notices
@@ -30,6 +30,8 @@ def scope(p, existing=None):
         return False
     if (existing or {}).get('parentTwRef') or p.get('parentTwRef'):
         return str((existing or p).get('reinsuranceStructure') or '').upper() in ('QS', 'XOL')
+    from .cgl_information import is_standard_cgl
+    if str(p.get('reinsuranceStructure') or '').upper() == 'XOL' and is_standard_cgl(p): return True
     prior = existing if isinstance(existing, dict) else {}
     family = (prior.get('draftInputScope') or (prior.get('classOfBusiness') if prior.get('reinsuranceStructure') == 'QS' else '')) if prior else ''
     structure = str(p.get('reinsuranceStructure') or ('QS' if family else '')).upper()
@@ -86,6 +88,9 @@ def normalize(p, *, existing=None):
         for field in ('construction','constructionLegacyText','constructionSelectionVersion'):
             raw[field]=copy.deepcopy(value[field])
     value['draftInputScope'] = p.get('classOfBusiness') or (existing or {}).get('draftInputScope') or (existing or {}).get('classOfBusiness')
+    if 'cglAggregateMode' in value:
+        raw['cglAggregateMode'] = value['cglAggregateMode']
+        if value['cglAggregateMode'] == 'auto': raw['aggregateLimit'] = value['aggregateLimit']
     value[KEY] = raw
     pending = p.get(CLAUSE) if isinstance(p.get(CLAUSE), dict) else {}
     value[CLAUSE] = {'code': str(pending.get('code') or '')[:80], 'title': str(pending.get('title') or '')[:300]}
@@ -109,7 +114,10 @@ def validate(p):
     dates += [(f'performanceInstallments.{i}.paymentBaseDate', row.get('paymentBaseDate')) for i, row in enumerate(candidate.get('performanceInstallments') or [])]
     info = candidate.get('cglInformation') or {}
     if isinstance(info, dict) and info.get('policyForm') == 'Claims-Made Form':
-        dates.append(('cglInformation.retroactiveDate', info.get('retroactiveDate')))
+        from .cgl_information import retroactive_rows
+        entries = retroactive_rows(info)
+        if isinstance(entries, list):
+            dates += [(f'cglInformation.retroactiveDates.{i}.date', row.get('date')) for i, row in enumerate(entries) if isinstance(row, dict)]
     date_errors = []
     for field, value in dates:
         if value is None or value == '':

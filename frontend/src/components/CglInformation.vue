@@ -1,4 +1,5 @@
 <script setup>
+import { retroactiveRows, sortedRetroactiveRows, retroactiveIssues } from '../alpha/cglRetroactive'
 import DraftNumber from './DraftNumber.vue'
 import DraftDate from './DraftDate.vue'
 import { computed, ref, watch } from 'vue'
@@ -13,6 +14,20 @@ watch(() => [info.value.insuredBusinessSelections, info.value.insuredBusinessOth
 const issues = computed(() => props.reviewAttempted ? cglInformationIssues(props.payload) : [])
 const invalid = key => ({ 'is-required-error': issues.value.some(issue => issue.field === (key === 'specialAgreement' ? key : 'cglInformation.' + key)) })
 const switching = ref(false)
+watch(() => props.payload.cglInformation, value => {
+  if (value) value.retroactiveDates = sortedRetroactiveRows(value).map(r => ({...r, clientKey: r.clientKey || clientKey()}))
+}, { immediate: true })
+const retroRows = computed(() => retroactiveRows(info.value))
+const duplicateRetroactive = computed(() => retroactiveIssues(info.value).filter(i => i.label.startsWith('Duplicate')))
+function sortRetroactive() {
+  info.value.retroactiveDates = sortedRetroactiveRows(info.value)
+  info.value.retroactiveDate = info.value.retroactiveDates[0]?.date || ''
+}
+function addRetroactive() {
+  if (retroRows.value.length < 50) info.value.retroactiveDates.push({clientKey:clientKey(), date:'', description:''})
+}
+function removeRetroactive(index) { info.value.retroactiveDates.splice(index, 1); sortRetroactive() }
+
 async function changeChoice(key, value) {
   const previous = info.value[key]
   if (previous === value || switching.value) return
@@ -27,6 +42,7 @@ async function changeChoice(key, value) {
   try {
     if (needsConfirmation) await ElMessageBox.confirm('Changing this selection will clear the related date, applicability or text. This cannot be undone.', 'Clear related information?', { type: 'warning', confirmButtonText: 'Change and clear', cancelButtonText: 'Keep current selection' })
     clear.forEach(field => { info.value[field] = '' })
+    if (key === 'policyForm') info.value.retroactiveDates = []
     if (special) props.payload.specialAgreement = ''
     info.value[key] = value
   } catch { /* Cancel leaves the selection and all related data intact. */ }
@@ -43,7 +59,16 @@ function addTurnover() {
       <el-form-item label="Policy Form" required :class="invalid('policyForm')">
         <el-select :model-value="info.policyForm" :disabled="switching" placeholder="Select" @update:model-value="value => changeChoice('policyForm', value)"><el-option v-for="item in CGL_POLICY_FORMS" :key="item" :label="item" :value="item" /></el-select>
       </el-form-item>
-      <el-form-item v-if="info.policyForm === 'Claims-Made Form'" label="Retroactive Date" required :class="invalid('retroactiveDate')"><DraftDate :relaxed="relaxed" v-model="info.retroactiveDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" /></el-form-item>
+      <section v-if="info.policyForm === 'Claims-Made Form'" class="retroactive-entries" data-testid="retroactive-entries">
+        <div class="turnover-heading"><strong>Retroactive Date</strong><el-button size="small" @click="addRetroactive" :disabled="retroRows.length >= 50">Add date</el-button></div>
+        <div v-for="(row, index) in retroRows" :key="row.clientKey || index" class="retroactive-entry">
+          <el-form-item label="Retroactive Date" required :class="invalid(`retroactiveDates.${index}.date`)"><DraftDate :relaxed="relaxed" v-model="row.date" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" @change="sortRetroactive" /></el-form-item>
+          <el-form-item label="In respect of" :required="retroRows.length > 1" :class="invalid(`retroactiveDates.${index}.description`)"><el-input v-model="row.description" type="textarea" maxlength="3000" placeholder="e.g. limit USD 1,000,000 or Usang Holding Company" /></el-form-item>
+          <el-button size="small" @click="removeRetroactive(index)">Remove date</el-button>
+        </div>
+        <p v-if="invalid('retroactiveDates')['is-required-error']" class="turnover-error">Add at least one Retroactive Date.</p>
+        <p v-if="duplicateRetroactive.length" class="turnover-error">Duplicate Retroactive Date — combine the descriptions for the same date.</p>
+      </section>
     </div>
     <template v-if="info.policyForm === 'Claims-Made Form'">
       <el-form-item label="Extended Reporting Period" required :class="invalid('extendedReportingApplies')"><el-select :model-value="info.extendedReportingApplies" :disabled="switching" placeholder="Select" @update:model-value="value => changeChoice('extendedReportingApplies', value)"><el-option label="Not applicable" value="notApplicable" /><el-option label="Applicable" value="applicable" /></el-select></el-form-item>
@@ -77,5 +102,7 @@ function addTurnover() {
 </template>
 <style scoped>
 .el-select, .el-date-editor, .el-input-number { width: 100%; }
+.retroactive-entries { min-width:0; }
+.retroactive-entry { margin-top:12px; border-bottom:1px solid var(--el-border-color); padding-bottom:12px; }
 .turnover-error { color: var(--el-color-danger); }
 </style>

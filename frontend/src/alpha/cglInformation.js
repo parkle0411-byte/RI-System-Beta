@@ -1,5 +1,6 @@
 import { newCgl, businessText, placingExtraIssues } from './placingRules'
 import { swissCglScope } from './swissCgl'
+import { retroactiveIssues, retroactiveText } from './cglRetroactive'
 
 export const CGL_POLICY_FORMS = ['Occurrence Form', 'Claims-Made Form']
 export const CGL_TERRITORIES = ['Worldwide including USA/Canada', 'Worldwide excluding USA/Canada', 'USA/Canada Only', 'Other']
@@ -26,9 +27,7 @@ export function cglInformationIssues(payload) {
   const filled = value => value != null && String(value).trim() !== ''
   if (!CGL_POLICY_FORMS.includes(info.policyForm)) add('policyForm', 'Policy Form')
   if (info.policyForm === 'Claims-Made Form') {
-    const value = info.retroactiveDate
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? new Date(value + 'T00:00:00Z') : null
-    if (!date || Number.isNaN(date.getTime()) || date.getUTCFullYear() < 100 || date.toISOString().slice(0, 10) !== value) add('retroactiveDate', 'Retroactive Date')
+    issues.push(...retroactiveIssues(info))
     if (!APPLICABILITY.includes(info.extendedReportingApplies)) add('extendedReportingApplies', 'Extended Reporting Period applicability')
     if (info.extendedReportingApplies === 'applicable' && !filled(info.extendedReportingPeriod)) add('extendedReportingPeriod', 'Extended Reporting Period — period and description')
   }
@@ -53,7 +52,7 @@ export function cglInformationRows(payload) {
   const info = payload?.cglInformation || {}
   const rows = [{ label: 'Policy Form', value: info.policyForm || '—' }]
   if (info.policyForm === 'Claims-Made Form') {
-    rows.push({ label: 'Retroactive Date', value: info.retroactiveDate || '—' })
+    rows.push({ label: 'Retroactive Date', value: retroactiveText(info) || '—' })
     rows.push({ label: 'Extended Reporting Period', value: info.extendedReportingApplies === 'applicable' ? info.extendedReportingPeriod || '—' : info.extendedReportingApplies === 'notApplicable' ? 'Not applicable' : '—' })
   }
   rows.push({ label: 'Territorial / Jurisdiction Limits', value: info.territorialLimits === 'Other' ? info.territorialOther || '—' : info.territorialLimits || '—' },
@@ -61,4 +60,14 @@ export function cglInformationRows(payload) {
     { label: 'Estimated Turnover', value: (info.estimatedTurnover || []).map(row => `${(newCgl(payload) && row.region === 'Other' ? row.regionOther : row.region) || '—'} · ${row.currency || '—'} ${row.amount == null ? '—' : Number(row.amount).toLocaleString('en-US', { maximumFractionDigits: 20 })}`).join('\n') || '—' },
     { label: 'Insured’s Website', value: info.insuredWebsite || '—' })
   return rows
+}
+
+export function initializeCglAggregate(p) {
+  if (!isStandardCgl(p)) return
+  if (!['auto','manual'].includes(p.cglAggregateMode)) p.cglAggregateMode = p.aggregateLimit == null || p.aggregateLimit === '' || Number(p.aggregateLimit) === 0 ? 'auto' : 'manual'
+  if (p.cglAggregateMode === 'auto') p.aggregateLimit = p.limitOfLiability ?? null
+}
+export function cglAggregateIssues(p) {
+  return isStandardCgl(p) && (p.aggregateLimit == null || String(p.aggregateLimit).trim() === '' || !Number.isFinite(Number(p.aggregateLimit)) || Number(p.aggregateLimit) <= 0)
+    ? [{field:'aggregateLimit', label:'Aggregate Limit must be greater than 0'}] : []
 }

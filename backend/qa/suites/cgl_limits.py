@@ -1,4 +1,4 @@
-"""CGL XOL underlying readiness; aggregate/sub-limits remain optional."""
+"""CGL XOL underlying readiness; aggregate defaults and required positive amounts; optional sub-limits."""
 import copy,json,os
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -45,7 +45,7 @@ try:
         for sub in ['', '  \n\t ', 'Medical USD25,000\n附加 & wording']:
             result=normalize_draft({**base,'aggregateLimit':aggregate,'subLimits':sub})
             check('valid optionals '+repr((aggregate,sub)),not result['errors'] and not validate_announce_ready(result['value']),result)
-            if aggregate==0:check('explicit aggregate zero retained',result['value']['aggregateLimit']==0)
+            if aggregate==0:check('legacy aggregate zero defaults to Limit',result['value']['aggregateLimit']==base['limitOfLiability'])
     for raw in [None,'','  \t\n ','\ufeff']:
         p={**base,'underlyingLimits':raw};result=normalize_draft(p)
         check('blank underlying draft accepted '+repr(raw),not result['errors'],result['errors'])
@@ -70,14 +70,14 @@ try:
     complete={**base,'aggregateLimit':0,'underlyingLimits':'USD500,000\nOriginal terms & conditions','subLimits':'Medical USD25,000\n附加限額'}
     response=call('put','/api/cases',dict(caseUid=uid,rowVersion=case.row_version,case=complete));check('API saves all limit fields',response.status_code==200,response.content[:400]);case.refresh_from_db()
     stored=copy.deepcopy(case.payload)
-    check('aggregate zero and Case currency round-trip',stored['aggregateLimit']==0 and stored['currency']=='USD')
+    check('legacy aggregate zero fills from Limit and retains Case currency',stored['aggregateLimit']==base['limitOfLiability'] and stored['currency']=='USD')
     check('underlying multiline round-trip',stored['underlyingLimits']==complete['underlyingLimits'])
     check('optional sub-limits multiline round-trip',stored['subLimits']==complete['subLimits'])
     Case.objects.filter(pk=case.pk).update(status='posted',tw_ref='ZZ-CGL-LIMITS-001',announced_at=timezone.now())
     response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('complete XOL Cover authorized',response.status_code==204,response.content[:400])
     Case.objects.filter(pk=case.pk).update(payload={**stored,'aggregateLimit':None,'subLimits':''})
-    response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('blank optionals do not block Cover',response.status_code==204,response.content[:400])
-    Case.objects.filter(pk=case.pk).update(payload={**stored,'cglInformation':base['cglInformation'],'reinsuranceStructure':'QS','underlyingLimits':'STALE QS UNDERLYING','aggregateLimit':None,'subLimits':''})
+    response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('blank Aggregate blocks Cover',response.status_code==409 and response.json().get('error')=='aggregate_limit_required',response.content[:400])
+    Case.objects.filter(pk=case.pk).update(payload={**stored,'cglInformation':base['cglInformation'],'reinsuranceStructure':'QS','underlyingLimits':'STALE QS UNDERLYING','aggregateLimit':1000000,'subLimits':''})
     response=call('post','/api/document-generation-log',dict(caseUid=uid,kind='cover',format='docx'));check('QS has no underlying document requirement',response.status_code==204,response.content[:400])
     result=normalize_draft({**base,'currency':'TWD','aggregateLimit':1234567.89})
     check('aggregate always uses Case currency without changing amount',result['value']['currency']=='TWD' and result['value']['aggregateLimit']==1234567.89)

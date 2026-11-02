@@ -140,6 +140,8 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     if "manualTwRef" in payload:
         payload["manualTwRef"] = ""
     payload.pop("_legacyCalculation", None)
+    from .cgl_information import inherit_aggregate
+    inherit_aggregate(payload)
     return payload
 
 
@@ -160,6 +162,8 @@ def build_renewal_payload(source_payload, source_tw_ref):
     payload["statementNo"] = ""
     payload["claims"] = []
     payload["reinsurers"] = [{**js_spread(row), "settlementRef": ""} for row in _rows(payload.get("reinsurers"))]
+    from .cgl_information import inherit_aggregate
+    inherit_aggregate(payload)
     return payload
 
 

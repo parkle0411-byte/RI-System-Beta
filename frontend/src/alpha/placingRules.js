@@ -32,7 +32,7 @@ export function adjustClientIssues(p, issues, labels = false) {
   if (!placingRulesEnabled(p)) return issues
   const filtered = issues.filter(x => {
     const label = typeof x === 'string' ? x : x.label || ''
-    if (/^Aggregate Limit/.test(label) && Number(p.aggregateLimit) === 0) return false
+    if (/^Aggregate Limit/.test(label) && Number(p.aggregateLimit) === 0 && !newCgl(p)) return false
     if (/Reinsured[’']s Retention/i.test(label)) return false
     if (newCgl(p) && (/^Deductibles$/.test(label) || /^Interest$/.test(label) || /^Principal Address(?: \d+)?$/.test(label))) return false
     return true

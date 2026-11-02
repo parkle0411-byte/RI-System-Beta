@@ -143,7 +143,7 @@ def adjust_issues(p, issues):
         return issues
     def keep(x):
         f = x.get('field', '')
-        if f == 'aggregateLimit' and p.get('aggregateLimit') == 0: return False
+        if f == 'aggregateLimit' and p.get('aggregateLimit') == 0 and not cgl(p): return False
         if f == 'reinsuredRetention': return False
         if cgl(p) and (f in ('interest', 'deductibles', 'situations') or f.startswith('situations.')):
             # An optional address still validates its postcode when supplied.

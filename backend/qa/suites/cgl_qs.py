@@ -44,7 +44,7 @@ try:
     first=call('post','/api/cases',dict(case=minimum,incompleteDraft=True,draftKey=nonce))
     again=call('post','/api/cases',dict(case=minimum,incompleteDraft=True,draftKey=nonce))
     check('retry recovers the same draft instead of duplicating it',first.status_code==201 and again.status_code==200 and first.json()['case']['caseUid']==again.json()['case']['caseUid'])
-    for p in [dict(reinsuranceStructure='QS'),dict(classOfBusiness='Commercial General Liability'),{**minimum,'reinsuranceStructure':'XOL'},{**minimum,'reinsurers':[{'name':'QA (Facility)'}]}]:
+    for p in [dict(reinsuranceStructure='QS'),dict(classOfBusiness='Commercial General Liability'),{**minimum,'reinsurers':[{'name':'QA (Facility)'}]}]:
         r=call('post','/api/cases',dict(case=p,incompleteDraft=True));check('incomplete mode stays in approved scope',r.status_code==400,r.content[:300])
     case=create(minimum)
     check('incomplete draft does not create accounting entries',case.payload.get('transactions')==[] and not case.tw_ref)
@@ -79,7 +79,7 @@ try:
     check('PWS XOL scope is unchanged',not is_standard_cgl({**base,'reinsuranceStructure':'XOL'}))
     normalized=normalize_draft(base);check('complete QS normalizes',not normalized['errors'],normalized['errors'])
     check('PD required timing, blank postcode and zero commissions accepted',not validate_announce_ready(normalized['value'],allow_zero_loss_years=True),validate_announce_ready(normalized['value'],allow_zero_loss_years=True))
-    hidden={**base,'aggregateLimit':'unfinished legacy value','sumInsured':[dict(category='Legacy item',amount='unfinished')]}
+    hidden={**base,'aggregateLimit':5000000,'sumInsured':[dict(category='Legacy item',amount='unfinished')]}
     normalized_hidden=normalize_draft(hidden)
     check('inactive legacy fields are retained without blocking CGL QS',not normalized_hidden['errors'] and not validate_announce_ready(normalized_hidden['value'],allow_zero_loss_years=True),normalized_hidden['errors'])
     check('inactive legacy values are not erased',normalized_hidden['value']['aggregateLimit']==hidden['aggregateLimit'] and normalized_hidden['value']['sumInsured']==hidden['sumInsured'])

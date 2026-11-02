@@ -186,8 +186,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if cgl_qs_scope(inp):
         # These preserved legacy values have no CGL QS input or output.
         # They must not prevent completing a case after a Class change.
-        inactive = {key: inp[key] for key in ('aggregateLimit', 'sumInsured') if key in inp}
-        inp = {**inp, 'aggregateLimit': None, 'sumInsured': []}
+        inactive = {key: inp[key] for key in ('sumInsured',) if key in inp}
+        inp = {**inp, 'sumInsured': []}
     errors.extend(issue["label"] for issue in facility_selection_issues(inp))
     premium_minimum = None if allow_negative_premiums else 0
 
@@ -478,6 +478,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     from .calc.premium_money import premium_input_errors
     errors.extend(premium_input_errors(value, existing_premiums))
     value.update(inactive)
+    from .cgl_information import normalize_aggregate
+    normalize_aggregate(inp, value)
     from .placing_rules import normalize_extra, share_issues
     normalize_extra(inp, value)
     from .construction import normalize as normalize_construction
@@ -719,6 +721,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     issues.extend(endorsement_issues(value))
     issues.extend(property_field_issues(value))
     issues.extend(cgl_qs_issues(value))
+    from .cgl_information import aggregate_issues
+    issues.extend(aggregate_issues(value))
     from .placing_rules import adjust_issues, share_issues
     issues = adjust_issues(value, issues)
     issues.extend(share_issues(value, value))
