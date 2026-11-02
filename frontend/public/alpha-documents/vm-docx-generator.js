@@ -435,6 +435,12 @@
     return { order, originalPremium, cededPremium, commission, tax, netDue, t1s: components.map(row => row.t1) };
   }
 
+  // Match the Case form and server's existing named-reinsurer Facility rule.
+  function pureFacility(c) {
+    const named = (Array.isArray(c?.reinsurers) ? c.reinsurers : []).filter(row => text(row?.name));
+    return named.length > 0 && named.every(row => /\(Facility\)\s*$/i.test(text(row.name)));
+  }
+
   function commonValues(c) {
     const fin = financials(c);
     const sums = sumInsuredRows(c);
@@ -458,25 +464,25 @@
       PERIOD_SHORT: period(c, false),
       INTEREST: text(c && c.interest) || (newCgl(c) ? 'Reinsurance of the Reinsured’s liability under the original policy.' : ''),
       LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c) + (newCgl(c) ? ' each occurrence' : ''),
-      AGGREGATE_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && (String(c.reinsuranceStructure || '').toUpperCase() === 'QS' || !text(c && c.aggregateLimit)) ? '' : money(c && c.aggregateLimit, c),
+      AGGREGATE_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
       UNDERLYING_LIMITS: qsProperty(c) ? '' : Array.isArray(c && c.cglInformationRows) && text(c && c.reinsuranceStructure).toUpperCase() !== 'XOL' ? '' : text(c && c.underlyingLimits),
       SUB_LIMITS: text(c && c.subLimits),
       DEDUCTIBLES: text(c && c.deductibles),
-      REINSURED_RETENTION: text(c && c.reinsuredRetention) || ((qsProperty(c) || newCgl(c)) ? "Advice of Reinsured's retention waived." : ""),
-      REINSTATEMENT_PROVISIONS: text(c && c.reinstatementProvisions),
+      REINSURED_RETENTION: pureFacility(c) ? 'Advice of Reinsured’s retention waived' : text(c && c.reinsuredRetention) || ((qsProperty(c) || newCgl(c)) ? "Advice of Reinsured's retention waived." : ""),
+      REINSTATEMENT_PROVISIONS: pureFacility(c) ? '' : text(c && c.reinstatementProvisions),
       INDEMNITY_PERIOD: Array.isArray(c && c.cglInformationRows) ? '' : text(c && c.indemnityPeriod),
       ORIGINAL_EXCLUSIONS: originalExclusions,
       LOCATION: situations.map((item, index) => `${index + 1}. ${situationAddress(item)}`).join('\n'),
       SITUATION: situations.map((item, index) => `${index + 1}. ${situationAddress(item)}`).join('\n'),
       TOTAL_SUM_INSURED: money(sums.reduce((total, row) => total + row.numericAmount, 0), c),
-      POLICY_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && (String(c.reinsuranceStructure || '').toUpperCase() === 'QS' || !text(c && c.aggregateLimit)) ? '' : money(c && c.aggregateLimit, c),
+      POLICY_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
       BASIS_OF_VALUATION: Array.isArray(c && c.cglInformationRows) ? '' : basisOfValuation(c),
       ORIGINAL_CONDITIONS: originalConditions,
       REINSURANCE_CONDITIONS: reinsuranceConditions,
       LOSS_PAYEE: Array.isArray(c && c.cglInformationRows) || (newQs(c) && !propertyExtras(c)) ? '' : text(c && c.lossPayee),
       NOTICES: text(c && c.notices),
-      EXPRESS_WARRANTIES: text(c && c.expressWarranties) || (newQs(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : ''),
-      CONDITIONS_PRECEDENT: text(c && c.conditionsPrecedent) || (newQs(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : ''),
+      EXPRESS_WARRANTIES: pureFacility(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : text(c && c.expressWarranties) || (newQs(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : ''),
+      CONDITIONS_PRECEDENT: pureFacility(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : text(c && c.conditionsPrecedent) || (newQs(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : ''),
       SUBJECTIVITIES: text(c && c.subjectivities) || (newQs(c) ? 'None - other than as may exist in this document or in the wording that forms part of this contract.' : ''),
       PREMIUM: money(c && c.originalPremium, c) + (Array.isArray(c && c.cglInformationRows) && c.cglAnnual !== false ? ' (Annual)' : ''),
       ORDER_HEREON: `${percentTrim(fin.order, shareDecimals)} of 100%`,
@@ -1097,7 +1103,9 @@
     const codes = ['USD', 'TWD', 'NTD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR', 'CNY', 'AUD', 'CAD', 'CHF', 'SGD', 'NZD', text(c && c.currency).toUpperCase()]
       .filter(code => /^[A-Z]{3}$/.test(code));
     const pattern = new RegExp(`\\b(${[...new Set(codes)].join('|')})[ \t\u00a0\u202f]+(?=[+-]?\\d)`, 'g');
-    return xml.replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g, node => node.replace(pattern, '$1'));
+    const retroactive = (c?.cglInformationRows || []).find(row => row.label === 'Retroactive Date');
+    const preserved = new Set(String(retroactive?.value || '').split('\n').map(value => xmlEscape(value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;')));
+    return xml.replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g, (node, content) => preserved.has(content) ? node : node.replace(pattern, '$1'));
   }
 
   function expandDocumentRepeatingRows(xml, c) {
@@ -1688,7 +1696,8 @@
     }
     zip.file('word/document.xml', xml);
     const prepared = await zip.generateAsync({ type: 'base64' });
-    const filled = await JSZip.loadAsync(await fillTemplate(prepared, c, commonValues(c), 'uint8array', false, true));
+    const values = { ...commonValues(c), ORDER_HEREON_DEBIT: percent(financials(c).order, 2) };
+    const filled = await JSZip.loadAsync(await fillTemplate(prepared, c, values, 'uint8array', false, true));
     // 2026-10-29 業主：批單 Debit／Credit Note 的頁尾（公司資訊與頁碼）用 8 pt；其他文件維持原字級。
     for (const name of Object.keys(filled.files).filter(n => /^word\/footer\d+\.xml$/.test(n))) {
       const footer = await filled.file(name).async('string');

@@ -1,4 +1,5 @@
 <script setup>
+import CaseFormSection from './CaseFormSection.vue'
 defineProps({ combined: Boolean })
 const sections = [
   { name: 'occupation', title: 'Occupation & Construction' },
@@ -9,16 +10,16 @@ const sections = [
 </script>
 
 <template>
-  <el-collapse-item v-if="combined" name="information" title="Information" data-testid="property-information">
+  <CaseFormSection v-if="combined" name="information" title="Information" data-testid="property-information">
     <section v-for="section in sections" :key="section.name" class="information-section" :data-section="section.name">
       <h3>{{ section.title }}</h3>
       <slot :name="section.name" />
     </section>
-  </el-collapse-item>
+  </CaseFormSection>
   <template v-else>
-    <el-collapse-item v-for="section in sections" :key="section.name" :name="section.name" :title="section.title">
+    <CaseFormSection v-for="section in sections" :key="section.name" :name="section.name" :title="section.title">
       <slot :name="section.name" />
-    </el-collapse-item>
+    </CaseFormSection>
   </template>
 </template>
 

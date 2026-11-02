@@ -1,3 +1,4 @@
+import { allSumInsuredFacility } from './sumInsured.js'
 import { isStandardCgl } from './cglInformation'
 
 export const cglQsScope = p => isStandardCgl(p) && ['QS', 'FACULTATIVE'].includes(String(p?.reinsuranceStructure || '').toUpperCase())
@@ -9,7 +10,7 @@ export function cglQsIssues(p) {
   if (!cglQsScope(p) || p.parentTwRef) return []
   const issues = [], add = (field, label) => issues.push({ field, label })
   for (const [key,label] of [['originalInsuredCn','Original Insured (CN)'],['reinsuredRetention','Reinsured’s Retention'],['riCommPct','Cedant Commission'],['taxPct','Cedant Tax'],['paymentTermsDays','Cedant Collection Days']]) {
-    if (!filled(p[key])) add(key,label)
+    if (!(key === 'reinsuredRetention' && allSumInsuredFacility(p)) && !filled(p[key])) add(key,label)
   }
   if (!['TWD','USD'].includes(p.currency)) add('currency','CGL QS Currency must be TWD or USD')
   if (p.policyFrom && p.policyTo && p.policyTo <= p.policyFrom) add('policyTo','Expiration date must be later than Effective date')
@@ -39,7 +40,7 @@ export function draftFormatIssues(p) {
     if (filled(value) && (n(value) === null || n(value) < min || n(value) > max || integer && !Number.isInteger(n(value)))) add(field,label + ' is invalid')
   }
   for (const [k,l] of [['originalPremium','100% Premium'],['limitOfLiability','Limit'],['aggregateLimit','Aggregate Limit']]) {
-    if (k === 'aggregateLimit' && cglQsScope(p)) continue
+    // Aggregate is editable for all CGL placements.
     numeric(k,p[k],l,k === 'originalPremium' && p.parentTwRef ? -Infinity : 0)
   }
   for (const key of ['riCommPct','taxPct']) numeric(key,p[key],key,0,100)

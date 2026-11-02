@@ -1,3 +1,4 @@
+from .sum_insured import all_facility
 """Shared premium ledgers and Property-only underwriting validation.
 
 The server owns the accounting version. Protected historical calculations and
@@ -307,7 +308,7 @@ def field_issues(p):
     def filled(value):return value is not None and str(value).strip()!=''
     for key,label in [('originalInsuredCn','Original insured (CN)'),('reinsuredRetention',"Reinsured's Retention"),
                       ('riCommPct','Cedant Commission'),('taxPct','Cedant Tax'),('paymentTermsDays','Cedant Payment Terms (Days)')]:
-        if not filled(p.get(key)):add(key,label)
+        if not (key == 'reinsuredRetention' and all_facility(p)) and not filled(p.get(key)):add(key,label)
     if p.get('policyFrom') and p.get('policyTo') and p['policyTo']<=p['policyFrom']:
         add('policyTo','Expiration date must be later than Effective date')
     if sum(num(r.get('sharePct')) for r in rows(p.get('reinsurers'))) > 100:

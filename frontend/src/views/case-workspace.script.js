@@ -42,14 +42,14 @@ import { transactionNumber } from '../alpha/transactionNumber'
 import { swissCglScope } from '../alpha/swissCgl'
 import { isSwissFacility, isSwissPropertyCase } from '../alpha/swissFacility'
 import { transactionParty, transactionRecipient, paymentDirection } from '../alpha/transactionParty'
-import { isStandardCgl, emptyCglInformation, cglInformationIssues } from '../alpha/cglInformation'
+import { isStandardCgl, emptyCglInformation, cglInformationIssues, initializeCglAggregate, cglAggregateIssues } from '../alpha/cglInformation'
 import { cglQsScope, cglQsIssues, draftFormatIssues } from '../alpha/cglQs'
 import { useDraftAutosave } from '../alpha/draftAutosave'
 import { insuranceIssues, recomputeRenewal, markRenewalPremium } from '../alpha/endorsementRules'
 import { CGL_INTEREST, cglTypePrefix, cglType, cglTypeIssues, cglUnderlyingIssues, liabilityLimitLabel, cglRiskDetailsIssues, CGL_CLAUSE_PRESETS, cglAnnual } from '../alpha/cglRiskDetails'
 
 const MAX_DOCUMENT_BYTES = 30 * 1024 * 1024 // VM：10 MB（Alpha 5 MB）
-const OPEN_SECTIONS = ['risk', 'security', 'terms', 'information', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'reinsurerPremium', 'split', 'conditions']
+const OPEN_SECTIONS = ['risk', 'security', 'terms', 'information', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'split', 'conditions']
 const headers = {
   cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All outward cases' },
   'case-create': { kicker: 'Placement · Draft', title: 'Account', subtitle: 'Draft — not yet saved' },
@@ -72,7 +72,11 @@ export function useCaseWorkspace() {
   const editingRowVersion = ref(null)
   const editingOriginalStatus = ref('draft')
   const editingAccountingBaseline = ref({})
-  const endorsementFieldsUnlocked = ref(false)
+  const editingEndorsementSection = ref('')
+  const sectionEditTransition = ref(false)
+  let sectionEditEpoch = 0
+  let sectionEditBaseline = ''
+  const endorsementFieldsUnlocked = computed(() => Boolean(draft.parentTwRef) && editingEndorsementSection.value === 'risk')
   const mdmRecords = ref([])
   const caseClauseDraft = reactive({ code: '', title: '' })
   const selectedCase = ref(null)
@@ -108,6 +112,7 @@ export function useCaseWorkspace() {
   let replacingDraft = false
   function replaceDraft(fresh) {
     initializeConstruction(fresh)
+    initializeCglAggregate(fresh)
     replacingDraft = true
     try {
       // Required array fields remain present throughout synchronous Vue watchers.
@@ -120,7 +125,7 @@ export function useCaseWorkspace() {
     }
   }
   const keyInScope = p => propertyScope(p) || cglQsScope(p) && !p.parentTwRef
-  const ordinaryDraftScope = p => Boolean(p.parentTwRef && ['QS','XOL'].includes(p.reinsuranceStructure)) || p.reinsuranceStructure === 'QS' && ['Property','Commercial General Liability'].includes(p.classOfBusiness) && !p.parentTwRef && (swissCglScope(p) || !(p.reinsurers || []).some(r=>/facility|swiss re asia/i.test(r.name || '')))
+  const ordinaryDraftScope = p => isStandardCgl(p) && p.reinsuranceStructure === 'XOL' || Boolean(p.parentTwRef && ['QS','XOL'].includes(p.reinsuranceStructure)) || p.reinsuranceStructure === 'QS' && ['Property','Commercial General Liability'].includes(p.classOfBusiness) && !p.parentTwRef && (swissCglScope(p) || !(p.reinsurers || []).some(r=>/facility|swiss re asia/i.test(r.name || '')))
   const draftFamily = ref('')
   const relaxedDraft = computed(() => activeView.value === 'case-create' && editingOriginalStatus.value === 'draft' && ordinaryDraftScope({...draft,
     classOfBusiness:draft.classOfBusiness || (editingCaseUid.value ? draftFamily.value : ''),
@@ -161,6 +166,16 @@ export function useCaseWorkspace() {
   })
 
   const isCglInformation = computed(() => isStandardCgl(draft))
+  watch(() => [isStandardCgl(draft), draft.limitOfLiability], () => {
+    if (!replacingDraft && isStandardCgl(draft)) initializeCglAggregate(draft)
+  }, { flush:'sync' })
+  function onAggregateInput(value) {
+    const same = value === draft.aggregateLimit || filled(value) && filled(draft.aggregateLimit) && Number.isFinite(Number(value)) && Number(value) === Number(draft.aggregateLimit)
+    if (!same) draft.cglAggregateMode = 'manual'
+    draft.aggregateLimit = value
+  }
+  function followCglAggregate() { draft.cglAggregateMode = 'auto'; initializeCglAggregate(draft) }
+
   const gaBoundRows = new WeakMap()
   watchEffect(() => {
     if (draft.parentTwRef) return
@@ -625,6 +640,10 @@ export function useCaseWorkspace() {
   }
 
   function resetDraft() {
+    sectionEditEpoch++
+    editingEndorsementSection.value = ''
+    sectionEditTransition.value = false
+    sectionEditBaseline = ''
     editingInsuredMaster.value=null
     autoPolicyTo = ''
     const fresh = emptyDraft()
@@ -640,7 +659,6 @@ export function useCaseWorkspace() {
     editingRowVersion.value = null
     editingAccountingBaseline.value = {}
     editingOriginalStatus.value = 'draft'
-    endorsementFieldsUnlocked.value = false
     Object.assign(caseClauseDraft, { code: '', title: '' })
     currencyEdited=false
     draftCreationKey=clientKey()+clientKey()
@@ -683,6 +701,35 @@ export function useCaseWorkspace() {
   function onPolicyFromTimeChange(value) {
     if (['00:00', '12:00'].includes(value) && !propertyInputLocked('policyTo')) draft.policyToTime = value
   }
+  const sectionEditorBusy = computed(() => sectionEditTransition.value || saving.value || reviewPreparing.value || announcing.value)
+  const sectionSnapshot = () => JSON.stringify({ case: plainDraft(), pendingClause: { ...caseClauseDraft } })
+  async function editEndorsementSection(next = '') {
+    if (!draft.parentTwRef || sectionEditorBusy.value || ['security', 'split', 'cedantPremium'].includes(next)) return
+    const previous = editingEndorsementSection.value
+    if (previous === next) return
+    const epoch = sectionEditEpoch
+    sectionEditTransition.value = true
+    try {
+      if (previous) {
+        const saved = relaxedDraft.value ? await draftAutosave.flush(true)
+          : sectionEditBaseline === sectionSnapshot() || Boolean(await saveDraft({ stayInForm: true }))
+        if (epoch !== sectionEditEpoch) return
+        if (!saved) {
+          openSections.value = [...new Set([...openSections.value, previous])]
+          ElMessage.error(autosaveError.value || 'Save this section successfully before closing or editing another section.')
+          return
+        }
+      }
+      editingEndorsementSection.value = next
+      sectionEditBaseline = next ? sectionSnapshot() : ''
+      openSections.value = [...new Set(openSections.value.filter(name => name !== previous).concat(next ? [next] : []))]
+    } finally { if (epoch === sectionEditEpoch) sectionEditTransition.value = false }
+  }
+  const finishEndorsementSection = () => editEndorsementSection('')
+  watch(openSections, sections => {
+    if (loading.value || sectionEditTransition.value || !draft.parentTwRef || !editingEndorsementSection.value) return
+    if (!sections.includes(editingEndorsementSection.value)) void finishEndorsementSection()
+  })
   async function cancelNewCase() { if(relaxedDraft.value && !await draftAutosave.flush(true))return; resetDraft();activeView.value='cases';await loadData();window.scrollTo({top:0}) }
   function backToCases() { selectedCase.value = null; caseDetailTab.value = 'overview'; activeView.value = 'cases'; window.scrollTo({ top: 0 }) }
 
@@ -786,7 +833,7 @@ export function useCaseWorkspace() {
       if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.deductibles || '').trim()) {
         return ElMessage.warning('Complete Deductibles in the case before generating a Cover Note.')
       }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.reinsuredRetention || '').trim()) {
+      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !allSumInsuredFacility(selectedPayload.value) && !String(selectedPayload.value.reinsuredRetention || '').trim()) {
         return ElMessage.warning('Complete Reinsured’s Retention in the case before generating a Cover Note.')
       }
       if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !String(row?.address || '').trim()))) {
@@ -1281,7 +1328,24 @@ export function useCaseWorkspace() {
   }
   watch(()=>(Array.isArray(draft.reinsurers)?draft.reinsurers:[]).map(r=>r?.name||'').join('|'),()=>{if(!replacingDraft && !draft.parentTwRef && fixedCedant(draft)){draft.paymentTermsDays=90;draft.performanceInstallments.forEach(p=>p.paymentTermsDays=90)}},{flush:'sync'})
   function addReinsurer() { if (keyInScope(draft)) draft.performanceInstallments.forEach(p => {p.reinsurerPaymentTerms ||= {};p.reinsurerPaymentTerms['r'+(draft.reinsurers.length+1)]=90}); draft.reinsurers.push({ clientKey: clientKey(), name: '', sharePct: null, premium: null, riCommPct: null, taxPct: 1, paymentTermsDays: keyInScope(draft) ? 90 : null, foreignBroker: '', settlementRef: '' }) }
-  function removeReinsurer(index) { if (draft.reinsurers.length > 1) { draft.performanceInstallments.forEach(period => {const old=period.reinsurerPaymentTerms || {};period.reinsurerPaymentTerms=Object.fromEntries(draft.reinsurers.map((r,i)=>i).filter(i=>i!==index).map((i,j)=>['r'+(j+1),old['r'+(i+1)]]))}); draft.reinsurers.splice(index, 1); syncCaseClauses(); syncSumInsuredMode() } }
+  const removingReinsurer = ref(false)
+  async function removeReinsurer(index) {
+    if (draft.parentTwRef || draft.reinsurers.length <= 1 || removingReinsurer.value) return
+    const row = draft.reinsurers[index]
+    if (!row) return
+    removingReinsurer.value = true
+    try {
+      await ElMessageBox.confirm(`Remove ${row.name || ('Reinsurer ' + (index + 1))} and all of its premium, deductions, tax and payment terms?`, 'Remove reinsurer?', { type: 'warning', confirmButtonText: 'Remove reinsurer', cancelButtonText: 'Keep reinsurer' })
+      index = draft.reinsurers.indexOf(row)
+      if (index < 0 || draft.reinsurers.length <= 1 || draft.parentTwRef) return
+      draft.performanceInstallments.forEach(period => {const old=period.reinsurerPaymentTerms || {};period.reinsurerPaymentTerms=Object.fromEntries(draft.reinsurers.map((r,i)=>i).filter(i=>i!==index).map((i,j)=>['r'+(j+1),old['r'+(i+1)]]))}); draft.reinsurers.splice(index, 1); syncCaseClauses(); syncSumInsuredMode()
+      if (relaxedDraft.value) {
+        await nextTick()
+        if (!await draftAutosave.flush(true)) ElMessage.error(autosaveError.value || 'Save the Draft before leaving this page.')
+      }
+    } catch { /* Cancellation preserves the card and its values. */ }
+    finally { removingReinsurer.value = false }
+  }
   function addSumInsured(locationIndex = 0) { draft.sumInsured.push({ clientKey: clientKey(), category: '', amount: null, locationIndex: allFacilityReinsurers.value ? null : locationIndex }) }
   function removeSumInsured(index) { if (draft.sumInsured.length > 1) draft.sumInsured.splice(index, 1) }
 
@@ -1533,11 +1597,10 @@ export function useCaseWorkspace() {
       editingCaseUid.value = body.case.caseUid
       editingRowVersion.value = Number(body.case.rowVersion)
       editingOriginalStatus.value = body.case.status || 'draft'
-      endorsementFieldsUnlocked.value = false
+        openSections.value = draft.parentTwRef ? [] : [...OPEN_SECTIONS]
       activeView.value = 'case-create'
       await nextTick()
       draftAutosave.reset()
-      openSections.value = [...OPEN_SECTIONS]
       window.scrollTo({ top: 0 })
     } catch (err) {
       shell.error = err instanceof Error ? err.message : String(err)
@@ -1645,6 +1708,7 @@ export function useCaseWorkspace() {
     cglTypeIssues(value).forEach(issue => add(issue.label))
     cglRiskDetailsIssues(value).forEach(issue => add(issue.label))
     cglInformationIssues(value).forEach(issue => add(issue.label))
+    cglAggregateIssues(value).forEach(issue => add(issue.label))
     if (!filled(value?.lossAdvisedDate)) add('Loss record advised by broker on')
     if (!validLossRecordYears(value?.lossRecordYears, value)) add('Loss history years')
     const lossRecord = Array.isArray(value?.lossRecord) ? value.lossRecord : []
@@ -1703,6 +1767,7 @@ export function useCaseWorkspace() {
     if (key === 'lossAdvisedDate' && lossSaveAttempted.value) return !filled(draft.lossAdvisedDate)
     if (key === 'lossRecordYears' && lossSaveAttempted.value) return !validLossRecordYears(draft.lossRecordYears, draft)
     if (!reviewAttempted.value) return false
+    if (key==='aggregateLimit' && isStandardCgl(draft)) return cglAggregateIssues(draft).length > 0
     if (key==='construction' && constructionScope(draft)) return constructionIssues(draft).length>0
     if (placingRulesEnabled(draft) && key === "reinsuredRetention") return false
     if (newCgl(draft) && key === "interest") return false
@@ -1732,6 +1797,8 @@ export function useCaseWorkspace() {
     if(integrity.length)return integrity.map(issue=>({section:'security',label:issue.label}))
     const issues = []
     const add = (section, label) => {
+      if (draft.parentTwRef && ['Case Owner', 'Account Executive'].includes(label)) section = 'personnel'
+      if (draft.parentTwRef && ['Endorsement effective date', 'At least one endorsement type', 'Endorsement wording'].includes(label)) section = 'endorsementDetails'
       const combined = draft.classOfBusiness === 'Property'
         ? ['occupation', 'sumInsured', 'loss', 'specialAgreement'].includes(section)
         : isCglInformation.value && ['loss', 'specialAgreement'].includes(section)
@@ -1784,6 +1851,7 @@ export function useCaseWorkspace() {
     cglTypeIssues(draft).forEach(issue => add('risk', issue.label))
     cglRiskDetailsIssues(draft).forEach(issue => add('risk', issue.label))
     cglInformationIssues(draft).forEach(issue => add('information', issue.label))
+    cglAggregateIssues(draft).forEach(issue => add('terms', issue.label))
     if (!filled(draft.lossAdvisedDate)) add('loss', 'Loss record advised by broker on')
     if (!validLossRecordYears(draft.lossRecordYears, draft)) add('loss', 'Loss history years')
     if (filled(draft.lossRecordYears) && Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) add('loss', 'Loss Record must be empty when loss history years is 0')
@@ -1805,11 +1873,11 @@ export function useCaseWorkspace() {
       if (!splitResult.valid) add('split', splitResult.message)
     }
     draft.reinsurers.forEach((row, index) => {
-      if (!filled(row.premium)) add('reinsurerPremium', `Reinsurer ${index + 1} Premium`)
-      if (!filled(row.riCommPct)) add('reinsurerPremium', `Reinsurer ${index + 1} Deductions`)
-      if (!filled(row.taxPct)) add('reinsurerPremium', `Reinsurer ${index + 1} Tax`)
+      if (!filled(row.premium)) add('security', `Reinsurer ${index + 1} Premium`)
+      if (!filled(row.riCommPct)) add('security', `Reinsurer ${index + 1} Deductions`)
+      if (!filled(row.taxPct)) add('security', `Reinsurer ${index + 1} Tax`)
     })
-    propertyIssues(draft).forEach(issue => add(issue.field.startsWith('performanceInstallments') || ['originalPremium','riCommPct','taxPct','paymentTermsDays'].includes(issue.field) ? 'cedantPremium' : issue.field.startsWith('reinsurers') ? 'reinsurerPremium' : issue.field === 'splitParties' ? 'split' : 'risk', issue.label))
+    propertyIssues(draft).forEach(issue => add(issue.field.startsWith('performanceInstallments') || ['originalPremium','riCommPct','taxPct','paymentTermsDays'].includes(issue.field) ? 'cedantPremium' : issue.field.startsWith('reinsurers') ? 'security' : issue.field === 'splitParties' ? 'split' : 'risk', issue.label))
     issues.push(...constructionIssues(draft).map(i=>({...i,section:'occupation'})))
     return adjustClientIssues(draft, issues.concat(shareClientIssues(draft, editingAccountingBaseline.value).map(i => ({...i,section: "security"}))))
   }
@@ -1830,6 +1898,8 @@ export function useCaseWorkspace() {
     resetDocumentForm()
     announceConfirmed.value = false
     await loadCaseDocuments()
+    editingEndorsementSection.value = ''
+    sectionEditBaseline = ''
     return true
   }
 
@@ -1960,7 +2030,7 @@ export function useCaseWorkspace() {
     }
     const premiumError = premiumInputErrors(draft, selectedPayload.value)[0]
     if (premiumError) {
-      openSections.value = [...new Set([...openSections.value, 'cedantPremium', 'reinsurerPremium'])]
+      openSections.value = [...new Set([...openSections.value, 'cedantPremium', 'security'])]
       ElMessage.error(premiumError)
       return
     }
@@ -2101,10 +2171,10 @@ export function useCaseWorkspace() {
 
   return {
     insuranceValidationIssues, can, activeView, currentHeader, loading, saving, saveMessage,
-    insuranceIssues, markRenewalPremium, isCglInformation, isStandardCgl, cglInformationIssues, displayTwRef, isAuwReinsurer, isAllianzReinsurer, isAllianzTarget, hasAllianz, isGreatAmericanTarget, hasGreatAmerican, isQbeTarget, hasQbe, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange, onPolicyFromTimeChange,
+    onAggregateInput, followCglAggregate, insuranceIssues, markRenewalPremium, isCglInformation, isStandardCgl, cglInformationIssues, displayTwRef, isAuwReinsurer, isAllianzReinsurer, isAllianzTarget, hasAllianz, isGreatAmericanTarget, hasGreatAmerican, isQbeTarget, hasQbe, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange, onPolicyFromTimeChange,
     recycleSaving, recycleDraft,
     addSituation, removeSituation, addReinsurer, removeReinsurer, addSumInsured, removeSumInsured,
-    isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, endorsementFieldsUnlocked, startEditCase, startViewCase,
+    isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, editingEndorsementSection, sectionEditorBusy, editEndorsementSection, finishEndorsementSection, startEditCase, startViewCase,
     casePreviewVisible, casePreview, openCasePreview, openPreviewFullCase, formatPolicyDateTime, formatPolicyPeriod,
     refreshSelectedCase, selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarning, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
@@ -2120,7 +2190,7 @@ export function useCaseWorkspace() {
     masterOptions, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected, facilityStructureAllowed,
     draftClauseDetails, caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel, CGL_CLAUSE_PRESETS, toggleCglTemplateClause, cglAnnual,
     reviewPreparing, reviewDraftCase, reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,
-    isSwissCgl, isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
+    isSwissCgl, isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allSumInsuredFacility, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
     addInstallment, removeInstallment, onInstallmentToggle, installmentRowInvalid,
     propertyScope, propertyEnabled, fixedCedant, propertyInputLocked, validPostcode, onInstallmentDateChange, onInstallmentMonthChange, onSplitPctChange,
     splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,

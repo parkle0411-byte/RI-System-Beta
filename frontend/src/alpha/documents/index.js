@@ -14,7 +14,7 @@ const SCRIPTS = ['docx-templates.js', 'vm-docx-generator.js']
 function addScript(name) {
   return new Promise((resolve, reject) => {
     const el = document.createElement('script')
-    el.src = `${import.meta.env.BASE_URL}alpha-documents/${name}?v=endorsement-notes-20261029`
+    el.src = `${import.meta.env.BASE_URL}alpha-documents/${name}?v=cgl-aggregate-retroactive-20261029`
     el.async = false
     el.onload = resolve
     el.onerror = () => { el.remove(); reject(new Error('Document generator could not be loaded.')) }

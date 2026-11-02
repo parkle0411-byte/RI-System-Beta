@@ -1,7 +1,10 @@
 <script setup>
 // Case workspace template is maintained directly in this file.
 // Form state and actions are maintained in case-workspace.script.js.
-import { ref } from 'vue'
+import { computed, ref, provide, watch } from 'vue'
+import ClauseList from '../components/ClauseList.vue'
+import FacilityRulesDialog from '../components/FacilityRulesDialog.vue'
+import CaseFormSection, { SECTION_EDIT_CONTEXT } from '../components/CaseFormSection.vue'
 import PlacingSlipPanel from '../components/PlacingSlipPanel.vue'
 import PropertyConstruction from '../components/PropertyConstruction.vue'
 import { placingRulesEnabled, newCgl, propertyExtraFields } from '../alpha/placingRules'
@@ -23,7 +26,7 @@ const {
   displayTwRef, isAuwReinsurer, isAllianzReinsurer, isAllianzTarget, hasAllianz, isGreatAmericanTarget, hasGreatAmerican, isQbeTarget, hasQbe, isPureAuwCase, requiresManualTwRef, hasManualTwRefReinsurer, filters, filteredCases, draft, openSections, startNewCase, cancelNewCase, onPolicyFromChange, onPolicyFromTimeChange,
   recycleSaving, recycleDraft,
   addSituation, removeSituation, addReinsurer, removeReinsurer, addSumInsured, removeSumInsured,
-  insuranceValidationIssues, markRenewalPremium, isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, endorsementFieldsUnlocked, startEditCase, startViewCase,
+  insuranceValidationIssues, markRenewalPremium, isEditing, isEndorsementDraft, auwRefLocked, editingRowVersion, editingOriginalStatus, editingEndorsementSection, sectionEditorBusy, editEndorsementSection, finishEndorsementSection, startEditCase, startViewCase,
   casePreviewVisible, casePreview, openCasePreview, openPreviewFullCase, formatPolicyDateTime, formatPolicyPeriod,
   selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarning, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
   caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
@@ -38,7 +41,7 @@ const {
   masterOptions, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected, facilityStructureAllowed,
   draftClauseDetails, caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel, CGL_CLAUSE_PRESETS, toggleCglTemplateClause, cglAnnual,
   reviewPreparing, reviewDraftCase, reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,
-  isCglInformation, isStandardCgl, cglInformationIssues, isSwissCgl, isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
+  onAggregateInput, followCglAggregate, isCglInformation, isStandardCgl, cglInformationIssues, isSwissCgl, isSwissProperty, isSwissFacility, reviewDialogVisible, totalOrderHereon, totalSumInsured, draftSumInsuredWarning, sumInsuredGroups, unassignedSumInsured, sumGroupInvalid, allSumInsuredFacility, allFacilityReinsurers, hasNonFacilityReinsurer, lossRecordSummary, lossRecordYearsMin, installmentAllocations, installmentStatus,
   addInstallment, removeInstallment, onInstallmentToggle, installmentRowInvalid,
   propertyScope, propertyEnabled, fixedCedant, propertyInputLocked, validPostcode, onInstallmentDateChange, onInstallmentMonthChange, onSplitPctChange,
   splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
@@ -47,6 +50,33 @@ const {
   statusLabel, loadData, saveDraft, cglQsScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected,
   caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel
 } = useCaseWorkspace()
+provide(SECTION_EDIT_CONTEXT, { guarded: isEndorsementDraft, active: editingEndorsementSection, busy: sectionEditorBusy, edit: editEndorsementSection, done: finishEndorsementSection })
+
+const facilityRulesVisible = ref(false)
+const facilityRules = computed(() => {
+  const groups = [], seen = new Set()
+  for (const row of draft.reinsurers) {
+    if (!String(row.name || '').trim() || seen.has(row.name)) continue
+    const notes = []
+    if (isAuwReinsurer(row.name)) notes.push('AUW is bound to Howden Specialty Limited.', 'Month-end + 120 calendar days. Accounting date is 10 days earlier.')
+    else if (isAllianzTarget(draft,row.name)) notes.push('Month-end + 90 calendar days due. Accounting reminder: the third following month-end minus 10 calendar days; no holiday adjustment.')
+    else if (isQbeTarget(draft,row.name)) notes.push('QBE underwriting quarters: Aug–Oct, Nov–Jan, Feb–Apr, May–Jul. Quarter-end + 90 calendar days due; + 80 days reminder; no holiday adjustment.')
+    else if (isGreatAmericanTarget(draft,row.name)) notes.push('Quarter-end + 90 calendar days. Reminder: quarter-end + 80 days; no holiday adjustment.')
+    else if (isSwissCgl.value && isSwissFacility(row.name)) notes.push('Base month-end + 90 calendar days; Accounting reminder 10 days before due. No holiday adjustment.')
+    else if (isSwissProperty.value && isSwissFacility(row.name)) notes.push('Swiss settlement dates: 02/14, 05/14, 08/14 and 11/14.')
+    if (notes.length || /\(Facility\)\s*$/i.test(row.name)) { seen.add(row.name); groups.push({name:row.name,notes}) }
+  }
+  const common = []
+  if (groups.length) {
+    if (isSwissCgl.value) common.push('Fixed 90 calendar days; Accounting reminder 15 days before due. Swiss payment deadlines do not restart after late Cedant receipts.')
+    else if (isSwissProperty.value) common.push('Fixed 90 calendar days; Accounting reminder is day 80. Swiss settlement periods use day 90 and actual automatic-settlement confirmation dates.')
+    else if (fixedCedant(draft)) common.push('Fixed 90 calendar days; Cedant reminder is day 75.')
+    if (allFacilityReinsurers.value) common.push('All selected reinsurers are Facility arrangements. Their standard terms are applied through fixed clauses.')
+  }
+  return {groups,common,clauseHint:groups.length > 0 && !hasNonFacilityReinsurer.value}
+})
+watch(() => [activeView.value, facilityRules.value.groups.length], ([view,count]) => { if (view !== 'case-create' || !count) facilityRulesVisible.value=false })
+
 const referenceEditor = ref(null)
 const formatShare = value => value == null || value === "" ? "—" : Number(value).toLocaleString("en-US", {maximumFractionDigits: 8})
 async function refreshReferences() { await refreshSelectedCase(); await loadData() }
@@ -221,7 +251,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
 
                     <section class="overview-card">
                       <h2>Reinsurance conditions</h2>
-                      <div class="review-list"><div v-for="clause in selectedOverview.clauseDetails" :key="'overview-clause-' + clause.code"><strong>{{ clause.code }}</strong><span>{{ clause.title }}</span></div></div>
+                      <ClauseList :clauses="selectedOverview.clauseDetails" />
                     </section>
                   </div>
 
@@ -270,7 +300,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                       <h2>Terms & conditions</h2>
                       <dl class="overview-kv">
                         <dt>{{ liabilityLimitLabel(selectedPayload) }}</dt><dd>{{ selectedPayload.currency || '—' }} {{ formatCurrency(selectedPayload.limitOfLiability, selectedPayload.currency) }}<span v-if="newCgl(selectedPayload)"> each occurrence</span></dd>
-                        <template v-if="(!cglQsScope(selectedPayload) || placingRulesEnabled(selectedPayload)) && (!isStandardCgl(selectedPayload) || filled(selectedPayload.aggregateLimit))"><dt>Aggregate Limit</dt><dd>{{ selectedPayload.aggregateLimit === null || selectedPayload.aggregateLimit === undefined ? '—' : (selectedPayload.currency || '—') + ' ' + formatCurrency(selectedPayload.aggregateLimit, selectedPayload.currency) }}</dd></template>
+                        <template v-if="(!cglQsScope(selectedPayload) || isStandardCgl(selectedPayload) || placingRulesEnabled(selectedPayload)) && (!isStandardCgl(selectedPayload) || filled(selectedPayload.aggregateLimit))"><dt>Aggregate Limit</dt><dd>{{ selectedPayload.aggregateLimit === null || selectedPayload.aggregateLimit === undefined ? '—' : (selectedPayload.currency || '—') + ' ' + formatCurrency(selectedPayload.aggregateLimit, selectedPayload.currency) }}</dd></template>
                         <template v-if="isStandardCgl(selectedPayload) ? String(selectedPayload.reinsuranceStructure || '').trim().toUpperCase() === 'XOL' : selectedPayload.reinsuranceStructure !== 'QS'"><dt>Underlying Limits</dt><dd :style="isStandardCgl(selectedPayload) ? { whiteSpace: 'pre-wrap' } : null">{{ selectedPayload.underlyingLimits || '—' }}</dd></template>
                         <template v-if="!isStandardCgl(selectedPayload) || filled(selectedPayload.subLimits)"><dt>Sub-Limits</dt><dd :style="isStandardCgl(selectedPayload) ? { whiteSpace: 'pre-wrap' } : null">{{ selectedPayload.subLimits || '—' }}</dd></template>
                         <template v-if="isStandardCgl(selectedPayload)"><dt>Coverages</dt><dd style="white-space: pre-wrap">{{ cglCoveragesText(selectedPayload) || '—' }}</dd></template>
@@ -348,7 +378,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                       <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; !String(selectedPayload.limitOfLiability ?? '').trim()))" type="warning" :closable="false" show-icon :title="`Complete ${liabilityLimitLabel(selectedPayload)} in the case before generating a Cover Note.`"></el-alert>
                       <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; String(selectedPayload.reinsuranceStructure || '').trim() === 'XOL' &amp;&amp; !String(selectedPayload.underlyingLimits || '').trim()))" type="warning" :closable="false" show-icon title="Complete Underlying Limits in the case before generating a Cover Note."></el-alert>
                       <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !String(selectedPayload.deductibles || '').trim()))" type="warning" :closable="false" show-icon title="Complete Deductibles in the case before generating a Cover Note."></el-alert>
-                      <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !String(selectedPayload.reinsuredRetention || '').trim()))" type="warning" :closable="false" show-icon title="Complete Reinsured’s Retention in the case before generating a Cover Note."></el-alert>
+                      <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !allSumInsuredFacility(selectedPayload) &amp;&amp; !String(selectedPayload.reinsuredRetention || '').trim()))" type="warning" :closable="false" show-icon title="Complete Reinsured’s Retention in the case before generating a Cover Note."></el-alert>
                       <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.situations) || !selectedPayload.situations.length || selectedPayload.situations.some(row =&gt; !String(row?.address || '').trim()))))" type="warning" :closable="false" show-icon :title="isStandardCgl(selectedPayload) ? 'Complete Principal Address in the case before generating a Cover Note.' : 'Complete Risk Address for every Situation in the case before generating a Cover Note.'"></el-alert>
                       <el-alert v-if="!isQsWordCase &amp;&amp; !placingRulesEnabled(selectedPayload) &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; (!Array.isArray(selectedPayload.situations) || !selectedPayload.situations.length || selectedPayload.situations.some(row =&gt; !validPostcode(row?.postcode,selectedPayload)))))" type="warning" :closable="false" show-icon :title="isStandardCgl(selectedPayload) ? 'Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note.' : 'Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.'"></el-alert>
                       <el-alert v-if="!isQsWordCase &amp;&amp; (!isTreatyDocumentCase &amp;&amp; (!selectedPayload.parentTwRef &amp;&amp; ['QS', 'XOL'].includes(String(selectedPayload.reinsuranceStructure || '').trim()) &amp;&amp; !String(selectedPayload.originalPremium ?? '').trim()))" type="warning" :closable="false" show-icon title="Complete 100% Premium in the case before generating a Cover Note or Debit Note."></el-alert>
@@ -699,7 +729,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <el-form-item label="Class" required :class="{ 'is-required-error': fieldInvalid('classOfBusiness') }"><el-select :model-value="draft.classOfBusiness" :disabled="isEndorsementDraft" filterable clearable placeholder="Select class" @update:model-value="onClassSelected"><el-option v-for="item in masterOptions('class', draft.classOfBusiness)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : (item.code ? item.name + ' · ' + item.code : item.name)" :value="item.name"></el-option></el-select></el-form-item>
                 </div>
                 <p class="document-help">Select a reinsurance structure and class to enter the case details.</p>
-                <el-switch v-if="isEndorsementDraft" data-testid="case-risk-fields-unlock" v-model="endorsementFieldsUnlocked" inline-prompt active-text="Risk fields unlocked" inactive-text="Risk fields locked"></el-switch>
+                <p v-if="isEndorsementDraft" class="document-help">Inherited sections are read-only. Use Edit on the section you need to change; only one section can be edited at a time.</p>
               </section>
               <template v-if="draft.reinsuranceStructure && draft.classOfBusiness">
               <section v-if="hasManualTwRefReinsurer && !isEndorsementDraft" class="overview-card" data-testid="manual-tw-ref-section">
@@ -708,10 +738,10 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <p class="document-help">Enter TW Ref. (for AUW). Required before saving Draft and unique across cases. Pure AUW uses this as its only TW reference; mixed placements also receive an automatic reference.</p>
                 </el-form-item>
               </section>
-              <section v-if="isEndorsementDraft" class="overview-card endorsement-personnel"><div class="form-grid cols-2">
+              <el-collapse v-if="isEndorsementDraft" v-model="openSections" class="endorsement-personnel"><CaseFormSection name="personnel" title="Case Owner &amp; Account Executive"><div class="form-grid cols-2">
                 <el-form-item label="Case Owner" required><el-select v-model="draft.ownerPersonnelId" filterable clearable @change="onOwnerSelected"><el-option v-for="item in personnelRecords.filter(row => row.isActive)" :key="item.id" :label="item.name" :value="item.id" /></el-select></el-form-item>
                 <el-form-item label="Account Executive" required><el-select v-model="draft.ae" :disabled="propertyInputLocked('ae')" filterable clearable><el-option v-for="item in masterOptions('ae', draft.ae)" :key="item.id" :label="item.name" :value="item.name" /></el-select></el-form-item>
-              </div></section>
+              </div></CaseFormSection></el-collapse>
               <section v-if="isEndorsementDraft" class="overview-card endorsement-editor">
                 <div class="section-heading"><div><span class="pending-badge">Endorsement {{ draft.endorsementSeq || '' }}</span><h2>Endorsement details</h2><p>Parent reference: {{ draft.parentTwRef }}</p></div></div>
                 <div class="form-grid cols-3">
@@ -720,9 +750,9 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <el-form-item label="Endorsement wording" required :class="{ 'is-required-error': fieldInvalid('endoText') }"><el-input v-model="draft.endoText" type="textarea" :rows="4" maxlength="5000" show-word-limit></el-input></el-form-item>
                 </div>
               </section>
-              <fieldset class="case-fieldset" :disabled="isEndorsementDraft && !endorsementFieldsUnlocked">
+
               <el-collapse v-model="openSections">
-                <el-collapse-item name="risk" title="Risk Details">
+                <CaseFormSection name="risk" title="Risk Details">
                   <div class="form-grid cols-4">
                     <el-form-item v-if="!isEndorsementDraft" label="Case Owner" required :class="{ 'is-required-error': fieldInvalid('ownerPersonnelId') }"><el-select v-model="draft.ownerPersonnelId" filterable clearable placeholder="Select active Personnel" @change="onOwnerSelected"><el-option v-for="item in personnelRecords.filter(row => row.isActive)" :key="'owner-' + item.id" :label="item.name" :value="item.id"></el-option></el-select></el-form-item>
                     <el-form-item v-if="!isEndorsementDraft" label="Account Executive" required :class="{ 'is-required-error': fieldInvalid('ae') }"><el-select v-model="draft.ae" :disabled="propertyInputLocked('ae')" filterable clearable placeholder="Select Account Executive"><el-option v-for="item in masterOptions('ae', draft.ae)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : item.name" :value="item.name"></el-option></el-select></el-form-item>
@@ -745,27 +775,34 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   </div>
                   <el-form-item label="Interest" :required="!newCgl(draft)" :class="{ 'is-required-error': fieldInvalid('interest') }"><el-input v-model="draft.interest" type="textarea" :rows="3" maxlength="3000" show-word-limit></el-input></el-form-item>
                   <CglCoverages v-if="isCglInformation" :payload="draft" :review-attempted="reviewAttempted" />
-                </el-collapse-item>
+                </CaseFormSection>
 
-                <el-collapse-item name="security" title="Schedule of Security">
-                  <div v-for="(row,index) in draft.reinsurers" :key="row.clientKey" class="repeat-card">
-                    <div class="repeat-heading"><h3>Reinsurer {{ index + 1 }}</h3><el-button text type="danger" :disabled="isEndorsementDraft || draft.reinsurers.length === 1" @click="removeReinsurer(index)">Remove</el-button></div>
+                <CaseFormSection name="security" title="Schedule of Security" direct>
+                  <div v-if="facilityRules.groups.length" class="security-tools"><el-button size="small" @click="facilityRulesVisible = true" data-testid="facility-rules-button">查看 Facility 規則</el-button></div>
+                  <p v-if="isEndorsementDraft" class="document-help" data-testid="endorsement-premium-hint">Enter this endorsement's premium change: positive for additional premium, negative for return premium.</p>
+                  <div v-for="(row,index) in draft.reinsurers" :key="row.clientKey" class="repeat-card reinsurer-card" data-testid="reinsurer-card">
+                    <div class="repeat-heading"><h3>Reinsurer</h3><el-button text type="danger" :disabled="isEndorsementDraft || draft.reinsurers.length === 1" @click="removeReinsurer(index)">Remove</el-button></div>
                     <div class="form-grid cols-4">
                       <el-form-item label="Reinsurer" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'name') }"><el-select v-model="row.name" :disabled="isEndorsementDraft" filterable clearable placeholder="Select reinsurer" @change="onReinsurerSelected(row)"><el-option v-for="item in masterOptions('reinsurer', row.name)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : item.name" :value="item.name"></el-option></el-select></el-form-item>
                       <el-form-item label="Order Hereon (%)" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'sharePct') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.sharePct" :disabled="isEndorsementDraft" :min="0" :max="100" :precision="8" :controls="false" placeholder="Empty by default"></DraftNumber></el-form-item>
-                      <el-form-item label="Foreign RI Broker"><el-select v-model="row.foreignBroker" :disabled="isEndorsementDraft || isAuwReinsurer(row.name)" filterable clearable placeholder="Select foreign RI broker"><el-option v-for="item in masterOptions('foreign_broker', row.foreignBroker)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : item.name" :value="item.name"></el-option></el-select><small v-if="isAuwReinsurer(row.name)">AUW is bound to Howden Specialty Limited.</small></el-form-item>
-                      <el-form-item label="Reinsurer Ref."><el-input v-model="row.settlementRef" maxlength="160" placeholder="Settlement reference"></el-input></el-form-item>
-                      <el-form-item :label="isAuwReinsurer(row.name) ? 'AUW payment terms (days)' : 'Payment Terms (Days)'" :required="keyInScope(draft)" :class="{ 'is-required-error': keyInScope(draft) && rowInvalid('reinsurers',index,'paymentTermsDays') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.paymentTermsDays" :disabled="propertyInputLocked('riDays',index) || isAuwReinsurer(row.name) || isAllianzTarget(draft,row.name) || isGreatAmericanTarget(draft,row.name) || isQbeTarget(draft,row.name) || (isSwissProperty && isSwissFacility(row.name))" :min="15" :precision="0" :controls="false" placeholder="Required for this period"></DraftNumber><small v-if="isAuwReinsurer(row.name)">Month-end + 120 calendar days. Accounting date is 10 days earlier.</small><small v-else-if="isAllianzTarget(draft,row.name)">Month-end + 90 calendar days. Accounting reminder: month-end + 80 days; no holiday adjustment.</small><small v-else-if="isQbeTarget(draft,row.name)">QBE underwriting quarters: Aug–Oct, Nov–Jan, Feb–Apr, May–Jul. Quarter-end + 90 calendar days due; + 80 days reminder; no holiday adjustment.</small><small v-else-if="isGreatAmericanTarget(draft,row.name)">Quarter-end + 90 calendar days. Reminder: quarter-end + 80 days; no holiday adjustment.</small><small v-else-if="isSwissCgl && isSwissFacility(row.name)">Base month-end + 90 calendar days; Accounting reminder 10 days before due. No holiday adjustment.</small><small v-else-if="isSwissProperty && isSwissFacility(row.name)">Swiss settlement dates: 02/14, 05/14, 08/14 and 11/14.</small></el-form-item>
+                      <el-form-item label="Foreign RI Broker"><el-select v-model="row.foreignBroker" :disabled="isEndorsementDraft || isAuwReinsurer(row.name)" filterable clearable placeholder="Select foreign RI broker"><el-option v-for="item in masterOptions('foreign_broker', row.foreignBroker)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : item.name" :value="item.name"></el-option></el-select></el-form-item>
+                      <el-form-item label="Reinsurer Ref."><el-input :disabled="isEndorsementDraft" v-model="row.settlementRef" maxlength="160" placeholder="Settlement reference"></el-input></el-form-item>
+
+                    </div>
+                    <div class="form-grid cols-4"><el-form-item :label="`Premium (${draft.currency || '—'})`" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'premium') }"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="row.premium" @update:model-value="markRenewalPremium(draft,'reinsurers.'+index+'.premium')" :disabled="propertyInputLocked('riMoney',index)" :min="isEndorsementDraft ? undefined : 0" :controls="false"></DraftNumber></el-form-item><el-form-item label="Deductions (%)" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'riCommPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.riCommPct" :disabled="isEndorsementDraft || propertyInputLocked('riMoney',index)" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item><el-form-item label="Tax (%)" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'taxPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.taxPct" :disabled="isEndorsementDraft || isAuwReinsurer(row.name) || propertyInputLocked('riMoney',index)" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item>
+                      <el-form-item :label="isAuwReinsurer(row.name) ? 'AUW payment terms (days)' : 'Payment Terms (Days)'" :required="keyInScope(draft)" :class="{ 'is-required-error': keyInScope(draft) && rowInvalid('reinsurers',index,'paymentTermsDays') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.paymentTermsDays" :disabled="propertyInputLocked('riDays',index) || isAuwReinsurer(row.name) || isAllianzTarget(draft,row.name) || isGreatAmericanTarget(draft,row.name) || isQbeTarget(draft,row.name) || (isSwissProperty && isSwissFacility(row.name))" :min="15" :precision="0" :controls="false" placeholder="Required for this period"></DraftNumber></el-form-item>
                     </div>
                   </div>
                   <el-button class="secondary-button" :disabled="isEndorsementDraft" @click="addReinsurer">+ Add reinsurer</el-button>
-                </el-collapse-item>
+                </CaseFormSection>
 
-                <el-collapse-item name="terms" title="Terms & Conditions">
-                  <el-alert v-if="allFacilityReinsurers" class="case-readiness-alert" type="info" :closable="false" show-icon title="All selected reinsurers are Facility arrangements" description="Their standard terms are applied through fixed clauses; the Development Facility rules are active for this case."></el-alert>
+                <CaseFormSection name="terms" title="Terms & Conditions">
                   <div class="form-grid cols-2">
                     <el-form-item :label="liabilityLimitLabel(draft)" required :class="{ 'is-required-error': fieldInvalid('limitOfLiability') }"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="draft.limitOfLiability" :min="0" :controls="false"></DraftNumber><span v-if="newCgl(draft)">each occurrence</span></el-form-item>
-                    <el-form-item v-if="!cglQsScope(draft) || placingRulesEnabled(draft)" :label="isCglInformation ? 'Aggregate Limit' : 'Aggregate Limit (Policy Limit)'"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="draft.aggregateLimit" :min="0" :controls="false"></DraftNumber></el-form-item>
+                    <el-form-item v-if="!cglQsScope(draft) || isCglInformation || placingRulesEnabled(draft)" :label="isCglInformation ? 'Aggregate Limit' : 'Aggregate Limit (Policy Limit)'" :required="isCglInformation" :class="{ 'is-required-error': isCglInformation && fieldInvalid('aggregateLimit') }">
+                      <DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" :model-value="draft.aggregateLimit" @update:model-value="value => isCglInformation ? onAggregateInput(value) : draft.aggregateLimit = value" :min="0" :controls="false" />
+                      <el-button v-if="isCglInformation" size="small" :disabled="draft.cglAggregateMode === 'auto'" @click="followCglAggregate">Follow Limit of Indemnity</el-button>
+                    </el-form-item>
                     <el-form-item v-if="!isCglInformation" label="Basis of Valuation" :required="placingRulesEnabled(draft)" :class="{ 'is-required-error': placingRulesEnabled(draft) &amp;&amp; fieldInvalid('basisOfValuation') }"><el-select v-model="draft.basisOfValuation" clearable placeholder="Select"><el-option label="Actual Cash Value" value="Actual Cash Value"></el-option><el-option label="Replacement Value" value="Replacement Value"></el-option><el-option label="Other" value="Other"></el-option></el-select></el-form-item>
                   </div>
                   <el-form-item v-if="!isCglInformation && draft.basisOfValuation === 'Other'" label="Basis of Valuation — Other" required :class="{ 'is-required-error': fieldInvalid('basisOfValuationOther') }"><el-input v-model="draft.basisOfValuationOther" maxlength="1000"></el-input></el-form-item>
@@ -775,18 +812,18 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <el-form-item v-if="isCglInformation || propertyExtraFields(draft)" label="Self-Insured Retention"><el-input v-model="draft.selfInsuredRetention" type="textarea" :autosize="{ minRows: 2 }" maxlength="3000" show-word-limit></el-input></el-form-item>
                   <el-form-item label="Original Exclusions"><el-input v-model="draft.originalExclusions" type="textarea" :rows="3" maxlength="5000"></el-input></el-form-item>
                   <el-form-item label="Original Conditions" required :class="{ 'is-required-error': fieldInvalid('originalConditions') }"><el-input v-model="draft.originalConditions" type="textarea" :rows="3" maxlength="5000"></el-input></el-form-item>
-                  <el-form-item label="Reinsured's Retention" :required="keyInScope(draft) && !placingRulesEnabled(draft)" :class="{ 'is-required-error': keyInScope(draft) && !placingRulesEnabled(draft) && fieldInvalid('reinsuredRetention') }"><el-input v-model="draft.reinsuredRetention" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item label="Reinstatement Provisions"><el-input v-model="draft.reinstatementProvisions" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Reinsured's Retention" :required="keyInScope(draft) && !placingRulesEnabled(draft)" :class="{ 'is-required-error': keyInScope(draft) && !placingRulesEnabled(draft) && fieldInvalid('reinsuredRetention') }"><el-input v-model="draft.reinsuredRetention" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Reinstatement Provisions"><el-input v-model="draft.reinstatementProvisions" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item v-if="propertyExtraFields(draft)" label="Loss Payee"><el-input v-model="draft.lossPayee" type="textarea" :rows="2" maxlength="3000" /></el-form-item>
                   <el-form-item v-if="newCgl(draft) || propertyExtraFields(draft)" label="Co-Reinsurance Warranty"><el-input v-model="draft.coReinsuranceWarranty" type="textarea" :rows="2" maxlength="3000" /></el-form-item>
                   <el-form-item v-if="isCglInformation || placingRulesEnabled(draft)" label="Notices"><el-input v-model="draft.notices" type="textarea" :autosize="{ minRows: 2 }" maxlength="5000" show-word-limit></el-input></el-form-item>
                   <el-form-item v-if="!isCglInformation" label="Indemnity Period"><el-input v-model="draft.indemnityPeriod" maxlength="1000"></el-input></el-form-item>
-                  <el-form-item label="Express Warranties"><el-input v-model="draft.expressWarranties" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item label="Conditions Precedent"><el-input v-model="draft.conditionsPrecedent" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Express Warranties"><el-input v-model="draft.expressWarranties" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Conditions Precedent"><el-input v-model="draft.conditionsPrecedent" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item label="Subjectivities"><el-input v-model="draft.subjectivities" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                </el-collapse-item>
+                </CaseFormSection>
 
-                <el-collapse-item v-if="isCglInformation" name="information" title="Information">
+                <CaseFormSection v-if="isCglInformation" name="information" title="Information">
                   <CglInformation :relaxed="relaxedDraft" :payload="draft" :review-attempted="reviewAttempted"><template #loss>
                   <div class="form-grid cols-2"><el-form-item label="Loss record advised by broker on" required :class="{ 'is-required-error': fieldInvalid('lossAdvisedDate') }"><DraftDate :relaxed="relaxedDraft" v-model="draft.lossAdvisedDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD"></DraftDate></el-form-item><el-form-item label="Past Year(s)" required :class="{ 'is-required-error': fieldInvalid('lossRecordYears', 'lossRecordYears') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.lossRecordYears" :min="lossRecordYearsMin" :precision="0" :controls="false"></DraftNumber><small>{{ lossRecordYearsMin === 0 ? 'New cases may use 0 only when no losses are recorded.' : 'Renewal cases require at least 1 year.' }}</small></el-form-item></div>
                   <el-alert class="case-readiness-alert" :title="lossRecordSummary" type="info" :closable="false" show-icon></el-alert>
@@ -800,13 +837,12 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                     </div>
                   </div>
                   <el-button class="secondary-button" @click="addLossRecord">+ Add loss</el-button>
-                  <el-form-item label="Additional Loss Record Notes"><el-input v-model="draft.lossRecordText" type="textarea" :rows="3" maxlength="5000" placeholder="Optional notes"></el-input><small>Included below Loss Record in the Cover Note when completed.</small></el-form-item>
                   </template></CglInformation>
-                </el-collapse-item>
+                </CaseFormSection>
 
                 <CaseInformationSections v-if="!isCglInformation" :combined="draft.classOfBusiness === 'Property'">
                 <template #occupation>
-                  <div class="form-grid cols-2"><el-form-item label="Occupation" required :class="{ 'is-required-error': fieldInvalid('occupation') }"><el-input v-model="draft.occupation" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item><PropertyConstruction :disabled="isEndorsementDraft && !endorsementFieldsUnlocked" :payload="draft" :invalid="fieldInvalid('construction')" /></div>
+                  <div class="form-grid cols-2"><el-form-item label="Occupation" required :class="{ 'is-required-error': fieldInvalid('occupation') }"><el-input v-model="draft.occupation" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item><PropertyConstruction :payload="draft" :invalid="fieldInvalid('construction')" /></div>
                 </template>
 
                 <template #sumInsured>
@@ -848,7 +884,6 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                     </div>
                   </div>
                   <el-button class="secondary-button" @click="addLossRecord">+ Add loss</el-button>
-                  <el-form-item label="Additional Loss Record Notes"><el-input v-model="draft.lossRecordText" type="textarea" :rows="3" maxlength="5000" placeholder="Optional notes"></el-input><small>Included below Loss Record in the Cover Note when completed.</small></el-form-item>
                 </template>
 
                 <template #specialAgreement>
@@ -857,14 +892,16 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                 </CaseInformationSections>
 
               </el-collapse>
-              </fieldset>
+
               <el-collapse v-model="openSections">
-                <el-collapse-item name="cedantPremium" title="Cedant Premium">
+                <CaseFormSection name="cedantPremium" title="Cedant Premium" direct>
                   <p v-if="isEndorsementDraft" class="document-help">Enter this endorsement's premium change: positive for additional premium, negative for return premium. The original policy premium remains unchanged.</p>
-                  <div class="form-grid cols-4"><el-form-item label="100% Premium" required :class="{ 'is-required-error': fieldInvalid('originalPremium') }"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="draft.originalPremium" @update:model-value="markRenewalPremium(draft,'originalPremium')" :disabled="propertyInputLocked('cedantMoney')" :min="isEndorsementDraft ? undefined : 0" :controls="false"></DraftNumber><el-checkbox v-if="isCglInformation" :disabled="isEndorsementDraft && !endorsementFieldsUnlocked" :model-value="cglAnnual(draft)" @update:model-value="draft.cglAnnual = $event" style="display:flex;margin-top:6px;">Annual</el-checkbox></el-form-item><el-form-item label="Cedant Collection Days" :required="!draft.installmentEnabled" :class="{ 'is-required-error': fieldInvalid('paymentTermsDays') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.paymentTermsDays" :disabled="fixedCedant(draft) || propertyInputLocked('cedantDays')" :min="15" :precision="0" :controls="false"></DraftNumber><small v-if="isSwissCgl">Fixed 90 calendar days; Accounting reminder 15 days before due. Swiss payment deadlines do not restart after late Cedant receipts.</small><small v-else-if="isSwissProperty">Fixed 90 calendar days; Accounting reminder is day 80. Swiss settlement periods use day 90 and actual automatic-settlement confirmation dates.</small><small v-else-if="fixedCedant(draft)">Fixed 90 calendar days; Cedant reminder is day 75.</small><small v-else>Calendar days. Cedant accounting date is 15 days before collection. AUW uses month-end + 120 days; Allianz Property uses month-end + 90 days; Great American Property uses quarter-end + 90 days; QBE Property uses its underwriting-quarter-end + 90 days. Reinsurer accounting reminders are 10 days before the due date.</small></el-form-item><el-form-item label="Ceding Commission (%)" :required="keyInScope(draft)" :class="{ 'is-required-error': keyInScope(draft) && fieldInvalid('riCommPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.riCommPct" :disabled="isEndorsementDraft || propertyInputLocked('cedantMoney')" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item><el-form-item label="Tax (%)" :required="keyInScope(draft)" :class="{ 'is-required-error': keyInScope(draft) && fieldInvalid('taxPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.taxPct" :disabled="isEndorsementDraft || propertyInputLocked('cedantMoney')" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item></div>
+                  <div class="form-grid cols-4"><el-form-item label="100% Premium" required :class="{ 'is-required-error': fieldInvalid('originalPremium') }"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="draft.originalPremium" @update:model-value="markRenewalPremium(draft,'originalPremium')" :disabled="propertyInputLocked('cedantMoney')" :min="isEndorsementDraft ? undefined : 0" :controls="false"></DraftNumber><el-checkbox v-if="isCglInformation" :model-value="cglAnnual(draft)" @update:model-value="draft.cglAnnual = $event" style="display:flex;margin-top:6px;">Annual</el-checkbox></el-form-item><el-form-item label="Cedant Collection Days" :required="!draft.installmentEnabled" :class="{ 'is-required-error': fieldInvalid('paymentTermsDays') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.paymentTermsDays" :disabled="fixedCedant(draft) || propertyInputLocked('cedantDays')" :min="15" :precision="0" :controls="false"></DraftNumber><small v-if="!isSwissCgl && !isSwissProperty && !fixedCedant(draft)">Calendar days. Cedant accounting date is 15 days before collection.</small></el-form-item><el-form-item label="Ceding Commission (%)" :required="keyInScope(draft)" :class="{ 'is-required-error': keyInScope(draft) && fieldInvalid('riCommPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.riCommPct" :disabled="isEndorsementDraft || propertyInputLocked('cedantMoney')" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item><el-form-item label="Tax (%)" :required="keyInScope(draft)" :class="{ 'is-required-error': keyInScope(draft) && fieldInvalid('taxPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="draft.taxPct" :disabled="isEndorsementDraft || propertyInputLocked('cedantMoney')" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item></div>
                   <el-form-item label="Statement No."><el-input v-model="draft.statementNo" maxlength="160" placeholder="Cedant reconciliation reference"></el-input></el-form-item>
-                  <div class="repeat-card">
-                    <p v-if="isEndorsementDraft" class="document-help">Endorsements use one premium settlement. Cedant payment terms follow the original policy; the collection base date is the later of Announce and endorsement effective dates.</p><div class="repeat-heading"><div><h3>Premium Installments</h3><p>Optionally assign Production Report performance months. Calculated Income uses the current brokerage amount; rounding difference goes to the first installment.</p></div><el-switch v-model="draft.installmentEnabled" :disabled="isEndorsementDraft" data-testid="premium-installments-toggle" inline-prompt active-text="On" inactive-text="Off" @change="onInstallmentToggle"></el-switch></div>
+                  <p v-if="isEndorsementDraft" class="document-help">Endorsements use one premium settlement. Cedant payment terms follow the original policy; the collection base date is the later of Announce and endorsement effective dates.</p>
+                  <div class="repeat-card optional-switch-card" :class="{ 'is-on': draft.installmentEnabled }" data-testid="premium-installments-card">
+                    <div class="repeat-heading"><div><h3>Premium Installments</h3></div><el-switch v-model="draft.installmentEnabled" :disabled="isEndorsementDraft" data-testid="premium-installments-toggle" inline-prompt active-text="On" inactive-text="Off" @change="onInstallmentToggle"></el-switch></div>
+                    
                     <template v-if="draft.installmentEnabled">
                       <el-alert class="case-readiness-alert" :title="installmentStatus.message" :type="installmentStatus.valid ? 'success' : (reviewAttempted ? 'error' : 'warning')" :closable="false" show-icon></el-alert>
                       <div v-for="(row,index) in draft.performanceInstallments" :key="row.clientKey" class="repeat-card">
@@ -884,18 +921,11 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                       <el-button class="secondary-button" @click="addInstallment">+ Add installment</el-button>
                     </template>
                   </div>
-                </el-collapse-item>
+                </CaseFormSection>
 
-                <el-collapse-item name="reinsurerPremium" title="Reinsurer Premium">
-                  <div v-for="(row,index) in draft.reinsurers" :key="'premium-' + row.clientKey" class="repeat-card">
-                    <h3>{{ row.name || ('Reinsurer ' + (index + 1)) }}</h3>
-                    <div class="form-grid cols-3"><el-form-item label="Premium" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'premium') }"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="row.premium" @update:model-value="markRenewalPremium(draft,'reinsurers.'+index+'.premium')" :disabled="propertyInputLocked('riMoney',index)" :min="isEndorsementDraft ? undefined : 0" :controls="false"></DraftNumber></el-form-item><el-form-item label="Deductions (%)" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'riCommPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.riCommPct" :disabled="isEndorsementDraft || propertyInputLocked('riMoney',index)" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item><el-form-item label="Tax (%)" required :class="{ 'is-required-error': rowInvalid('reinsurers', index, 'taxPct') }"><DraftNumber :relaxed="relaxedDraft" v-model="row.taxPct" :disabled="isEndorsementDraft || isAuwReinsurer(row.name) || propertyInputLocked('riMoney',index)" :min="0" :max="100" :precision="4" :controls="false"></DraftNumber></el-form-item></div>
-                  </div>
-                </el-collapse-item>
-
-                <el-collapse-item name="split" title="Performance Split (internal only)">
-                  <div class="repeat-card">
-                    <div class="repeat-heading"><div><h3>Production Credit</h3><p>Split this case between exactly two people. This internal allocation is never shown on external documents or SOA.</p></div><el-switch v-model="draft.splitEnabled" :disabled="propertyInputLocked('split')" inline-prompt active-text="On" inactive-text="Off" @change="onSplitToggle"></el-switch></div>
+                <CaseFormSection name="split" title="Performance Split (Internal Only)" fixed>
+                  <div class="repeat-card optional-switch-card" :class="{ 'is-on': draft.splitEnabled }" data-testid="production-credit-card">
+                    <div class="repeat-heading"><div><h3>Production Credit</h3><p>Split this case between Reinsurance Dept. &amp; Other Dept.</p></div><el-switch v-model="draft.splitEnabled" :disabled="propertyInputLocked('split')" inline-prompt active-text="On" inactive-text="Off" @change="onSplitToggle"></el-switch></div>
                     <template v-if="draft.splitEnabled">
                       <el-alert class="case-readiness-alert" :title="splitStatus.message" :type="splitStatus.valid ? 'success' : (reviewAttempted ? 'error' : 'warning')" :closable="false" show-icon></el-alert>
                       <p class="document-help">Select active, split-eligible Personnel records. Each saved split keeps the Personnel ID and a name snapshot; historical names remain visible when an older Draft is opened.</p>
@@ -908,23 +938,15 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                       </div>
                     </template>
                   </div>
-                </el-collapse-item>
+                </CaseFormSection>
 
               </el-collapse>
-              <fieldset class="case-fieldset" :disabled="isEndorsementDraft && !endorsementFieldsUnlocked">
+
               <el-collapse v-model="openSections">
-                <el-collapse-item name="conditions" title="Reinsurance Conditions">
+                <CaseFormSection name="conditions" title="Reinsurance Conditions">
                   <div class="repeat-heading"><div><h3>Clauses</h3><p>Universal clauses are always included. Fixed clauses come from the selected Class and applicable reinsurers. Selected clauses keep their latest MDM titles.</p></div></div>
-                  <div class="review-list">
-                    <div v-for="clause in draftClauseDetails" :key="'clause-' + clause.code">
-                      <strong>{{ clause.code }}</strong>
-                      <span>{{ clause.title }}</span>
-                      <el-tag size="small" effect="plain">{{ clauseSourceLabel(clause.code) }}</el-tag>
-                      <el-button v-if="isManualClause(clause.code)" text type="danger" @click="removeCaseClause(clause.code)">Remove</el-button>
-                    </div>
-                  </div>
-                  <el-alert v-if="!hasNonFacilityReinsurer" class="case-readiness-alert" type="info" :closable="false" show-icon title="Facility clause rules" description="Case-specific clauses can be added after at least one non-Facility reinsurer is selected."></el-alert>
-                  <div v-else class="repeat-card" style="margin-top:16px;">
+                  <ClauseList :clauses="draftClauseDetails" :source-label="clauseSourceLabel" :removable="isManualClause" @remove="removeCaseClause" />
+                  <div v-if="hasNonFacilityReinsurer" class="repeat-card" style="margin-top:16px;">
                     <div class="repeat-heading"><div><h3>Add case-specific clause</h3><p>Manual clauses apply only to this case snapshot.</p></div></div>
                     <el-form-item v-if="isCglInformation" label="CGL template clauses">
                       <div style="display:grid;gap:8px;min-width:0;">
@@ -939,9 +961,9 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                       <el-form-item label=" "><el-button class="secondary-button" @click="addCaseClause">+ Add clause</el-button></el-form-item>
                     </div>
                   </div>
-                </el-collapse-item>
+                </CaseFormSection>
               </el-collapse>
-              </fieldset>
+
 
               <div class="form-actions"><div><strong>Draft Rules</strong><p>Save incomplete work as Draft. Review checks required fields, then lets you upload evidence and Announce.</p></div><div class="action-buttons"><el-button class="secondary-button" :loading="reviewPreparing" :disabled="saving || announcing" @click="reviewAndConfirm">Review & confirm</el-button><el-button class="primary-button" :loading="saving" @click="saveDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button></div></div>
               </template>
@@ -961,7 +983,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <div><dt>New / Renew</dt><dd>{{ draft.newOrRenew }}</dd></div><div><dt>Type</dt><dd>{{ draft.type }}</dd></div>
                   <div><dt>Reinsured</dt><dd>{{ draft.reinsured }}</dd></div><div><dt>Original insured</dt><dd>{{ draft.originalInsured }}</dd></div>
                   <div><dt>{{ isCglInformation ? 'Period' : 'Policy period' }}</dt><dd>{{ formatPolicyDateTime(draft.policyFrom, draft.policyFromTime) }} ~ {{ formatPolicyDateTime(draft.policyTo, draft.policyToTime) }}</dd></div><div><dt>{{ liabilityLimitLabel(draft) }}</dt><dd>{{ draft.currency }} {{ formatAmount(draft.limitOfLiability) }}<span v-if="newCgl(draft)"> each occurrence</span></dd></div>
-                  <div v-if="(!cglQsScope(draft) || placingRulesEnabled(draft)) && (placingRulesEnabled(draft) ? Number(draft.aggregateLimit) > 0 : (isCglInformation ? filled(draft.aggregateLimit) : draft.aggregateLimit !== null))"><dt>Aggregate Limit</dt><dd>{{ draft.currency }} {{ formatAmount(draft.aggregateLimit) }}</dd></div><div v-if="(isCglInformation ? draft.reinsuranceStructure === 'XOL' : draft.reinsuranceStructure !== 'QS') && draft.underlyingLimits"><dt>Underlying Limits</dt><dd>{{ draft.underlyingLimits }}</dd></div>
+                  <div v-if="(!cglQsScope(draft) || isCglInformation || placingRulesEnabled(draft)) && (placingRulesEnabled(draft) ? Number(draft.aggregateLimit) > 0 : (isCglInformation ? filled(draft.aggregateLimit) : draft.aggregateLimit !== null))"><dt>Aggregate Limit</dt><dd>{{ draft.currency }} {{ formatAmount(draft.aggregateLimit) }}</dd></div><div v-if="(isCglInformation ? draft.reinsuranceStructure === 'XOL' : draft.reinsuranceStructure !== 'QS') && draft.underlyingLimits"><dt>Underlying Limits</dt><dd>{{ draft.underlyingLimits }}</dd></div>
                 </dl>
               </section>
 
@@ -990,7 +1012,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
 
               <section v-if="!isCglInformation" class="review-section"><h3>Loss record</h3><dl class="review-grid"><div><dt>Advised by broker on</dt><dd>{{ draft.lossAdvisedDate }}</dd></div><div><dt>Summary</dt><dd>{{ lossRecordSummary }}</dd></div><div v-if="draft.lossRecordText" class="review-wide"><dt>Additional notes</dt><dd>{{ draft.lossRecordText }}</dd></div></dl><div v-if="draft.lossRecord.length" class="review-list"><div v-for="(row,index) in draft.lossRecord" :key="'review-loss-' + row.clientKey"><strong>Loss {{ index + 1 }} · {{ row.date }}</strong><span>{{ row.cause }} · {{ draft.currency || '—' }} {{ formatAmount(row.lossPaid) }}</span></div></div><p v-else class="document-help">Clean — no losses recorded.</p></section>
 
-              <section class="review-section"><h3>Reinsurance conditions</h3><div class="review-list"><div v-for="clause in draftClauseDetails" :key="'review-clause-' + clause.code"><strong>{{ clause.code }}</strong><span>{{ clause.title }}</span></div></div></section>
+              <section class="review-section"><h3>Reinsurance conditions</h3><ClauseList :clauses="draftClauseDetails" /></section>
 
               <section v-if="reviewDraftCase &amp;&amp; can('documents.read')" class="review-section" data-testid="review-placement-evidence" v-loading="documentsLoading">
                 <h3>Placement evidence</h3>
@@ -1015,10 +1037,26 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
               <template #footer><div class="review-footer"><p>Saving keeps this case as Draft. Announce assigns the reference after the required evidence is selected and confirmed.</p><div><el-button class="secondary-button" :disabled="saving || announcing || documentsSaving" @click="reviewDialogVisible = false">Back to edit</el-button><el-button :loading="saving" :disabled="announcing || documentsSaving" @click="saveReviewedDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button><el-button v-if="reviewDraftCase &amp;&amp; can('cases.announce')" class="primary-button" :loading="announcing" :disabled="!announceConfirmed || !documentCoverage.ready || selectedAnnounceIssues.length > 0 || documentsLoading || documentsSaving || saving" @click="announceSelectedCase">Announce</el-button></div></div></template>
             </el-dialog>
           </template>
+<FacilityRulesDialog v-if="activeView === 'case-create'" v-model="facilityRulesVisible" :groups="facilityRules.groups" :common="facilityRules.common" :clause-hint="facilityRules.clauseHint" />
 <ReconciliationReferences ref="referenceEditor" @saved="refreshReferences" @refresh="refreshReferences" />
 </template>
 
 <style scoped>
+.optional-switch-card { box-sizing: border-box; min-height: 60px; padding: 10px 14px; }
+.optional-switch-card > .repeat-heading { min-height: 38px; margin-bottom: 0; flex-direction: row; align-items: center; }
+.optional-switch-card > .repeat-heading > div:not(.el-switch) { min-width: 0; }
+.optional-switch-card > .repeat-heading h3 { line-height: 20px; }
+.optional-switch-card > .repeat-heading p { line-height: 18px; }
+.optional-switch-card > .repeat-heading :deep(.el-switch) { flex: 0 0 auto; width: auto; }
+.optional-switch-card.is-on > .repeat-heading { margin-bottom: 12px; }
+.optional-switch-card > .document-help { margin: 12px 0 0; }
+@media (max-width: 620px) {
+  .optional-switch-card > .repeat-heading { flex-wrap: wrap; column-gap: 12px; row-gap: 6px; }
+  .optional-switch-card > .repeat-heading > div:not(.el-switch) { flex: 1 1 180px; }
+}
+
+.security-tools { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.reinsurer-card .repeat-heading h3 { min-width: 0; overflow-wrap: anywhere; }
 .case-placement-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

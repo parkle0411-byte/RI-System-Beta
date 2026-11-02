@@ -1,3 +1,4 @@
+import { allSumInsuredFacility } from './sumInsured.js'
 // Confirmed Property / QS / PD Original rules, 2026-10-22.
 import { financialIssues, pendingTotals } from './dataIntegrity.js'
 const objectRows=value=>(Array.isArray(value)?value:[]).filter(row=>row!==null && typeof row==='object' && !Array.isArray(row))
@@ -102,7 +103,7 @@ export function propertyLegs(p,r) {
 export function propertyIssues(p) {
   if (!propertyScope(p)) return []
   const issues=[], add=(field,label) => issues.push({field,label})
-  for (const [k,label] of [['originalInsuredCn','Original Insured (CN)'],['reinsuredRetention',"Reinsured's Retention"],['riCommPct','Cedant Commission'],['taxPct','Cedant Tax'],['paymentTermsDays','Cedant Payment Terms (Days)']]) if (!filled(p[k])) add(k,label)
+  for (const [k,label] of [['originalInsuredCn','Original Insured (CN)'],['reinsuredRetention',"Reinsured's Retention"],['riCommPct','Cedant Commission'],['taxPct','Cedant Tax'],['paymentTermsDays','Cedant Payment Terms (Days)']]) if (!(k === 'reinsuredRetention' && allSumInsuredFacility(p)) && !filled(p[k])) add(k,label)
   if (p.policyFrom && p.policyTo && p.policyTo <= p.policyFrom) add('policyTo','Expiration date must be later than Effective date')
   if ((p.reinsurers || []).reduce((s,r) => s+n(r.sharePct),0) > 100) add('reinsurers','Total Order Hereon must not exceed 100%')
   if (!filled(p.typePrefix)) add('type','Type')

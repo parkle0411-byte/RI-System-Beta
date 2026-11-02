@@ -25,7 +25,7 @@ from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 
 from .calc.jsnum import get, is_nullish, js_to_string, js_trim, js_to_number, js_is_finite
 from .document_views import visible_cases
-from .sum_insured import placement_issues
+from .sum_insured import placement_issues, all_facility
 
 
 KINDS = ("cover", "endorsement", "debit", "credit")
@@ -154,6 +154,10 @@ def _check_case_base(request, body):
     scope_issues = facility_selection_issues(payload)
     if scope_issues:
         return None, kind, _error(409, "allianz_property_required" if allianz_selection_issues(payload) else "facility_class_required", scope_issues[0]["label"])
+    from .cgl_information import aggregate_issues
+    aggregate_problems = aggregate_issues(payload)
+    if aggregate_problems:
+        return None, kind, Response({'error':'aggregate_limit_required', 'message':aggregate_problems[0]['label'], 'issues':aggregate_problems}, status=409)
     # Treaty document requirements are deferred until its workflow is defined.
     if _text(payload, "reinsuranceStructure") == "TREATY":
         return case, kind, None
@@ -233,7 +237,7 @@ def _check_case_base(request, body):
         return None, kind, _error(409, "underlying_limits_required", "Complete Underlying Limits in the case before generating a Cover Note.")
     if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "deductibles"):
         return None, kind, _error(409, "deductibles_required", "Complete Deductibles in the case before generating a Cover Note.")
-    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "reinsuredRetention"):
+    if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not all_facility(payload) and not _text(payload, "reinsuredRetention"):
         return None, kind, _error(409, "reinsured_retention_required", "Complete Reinsured’s Retention in the case before generating a Cover Note.")
     if kind == "cover" and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         situations = get(payload, "situations")

@@ -1,3 +1,4 @@
+from .sum_insured import all_facility
 """Confirmed ordinary CGL QS input rules (2026-10-23).
 
 Required-field timing follows the latest PD decision. Positive premiums apply
@@ -32,7 +33,7 @@ def issues(p):
         result.append({'field': field, 'label': label})
     for key, label in [('originalInsuredCn', 'Original Insured (CN)'), ('reinsuredRetention', 'Reinsured’s Retention'),
                        ('riCommPct', 'Cedant Commission'), ('taxPct', 'Cedant Tax'), ('paymentTermsDays', 'Cedant Collection Days')]:
-        if not filled(p.get(key)):
+        if not (key == 'reinsuredRetention' and all_facility(p)) and not filled(p.get(key)):
             add(key, label)
     if p.get('currency') not in ('TWD', 'USD'):
         add('currency', 'CGL QS Currency must be TWD or USD')
