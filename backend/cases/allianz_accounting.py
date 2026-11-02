@@ -3,7 +3,9 @@
 Cash records and manual settlement remain separate. The shared payment policy
 requires both for the whole Cedant installment before a premium payment.
 """
+import calendar
 import re
+from datetime import date
 
 NAME='Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)'
 TERMS_DAYS=90
@@ -37,13 +39,26 @@ def selection_issues(payload):
             and is_allianz(payload["reinsurers"][int(issue["field"].split(".")[1])].get("name"))]
 
 
+def reminder_date(base_month_end):
+    """Third following month-end minus ten calendar days; no holiday adjustment."""
+    try:
+        base = date.fromisoformat(base_month_end)
+        year, month = divmod(base.year * 12 + base.month - 1 + 3, 12)
+        month += 1
+        target = date(year, month, calendar.monthrange(year, month)[1]).isoformat()
+    except (TypeError, ValueError):
+        return ''
+    from .calc.payment_terms import add_calendar_days
+    return add_calendar_days(target, -ACCOUNTING_LEAD_DAYS)
+
+
 def payment_dates(payload,installment):
     from .calc.payment_terms import endorsement_base_date,month_end_date,add_calendar_days
     source=installment.get('baseDate','')
     if payload.get('parentTwRef') and payload.get('installmentEnabled') is not True:
         source=endorsement_base_date(payload)
     base=month_end_date(source)
-    return source,base,add_calendar_days(base,90) if base else '',add_calendar_days(base,80) if base else ''
+    return source,base,add_calendar_days(base,90) if base else '',reminder_date(base) if base else ''
 
 
 def apply_schedules(payload, items):

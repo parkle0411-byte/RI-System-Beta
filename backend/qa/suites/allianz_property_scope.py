@@ -25,7 +25,7 @@ for klass in ('Property',' property ','PROPERTY'):
  p=raw(klass);check('Property name normalization '+klass,target(p,NAME.lower()) and applies(p) and not selection_issues(p))
  norm=normalize_draft(p);check('valid Property draft keeps fixed90 '+klass,not norm['errors'] and norm['value']['reinsurers'][0]['paymentTermsDays']==90,norm['errors'])
  r=next(i for i in build_payment_schedule(p)['items'] if i['partyType']=='reinsurer')
- check('Property calendar remains80/90 '+klass,r.get('allianzFacility') and r['dueDate']=='2026-04-21' and r['contractDueDate']=='2026-05-01')
+ check('Property reminder changes while due90 remains '+klass,r.get('allianzFacility') and r['dueDate']=='2026-04-20' and r['contractDueDate']=='2026-05-01')
 for klass in ('CGL','Marine','Engineering','',None):
  p=raw(klass);before=copy.deepcopy(p)
  check('reject non-Property selection '+str(klass),not applies(p) and not target(p,NAME) and len(selection_issues(p))==1 and kind(p,NAME)=='')

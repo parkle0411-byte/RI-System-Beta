@@ -26,10 +26,10 @@ def raw(**changes):
  p.update(changes);return p
 def ri(p,day='2026-01-01'):return [i for i in build_payment_schedule(p,now(day))['items'] if i.get('allianzFacility')]
 check('exact Facility identity is required',is_allianz(NAME.lower()) and not is_allianz(NAME.replace(' (Facility)','')) and not is_allianz('Allianz Other (Facility)'))
-# 2026-10-20「四類會計統一」：Allianz 基準月底＋80 日開始提醒、＋90 日到期（取代 10-19 的＋75 日提醒）
-for month_end,reminder,due in [('2026-01-31', '2026-04-21', '2026-05-01'), ('2026-02-28', '2026-05-19', '2026-05-29'), ('2028-02-29', '2028-05-19', '2028-05-29'), ('2026-12-31', '2027-03-21', '2027-03-31')]:
+# 2026-10-30：提醒改為基準月份往後第3個月月底減10日；到期仍為基準月底＋90日。
+for month_end,reminder,due in [('2026-01-31', '2026-04-20', '2026-05-01'), ('2026-02-28', '2026-05-21', '2026-05-29'), ('2028-02-29', '2028-05-21', '2028-05-29'), ('2026-12-31', '2027-03-21', '2027-03-31')]:
  p=raw(policyFrom=month_end);r=ri(p)[0]
- check('calendar month-end 90/80 '+month_end,(r['baseDate'],r['dueDate'],r['contractDueDate'])==(month_end,reminder,due))
+ check('calendar month-end due90 and third month-end minus10 '+month_end,(r['baseDate'],r['dueDate'],r['contractDueDate'])==(month_end,reminder,due))
  check('read does not mutate source '+month_end,p['reinsurers'][0]['paymentTermsDays']==30)
 p=raw(parentTwRef='ROOT',endoEffectiveDate='2026-01-20',endorsementAnnouncedAt='2026-02-02T17:00:00Z',originalPremium=-200)
 p['reinsurers'][0]['premium']=-160;r=ri(p)[0]
@@ -97,7 +97,7 @@ before_edit=copy.deepcopy(c.payload);c.refresh_from_db()
 check('receipt correction cannot bypass paid Allianz gate',correction.status_code in (400,409) and correction.json()['error'] in ('full_premium_required','settled_amount_locked') and c.payload['paymentEntries']==before_edit['paymentEntries'],(correction.status_code,correction.content[:200]))
 unpaid=make();d=transaction_details(unpaid.payload,now('2026-05-02'))[tx(unpaid,'Leg 2')]
 check('overdue uses90-day contract date and never shifts',d['paymentStatus']=='overdue' and d['contractDueDate']=='2026-05-01')
-check('80-day screen reminder starts on its calendar date',transaction_details(unpaid.payload,now('2026-04-21'))[tx(unpaid,'Leg 2')]['paymentStatus']=='reminder')
+check('third month-end minus10 screen reminder starts on its calendar date',transaction_details(unpaid.payload,now('2026-04-20'))[tx(unpaid,'Leg 2')]['paymentStatus']=='reminder')
 refund=make(parent=unpaid,parentTwRef=unpaid.tw_ref,endoEffectiveDate='2026-01-10',endorsementAnnouncedAt='2026-02-03T00:00:00Z',originalPremium=-200,reinsurers=[{'name':NAME,'sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':90}])
 for party in ('cedant','reinsurer'):
  a=next(i for i in build_payment_schedule(unpaid.payload)['items'] if i['partyType']==party)

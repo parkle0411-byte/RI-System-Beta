@@ -21,7 +21,7 @@ try:
   for label,name in KINDS:
    c=make('ALIGN'+label,policyFrom='2026-01-10',reinsurers=[partyrow(name)])
    schedule=build_payment_schedule(c.payload,'2026-01-10T00:00:00Z')['items'];ri=next(r for r in schedule if r['partyType']=='reinsurer');cedant=next(r for r in schedule if r['partyType']=='cedant')
-   expected={'Ordinary':('2026-01-30','2026-02-09'),'AUW':('2026-05-21','2026-05-31'),'Allianz':('2026-04-21','2026-05-01'),'GA':('2026-06-19','2026-06-29')}
+   expected={'Ordinary':('2026-01-30','2026-02-09'),'AUW':('2026-05-21','2026-05-31'),'Allianz':('2026-04-20','2026-05-01'),'GA':('2026-06-19','2026-06-29')}
    check(label+' premium dates preserve deadlines and use confirmed reminder lead',(ri['dueDate'],ri['contractDueDate'])==expected[label],ri)
    check(label+' Cedant uses current fixed/ordinary days',cedant['contractDueDate']==('2026-02-09' if label=='Ordinary' else '2026-04-10'))
    check(label+' outgoing waits for full Cedant cash',full(fin,c,'Leg 2').status_code==409)
@@ -36,7 +36,7 @@ try:
    ref=make('ALREF'+label,parent=c,originalPremium=-200,endoEffectiveDate='2026-10-01',announced=datetime(2026,10,20,tzinfo=dtz.utc),reinsurers=[{**partyrow(name),'premium':-160}])
    rr=next(i for i in build_payment_schedule({**ref.payload,'endorsementAnnouncedAt':ref.announced_at.isoformat()})['items'] if i['partyType']=='reinsurer')
    if label in ('Allianz','GA'):
-    check(label+' refund also uses deadline minus10',rr['dueDate']=='2027-01-19' if label=='Allianz' else rr['dueDate']=='2027-03-21',rr)
+    check(label+' refund uses confirmed reminder rule',rr['dueDate']=='2027-01-21' if label=='Allianz' else rr['dueDate']=='2027-03-21',rr)
    check(label+' Cedant refund blocked before RI cash',full(fin,ref,'Leg 1').status_code==409)
    check(label+' RI refund partial receipt rejected',pay(fin,ref,'Leg 2',1).status_code==400)
    check(label+' full RI refund cash accepted early',full(fin,ref,'Leg 2').status_code==200)

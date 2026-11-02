@@ -405,7 +405,8 @@ def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
                 from ..allianz_accounting import payment_dates
                 source_date, row_base_date, actual_due, due_date = payment_dates(case_data, installment)
                 rule_fields = {"paymentRule":"allianz_month_end_90", "allianzFacility":True,
-                               "sourceBaseDate":source_date, "contractDueDate":actual_due, "accountingLeadDays":10}
+                               "sourceBaseDate":source_date, "contractDueDate":actual_due,
+                               "accountingLeadDays":days_between_dates(due_date, actual_due) if due_date and actual_due else None}
                 if not row_base_date:
                     issues.append(installment["label"] + ": Allianz payment base date requires an effective date and, for endorsements, actual Announce.")
             else:
