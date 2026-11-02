@@ -180,9 +180,12 @@ def phase_a(page):
           page.locator(".page-header button", has_text="Save draft").is_visible()
           and page.locator(".form-actions button", has_text="Review & confirm").is_visible() and page.locator(".form-actions button", has_text="Save draft").is_visible())
     titles = [t.strip() for t in page.locator(".case-form .el-collapse-item__header").all_inner_texts()]
-    want = ["Risk Details", "Schedule of Security", "Terms & Conditions", "Information", "Cedant Premium", "Reinsurer Premium", "Performance Split", "Reinsurance Conditions"]
-    check("Property sections in order, Information merged (2026-10-16)", [w for t in titles for w in want if t == w or t.startswith(w + " ")] == want
-          and not any(t in titles for t in ("Occupation & Construction", "Breakdown of Sum Insured", "Loss Record", "Special Agreement")), titles)
+    # 2026-10-30 起 Reinsurer Premium 併入 Schedule of Security 的每家再保人卡片，不再是獨立區塊
+    want = ["Risk Details", "Schedule of Security", "Terms & Conditions", "Information", "Cedant Premium", "Performance Split", "Reinsurance Conditions"]
+    check("Property sections in order, Information merged (2026-10-16), Reinsurer Premium inside Schedule of Security (2026-10-30)",
+          [w for t in titles for w in want if t == w or t.startswith(w + " ")] == want
+          and not any(t in titles for t in ("Occupation & Construction", "Breakdown of Sum Insured", "Loss Record", "Special Agreement"))
+          and not any(t.startswith("Reinsurer Premium") for t in titles), titles)
     owner = selected_label(page, page, "Case Owner")
     check("case owner defaults to the signed-in person", owner == "UI Sales", owner)
     fill(page, page, "Original Insured (EN)", "UI Test Insured Ltd")
@@ -260,9 +263,10 @@ def phase_a(page):
     fill(cedant, page, "Cedant Collection Days", "30")   # 2026-10-16 起由「Payment Terms (Days)」更名
     fill(cedant, page, "Ceding Commission (%)", "10")
     fill(cedant, page, "Tax (%)", "0")
-    rp = section(page, "Reinsurer Premium").locator(".repeat-card")
+    rp = section(page, "Schedule of Security").locator(".repeat-card")
     for index, premium in ((0, "600"), (1, "400")):
-        fill(rp.nth(index), page, "Premium", premium)
+        box = rp.nth(index).locator(".el-form-item").filter(has=page.locator(".el-form-item__label", has_text=re.compile(r"^\s*Premium \(")))
+        box.first.locator("input").first.fill(premium); box.first.locator("input").first.press("Tab")
         fill(rp.nth(index), page, "Deductions (%)", "5")
         fill(rp.nth(index), page, "Tax (%)", "0")
     conditions = section(page, "Reinsurance Conditions").inner_text()

@@ -359,17 +359,59 @@ def js_json_stringify(value):
     return "null"
 
 
-def json_roundtrip(value):
-    """JSON.parse(JSON.stringify(value))：深層複製；-0 變 0、NaN/Infinity 變 null。"""
+def _json_roundtrip_reference(value):
+    """原本的寫法（逐層檢查）；json_roundtrip 的結果必須與它完全相同，測試用來比對。"""
     if isinstance(value, dict):
-        return {k: json_roundtrip(value[k]) for k in _key_order(list(value)) if value[k] is not UNDEFINED}
+        return {k: _json_roundtrip_reference(value[k]) for k in _key_order(list(value)) if value[k] is not UNDEFINED}
     if isinstance(value, list):
-        return [None if v is UNDEFINED else json_roundtrip(v) for v in value]
+        return [None if v is UNDEFINED else _json_roundtrip_reference(v) for v in value]
     if isinstance(value, float):
         if not js_is_finite(value):
             return None
         return 0.0 if value == 0 else value
     return value
+
+
+# 2026-11-02 效能：Accounting 回應約 2.4 百萬個值，原寫法每個值都做多次型別檢查、每個物件都逐鍵檢查是否像整數。
+# 改為：常見的純值（字串、整數、布林、null）直接沿用；同一組鍵（例如每一列交易）的鍵順序只判斷一次並記住。
+# 其他型別（float 子類別、dict／list 子類別等）一律交給原寫法，結果與原寫法逐位元組相同。
+_PLAIN = frozenset((str, int, bool, type(None)))
+_KEY_ORDER_MEMO = {}
+_KEY_ORDER_MEMO_LIMIT = 4096
+
+
+def _memo_key_order(keys):
+    order = _KEY_ORDER_MEMO.get(keys)
+    if order is None:
+        listed = _key_order(list(keys))
+        order = () if listed == list(keys) else tuple(listed)   # ()：順序不變
+        if len(keys) <= 200 and len(_KEY_ORDER_MEMO) < _KEY_ORDER_MEMO_LIMIT:   # 只記一般大小的物件，記憶體有上限
+            _KEY_ORDER_MEMO[keys] = order
+    return order
+
+
+def json_roundtrip(value):
+    """JSON.parse(JSON.stringify(value))：深層複製；-0 變 0、NaN/Infinity 變 null。"""
+    kind = type(value)
+    if kind is dict:
+        order = _memo_key_order(tuple(value))
+        out = {}
+        for k in (order or value):
+            v = value[k]
+            if type(v) in _PLAIN:
+                out[k] = v
+            elif v is not UNDEFINED:
+                out[k] = json_roundtrip(v)
+        return out
+    if kind is list:
+        return [v if type(v) in _PLAIN else None if v is UNDEFINED else json_roundtrip(v) for v in value]
+    if kind in _PLAIN:
+        return value
+    if kind is float:
+        if value != value or value in (math.inf, -math.inf):
+            return None
+        return 0.0 if value == 0 else value
+    return _json_roundtrip_reference(value)
 
 
 def js_number_out(x):

@@ -97,7 +97,8 @@ class AccountingView(NoStoreMixin, APIView):
     permission_map = {"GET": "accounting.read", "POST": "accounting.read"}
 
     def get(self, request):
-        cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").order_by("tw_ref", "id")
+        cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").defer("parent_case__payload").order_by("tw_ref", "id")
+        # 2026-11-02：上層案件只用到 case_uid，不讀它的整份 payload
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
         case_views, rows, warnings, transactions, swiss_rows, schedule_rows = [], [], [], [], [], []
         now = datetime.now(dt_timezone.utc)   # 整個請求用同一個時間

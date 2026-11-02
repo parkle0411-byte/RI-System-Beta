@@ -32,19 +32,26 @@ def _limit():
         return 30000
 
 
-def _key(kind, payload, now):
+def fingerprint(payload):
+    """資料內容的指紋；無法轉成 JSON 時回傳 None（不記）。"""
     try:
         text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False, allow_nan=True)
     except (TypeError, ValueError):
         return None
-    return (kind, taipei_date(now), hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest())
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest()
 
 
-def cached(kind, payload, now, compute):
-    """kind：'schedule' 或 'details'；compute：沒有記住時實際計算的函式。"""
+def _key(kind, payload, now, digest=None):
+    digest = fingerprint(payload) if digest is None else digest
+    return None if digest is None else (kind, taipei_date(now), digest)
+
+
+def cached(kind, payload, now, compute, digest=None):
+    """kind：'schedule' 或 'details'；compute：沒有記住時實際計算的函式。
+    digest：呼叫端已算好的同一份 payload 指紋（2026-11-02：同一件案件的付款排程與交易明細共用，不重算）。"""
     if not enabled():
         return compute()
-    key = _key(kind, payload, now)
+    key = _key(kind, payload, now, digest)
     if key is None:
         return compute()
     with _LOCK:

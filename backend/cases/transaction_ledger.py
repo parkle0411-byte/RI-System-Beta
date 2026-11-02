@@ -12,19 +12,25 @@ def transaction_rows(cases, shared=None):
         payload = case["payload"]
         memo = (shared or {}).get(case["caseUid"])
         cash = memo.details("override") if memo else transaction_details({**payload, "currency":case["currency"], "reinsured":case["reinsured"]})
+        # 2026-11-02 效能：每件案件共用的欄位只算一次（每列的內容與欄位順序不變）
+        root_uid = case.get("rootCaseUid", case["caseUid"])
+        manual = manual_tw_ref_fields(payload)
+        statement_no = payload.get("statementNo") or ""
+        original_insured = payload.get("originalInsured") or payload.get("original_insured") or ""
+        original_insured_cn = payload.get("originalInsuredCn") or ""
         for index, tx in enumerate(_objects(payload.get("transactions"))):
             rows.append({
                 **tx,
                 "key": f"{case['caseUid']}:{index}",
-                "caseUid": case["caseUid"], "rootCaseUid": case.get("rootCaseUid", case["caseUid"]),
+                "caseUid": case["caseUid"], "rootCaseUid": root_uid,
                 "caseRowVersion": case["rowVersion"],
                 "twRef": case["twRef"],
-                **manual_tw_ref_fields(payload),
+                **manual,
                 "caseStatus": case["status"],
                 "announcedAt": case["announcedAt"],
-                "statementNo": payload.get("statementNo") or "",
-                "originalInsured": payload.get("originalInsured") or payload.get("original_insured") or "",
-                "originalInsuredCn": payload.get("originalInsuredCn") or "",
+                "statementNo": statement_no,
+                "originalInsured": original_insured,
+                "originalInsuredCn": original_insured_cn,
                 "reinsured": case["reinsured"],
                 "currency": case["currency"],
                 "source": "claim" if tx.get("source") == "claim" else "premium",

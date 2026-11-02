@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from .calc.payment_terms import build_payment_schedule
 from .cash_ledger import transaction_details
-from .case_result_cache import cached
+from .case_result_cache import cached, enabled as cache_enabled, fingerprint
 
 
 class CaseCompute:
@@ -21,6 +21,16 @@ class CaseCompute:
         self.override = {**raw, "currency": case["currency"], "reinsured": case["reinsured"]}
         self.same = self.override == raw and all(type(self.override[k]) is type(raw.get(k)) for k in ("currency", "reinsured"))
         self._memo = {}
+        self._digests = {}
+
+    def _digest(self, variant):
+        # 計算不會改動 payload（2026-11-02 以 1 萬件案件驗證），所以同一份 payload 的指紋算一次即可
+        if not cache_enabled():
+            return None
+        name = self._variant(variant)
+        if name not in self._digests:
+            self._digests[name] = fingerprint(self.payload(variant))
+        return self._digests[name] or None
 
     def _variant(self, variant):
         return "override" if (variant == "override" or self.same) else "raw"
@@ -33,12 +43,12 @@ class CaseCompute:
         if key not in self._memo:
             payload = self.payload(variant)
             # 2026-10-29：跨請求記住答案（同一份資料、同一個台北日期），見 case_result_cache
-            self._memo[key] = cached("schedule", payload, self.now, lambda: build_payment_schedule(payload, self.now))
+            self._memo[key] = cached("schedule", payload, self.now, lambda: build_payment_schedule(payload, self.now), self._digest(variant))
         return self._memo[key]
 
     def details(self, variant="raw"):
         key = ("details", self._variant(variant))
         if key not in self._memo:
             payload = self.payload(variant)
-            self._memo[key] = cached("details", payload, self.now, lambda: transaction_details(payload, self.now, self.schedule(variant)))
+            self._memo[key] = cached("details", payload, self.now, lambda: transaction_details(payload, self.now, self.schedule(variant)), self._digest(variant))
         return self._memo[key]
