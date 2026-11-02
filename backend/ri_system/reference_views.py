@@ -35,7 +35,7 @@ MANUALS = {
     'swiss-cgl': 'Swiss_Re_Facility_CGL_Exclusive_Rules_2026-10-29.docx',
     'auw-accounting': 'Syndicate_609_AUW_Facility_PD_Exclusive_Rules_2026-10-29.docx',
     'great-american-questionnaire': 'Great_American_Facility_PD_Exclusive_Rules_2026-10-29.docx',
-    'allianz-questionnaire': 'Allianz_Facility_PD_Exclusive_Rules_2026-10-29.docx',
+    'allianz-questionnaire': 'Allianz_Facility_PD_Exclusive_Rules_2026-10-30.docx',
 }
 OFFICE = {
     'docx': ('word/document.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
@@ -69,11 +69,11 @@ MANUAL_DOWNLOAD_NAMES = {
     'swiss-cgl': 'Swiss Re Facility - CGL 專屬規則_2026-10-29.docx',
     'auw-accounting': 'Syndicate 609 AUW Facility - PD 專屬規則.docx',
     'great-american-questionnaire': 'Great American Facility - PD 專屬規則_2026-10-29.docx',
-    'allianz-questionnaire': 'Allianz Facility - PD 專屬規則_2026-10-29.docx',
+    'allianz-questionnaire': 'Allianz Facility - PD 專屬規則_2026-10-30.docx',
 }
 
 
-MANUAL_RELEASE_DATES = {'mdm': '2026-10-27', 'schema': '2026-10-27', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-29'}
+MANUAL_RELEASE_DATES = {'mdm': '2026-11-02', 'schema': '2026-11-02', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
 
 def manual_row(key):
     return {'id': key, 'filename': MANUAL_DOWNLOAD_NAMES[key], 'release_date': MANUAL_RELEASE_DATES[key], 'kind': 'manual'}
