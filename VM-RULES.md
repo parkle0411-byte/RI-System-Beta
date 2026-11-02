@@ -1417,3 +1417,95 @@ Implementation uses a nullable Case → insured MasterRecord FK and additive ins
 - 未做：Accounting 回應約 67 MB，組資料與輸出即使記住答案仍需約 12 秒。
 - 測試：dashboard_outstanding_window、dashboard_settled_skip；壓測工具 qa/stress（seed.py、dump_responses.py）。
 - **Production Report 加速**（同日追加）：同一件案件的分期金額只算一次並共用；報表金額等確定有列落在該月份（或延後到該月）才算。純計算，12 個月份報表與修改前逐位元組相同；1 萬件案件約 15 秒 → 9 秒（未快取）。剩餘時間主要是讀取全部案件資料與連結表（業主 10-16 決定連結表先不改）。
+
+
+### 2026-10-29：CGL Aggregate Limit 連動與多筆 Retroactive Date
+- 一般 CGL QS／XOL（含既有 FACULTATIVE 相容）及 Swiss Facility CGL QS：Aggregate Limit 預帶 Limit of Indemnity，未人工修改前連動；人工修改（含清空或0）保留並以 manual 保存，提供恢復跟隨。舊案無狀態且 Aggregate 空白／0 時於編輯補帶；非零舊值預設人工值。續保／批單沿用來源非零值及狀態，空白／0補帶，不批次改寫正式資料。
+- Aggregate 必須大於0；Draft可保存未完成值，Review／Announce／新文件正式檢查阻擋。取代舊 CGL QS Aggregate 隱藏／選填／0省略規則，其他險種不變。
+- Claims-Made Retroactive Date 改多筆日期與自由說明，至少一筆；一筆說明選填，兩筆以上每筆說明必填。完整日期由早到晚自動排序，同日不允許重複；重複及未完成保留草稿並提示，正式檢查阻擋，人工合併說明。舊單一日期以一筆無說明顯示，不強迫補說明。
+- 畫面、Overview、Review、Cover Note及Placing Slip依完整日期升冪。無說明：September 01, 2002；有說明：(September 01, 2002 in respect of limit USD 1,000,000)，每筆一行、不加分號。Occurrence不顯示日期；Claims-Made切換Occurrence清空全部日期與說明（沿用既有切換確認）。
+- JSON相容保存單一retroactiveDate及canonical retroactiveDates列表；無schema migration。CGL XOL草稿同樣可保留未完成原文；正式驗證、財務計算、Swiss選用及近期Review上傳／Announce、時間連動、權限修正保留。
+
+
+### 2026-10-30T10:28:12+08:00：CGL Aggregate／多筆 Retroactive Date 正式部署
+
+依使用者確認規格及「先檢查新改動，再部署」發布。保留最新效能快取、Dashboard 五年範圍／已銷帳略過、Review 上傳及Announce、時間連動及權限修正。85組隔離回歸、CGL API／桌面手機／實際Word／繼承及前後端金額檢查通過。無schema migration、無正式案例批次改寫，部署前後業務資料、文件及設定指紋核對；Audit暫停及實際寄信關閉保留。備份：`/opt/ri-system/backups/cgl_aggregate_retroactive_20261030_102739`。
+
+
+### 2026-10-30：批單逐區塊 Edit（待合併驗證後部署）
+
+- 僅 Endorsement 採用：新增、重新開啟及重新載入時，所有可收合區塊預設收合；移除最上方整頁風險解鎖開關。
+- 點標題只展開查看，不解除編輯鎖。每次僅一個需 Edit 的區塊可編輯；按該區塊 Edit 後才可操作，按 Done、收合或切換其他區塊前先保存 Draft，再鎖回原區塊。保存失敗時保留輸入、重開原區塊且不解鎖別區。
+- Endorsement details（批改生效日、類型、wording）維持直接填寫。Cedant Premium／Reinsurer Premium 展開後可直接輸入本次加退費，不要求 Edit；繼承的佣金、稅率、付款條件仍依原規則固定。
+- Case Owner／Account Executive 改為獨立需 Edit 的區塊。Schedule of Security 及 Performance Split 沿用固定來源規則，只能查看，不提供解除來源鎖的 Edit。
+- Risk Details 的 Period 改期仍須選 Period，並按該區塊 Edit；只在保存該區塊時傳送既有 endorsementUnlocked 許可，不解除其他區塊。起訖時間連動、18 個月上限、日期界線與來源比例等規則維持。
+- Property Information 及其他險種分開的 Information 子區塊依實際畫面個別鎖定，涵蓋文字、下拉選單、日期、按鈕及彈出選單；固定欄位不因局部 Edit 而開放。
+- Review 前保存修改並鎖回編輯區塊；保留 Review 內上傳、每家再保人證明涵蓋、Announce／Reference／零保費 Confirmed、文件及會計流程。原單與續保的原顯示／輸入方式維持。
+- 狀態僅在前端記憶體，不新增 Case 欄位或 schema migration。2026-10-30 業主已明確指示先檢查最新更新，再完成部署；驗證與發布紀錄另列。
+
+
+### 2026-10-30T11:16:08+08:00：批單逐區塊 Edit 正式部署
+
+依業主「可以部署了，但剛剛系統有新的更新，先檢查有沒有衝突再執行部署」發布。三方合併保留最新 CGL Aggregate 連動／多筆 Retroactive Date，以及近期效能、權限、Review 上傳及 Announce、時間連動；僅部署4份前端產品檔案與規則紀錄，後端及 MySQL 容器與 image 維持。合併後111項瀏覽器、6組相容性回歸、3017組金額、20組密碼與24項批單 Word 檢查通過。無schema migration、不回寫正式案件。備份：`/opt/ri-system/backups/endorsement_sections_20261030_111553`；證據：工作區 RI-docs/Endorsement-Section-Editing-2026-10-29/release-20261030/。
+
+
+### 2026-10-30：Allianz Facility PD 提醒日改為往後第3個月月底前10天
+
+- 依業主最終確認，只修改 Property ＋ Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility) 的保費及退款提醒日；基準月份往後第3個月取實際月底，再減10個日曆天，不調整週末或假日。例如2026年1月提醒04/20、2月提醒05/21、11月提醒2027/02/18。
+- 原單／續保、各期分期、加費、退費／退保退款均適用。基準月份來源維持原規則；原約定結算期限仍為基準月底＋90個日曆天，並非往後第3個月月底。1月原期限05/01、2月原期限05/29不變。accountingLeadDays 反映提醒日至原期限的實際日差，不再固定10天。
+- 本段取代先前同範圍的月底＋80天提醒；Cedant 日期、原期限、逾期判斷、付款條件、理賠、其他再保人及權限均維持。讀取時計算既有資料，不批次回寫正式案件或帳款，不新增手動延期，無schema migration。同步修正畫面提示與System Guides Allianz專屬指南。
+
+
+### 2026-10-30T14:21:10+08:00：Allianz Facility PD 新提醒日正式部署
+
+依業主授權並以最新正式版本檢查衝突後部署。保留 CGL、效能、Review 時間／上傳及批單逐區塊 Edit 更新；86組隔離回歸、612項日期與隔離檢查、瀏覽器及指南下載、3017組金額與20組密碼一致性通過。正式程式逐檔核對，資料庫、案件文件及系統開關維持；只更新Allianz指南登錄，無migration、無帳款批次回寫。備份：`/opt/ri-system/backups/allianz_reminder_20261030_142031`；證據：工作區RI-docs/Allianz-Reminder-2026-10-30/。
+
+
+### 2026-10-30T14:48:49+08:00：批單 Debit／Credit Note 的 Order Hereon 固定兩位小數
+
+- 依業主「目前部署，會有衝突嗎? 沒有的話，直接部署」授權，確認最新正式來源及映像一致後局部發布。只限 Endorsement Debit／Credit Note 的 Order Hereon，60顯示60.00%、60.5顯示60.50%，與Commission／Tax百分比欄對齊；實際比例、分攤與金額計算維持。原單及其他文件既有比例精度保留。
+- 以最新Allianz提醒日部署版為基底，只更換Word靜態生成器並更新對應測試；前端HTML／bundle／CSS／模板及其他靜態檔逐位元相同，後端與MySQL容器及映像不變。保留CGL、逐區塊Edit、Review上傳／Announce、時間、效能、權限及Allianz更新。
+- 24項批單Word檢查、66份新舊Word比較（50份僅Order文字改變、16份其他文件完全一致）、前端readiness／autosave及4份離線預覽通過；百分比欄座標對齊。沿用未變後端映像本日已通過的86組隔離回歸，未另重跑後端全套。
+- 無schema migration，不改寫正式案件、帳款或既有文件；Audit暫停與實際寄信關閉保留。備份：`/opt/ri-system/backups/endo_note_order_percent_20261030_144839`；證據：工作區`RI-docs/Endorsement-Order-Hereon-Format-2026-10-30/`。
+
+
+### 2026-10-30：Case Key-in 卡片整合與說明收納（本次候選）
+- 所有險種／可用結構、原單／續保／批單、Facility 與既有可編輯案件，將 Reinsurer Premium 三欄移入 Schedule of Security。每家一張卡片：Reinsurer／Order Hereon／Foreign RI Broker／Reinsurer Ref.；第二列 Premium（Case幣別）／Deductions／Tax／Payment Terms。區塊位置不變，取消獨立 Reinsurer Premium，缺項檢核定位合併卡片。
+- 一般案件仍預設展開；批單仍預設收合，合併區塊展開後 Premium 可直接填本次加退費，其餘來源欄位、已確認／銷帳鎖定及各 Facility 例外規則沿用。批單加退費說明僅在合併區塊上方顯示一次。再保人卡片標題帶所選公司；每次刪除（含空白卡片）先確認，取消保留資料，原不可刪除限制維持。
+- Facility 欄位下付款／提醒／Broker說明與固定提示條移入單一「查看 Facility 規則」視窗，只列本案適用規則。付款欄位不留縮短說明；Cedant共通段落保留一般付款必要說明。固定條款清單及檢核錯誤不隱藏；Facility Clause Rules指定合併文案只在視窗顯示。
+- 刪除 Key-in Premium Installments 標題下說明；Performance Split (Internal Only) 與 Production Credit 說明依業主指定文案。原功能／計算保留。
+- Key-in／Overview／Review 僅條款清單改用固定 Code 欄、Title靠左且起點一致，Code內容欄依實際字型／字級／字重量測20個最寬大寫字母連排含字距的寬度。長文字完整換行；窄螢幕沿用可讀的上下排版。其他Overview／Review欄位、文件、計算及資料結構不變，無schema migration。
+
+
+### 2026-10-30T15:48:31+08:00：Case Key-in 整合、Facility 說明視窗與條款對齊正式部署
+
+依業主「可以開始實作跟部署了，我想看一下成果」發布所有已確認介面規格。保留最新 Allianz 提醒日、批單 Word Order Hereon 兩位小數、CGL、逐區塊 Edit、Review 上傳／Announce、時間、效能及權限更新。僅4份前端產品檔案與本規則紀錄；同一測試前端 image，後端及 MySQL 容器與 image 維持。合併後169項瀏覽器、7組相容性回歸、3017組金額、20組密碼及24項批單 Word 檢查通過。Code欄依實際字型量測20個最寬大寫字母，長文完整顯示。無schema migration、不改寫正式案件、文件或設定。備份：`/opt/ri-system/backups/case_keyin_ui_20261030_154815`；證據：工作區 RI-docs/Case-KeyIn-UI-Implementation-2026-10-30/。
+
+
+### 2026-10-30：Case Key-in 後續介面及純 Facility 文件規則
+- Schedule of Security 每張卡片的標題統一為 Reinsurer，省略編號及公司後綴；下方 Reinsurer 選擇欄位仍顯示公司名稱。
+- 純 Facility 沿用既有判斷：有具名再保人且所有具名再保人均以 (Facility) 結尾。Key-in 隱藏 Reinsured’s Retention、Reinstatement Provisions、Express Warranties、Conditions Precedent。Subjectivities 維持原規則。切換混合／一般案時仍可使用原有手填資料，不清除儲存值。
+- 純 Facility 新生成的 Cover Note 不採用上述四欄既有手填值：Retention 固定 Advice of Reinsured’s retention waived；Express Warranties 及 Conditions Precedent 固定 None - other than as may exist in this document or in the wording that forms part of this contract.；Reinstatement Provisions 省略整列。同步豁免隱藏 Retention 的 Review／Announce 與生成文件必填，其他檢核不變。一般與混合案沿用既有值及預設。Placing Slip 原有純 Facility 不提供生成的限制維持，批單 Addendum 原版型不變。
+- 所有案件 Key-in 隱藏 Additional Loss Record Notes；原有 lossRecordText 資料保留，既有文件輸出規則維持。
+- Premium Installments 與 Production Credit 關閉時為約60px的緊湊開關列，開啟後依內容增高；窄螢幕自然換行。原有計算、開關與批單鎖定限制維持。
+- 無資料結構或 migration，不回寫既有案件或既有文件。本批依原部署授權及問題20–26的回答實作。
+
+
+### 2026-11-02T09:16:23+08:00：Case Key-in 後續介面及純 Facility 文件規則正式部署
+
+依業主既有實作／部署授權及問題20–26的回答發布。Reinsurer卡片標題統一；純Facility隱藏四欄，文件三項使用已確認固定文字、Reinstatement整列省略，隱藏Retention不再阻擋Review與生成；一般／混合保留既有規則。所有案件隱藏Additional Loss Record Notes輸入，資料與既有文件輸出保留。兩開關卡片桌面Off約60px，手機換行。收合間距12種情境均為3px，未重現大片空白。使用相同測試前後端image；8組相容性、181項瀏覽器、68項後端、196項Word／前端檢核，以及3017組金額、20組密碼與24項批單Word檢查通過。保留最新Allianz、CGL、逐區塊Edit、Review上傳／Announce及時間等更新。無migration，不回寫案件、帳款、既有文件或設定；MySQL維持。備份：`/opt/ri-system/backups/case_keyin_refinement_20261102_091603`；證據：工作區RI-docs/Case-KeyIn-Refinement-2026-10-30/。
+
+
+### 2026-11-02：本次公告與完整MDM／Schema指南更新
+- 公告核對期間自2026-10-27 23:45至本次VM唯讀核對時間，英文信僅列四個目標角色可見的功能與操作差異；本次依業主選A不提資料重置，不含System Reference Data。
+- 兩份完整指南同步重整批單逐區塊Edit／固定來源、全保期平均續保及18曆月、Placing Slip／Addendum版本、Review證明上傳與Announce、Property Construction、CGL Aggregate及多筆Retroactive Date、純Facility文件、Allianz新提醒日、Dashboard五年範圍及權限現況。
+- 實際information_schema核對29表、290欄、83索引、22外鍵、41 CHECK、5 trigger、43 migration；304份容器Python雜湊與製作來源一致。完成逐欄覆蓋、XML與內部連結、離線分頁、隔離及正式下載內容／日期／權限核對。
+- 僅發布兩份指南及其預設日期2026-11-02；其他專屬指南與模板保留，無業務資料寫入、無schema migration，不改應用程式規則。原始碼、舊映像與指南metadata先備份，Audit暫停與寄信關閉不變。
+
+
+### 2026-11-02：週檢查與 Accounting 安全優化（候選，部署前經業主確認）
+- 週檢查：正式程式與原始碼逐檔一致；86組隔離回歸通過；Allianz 新提醒日 2020–2031 每月與獨立算法一致；CGL 多筆 Retroactive Date 12種異常格式經 API 不會當機（正式儲存擋下或忽略，草稿保留原文，Placing Slip／Cover Note 檢查擋下）；Aggregate 連動與規則一致。
+- 環境清理：停用 ri-endorsement28 兩組舊測試容器（未刪除）；移除無容器使用的 Docker 網路（位址池已耗盡，新測試環境無法建立）。
+- Accounting 優化（業主選「只部署安全優化」）：最後深層複製改為快速寫法（常見純值直接沿用、同一組鍵的順序只判斷一次），其他型別交原寫法；每件案件的付款排程與交易明細共用一次資料指紋（計算不改動 payload，1 萬件驗證）；交易列每件案件共用欄位只算一次；上層案件只讀 case_uid，不讀整份 payload。
+- 結果：1 萬件壓測 Accounting（完整與 list）、Dashboard、3 個月份 Production Report 及 589 件案件明細回應與修改前逐位元組相同；Accounting list 當天第二次打開伺服器約 11.7 秒 → 10.2 秒。剩餘主要為讀取全部案件（約 4 秒）。未做：每件案件整列結果快取、分頁（業主 11-02 選擇不做）。
+- 測試：perf_equivalence_1102（3 萬組隨機值與原寫法逐項相同、指紋共用、關閉快取；3 種故意破壞皆被抓到）。無 schema migration，不改任何計算規則或資料。
