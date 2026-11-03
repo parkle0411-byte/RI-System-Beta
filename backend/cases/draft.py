@@ -38,7 +38,6 @@ MAX_ROWS = 50
 STRUCTURE_SUFFIX = {
     "QS": "Facultative Reinsurance",
     "XOL": "Excess of Loss Facultative Reinsurance",
-    "TREATY": "Reinsurance Treaty",
 }
 # VM 與 Alpha 不同（2026-09-29 你的決定）：LMA3333 的標題含代碼，文件上才會印出「LMA3333 …」
 LMA3333_TITLE = "LMA3333 Reinsurers Liability Clause"
@@ -289,10 +288,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
 
     requested_structure = js_upper(text(get(inp, "reinsuranceStructure"), 20))
     reinsurance_structure = "QS" if requested_structure == "FACULTATIVE" else requested_structure
-    if reinsurance_structure and reinsurance_structure not in ("QS", "XOL", "TREATY"):
-        errors.append("Reinsurance structure must be Quota Share, Excess of Loss, or Treaty.")
-    if not get(inp,"parentTwRef") and (get(inp,"classCode")=="PD" or get(inp,"classOfBusiness")=="Property") and reinsurance_structure=="TREATY":
-        errors.append("Property supports Quota Share or Excess of Loss; Treaty is not available.")
+    if reinsurance_structure and reinsurance_structure not in ("QS", "XOL"):
+        errors.append("Reinsurance structure must be Quota Share or Excess of Loss.")
     suffix = STRUCTURE_SUFFIX.get(reinsurance_structure, "")
     stored_type = text(get(inp, "type"), 200)
     type_prefix = text(get(inp, "typePrefix"), 120)

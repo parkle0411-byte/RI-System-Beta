@@ -23,7 +23,6 @@ REINSURANCE_STRUCTURE_CHOICES = [
     ("FACULTATIVE", "Facultative"),
     ("QS", "Quota Share"),
     ("XOL", "Excess of Loss"),
-    ("TREATY", "Treaty"),
 ]
 
 DOCUMENT_KIND_CHOICES = [

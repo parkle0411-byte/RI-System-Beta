@@ -761,9 +761,6 @@ try:
                 Case.objects.filter(pk=posted.pk).update(payload={**terms_base,"installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90,"reinsurerPaymentTerms":{"r1":90},"ratio":100}]})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
                 check(f"Debit {structure}: installment flag {enabled!r} respects strict boolean scope", response.status_code==(204 if enabled is True else 409) and (enabled is True or code(response)=="debit_payment_terms_required"))
-        for enabled in (True,False):
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"paymentTermsDays":None,"reinsurers":[terms_ri],"performanceInstallments":[{"paymentBaseDate":"2026-03-01","paymentTermsDays":90,"ratio":100}]})
-            check(f"Treaty Draft debit terms exempt, installments={enabled}",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Every installment needs its own real ISO calendar date; no fallback.
         base_dates_bad=[None,""," \t\n","　","\ufeff","2026-02-30","2025-02-29","1900-02-29","2026-04-31","2026-00-01","2026-13-01","2026-01-00","2026-01-32","2026-1-01","2026-01-1","01/01/2026","2026-01-01T00:00:00Z"," 2026-01-01 ","2026-01-01\n","0000-01-01","not a date",0,False,[],{},["2026-01-01"],"２０２６-０１-０１"]
@@ -799,9 +796,6 @@ try:
                 Case.objects.filter(pk=posted.pk).update(payload={**dates_base,"installmentEnabled":enabled,"performanceInstallments":[]})
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
                 check(f"Debit {structure}: installment date requirement scope is strict boolean {enabled!r}",response.status_code==(409 if enabled is True else 204) and (enabled is not True or code(response)=="debit_installment_base_date_required"))
-        for rows in (None,[],[{"paymentBaseDate":"2026-02-30"}]):
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":rows})
-            check("Treaty Draft debit remains exempt from installment dates",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # Every installment/RI pair must resolve terms from the four sources.
         # 2026-10-16「92 項會計規則重新確認」：「每期每家普通再保人的約定天數須獨立填寫，沒有預設繼承」。
@@ -860,9 +854,6 @@ try:
                 response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
                 expected="debit_installment_payment_terms_required" if enabled is True else "debit_payment_terms_required"
                 check(f"Debit {structure}: term scope respects strict boolean {enabled!r}",response.status_code==409 and code(response)==expected)
-        for enabled in (True,False):
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":enabled,"reinsurers":[inst_terms_ri],"performanceInstallments":[inst_terms_row]})
-            check("Treaty Draft debit remains exempt from installment term checks",docx(sales,kind="debit",caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # All installments lacking both allocation sources must not silently split equally.
         # 2026-10-16「92 項會計規則重新確認」：每期每家再保人天數獨立填寫，fixture 明確填 r1，讓本段只測分配。
@@ -900,10 +891,6 @@ try:
             Case.objects.filter(pk=posted.pk).update(payload={**allocation_base,"paymentTermsDays":None,"performanceInstallments":[{**r,"reinsurerPaymentTerms":{}} for r in rows]})
             response=docx(sales,kind="debit",caseUid=str(posted.case_uid))
             check(f"Debit {structure}: existing payment-term guard keeps priority",code(response)=="debit_installment_payment_terms_required")
-        for saved_rows in ([allocation_row],[{**allocation_row,"premium":None,"ratio":"　"}],[]):
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":saved_rows})
-            for kind in ("cover","debit","endorsement"):
-                check(f"Treaty Draft {kind}: blank allocation remains exempt",docx(sales,kind=kind,caseUid=str(draft.case_uid)).status_code==204)
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
         # A missing first, middle or final allocation blocks even when other periods are filled.
         for structure in ("QS","XOL"):
@@ -966,16 +953,12 @@ try:
                 check(f"{kind} {structure}: no new positive allocation requirement",docx(sales,kind=kind,caseUid=str(posted.case_uid)).status_code==204)
             Case.objects.filter(pk=posted.pk).update(payload={**positive_base,"installmentEnabled":False,"performanceInstallments":[{**row_base,"premium":0}]})
             check(f"Debit {structure}: non-installment zero rows outside scope",docx(sales,kind="debit",caseUid=str(posted.case_uid)).status_code==204)
-        for fields,valid,corrupt in positive_cases[:12]:
-            Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure":"TREATY","installmentEnabled":True,"performanceInstallments":[{**row_base,**fields}]})
-            response=docx(sales,kind="debit",caseUid=str(draft.case_uid))
-            check("Treaty Draft: blank/nonpositive allocation stays exempt; corrupted monetary data is blocked",response.status_code==(409 if corrupt else 204) and (not corrupt or code(response)=="case_data_invalid"))
         Case.objects.filter(pk=posted.pk).update(payload=original_payload)
-        # Treaty requirements are intentionally deferred, including reference/AE.
+        # 2026-11-02：系統不再有 Treaty；舊資料殘留 TREATY 也不再豁免文件檢查。
         Case.objects.filter(pk=draft.pk).update(payload={"reinsuranceStructure": "TREATY"})
         for kind in ("cover", "debit", "endorsement"):
             r = docx(sales, kind=kind, caseUid=str(draft.case_uid))
-            check(f"Treaty draft {kind}: no reference or business fields -> 204", r.status_code == 204)
+            check(f"legacy Treaty draft {kind}: no exemption -> 409", r.status_code == 409, r.content[:200])
         Case.objects.filter(pk=posted.pk).update(payload={"reinsuranceStructure": "QS"})
         r = docx(sales, kind="cover", caseUid=str(posted.case_uid), reinsuranceStructure="TREATY")
         check("request Treaty flag cannot bypass stored QS requirements", r.status_code == 409 and code(r) == "reinsured_required")

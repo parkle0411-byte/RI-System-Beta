@@ -21,7 +21,7 @@ def payload():
     for key, choices in (
         ("originalInsured", NAMES), ("reinsured", ["Cedant A", "", None, MISSING]),
         ("ae", ["A.L", "B.K", "", None, MISSING, 7]), ("classCode", ["PAR", "", None, MISSING]), ("classOfBusiness", ["Property", MISSING]),
-        ("newOrRenew", ["New", "Renew", "renew", None, MISSING]), ("reinsuranceStructure", ["QS", "TREATY", "treaty", None, MISSING]),
+        ("newOrRenew", ["New", "Renew", "renew", None, MISSING]), ("reinsuranceStructure", ["QS", "XOL", None, MISSING]),
         ("policyFrom", ["2026-03-01", "2026-04-15", "2026-09-10", "2026-10-01", "2026-12-31", "", None, MISSING, "2026-13-01", "2027-01-01"]),
         ("policyTo", ["2027-03-01", "", None, MISSING]),
         ("parentTwRef", ["TWPAR2603001", "", None, MISSING, MISSING, MISSING]),
@@ -56,7 +56,7 @@ def coherent_payload(month):
     shares = R.choice([[100], [60, 40], [50, 30, 20], [33.33, 33.33, 33.34], [70, 30]])[:n] if n > 1 else [100]
     d = {"originalInsured": R.choice(NAMES[:4] + ["Gamma Ltd", "gamma ltd"]), "reinsured": "Cedant A", "ae": R.choice(["A.L", "B.K", "Sandy"]),
          "classCode": R.choice(["PAR", "ENG", ""]), "classOfBusiness": "Property", "newOrRenew": R.choice(["New", "Renew"]),
-         "reinsuranceStructure": R.choice(["QS", "TREATY", "XOL"]), "currency": R.choice(["USD", "TWD", "EUR", "JPY", "usd", "GBP"]),
+         "reinsuranceStructure": R.choice(["QS", "XOL"]), "currency": R.choice(["USD", "TWD", "EUR", "JPY", "usd", "GBP"]),
          "originalPremium": R.choice([1_000_000, 2_500_000.5, 987654.32, 4321, 0]), "riCommPct": R.choice([10, 12.5, 7.35, 0]),
          "taxPct": R.choice([0, 3, 0.75]), "policyFrom": f"{y:04d}-{m:02d}-{R.randint(1, 28):02d}" if R.random() < 0.8 else "2025-01-15",
          "policyTo": f"{y + 1:04d}-{m:02d}-01",

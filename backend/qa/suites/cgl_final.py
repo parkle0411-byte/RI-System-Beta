@@ -55,7 +55,7 @@ try:
             check('actual times and addresses retained',value['policyFromTime']=='00:00' and value['policyToTime']=='12:00' and value['situations']==base['situations'])
     for annual in [0,1,'false','true',[],{}]:
         result=normalize_draft({**base,'cglAnnual':annual});check('invalid Annual rejected '+repr(annual),'Annual must be a boolean.' in result['errors'])
-    for scope,patch in [('property',dict(classOfBusiness='Property')),('facility',dict(reinsurers=[dict(name='QA (Facility)')])),('pws',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])),('swiss',dict(reinsurers=[dict(name='Swiss Re Asia')])),('treaty',dict(reinsuranceStructure='TREATY'))]:
+    for scope,patch in [('property',dict(classOfBusiness='Property')),('facility',dict(reinsurers=[dict(name='QA (Facility)')])),('pws',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])),('swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
         result=normalize_draft({**base,**patch});check(scope+' has no new Annual default','cglAnnual' not in result['value'])
         result=normalize_draft({**base,**patch,'cglAnnual':False});check(scope+' preserves inactive saved Annual',result['value']['cglAnnual'] is False)
     for clause in PRESETS:

@@ -252,7 +252,10 @@ try:
         sales_p.save(update_fields=["email"])
         from cases.draft import validate_announce_ready
         from cases.calc.accounting import calc_legs_for_reinsurer
-        for structure in ("QS", "XOL", "TREATY"):
+        # 2026-11-02：系統不再有 Treaty，儲存時拒絕。
+        r = call(sales, "post", "/api/cases", {"case": ready(reinsuranceStructure="TREATY")})
+        check("Treaty structure is rejected on save", r.status_code == 400 and code(r) == "validation_failed" and any("Quota Share or Excess of Loss" in e for e in r.json().get("errors", [])), r.content[:250])
+        for structure in ("QS", "XOL"):
             for value in (None, "", 0, 10):
                 optional = create(sales, reinsuranceStructure=structure, riCommPct=value, ae=sales_p.name, reinsuredRetention="Advice of Reinsured's retention waived.", underlyingLimits="Primary layer limit")
                 check(f"{structure}: optional commission {value!r} saved", optional.payload["riCommPct"] == (None if value in (None, "") else value))
@@ -277,7 +280,7 @@ try:
             r = call(sales, "post", "/api/cases", {"case": ready(riCommPct=value)})
             check(f"filled commission {value} remains outside 0–100 range", r.status_code == 400 and code(r) == "validation_failed")
         # Optional Case tax: save, Announce, authorize Word, then clear on edit.
-        for structure in ("QS", "XOL", "TREATY"):
+        for structure in ("QS", "XOL"):
             for value in (None, "", 0, 1, 10):
                 optional_tax = create(sales, reinsuranceStructure=structure, taxPct=value, ae=sales_p.name, reinsuredRetention="Advice of Reinsured's retention waived.", underlyingLimits="Primary layer limit")
                 expected_tax = None if value in (None, "") else value
@@ -304,7 +307,7 @@ try:
             check(f"filled Tax {value} remains outside 0–100 range", r.status_code == 400 and code(r) == "validation_failed")
         # Draft may save incomplete amounts; Review/Announce requires every row > 0.
         from cases.draft import validate_announce_ready
-        for structure in ("QS", "XOL", "TREATY"):
+        for structure in ("QS", "XOL"):
             for value in (None, "", 0, "0"):
                 invalid = create(sales, reinsuranceStructure=structure, sumInsured=[dict(category="Building", amount=1000), dict(category="Plant", amount=value)])
                 full_docs(invalid)
@@ -319,7 +322,7 @@ try:
         # Location coverage, explicit unassigned persistence, uniqueness, API conversion.
         locations = [dict(address="Risk A", postcode="100"), dict(address="Risk B", postcode="200")]
         assigned = [dict(category="Building", amount=1000, locationIndex=0), dict(category="Building", amount=2000, locationIndex=1)]
-        for structure in ("QS", "XOL", "TREATY"):
+        for structure in ("QS", "XOL"):
             missing = create(sales, reinsuranceStructure=structure, situations=locations, sumInsured=assigned[:1])
             full_docs(missing); response = announce(sales, missing)
             check(f"{structure}: every Location must be covered", code(response) == "case_not_ready" and response.json()["issues"] == [{"field": "sumInsuredLocation.1", "label": "Location 2 requires at least one Sum Insured entry"}], response.content[:250])
@@ -348,7 +351,7 @@ try:
         check("API manual allocation persists and is ready", response.status_code == 200 and not validate_announce_ready(editable.payload, allow_zero_loss_years=True))
         # Displayed mismatch is advisory; Announce preserves entered amounts.
         from cases.sum_insured import limit_warning
-        for structure in ("QS", "XOL", "TREATY"):
+        for structure in ("QS", "XOL"):
             for currency, amount, limit, mismatch in (("USD",1000.001,1000.004,False), ("USD",1000.004,1000.005,True), ("TWD",1000.4,1000.49,False), ("TWD",1000.49,1000.5,True), ("USD",1000,0,True), ("USD",1.005,1.01,False)):
                 sample = create(sales, reinsuranceStructure=structure, currency=currency, sumInsured=[dict(category="Building",amount=amount,locationIndex=0)], limitOfLiability=limit)
                 full_docs(sample); response = announce(sales, sample); sample.refresh_from_db()

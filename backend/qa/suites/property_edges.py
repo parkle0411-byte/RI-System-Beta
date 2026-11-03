@@ -84,7 +84,7 @@ with transaction.atomic():
     split=[dict(personnelId=staff.pk,name=staff.name,pct=40),dict(personnelId=other.pk,name=other.name,pct=60)]
     rr=call(sales,'post','/api/cases',{'case':p_ready(parentTwRef='FAKE-ENDORSEMENT',originalPremium=0)})
     check('Original cannot forge Endorsement identity to bypass rules',rr.status_code==400)
-    check('Property cannot select Treaty',bool(normalize_draft(p_ready(reinsuranceStructure='TREATY'))['errors']))
+    check('Treaty structure is rejected (removed 2026-11-02)',bool(normalize_draft(p_ready(reinsuranceStructure='TREATY'))['errors']))
     inst=[dict(id='P1',paymentBaseDate='2026-03-01',performanceMonth='2026-03',premium=400,paymentTermsDays=30,reinsurerPaymentTerms={'r1':45,'r2':60}),dict(id='P2',paymentBaseDate='2026-04-01',performanceMonth='2026-04',premium=601,paymentTermsDays=45,reinsurerPaymentTerms={'r1':60,'r2':75})]
     c=posted(sales,**shared,installmentEnabled=True,performanceInstallments=inst)
     check('two installments create per-reinsurer T1/T2/T3',len(c.payload['transactions'])==12)

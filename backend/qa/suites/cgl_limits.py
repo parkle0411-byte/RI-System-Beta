@@ -55,7 +55,7 @@ try:
         p={**base,'reinsuranceStructure':structure,'underlyingLimits':'STALE QS UNDERLYING'};result=normalize_draft(p)
         check(structure+' uses existing clearing rule',result['value']['underlyingLimits']=='')
         check(structure+' has no underlying readiness requirement',not underlying_issues(p) and not validate_announce_ready(result['value']))
-    for scope,patch in [('Property',dict(classOfBusiness='Property')),('Treaty',dict(reinsuranceStructure='TREATY')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsurers=[dict(name='QA',foreignBroker='PWS')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
+    for scope,patch in [('Property',dict(classOfBusiness='Property')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsurers=[dict(name='QA',foreignBroker='PWS')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
         p={**base,**patch,'underlyingLimits':''}
         check(scope+' unchanged underlying milestone',not underlying_issues(p) and not any(i['field']=='underlyingLimits' for i in validate_announce_ready(p)))
     check('negative aggregate still rejected',any('Aggregate Limit' in e for e in normalize_draft({**base,'aggregateLimit':-1})['errors']))

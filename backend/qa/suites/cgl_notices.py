@@ -51,7 +51,7 @@ try:
     check('legacy valuation explanation retained',result['value']['basisOfValuationOther']=='Legacy replacement wording')
     check('multi-line notices retained',result['value']['notices']=='通知\nsecond')
     check('multiple principal addresses and leading zeros retained',result['value']['situations']==base['situations'])
-    for patch in [dict(classOfBusiness='Property'),dict(reinsuranceStructure='TREATY'),dict(reinsurers=[dict(name='QA (Facility)')]),dict(reinsurers=[dict(name='Swiss Re Asia')]),dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])]:
+    for patch in [dict(classOfBusiness='Property'),dict(reinsurers=[dict(name='QA (Facility)')]),dict(reinsurers=[dict(name='Swiss Re Asia')]),dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])]:
         issues=validate_announce_ready({**base,**patch})
         check('non-standard scope still requires Other wording '+repr(patch),any(i['field']=='basisOfValuationOther' for i in issues))
     for patch,field in [(dict(address='',postcode='123'),'.address'),(dict(address='QA road',postcode='1234567'),'.postcode'),(dict(address='QA road',postcode='12'),'.postcode'),(dict(address='QA road',postcode='A12'),'.postcode')]:

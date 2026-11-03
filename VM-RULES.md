@@ -1509,3 +1509,13 @@ Implementation uses a nullable Case → insured MasterRecord FK and additive ins
 - Accounting 優化（業主選「只部署安全優化」）：最後深層複製改為快速寫法（常見純值直接沿用、同一組鍵的順序只判斷一次），其他型別交原寫法；每件案件的付款排程與交易明細共用一次資料指紋（計算不改動 payload，1 萬件驗證）；交易列每件案件共用欄位只算一次；上層案件只讀 case_uid，不讀整份 payload。
 - 結果：1 萬件壓測 Accounting（完整與 list）、Dashboard、3 個月份 Production Report 及 589 件案件明細回應與修改前逐位元組相同；Accounting list 當天第二次打開伺服器約 11.7 秒 → 10.2 秒。剩餘主要為讀取全部案件（約 4 秒）。未做：每件案件整列結果快取、分頁（業主 11-02 選擇不做）。
 - 測試：perf_equivalence_1102（3 萬組隨機值與原寫法逐項相同、指紋共用、關閉快取；3 種故意破壞皆被抓到）。無 schema migration，不改任何計算規則或資料。
+
+
+### 2026-11-02：業主結論——本系統不會有 Treaty（完整移除，取代所有舊條目中的 Treaty 規則）
+- 決定：本系統的業務範圍不包含 Treaty（合約再保），業主選擇「完整移除」。舊條目中「Treaty 維持／同樣適用／文件必填豁免」等描述全部失效，只作歷史紀錄。
+- Case：Reinsurance Structure 只剩 Quota Share／Excess of Loss（Property 原本就不能選 Treaty，其他險種的下拉也移除 Treaty）。儲存時填 TREATY 會被拒絕（Reinsurance structure must be Quota Share or Excess of Loss.）。Type 後綴移除「Reinsurance Treaty」。
+- 資料庫：migration cases 0009 將 reinsurance_structure 的允許值改為 FACULTATIVE／QS／XOL（CHECK 同步更新）。部署當下正式庫 Case 0 筆、Treaty 0 筆，無資料需要轉換。
+- 文件生成：移除 Treaty 的全部必填豁免（含 Draft 可生成 Cover／Debit）；若有舊資料殘留 TREATY，與一般案件同樣檢查（需 Announce、TW Reference 與各項必填）。批單 Debit／Credit Note 不再因 Treaty 跳過批單專屬檢查。前端對應的提示、按鈕條件、「DRAFT」標示與 Treaty 說明文字一併移除。
+- Production Report：remark 一律為 Fac（原本 Treaty 為 Ty）。
+- 測試：移除 Treaty 豁免的測試項目，改為驗證「儲存拒絕 Treaty」與「舊資料殘留 TREATY 不再豁免文件檢查」；CGL 等範圍清單移除 Treaty。隔離環境 87 組後端測試全部通過；前端建置與 4 項前端檢查通過；畫面測試 13 階段通過（phase K 首次出現一次偶發 401，重跑 11/11 通過）。
+- 部署：2026-11-03 09:17 正式部署（後端＋前端＋migration 0009）。部署前正式程式與 HEAD 逐檔一致、Case 0 筆。備份 `backups/ri_system_before_notreaty_20261103_091700.sql`；回復映像 `ri-backend:before-notreaty-20261103_091700`、`ri-frontend:before-notreaty-20261103_091700`。部署後確認 CHECK 規則、前後端無 Treaty、正式程式與原始碼一致。

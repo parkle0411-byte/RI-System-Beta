@@ -202,7 +202,7 @@ def draft_input():
     for key, n in (("originalInsured", 240), ("originalInsuredCn", 240), ("reinsured", 240), ("classOfBusiness", 160), ("classCode", 80)):
         maybe(d, key, gen_text(n))
     maybe(d, "situations", gen_rows(situation, 50))
-    maybe(d, "reinsuranceStructure", R.choice(["QS", "qs", "XOL", "TREATY", "FACULTATIVE", "Facultative", " treaty ", "", None, MISSING, "bad", "ｑｓ", "QS" + "x" * 30, 5]))
+    maybe(d, "reinsuranceStructure", R.choice(["QS", "qs", "XOL", "FACULTATIVE", "Facultative", "", None, MISSING, "bad", "ｑｓ", "QS" + "x" * 30, 5]))
     maybe(d, "policyFrom", gen_date())
     maybe(d, "policyTo", gen_date())
     maybe(d, "policyFromTime", gen_time())
@@ -302,7 +302,7 @@ def valid_draft():
     d = {
         "ownerPersonnelId": R.choice([1, 29, 35]), "ownerPersonnelName": "Parkle Law", "type": R.choice(["", "Property"]),
         "typePrefix": R.choice(["Property", "Marine Cargo", ""]), "originalInsured": "Acme Corporation", "originalInsuredCn": "亞克美股份有限公司",
-        "reinsured": "Fubon Insurance", "classOfBusiness": "Property", "classCode": "PF", "reinsuranceStructure": R.choice(["QS", "XOL", "TREATY", "FACULTATIVE"]),
+        "reinsured": "Fubon Insurance", "classOfBusiness": "Property", "classCode": "PF", "reinsuranceStructure": R.choice(["QS", "XOL", "FACULTATIVE"]),
         "situations": [{"address": f"{i + 1} Main Street, Taipei", "postcode": R.choice(["100", "10001", "110"])} for i in range(R.choice([1, 2, 3]))],
         "policyFrom": "2026-01-01", "policyTo": "2026-12-31", "policyFromTime": R.choice(["12:00", "00:00"]), "policyToTime": "12:00", "currency": "USD",
         "originalPremium": round(R.uniform(10000, 9_000_000), 2), "riCommPct": R.choice([10, 12.5, 7.35]), "taxPct": R.choice([0, 3, 0.75]),

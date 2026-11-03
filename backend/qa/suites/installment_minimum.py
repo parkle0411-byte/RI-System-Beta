@@ -27,7 +27,7 @@ with transaction.atomic():
  def body(**over):
   return dict(currency='USD',reinsuranceStructure='QS',newOrRenew='New',lossAdvisedDate='2026-10-15',lossRecordYears=0,lossRecord=[],originalPremium=1000,paymentTermsDays=90,**over)
  periods=[dict(id='I1',performanceMonth='2026-01',paymentBaseDate='2026-01-01',premium=400),dict(id='I2',performanceMonth='2026-02',paymentBaseDate='2026-02-01',premium=600)]
- for structure in ['QS','XOL','TREATY']:
+ for structure in ['QS','XOL']:
   for rows in [[],periods[:1],None,{},'invalid']:
    payload=body(installmentEnabled=True,performanceInstallments=rows)
    payload['reinsuranceStructure']=structure

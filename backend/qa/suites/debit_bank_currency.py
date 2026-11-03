@@ -47,11 +47,11 @@ with transaction.atomic():
   response=call('/api/document-generation-log',dict(caseUid=str(case.case_uid),kind='debit',format='docx'))
   check(f'{structure} missing currency blocked',response.status_code==409 and response.json()['error']=='debit_bank_currency_unsupported')
  for currency,_ in variants:
-  payload=dict(reinsuranceStructure='TREATY',currency=currency)
+  payload=dict(reinsuranceStructure='TREATY',currency=currency)  # 舊資料殘留值：2026-11-02 起不再豁免
   Case.objects.filter(pk=case.pk).update(status='draft',tw_ref=None,payload=payload)
   for kind in ['cover','debit','endorsement']:
    response=call('/api/document-generation-log',dict(caseUid=str(case.case_uid),kind=kind,format='docx'))
-   check(f'Treaty Draft {currency!r} {kind} retains full exemption',response.status_code==204)
+   check(f'Legacy Treaty Draft {currency!r} {kind} has no document exemption',response.status_code==409)
  # The new document rule does not restrict saved Case currency or readiness.
  for currency in ['USD','TWD','EUR','HKD','JPY','GBP']:
   response=call('/api/cases',dict(case={**base,'currency':currency}))

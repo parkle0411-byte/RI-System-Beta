@@ -120,7 +120,7 @@ def _check_case(request, body):
         case_uid = _text(body, "caseUid")
         case = _find_case(request, case_uid) if case_uid else None
         payload = case.payload if case is not None and isinstance(case.payload, dict) else {}
-        if case is not None and payload.get("parentTwRef") and _text(payload, "reinsuranceStructure") != "TREATY":
+        if case is not None and payload.get("parentTwRef"):
             err = _endorsement_note_error(case, payload, kind)
             if err:
                 return None, kind, err
@@ -158,9 +158,6 @@ def _check_case_base(request, body):
     aggregate_problems = aggregate_issues(payload)
     if aggregate_problems:
         return None, kind, Response({'error':'aggregate_limit_required', 'message':aggregate_problems[0]['label'], 'issues':aggregate_problems}, status=409)
-    # Treaty document requirements are deferred until its workflow is defined.
-    if _text(payload, "reinsuranceStructure") == "TREATY":
-        return case, kind, None
     if kind == "endorsement" and (getattr(case, 'case_kind', '') == "endorsement" or payload.get('parentTwRef')) and (case.status not in ("posted", "closed") or not case.tw_ref):
         return None, kind, _error(409, "endorsement_requires_announce", "The formal Endorsement is available only after successful Announce.")
     if kind == "debit" and not case.tw_ref:

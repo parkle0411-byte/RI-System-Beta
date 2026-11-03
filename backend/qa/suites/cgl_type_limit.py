@@ -62,7 +62,7 @@ try:
         check('CGL limit label '+str(value),any('Limit of Indemnity' in s for s in result['errors']) or any(i['label']=='Limit of Indemnity' for i in issues))
     p={**base,'classOfBusiness':'Property','typePrefix':'Fire / Lightning','limitOfLiability':-1}
     result=normalize_draft(p);check('Property limit save label remains',any('Limit of Liability' in s for s in result['errors']))
-    for scope,patch in [('Property',dict(classOfBusiness='Property')),('Treaty',dict(reinsuranceStructure='TREATY')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
+    for scope,patch in [('Property',dict(classOfBusiness='Property')),('Facility',dict(reinsurers=[dict(name='QA (Facility)')])),('PWS',dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA',foreignBroker='PWS')])),('Swiss',dict(reinsurers=[dict(name='Swiss Re Asia')]))]:
         p={**base,**patch,'typePrefix':'Custom liability'};result=normalize_draft(p)
         check(scope+' free Type unchanged',not result['errors'] and 'as original' not in result['value']['type'],result['errors'])
     blank={**base,'typePrefix':'','type':''}

@@ -99,7 +99,7 @@ try:
     check('whole zero net does not block cover','netDue' not in fields(ready(originalPremium=0),'cover'))
     tiny=ready(currency='TWD',originalPremium=1,riCommPct=0,taxPct=0,installmentEnabled=True,performanceInstallments=rows)
     check('rounded-zero individual T1 allowed when full net positive','netDue' not in fields(tiny,'debit'))
-    for changes in (dict(reinsuranceStructure='XOL'),dict(reinsuranceStructure='TREATY'),dict(parentTwRef='OLD'),dict(classCode='CGL',classOfBusiness='Liability')):
+    for changes in (dict(reinsuranceStructure='XOL'),dict(parentTwRef='OLD'),dict(classCode='CGL',classOfBusiness='Liability')):
         check('new storage excludes '+repr(changes),not scope(ready(**changes),'cover'))
     check('endorsement excluded',not scope(payload,'endorsement'))
     original=copy.deepcopy(case.payload);money=totals(original)

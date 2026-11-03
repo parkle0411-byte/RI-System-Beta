@@ -73,7 +73,7 @@ try:
         check('Other-only accepted', not risk_details_issues({**base, 'coverages': ['Other'], 'coveragesOther': 'Extra liability'}))
         for blank in ['', ' \n\t ', '\ufeff']:
             check('Other requires nonblank text ' + repr(blank), risk_details_issues({**base, 'coverages': ['Other'], 'coveragesOther': blank})[0]['field'] == 'coveragesOther')
-        for scope, patch in [('Property', dict(classOfBusiness='Property')), ('Treaty', dict(reinsuranceStructure='TREATY')),
+        for scope, patch in [('Property', dict(classOfBusiness='Property')), 
                 ('Facility', dict(reinsurers=[dict(name='QA (Facility)')])), ('PWS XOL', dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA', foreignBroker='PWS')])),
                 ('Swiss', dict(reinsurers=[dict(name='Swiss Re Asia Pte. Ltd.')]))]:
             check(scope + ' has no new requirements', not risk_details_issues({**base, **patch, 'coverages': []}))

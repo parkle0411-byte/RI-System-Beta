@@ -445,7 +445,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                         "comm": comm, "premium": premiums[person_index], "income": incomes[person_index],
                         "policyNo": policy_no, "firstPolicyNo": first_policy_no(policy_no, links),
                         "endorseNo": _js(get(case_data, "endorsementSeq")) if get(case_data, "twRefSource") == "auw_manual" and js_truthy(get(case_data, "parentTwRef")) else (endorse.group(1) if endorse else ""),
-                        "remark": "Ty" if get(case_data, "reinsuranceStructure") == "TREATY" else "Fac",
+                        "remark": "Fac",
                         "tranxDate": month_end(month), "installment": installment_index + 1,
                         "exclusion": {
                             "id": get(exclusion, "id"), "scope": get(exclusion, "scope"), "reason": get(exclusion, "reason"),

@@ -316,7 +316,6 @@ export function useCaseWorkspace() {
   })
   const isQsWordCase = computed(() => usesStoredQsWord('cover', selectedPayload.value))
   watch(() => selectedCase.value?.caseUid, () => { generatedWordFiles.value = []; generatedWordHistory.value = []; generatedWordIssues.value = [] })
-  const isTreatyDocumentCase = computed(() => String(selectedPayload.value.reinsuranceStructure || '').trim() === 'TREATY')
   const generatedDocumentCase = computed(() => {
     const payload = selectedPayload.value || {}
     const normalizedReinsured = String(payload.reinsured || '').trim().toLowerCase()
@@ -792,111 +791,109 @@ export function useCaseWorkspace() {
       } finally { documentGenerating.value = '' }
       return
     }
-    if (!isTreatyDocumentCase.value) {
-      if (kind === 'cover' && !selectedCase.value.twRef) {
-        return ElMessage.warning('Cover Note is available after Announce assigns a TW Reference.')
-      }
-      if (kind === 'debit' && selectedCase.value.status === 'draft') {
-        return ElMessage.warning('Debit Note is available after the case is Announced.')
-      }
-      if (selectedPayload.value.draftInput) return ElMessage.warning('Review and Announce the revised Draft before generating documents.')
-      if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.reinsured || '').trim()) {
-        return ElMessage.warning('Complete Reinsured in the case before generating a Cover Note or Debit Note.')
-      }
-      if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.originalInsured || '').trim()) {
-        return ElMessage.warning('Complete Original Insured in the case before generating a Cover Note or Debit Note.')
-      }
-      if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.type || '').trim()) {
-        return ElMessage.warning('Complete Type in the case before generating a Cover Note or Debit Note.')
-      }
-      if ((kind === 'cover' || kind === 'debit') && (!String(selectedPayload.value.policyFrom || '').trim() || !String(selectedPayload.value.policyTo || '').trim())) {
-        return ElMessage.warning('Complete the policy start and end dates in the case before generating a Cover Note or Debit Note.')
-      }
-      if (!String(selectedPayload.value.ae || '').trim()) {
-        return ElMessage.warning('Select an Account Executive in the case before generating a document.')
-      }
-      if (!String(generatedDocumentCase.value.aeEmail || '').trim()) {
-        return ElMessage.warning('Complete the Account Executive Email in the case or Personnel before generating a document.')
-      }
-      if (kind === 'cover' && cglTypeIssues(selectedPayload.value).length) return ElMessage.warning(cglTypeIssues(selectedPayload.value)[0].label)
-      if (kind === 'cover' && cglRiskDetailsIssues(selectedPayload.value).length) return ElMessage.warning('Complete Coverages: ' + cglRiskDetailsIssues(selectedPayload.value).map(issue => issue.label).join('; '))
-      if (kind === 'cover' && cglInformationIssues(selectedPayload.value).length) return ElMessage.warning('Complete Information: ' + cglInformationIssues(selectedPayload.value).map(issue => issue.label).join('; '))
-      if (kind === 'cover' && !String(selectedPayload.value.interest || '').trim()) {
-        return ElMessage.warning('Complete Interest in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && !String(selectedPayload.value.limitOfLiability ?? '').trim()) {
-        return ElMessage.warning(`Complete ${liabilityLimitLabel(selectedPayload.value)} in the case before generating a Cover Note.`)
-      }
-      if (kind === 'cover' && String(selectedPayload.value.reinsuranceStructure || '').trim() === 'XOL' && !String(selectedPayload.value.underlyingLimits || '').trim()) {
-        return ElMessage.warning('Complete Underlying Limits in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.deductibles || '').trim()) {
-        return ElMessage.warning('Complete Deductibles in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !allSumInsuredFacility(selectedPayload.value) && !String(selectedPayload.value.reinsuredRetention || '').trim()) {
-        return ElMessage.warning('Complete Reinsured’s Retention in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !String(row?.address || '').trim()))) {
-        return ElMessage.warning(isStandardCgl(selectedPayload.value) ? 'Complete Principal Address in the case before generating a Cover Note.' : 'Complete Risk Address for every Situation in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !validPostcode(row?.postcode, selectedPayload.value)))) {
-        return ElMessage.warning(isStandardCgl(selectedPayload.value) ? 'Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note.' : 'Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.')
-      }
-      if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.originalPremium ?? '').trim()) {
-        return ElMessage.warning('Complete 100% Premium in the case before generating a Cover Note or Debit Note.')
-      }
-      if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.reinsurers) || !selectedPayload.value.reinsurers.length || selectedPayload.value.reinsurers.some(row => !String(row?.sharePct ?? '').trim()))) {
-        return ElMessage.warning('Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.')
-      }
-      if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
-        return ElMessage.warning('Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.')
-      }
-      if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
-        return ElMessage.warning('Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.')
-      }
-      if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
-        const issues = sumInsuredPlacementIssues(selectedPayload.value)
-        if (issues.some(issue => issue.kind === 'location')) return ElMessage.warning('Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.')
-        if (issues.some(issue => issue.kind === 'duplicate')) return ElMessage.warning('Use unique Interest insured names within each Location or the Facility items before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.lossAdvisedDate ?? '').trim()) {
-        return ElMessage.warning('Complete the Loss Record advised date in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.lossRecordYears ?? '').trim()) {
-        return ElMessage.warning('Complete Past year(s) in the Loss Record section of the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.date ?? '').trim())) {
-        return ElMessage.warning('Complete Date of Loss for every Loss Record entry in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.cause ?? '').trim())) {
-        return ElMessage.warning('Complete Cause for every Loss Record entry in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.lossPaid ?? '').trim())) {
-        return ElMessage.warning('Complete Loss Amount for every Loss Record entry in the case before generating a Cover Note.')
-      }
-      if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.reinsurers) && selectedPayload.value.reinsurers.some(row => !String(row?.name ?? '').trim())) {
-        return ElMessage.warning('Complete the Reinsurer name for every Schedule of Security entry in the case before generating a Cover Note.')
-      }
-      if (kind === 'debit' && missingDebitPaymentTerms(selectedPayload.value)) {
-        return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
-      }
-      if (kind === 'debit' && missingDebitInstallmentBaseDates(selectedPayload.value)) {
-        return ElMessage.warning('Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.')
-      }
-      if (kind === 'debit' && missingDebitInstallmentPaymentTerms(selectedPayload.value)) {
-        return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
-      }
-      if (kind === 'debit' && missingDebitInstallmentAllocation(selectedPayload.value)) {
-        return ElMessage.warning('Complete Premium or Ratio for every installment before generating a Debit Note.')
-      }
-      if (kind === 'debit' && invalidDebitInstallmentAllocation(selectedPayload.value)) {
-        return ElMessage.warning('Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
-      }
-      if (kind === 'debit' && unsupportedDebitBankCurrency(selectedPayload.value)) {
-        return ElMessage.warning('Debit Note generation is available only for USD and TWD. The receiving bank account for other currencies is pending confirmation.')
-      }
+    if (kind === 'cover' && !selectedCase.value.twRef) {
+      return ElMessage.warning('Cover Note is available after Announce assigns a TW Reference.')
     }
-    if (kind === 'cover' && !isTreatyDocumentCase.value && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
+    if (kind === 'debit' && selectedCase.value.status === 'draft') {
+      return ElMessage.warning('Debit Note is available after the case is Announced.')
+    }
+    if (selectedPayload.value.draftInput) return ElMessage.warning('Review and Announce the revised Draft before generating documents.')
+    if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.reinsured || '').trim()) {
+      return ElMessage.warning('Complete Reinsured in the case before generating a Cover Note or Debit Note.')
+    }
+    if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.originalInsured || '').trim()) {
+      return ElMessage.warning('Complete Original Insured in the case before generating a Cover Note or Debit Note.')
+    }
+    if ((kind === 'cover' || kind === 'debit') && !String(selectedPayload.value.type || '').trim()) {
+      return ElMessage.warning('Complete Type in the case before generating a Cover Note or Debit Note.')
+    }
+    if ((kind === 'cover' || kind === 'debit') && (!String(selectedPayload.value.policyFrom || '').trim() || !String(selectedPayload.value.policyTo || '').trim())) {
+      return ElMessage.warning('Complete the policy start and end dates in the case before generating a Cover Note or Debit Note.')
+    }
+    if (!String(selectedPayload.value.ae || '').trim()) {
+      return ElMessage.warning('Select an Account Executive in the case before generating a document.')
+    }
+    if (!String(generatedDocumentCase.value.aeEmail || '').trim()) {
+      return ElMessage.warning('Complete the Account Executive Email in the case or Personnel before generating a document.')
+    }
+    if (kind === 'cover' && cglTypeIssues(selectedPayload.value).length) return ElMessage.warning(cglTypeIssues(selectedPayload.value)[0].label)
+    if (kind === 'cover' && cglRiskDetailsIssues(selectedPayload.value).length) return ElMessage.warning('Complete Coverages: ' + cglRiskDetailsIssues(selectedPayload.value).map(issue => issue.label).join('; '))
+    if (kind === 'cover' && cglInformationIssues(selectedPayload.value).length) return ElMessage.warning('Complete Information: ' + cglInformationIssues(selectedPayload.value).map(issue => issue.label).join('; '))
+    if (kind === 'cover' && !String(selectedPayload.value.interest || '').trim()) {
+      return ElMessage.warning('Complete Interest in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && !String(selectedPayload.value.limitOfLiability ?? '').trim()) {
+      return ElMessage.warning(`Complete ${liabilityLimitLabel(selectedPayload.value)} in the case before generating a Cover Note.`)
+    }
+    if (kind === 'cover' && String(selectedPayload.value.reinsuranceStructure || '').trim() === 'XOL' && !String(selectedPayload.value.underlyingLimits || '').trim()) {
+      return ElMessage.warning('Complete Underlying Limits in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.deductibles || '').trim()) {
+      return ElMessage.warning('Complete Deductibles in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !allSumInsuredFacility(selectedPayload.value) && !String(selectedPayload.value.reinsuredRetention || '').trim()) {
+      return ElMessage.warning('Complete Reinsured’s Retention in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !String(row?.address || '').trim()))) {
+      return ElMessage.warning(isStandardCgl(selectedPayload.value) ? 'Complete Principal Address in the case before generating a Cover Note.' : 'Complete Risk Address for every Situation in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.situations) || !selectedPayload.value.situations.length || selectedPayload.value.situations.some(row => !validPostcode(row?.postcode, selectedPayload.value)))) {
+      return ElMessage.warning(isStandardCgl(selectedPayload.value) ? 'Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note.' : 'Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.')
+    }
+    if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.originalPremium ?? '').trim()) {
+      return ElMessage.warning('Complete 100% Premium in the case before generating a Cover Note or Debit Note.')
+    }
+    if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.reinsurers) || !selectedPayload.value.reinsurers.length || selectedPayload.value.reinsurers.some(row => !String(row?.sharePct ?? '').trim()))) {
+      return ElMessage.warning('Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.')
+    }
+    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
+      return ElMessage.warning('Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.')
+    }
+    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
+      return ElMessage.warning('Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.')
+    }
+    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
+      const issues = sumInsuredPlacementIssues(selectedPayload.value)
+      if (issues.some(issue => issue.kind === 'location')) return ElMessage.warning('Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.')
+      if (issues.some(issue => issue.kind === 'duplicate')) return ElMessage.warning('Use unique Interest insured names within each Location or the Facility items before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.lossAdvisedDate ?? '').trim()) {
+      return ElMessage.warning('Complete the Loss Record advised date in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && !String(selectedPayload.value.lossRecordYears ?? '').trim()) {
+      return ElMessage.warning('Complete Past year(s) in the Loss Record section of the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.date ?? '').trim())) {
+      return ElMessage.warning('Complete Date of Loss for every Loss Record entry in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.cause ?? '').trim())) {
+      return ElMessage.warning('Complete Cause for every Loss Record entry in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.lossRecord) && selectedPayload.value.lossRecord.some(row => !String(row?.lossPaid ?? '').trim())) {
+      return ElMessage.warning('Complete Loss Amount for every Loss Record entry in the case before generating a Cover Note.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && Array.isArray(selectedPayload.value.reinsurers) && selectedPayload.value.reinsurers.some(row => !String(row?.name ?? '').trim())) {
+      return ElMessage.warning('Complete the Reinsurer name for every Schedule of Security entry in the case before generating a Cover Note.')
+    }
+    if (kind === 'debit' && missingDebitPaymentTerms(selectedPayload.value)) {
+      return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer, using the Case default when needed, before generating a Debit Note.')
+    }
+    if (kind === 'debit' && missingDebitInstallmentBaseDates(selectedPayload.value)) {
+      return ElMessage.warning('Add at least one installment and complete a valid Payment Base Date for every installment before generating a Debit Note.')
+    }
+    if (kind === 'debit' && missingDebitInstallmentPaymentTerms(selectedPayload.value)) {
+      return ElMessage.warning('Complete valid Payment Terms Days (an integer of at least 15) for every Reinsurer in every installment before generating a Debit Note.')
+    }
+    if (kind === 'debit' && missingDebitInstallmentAllocation(selectedPayload.value)) {
+      return ElMessage.warning('Complete Premium or Ratio for every installment before generating a Debit Note.')
+    }
+    if (kind === 'debit' && invalidDebitInstallmentAllocation(selectedPayload.value)) {
+      return ElMessage.warning('Use a Premium or Ratio greater than 0 for every installment before generating a Debit Note.')
+    }
+    if (kind === 'debit' && unsupportedDebitBankCurrency(selectedPayload.value)) {
+      return ElMessage.warning('Debit Note generation is available only for USD and TWD. The receiving bank account for other currencies is pending confirmation.')
+    }
+    if (kind === 'cover' && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
       const warning = sumInsuredLimitWarning(selectedPayload.value)
       if (warning) ElMessage.warning(warning.message)
     }
@@ -1397,7 +1394,6 @@ export function useCaseWorkspace() {
     const record = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === name)
     if (record) draft.classCode = record.code || ''
     if (name === 'Property') {
-      if (draft.reinsuranceStructure === 'TREATY') {draft.reinsuranceStructure='';ElMessage.info('Property supports Quota Share or Excess of Loss.')}
       if (!isEditing.value && propertyScope(draft)) draft.reinsurers.forEach(row => {row.paymentTermsDays ??= 90;row.taxPct ??= 1})
     }
     else if (!name) draft.classCode = ''
@@ -2181,7 +2177,7 @@ export function useCaseWorkspace() {
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
     claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
     generatedWordFiles, generatedWordHistory, generatedWordIssues, isQsWordCase,
-    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, isTreatyDocumentCase, endorsementNoteKind, endorsementNoteIssue, unsupportedDebitBankCurrency, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
+    documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, endorsementNoteKind, endorsementNoteIssue, unsupportedDebitBankCurrency, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,

@@ -8,11 +8,10 @@ export const FIXED_TEXT = {
 
 export const STRUCTURE_SUFFIX = {
   QS: 'Facultative Reinsurance',
-  XOL: 'Excess of Loss Facultative Reinsurance',
-  TREATY: 'Reinsurance Treaty'
+  XOL: 'Excess of Loss Facultative Reinsurance'
 };
 
-export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss', TREATY: 'Treaty' };
+export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss' };
 export const UNIVERSAL_CLAUSES = [
   // VM 與 Alpha 不同（2026-09-29）：標題含代碼，文件上印出「LMA3333 …」
   { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },
