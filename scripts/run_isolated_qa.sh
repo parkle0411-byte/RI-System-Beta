@@ -4,6 +4,9 @@
 #   scripts/run_isolated_qa.sh                    全部測試組（約 30–40 分鐘）
 #   scripts/run_isolated_qa.sh cases_api swiss_facility   只跑列出的測試組
 #   KEEP=1 scripts/run_isolated_qa.sh ...         結束後保留環境（除錯用；之後 docker compose -p ri-isoqa down -v）
+#   QA_BACKEND_IMAGE=ri-backend:local scripts/run_isolated_qa.sh ...
+#                                                 測指定映像（不重建），並用該映像內建的測試組（題目與程式同版）；
+#                                                 部署前測候選映像、每週三測正式版時使用（見 VM-RULES §3）
 #
 # 做法：用目前的原始碼建一個專用映像 ri-backend:isoqa（不影響正式的 ri-backend:local），起一套隔離的 MySQL＋後端，
 # 後端以 ri_runtime 連線並套用 db_harden.sh 的權限與 Audit trigger（與正式相同），Audit 記錄啟用、RI_DISPOSABLE_QA=true。
@@ -23,8 +26,13 @@ for s in mysql_root_password mysql_app_password mysql_runtime_password django_se
 done
 chmod 644 "$ISOQA_SECRETS"/*   # 容器內以非 root 讀取（隨機值，結束即刪）
 
-echo "== 建立測試映像（目前原始碼）並啟動獨立環境 =="
-docker build -q -t ri-backend:isoqa backend >/dev/null || { echo "映像建置失敗"; exit 1; }
+if [ -n "${QA_BACKEND_IMAGE:-}" ]; then
+  echo "== 使用指定映像 $QA_BACKEND_IMAGE（$(docker image inspect -f '{{.Id}}' "$QA_BACKEND_IMAGE" 2>/dev/null | cut -c8-19)）及其內建測試組，啟動獨立環境 =="
+  docker tag "$QA_BACKEND_IMAGE" ri-backend:isoqa || { echo "找不到映像 $QA_BACKEND_IMAGE"; exit 1; }
+else
+  echo "== 建立測試映像（目前原始碼）並啟動獨立環境 =="
+  docker build -q -t ri-backend:isoqa backend >/dev/null || { echo "映像建置失敗"; exit 1; }
+fi
 "${COMPOSE[@]}" up -d --wait >/dev/null 2>&1 || { echo "測試環境啟動失敗"; "${COMPOSE[@]}" logs --tail 40; exit 1; }
 
 fresh_db() {
@@ -45,15 +53,20 @@ fresh_db() {
   MYSQL_CONTAINER=ri-isoqa-mysql RUNTIME_PW_FILE="$ISOQA_SECRETS/mysql_runtime_password" scripts/db_harden.sh >/dev/null || { echo "db_harden 失敗"; return 1; }
 }
 
-if [ "$#" -gt 0 ]; then SUITES=("$@"); else SUITES=($(ls backend/qa/suites/*.py | xargs -n1 basename | sed 's/\.py$//')); fi
+if [ "$#" -gt 0 ]; then SUITES=("$@")
+elif [ -n "${QA_BACKEND_IMAGE:-}" ]; then SUITES=($(docker exec ri-isoqa-backend sh -c 'ls /app/qa/suites/*.py' | xargs -n1 basename | sed 's/\.py$//'))
+else SUITES=($(ls backend/qa/suites/*.py | xargs -n1 basename | sed 's/\.py$//')); fi
 echo "== 資料庫／API 測試組（${#SUITES[@]} 組，每組全新資料庫）=="
 FAILED=0
 for name in "${SUITES[@]}"; do
-  f="backend/qa/suites/$name.py"
-  [ -f "$f" ] || { printf "  %s%-32s 找不到%s\n" "$RED" "$name" "$OFF"; FAILED=1; continue; }
+  if [ -n "${QA_BACKEND_IMAGE:-}" ]; then
+    f="$(mktemp)"; docker exec ri-isoqa-backend cat "/app/qa/suites/$name.py" > "$f" 2>/dev/null || : > "$f"
+  else f="backend/qa/suites/$name.py"; fi
+  [ -s "$f" ] || { printf "  %s%-32s 找不到%s\n" "$RED" "$name" "$OFF"; FAILED=1; continue; }
   fresh_db || { FAILED=1; break; }
   envs=(); [ "$name" = auth_permissions ] && envs=(-e RI_LOGIN_THROTTLE=10/min)   # 這組要驗證預設的登入限流
   out=$(docker exec -i "${envs[@]}" ri-isoqa-backend python manage.py shell < "$f" 2>&1 | grep -v -i "warn\|imported auto")
+  [ -n "${QA_BACKEND_IMAGE:-}" ] && rm -f "$f"
   line=$(grep -E "passed" <<<"$out" | head -1)
   if [ -n "$line" ] && ! grep -q "^FAIL" <<<"$out"; then printf "  %s%-32s %s%s\n" "$GREEN" "$name" "$line" "$OFF"
   else printf "  %s%-32s 失敗%s\n" "$RED" "$name" "$OFF"; grep -E "^FAIL|Error|assert" <<<"$out" | tail -6 | cut -c1-240 | sed 's/^/      /'; FAILED=1; fi

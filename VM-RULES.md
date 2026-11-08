@@ -58,16 +58,23 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，2026-11-03 為 87 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，2026-11-03 為 87 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個階段 A H R B0 B K C D E F G P1 P2，2026-11-02 共 207 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。phase K 偶爾出現一次 401 console 錯誤，重跑即過。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
-- **部署流程**：測試通過 →（必問項目先問業主確認）→ 備份資料庫（有 migration 再加文件 volume）→ 標記回復映像 → 部署 → 核對正式程式與原始碼逐檔一致 → 在「部署與回復紀錄」加一列。
+- **實作前確認（2026-11-08 業主決定，所有修改都適用，含小改與 bug 修正）**：動工前先向業主說明——理解的需求、預計做法、影響範圍、屬於必問或小改、預計的測試範圍；業主確認後才開始實作（業主在指示中明說「直接做」即視為已確認）。實作中發現做法或範圍需要改變，先停下再問。
+- **部署流程**：實作前確認 → 實作 → 測試通過 →（必問項目先問業主確認）→ 備份資料庫（有 migration 再加文件 volume）→ 標記回復映像 → 部署 → 核對正式程式與原始碼逐檔一致 → 在「部署與回復紀錄」加一列。
   - **測試範圍**：有改程式就跑全部 API 測試組＋畫面測試；只更新參考檔／指南（應用程式碼不變）跑相關檢查即可。
   - **必問（不論大小，先測試再問業主）**：有 migration 或改資料庫結構；會寫入或修改正式資料（匯入、`--apply` 指令、清除資料）；新規則或改金額／會計；設定開關與帳號（寄信、Audit、排程、權限、帳號）。
   - **小改（測試通過即直接部署，事後在回覆中告知業主）**：只更新參考檔／指南；純畫面文字與版面（不改欄位、驗證、金額或資料）；不改結果的效能優化（回應比對逐位元組相同）；修正程式與本文件既有規則不符的 bug（不含新規則）。小改仍要備份、標記回復映像並寫入部署紀錄。
   - 同時符合小改與必問時，以必問為準；不確定屬於哪一類就先問。
+  - **測試版本（2026-11-08 業主決定）**：
+    - **每週三 Debug** 的全部 API＋全部畫面測試，對象是**最新已部署的正式版**：`QA_BACKEND_IMAGE=ri-backend:local scripts/run_isolated_qa.sh`（用正式映像內建的測試組，題目與程式同版）＋`scripts/run_ui_test.sh`（預設即正式映像）。
+    - **部署前測試**的對象是**這次要部署的候選映像**＝以最新已部署版本為基礎＋本次修改建置的 `ri-backend`／`ri-frontend`。API 測試用 `QA_BACKEND_IMAGE=<候選後端映像> scripts/run_isolated_qa.sh …`；畫面測試必須用 `UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定同一組候選映像（不可用預設的正式映像）。部署時直接部署測過的那組映像，不重新建置；回報寫明測試用的映像名稱。
+    - 候選映像若含其他 session 尚未完成的修改（`git status` 有不屬於本次的變更），先問業主是否一起部署，不要自行帶上線。
+- **Docker 映像保留（2026-11-06 業主決定）**：`ri-*` 自建映像一律保留——容器使用中（含已停止）、7 天內建立或 tag 日期在 7 天內、本文件／腳本／compose 有寫到（含「部署與回復紀錄」的回復映像）、每個功能最後一個 `before-*` 回滾點；其餘可刪。第三方映像（mysql、nginx、node、python…）不自動刪。清理用 `scripts/docker_cleanup.sh`（預設預覽，`--apply` 才刪；`KEEP_DAYS` 可調），同時清超過 7 天的建置快取與 dangling 映像。每週三 06:00（台灣時間）由 parkle 的 crontab 自動執行，紀錄在 `logs/docker-cleanup.log`。不要用 `docker system prune -a` 或 `docker rmi -f`。
+- **開發工具舊版本清理（2026-11-07 業主決定）**：`scripts/tools_cleanup.sh`（預設預覽，`--apply` 才刪）每週三 06:00 接在 Docker 清理之後由 parkle 的 crontab 自動執行，紀錄在 `logs/tools-cleanup.log`。清 parkle 家目錄內 Codex、Claude Code、VS Code 伺服器與擴充套件的舊版本、VS Code 擴充安裝檔快取，以及 `/tmp/ri-*` 暫存；一律保留執行中、目前版本、最新版本與 7 天內的項目，工具正在更新時跳過。不處理其他帳號（如 olin1）。
 
 **開發注意**
 - `frontend/src/views/CaseWorkspace.vue` 與 `case-workspace.script.js` 直接維護（舊的產生器已不存在）。
@@ -389,3 +396,9 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 2026-11-03：文件整理——改為依主題的現行規則；舊變更紀錄封存到 `docs/archive/VM-RULES-CHANGELOG-2026.md`；刪除「2026-09 規則決定（Alpha 對照）」表。
 - 2026-11-03：移除 Treaty 部署（migration cases.0009）。
 - 2026-11-04：部署確認規則放寬——小改（參考檔／指南、純畫面文字版面、不改結果的效能優化、修既有規則 bug）測試通過即部署、事後告知；migration、正式資料寫入、新規則／金額會計、設定與帳號仍須先問（§3）。
+- 2026-11-06：新增 §3「Docker 映像保留」規則與 `scripts/docker_cleanup.sh`，每週三 03:30 自動清理超過 7 天的非回滾映像與建置快取（VM 空間整理）。
+- 2026-11-06：2026-10-01～10-29 的備份（237 項，177M）已打包為 `backups/archive_20261001-20261029.tar.zst`（66M，逐位元驗證一致）；紀錄表中這些 `backups/...` 路徑需先解壓：`tar -I zstd -xf backups/archive_20261001-20261029.tar.zst -C backups <路徑>`。
+- 2026-11-07：新增 §3「開發工具舊版本清理」：`scripts/tools_cleanup.sh` 每週三 03:35 自動清理工具舊版本與 `/tmp/ri-*` 舊暫存（VM 空間整理）。
+- 2026-11-07：每週 Docker 與開發工具清理改為每週三 06:00（台灣時間）依序執行。
+- 2026-11-08：§3 新增「測試版本」：部署前測候選映像（最新已部署版本＋本次修改，測過即部署同一組映像）；每週三 Debug 測最新已部署正式版。`run_isolated_qa.sh` 新增 `QA_BACKEND_IMAGE` 選項（指定映像、用其內建測試組）。
+- 2026-11-08：新增 §3「實作前確認」——所有修改（含小改、bug 修正）動工前都先向業主說明需求理解、做法、影響範圍、分類與測試範圍，確認後才實作；部署前是否要問仍依必問／小改規則。
