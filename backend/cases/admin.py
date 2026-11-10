@@ -34,3 +34,11 @@ class DraftRecycleBinAdmin(ReadOnlyModelAdmin):
     list_filter = ("restored_at",)
     list_select_related = ("original_case",)
     ordering = ("-deleted_at", "-id")
+
+
+from .models import FinanceReconciliationBatch
+@admin.register(FinanceReconciliationBatch)
+class FinanceReconciliationBatchAdmin(ReadOnlyModelAdmin):
+    list_display = ('id', 'review_date', 'currency', 'party_name', 'status', 'created_by_name', 'created_at')
+    list_filter = ('status', 'currency')
+    search_fields = ('reference', 'party_name')

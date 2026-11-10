@@ -28,6 +28,9 @@ def reinsurer_key(value):
 
 
 def required_reinsurers(payload):
+    from ..oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        return []
     rows = get(payload, "reinsurers")
     keys = [reinsurer_key(get(row, "name")) for row in (rows if is_array(rows) else [])]
     return list(dict.fromkeys(k for k in keys if k))

@@ -1,3 +1,5 @@
+from django.db import transaction
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Reference-only edits; run solely in the disposable reference QA database."""
 import copy,json,os
 from unittest.mock import patch
@@ -58,18 +60,24 @@ try:
   paidcase=make('REF-QA-PAID')
   t1=next(tx['txNo'] for tx in paidcase.payload['transactions'] if tx['legType']=='Leg 1')
   c1=next(tx['txNo'] for tx in paidcase.payload['transactions'] if tx['legType']=='Claim Leg 1')
-  def account(body):return finance.post('/api/accounting',data=json.dumps(body),content_type='application/json')
+  review_case(paidcase,finance)
+  def account(body):
+   if body.get('action')=='record_transaction_payments':return reviewed_cash(finance,body)
+   return finance.post('/api/accounting',data=json.dumps(body),content_type='application/json')
   def pay_amount(value,no=None):
    no=no or t1;paidcase.refresh_from_db();return account({'action':'record_transaction_payments','paymentDate':'2026-10-15','amount':value,'allocations':[{'caseUid':str(paidcase.case_uid),'txNo':no,'rowVersion':paidcase.row_version,'amount':value}], 'note':'QA synthetic registration'})
   # 2026-10-16「92 項會計規則」：保費每次須登錄整筆餘額，只有賠款可部分收付 → 部分收款夾具改用賠款
-  check('partial premium payment rejected',pay_amount(100).status_code==400)
+  with transaction.atomic():
+   check('partial premium payment accepted',pay_amount(100).status_code==200)
+   transaction.set_rollback(True)
+  paidcase.refresh_from_db()
   check('partial payment fixture created',pay_amount(20,c1).status_code==200)
   paidcase.refresh_from_db();cash_before=transaction_details(paidcase.payload);raw_before=strip_refs(paidcase.payload)
   check('partial claim fixture recorded',cash_before[c1]['paid']==20 and cash_before[c1]['outstanding']==30,cash_before[c1])
   check('partially paid references update without changing cash',write(sales,paidcase,statementNo='AFTER-PARTIAL').status_code==200 and cash_before==transaction_details(paidcase.payload) and raw_before==strip_refs(paidcase.payload))
   check('remaining payment fixture created',pay_amount(cash_before[t1]['outstanding']).status_code==200)
   paidcase.refresh_from_db();response=account({'action':'confirm_facility_settlement','caseUid':str(paidcase.case_uid),'txNo':t1,'rowVersion':paidcase.row_version,'note':'QA reconciliation complete'})
-  check('full receipt auto-settles and manual confirmation is retired',response.status_code==400 and transaction_details(paidcase.payload)[t1]['settlement']=='settled')
+  check('full receipt auto-settles and manual confirmation is retired',response.status_code==410 and transaction_details(paidcase.payload)[t1]['settlement']=='settled')
   paidcase.refresh_from_db();cash_before=transaction_details(paidcase.payload);raw_before=strip_refs(paidcase.payload)
   check('manually settled references update without reopening settlement',cash_before[t1]['settlement']=='settled' and write(sales,paidcase,statementNo='',reinsurers=[{'index':0,'settlementRef':'AFTER-SETTLED'}]).status_code==200 and cash_before==transaction_details(paidcase.payload) and raw_before==strip_refs(paidcase.payload))
   swiss=make('REF-QA-SCHEDULE','posted',reinsurers=[{'name':'Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)','sharePct':100,'premium':1000,'riCommPct':20,'taxPct':1,'settlementRef':'SWISS-OLD'}])

@@ -3,7 +3,7 @@
 // dashboardTrendValues()／dashboardTrendMax()／dashboardTrendX()／dashboardTrendY()／dashboardTrendPoints()／dashboardTrendSeries()、formatThousands()。
 // 與 Alpha 不同的地方（見 VM-RULES.md）：後端用台北時間、趨勢用 Production 的規則；畫面是 fetch() → apiFetch()，
 // 以及下面的 <style>：占比長條的填色 <i class="mix-fill"> 是行內元素，Alpha 的 height:100% 對它無效、長條沒有填色，補上 display:block。
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiFetch } from '../api'
 import { can } from '../auth'
@@ -12,6 +12,9 @@ import { shell } from '../alpha/shell'
 
 const router = useRouter()
 const dashboardLoading = ref(false)
+const selectedTrendYear = ref(null)
+const trendYears = computed(() => dashboard.value.period?.year ? Array.from({ length: 5 }, (_, i) => dashboard.value.period.year - i) : [])
+
 const dashboard = ref({ period: { year: null, currentMonth: '', monthNumber: 1 }, metrics: {}, brokerage: { labels: [], current: [], prior: [], target: [], annualTarget: null }, classMix: [], reinsurers: [] })
 
 function formatThousands(value) {
@@ -32,10 +35,20 @@ function dashboardTrendMax() {
 }
 function dashboardTrendX(index, total) {
   if (total <= 1) return 450
-  return 92 + (index * 778 / (total - 1))
+  return 110 + (index * 742 / (total - 1))
+}
+function dashboardTrendMin() {
+  return Math.min(0, ...dashboardTrendValues())
+}
+function dashboardTrendTick(fraction) {
+  return dashboardTrendMin() + (dashboardTrendMax() - dashboardTrendMin()) * fraction
 }
 function dashboardTrendY(value) {
-  return 184 - (Math.max(0, Number(value || 0)) / dashboardTrendMax() * 150)
+  return 184 - ((Number(value || 0) - dashboardTrendMin()) / (dashboardTrendMax() - dashboardTrendMin()) * 150)
+}
+function dashboardBarWidth() {
+  const count = dashboard.value.brokerage?.labels?.length || 1
+  return Math.min(18, (count > 1 ? 742 / (count - 1) : 60) * 0.32)
 }
 function dashboardTrendPoints(series) {
   const values = Array.isArray(series) ? series : []
@@ -51,28 +64,31 @@ function dashboardTrendSeries(series) {
 }
 
 async function loadDashboard() {
+  const previousYear = dashboard.value.brokerage?.selectedYear || dashboard.value.period?.year
   if (!can('dashboard.read')) return
   dashboardLoading.value = true
   shell.error = ''
   try {
-    const response = await apiFetch('/api/dashboard', { headers: { Accept: 'application/json' } })
+    const response = await apiFetch('/api/dashboard' + (selectedTrendYear.value ? '?brokerageYear=' + selectedTrendYear.value : ''), { headers: { Accept: 'application/json' } })
     const body = await response.json()
     if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
     dashboard.value = body
+    selectedTrendYear.value = selectedTrendYear.value || body.period.year
+    dashboard.value.brokerage.selectedYear = selectedTrendYear.value
   } catch (err) {
+    selectedTrendYear.value = previousYear || null
     shell.error = err instanceof Error ? err.message : String(err)
   } finally {
     dashboardLoading.value = false
   }
 }
 
-onMounted(loadDashboard)
+onMounted(() => loadDashboard())
 </script>
 
 <template>
 <div class="rdash" v-loading="dashboardLoading">
   <el-alert v-if="dashboard.metrics?.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation and excluded from financial totals. Correct the saved case data before using complete totals." />
-  <el-alert v-if="dashboard.metrics?.missingPostingRates?.length" type="warning" :closable="false" show-icon title="Accounting TWD totals are incomplete — posting-month FX required" :description="dashboard.metrics.missingPostingRates.map(item=>item.currency+' / '+(item.month||'posting month pending')).filter((v,i,a)=>a.indexOf(v)===i).join(', ')" />
   <div class="row3">
     <section class="card">
       <div class="card-head"><h3>Total Bound YTD</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
@@ -89,9 +105,9 @@ onMounted(loadDashboard)
   </div>
 
   <section class="card">
-    <div class="card-head"><h3>YTD Brokerage Trend (TWD)</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
-    <div v-if="dashboard.brokerage?.labels?.length" class="trend-chart" aria-label="YTD brokerage trend line chart">
-      <svg class="trend-svg" viewBox="0 0 900 220" role="img" aria-label="Current year, prior year and target brokerage trend">
+    <div class="card-head"><h3>YTD Brokerage Trend (TWD)</h3><el-select v-model="selectedTrendYear" aria-label="Brokerage trend year" data-testid="dashboard-trend-year" size="small" style="width: 110px" :disabled="dashboardLoading" @change="loadDashboard"><el-option v-for="year in trendYears" :key="year" :label="String(year)" :value="year" /></el-select></div>
+    <div v-if="dashboard.brokerage?.labels?.length" class="trend-chart" aria-label="YTD brokerage grouped bar chart">
+      <svg class="trend-svg" viewBox="0 0 900 220" role="img" aria-label="Prior year bars on the left, current year bars on the right, and monthly target line">
         <g class="trend-grid">
           <line x1="92" y1="34" x2="870" y2="34"></line>
           <line x1="92" y1="84" x2="870" y2="84"></line>
@@ -100,21 +116,20 @@ onMounted(loadDashboard)
         </g>
         <g class="trend-axis-labels">
           <text x="84" y="38" text-anchor="end">{{ formatThousands(dashboardTrendMax()) }}</text>
-          <text x="84" y="88" text-anchor="end">{{ formatThousands(dashboardTrendMax() * 2 / 3) }}</text>
-          <text x="84" y="138" text-anchor="end">{{ formatThousands(dashboardTrendMax() / 3) }}</text>
-          <text x="84" y="188" text-anchor="end">0K</text>
+          <text x="84" y="88" text-anchor="end">{{ formatThousands(dashboardTrendTick(2 / 3)) }}</text>
+          <text x="84" y="138" text-anchor="end">{{ formatThousands(dashboardTrendTick(1 / 3)) }}</text>
+          <text x="84" y="188" text-anchor="end">{{ formatThousands(dashboardTrendMin()) }}</text>
         </g>
-        <polyline class="trend-line prior" :points="dashboardTrendPoints(dashboard.brokerage.prior)"></polyline>
+        <line class="trend-zero" x1="92" :y1="dashboardTrendY(0)" x2="870" :y2="dashboardTrendY(0)" />
+        <g v-for="(point,index) in dashboardTrendSeries(dashboard.brokerage.prior)" :key="'prior-bar-' + index">
+          <rect class="trend-bar prior" :x="point.x - dashboardBarWidth() - 2" :y="Math.min(point.y, dashboardTrendY(0))" :width="dashboardBarWidth()" :height="Math.abs(point.y - dashboardTrendY(0))"><title>{{ dashboard.brokerage.labels[index] }} · {{ selectedTrendYear - 1 }} · Prior {{ formatAmount(point.value) }}</title></rect>
+        </g>
+        <g v-for="(point,index) in dashboardTrendSeries(dashboard.brokerage.current)" :key="'current-bar-' + index">
+          <rect class="trend-bar current" :x="point.x + 2" :y="Math.min(point.y, dashboardTrendY(0))" :width="dashboardBarWidth()" :height="Math.abs(point.y - dashboardTrendY(0))"><title>{{ dashboard.brokerage.labels[index] }} · {{ selectedTrendYear }} · Current {{ formatAmount(point.value) }}</title></rect>
+        </g>
         <polyline class="trend-line target" :points="dashboardTrendPoints(dashboard.brokerage.target)"></polyline>
-        <polyline class="trend-line current" :points="dashboardTrendPoints(dashboard.brokerage.current)"></polyline>
-        <g v-for="(point,index) in dashboardTrendSeries(dashboard.brokerage.prior)" :key="'prior-point-' + index">
-          <circle class="trend-point prior" :cx="point.x" :cy="point.y" r="3"><title>{{ dashboard.brokerage.labels[index] }} · Prior {{ formatAmount(point.value) }}</title></circle>
-        </g>
         <g v-for="(point,index) in dashboardTrendSeries(dashboard.brokerage.target)" :key="'target-point-' + index">
           <circle class="trend-point target" :cx="point.x" :cy="point.y" r="3"><title>{{ dashboard.brokerage.labels[index] }} · Target {{ formatAmount(point.value) }}</title></circle>
-        </g>
-        <g v-for="(point,index) in dashboardTrendSeries(dashboard.brokerage.current)" :key="'current-point-' + index">
-          <circle class="trend-point current" :cx="point.x" :cy="point.y" r="4"><title>{{ dashboard.brokerage.labels[index] }} · Current {{ formatAmount(point.value) }}</title></circle>
         </g>
         <g class="trend-month-labels">
           <text v-for="(label,index) in dashboard.brokerage.labels" :key="'month-' + label" :x="dashboardTrendX(index, dashboard.brokerage.labels.length)" y="208" text-anchor="middle">{{ label }}</text>
@@ -122,7 +137,7 @@ onMounted(loadDashboard)
       </svg>
     </div>
     <div v-else class="empty-note">No performance months yet.</div>
-    <p class="empty-note">Closed months use official Production amounts; other months are estimates. {{ (dashboard.brokerage?.labels||[]).map((month,index)=>month+': '+(dashboard.brokerage?.currentStatus?.[index]||'estimated')).join(' · ') }}</p><div class="legend"><span class="legend-item"><i style="background:#AF2D41"></i>Current year</span><span class="legend-item"><i style="background:#5F5F5F"></i>Prior year</span><span class="legend-item"><i style="background:#4A3AA7"></i>Monthly target</span></div>
+    <p class="empty-note">Closed months use official Production amounts; other months are estimates. {{ (dashboard.brokerage?.labels||[]).map((month,index)=>month+': '+(dashboard.brokerage?.currentStatus?.[index]||'estimated')).join(' · ') }}</p><div class="legend"><span class="legend-item"><i style="background:#5F5F5F"></i>Prior year ({{ selectedTrendYear - 1 }})</span><span class="legend-item"><i style="background:#AF2D41"></i>Current year ({{ selectedTrendYear }})</span><span class="legend-item"><i style="background:#4A3AA7"></i>Monthly target</span></div>
   </section>
 
   <section class="card">
@@ -133,7 +148,7 @@ onMounted(loadDashboard)
       <div class="kpi"><div class="label">Open Quotes</div><div class="val">{{ dashboard.metrics?.openQuotes || 0 }}</div></div>
       <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val">{{ dashboard.metrics?.retentionRatio == null ? 'N/A' : formatAmount(dashboard.metrics.retentionRatio) }}<small v-if="dashboard.metrics?.retentionRatio != null">%</small></div></div>
       <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
-      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — subtotal only</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small><small v-if="dashboard.metrics?.outstandingSince" data-testid="outstanding-since">Entries created in the last 5 years (since {{ dashboard.metrics.outstandingSince }})</small></div>
+      <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — Past 5 years record only.</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small><small v-if="dashboard.metrics?.outstandingSince && !dashboard.metrics?.missingPostingRates?.length" data-testid="outstanding-since">Past 5 years record only.</small></div>
     </div>
   </section>
 
@@ -157,4 +172,7 @@ onMounted(loadDashboard)
 .rdash .mix-fill { display: block; }
 .rdash .new-business-card { display: flex; flex-direction: column; }
 .rdash .new-business-card .stat2 { margin-top: auto; }
+.rdash .trend-bar.prior { fill: #5F5F5F; }
+.rdash .trend-bar.current { fill: #AF2D41; }
+.rdash .trend-zero { stroke: #999; stroke-width: 1; }
 </style>

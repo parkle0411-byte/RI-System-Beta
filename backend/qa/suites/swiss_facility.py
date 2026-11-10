@@ -41,21 +41,30 @@ try:
   check('Swiss payment cannot precede full Cedant cash',pay(fin,case,t2).status_code==409)
   check('statement cannot precede full Cedant settlement',statement(fin,case).status_code==409)
   check('readonly cannot register Swiss cash',pay(read,case,t1).status_code==403)
-  check('partial Swiss Cedant cash rejected',pay(fin,case,t1,value=500).status_code==400)
+  with transaction.atomic():
+   check('partial Swiss Cedant cash accepted',pay(fin,case,t1,value=500).status_code==200)
+   transaction.set_rollback(True)
+  case.refresh_from_db()
   check('full Swiss Cedant cash recorded',pay(fin,case,t1).status_code==200)
   d=details(case);check('Swiss Cedant automatically settles',all(d[n]['settlement']=='settled' for n in t1))
   check('missing statement still blocks Swiss payment',pay(fin,case,t2).status_code==409)
   check('statement is recorded after automatic collection',statement(fin,case).status_code==200)
-  check('partial Swiss payable rejected',pay(fin,case,t2,value=400).status_code==400)
+  with transaction.atomic():
+   check('partial Swiss payable accepted',pay(fin,case,t2,value=400).status_code==200)
+   transaction.set_rollback(True)
+  case.refresh_from_db()
   check('full Swiss payable recorded',pay(fin,case,t2).status_code==200)
   d=details(case);check('Swiss T2 and T3 automatically settle',all(d[n]['settlement']=='settled' for n in t2+t3))
   case.refresh_from_db();before=copy.deepcopy(case.payload);entry=case.payload['paymentEntries'][-1]
-  r=post(fin,'reverse_batch_payment',batchId=entry['batchId'],cases=[{'caseUid':str(case.case_uid),'rowVersion':case.row_version}],note='QA returned remittance')
-  case.refresh_from_db();check('settled bank remittance cannot be reopened',r.status_code==409 and r.json()['error']=='settled_amount_locked' and case.payload==before)
+  with transaction.atomic():
+   r=post(fin,'reverse_batch_payment',batchId=entry['batchId'],paymentDate='2026-11-03',cases=[{'caseUid':str(case.case_uid),'rowVersion':case.row_version}],note='QA returned remittance')
+   case.refresh_from_db();check('settled remittance whole reversal reopens T2 and T3',r.status_code==200 and all(details(case)[n]['settlement']=='open' for n in t2+t3))
+   transaction.set_rollback(True)
+  case.refresh_from_db()
   check('T3 never fabricates a bank entry',len(case.payload['paymentEntries'])==2)
   for action in ['confirm_swiss_collection','record_swiss_clearance','confirm_facility_settlement','unconfirm_facility_settlement']:
    case.refresh_from_db();r=post(fin,action,caseUid=str(case.case_uid),rowVersion=case.row_version,txNo=t1[0],scheduleKey='case-effective-date:cedant',amount=1,note='QA retired action')
-   check('retired Swiss/manual action remains blocked '+action,r.status_code==400)
+   check('retired Swiss/manual action remains blocked '+action,r.status_code==410)
   # Actual operation date, rather than a backdated bank date, determines lateness.
   late=make('SWISS-LATE-OPERATION',names=[SWISS_NAME]);late_stamp=datetime(2026,5,2,2,tzinfo=timezone.utc)
   with patch('cases.calc.payment_terms._as_utc',side_effect=lambda v=None:late_stamp if v is None else _as_utc(v)),patch('cases.cash_ledger._as_utc',side_effect=lambda v=None:late_stamp if v is None else _as_utc(v)),patch('cases.accounting_views._iso_now',return_value='2026-05-02T02:00:00.000Z'):
@@ -71,11 +80,14 @@ try:
   check('first RI recovery recorded in full',pay(fin,refund,r1[:1]).status_code==200)
   check('one collected recovery does not release whole Cedant refund',pay(fin,refund,c1).status_code==409)
   check('last RI recovery automatically settles',pay(fin,refund,r1[1:]).status_code==200)
-  check('cannot refund just one independent Cedant T1',pay(fin,refund,c1[:1]).status_code==400)
+  with transaction.atomic():
+   check('one independent Cedant T1 can refund after all collections',pay(fin,refund,c1[:1]).status_code==200)
+   transaction.set_rollback(True)
+  refund.refresh_from_db()
   for party in ['cedant','reinsurer:r1']:
    root.refresh_from_db();refund.refresh_from_db()
    r=post(fin,'record_premium_offset',originalCaseUid=str(root.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=root.row_version,refundRowVersion=refund.row_version,originalKey='case-effective-date:'+party,refundKey='case-effective-date:'+party,amount=200,paymentDate='2026-10-27')
-   check('Swiss offsets remain unavailable '+party,r.status_code==400 and r.json()['error']=='offset_not_allowed')
+   check('Swiss offsets remain unavailable '+party,r.status_code==410 and r.json()['error']=='retired_accounting_action')
   check('whole Cedant refund may be paid early after all actual recoveries',pay(fin,refund,c1).status_code==200)
   check('refund balances automatically settle',all(d['settlement']=='settled' for d in details(refund).values()))
   # Existing returned-bank history keeps its booked period; no new reversal is fabricated.

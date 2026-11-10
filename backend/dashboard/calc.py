@@ -68,6 +68,10 @@ def build_rate_lookup(fx_rows, current_month):
 
 
 def reinsurer_legs(payload, reinsurer):
+    from cases.oversea import enabled as oversea_enabled, legs as oversea_legs
+    if oversea_enabled(payload):
+        result = oversea_legs(payload,reinsurer)
+        return {'cedantPremium': result['cp'], 'brokerage': result['brokerage']}
     order = number_or_zero(get(reinsurer, "sharePct")) / 100
     cedant_premium = number_or_zero(get(payload, "originalPremium")) * order
     leg1 = (cedant_premium - cedant_premium * number_or_zero(get(payload, "riCommPct")) / 100
@@ -87,6 +91,10 @@ def installment_income(payload):
     income = 0.0
     for row in _reinsurers(payload):
         income = income + reinsurer_legs(payload, row)["brokerage"]
+    from cases.oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        from production.calc import installment_allocations
+        return installment_allocations(payload)
     effective = month(get(payload, "policyFrom"))
     activity = month(js_or(get(payload, "announcedAt"), get(payload, "postedAt")))
     base = effective if _u16(effective) > _u16(activity) else activity
@@ -159,7 +167,7 @@ def _pad2(n):
     return f"{n:02d}"
 
 
-def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None):
+def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None):
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     today = now.strftime("%Y-%m-%d")
     year, month_number = now.year, now.month
@@ -259,7 +267,9 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             else:
                 out2 += value
 
-    monthly = {f"{y}-{_pad2(m)}": 0.0 for y in (year - 1, year) for m in range(1, 13)}
+    trend_year = year if brokerage_year is None else brokerage_year
+    trend_months = month_number if trend_year == year else 12
+    monthly = {f"{y}-{_pad2(m)}": 0.0 for y in (trend_year - 1, trend_year) for m in range(1, 13)}
     for r in rows:
         if r.get("_financialInvalid"):continue
         if not _live(r):
@@ -281,12 +291,12 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
 
     targets_annual, targets_monthly = None, {}
     for t in target_rows:
-        if get(t, "period_type") == "annual" and get(t, "period_key") == str(year):
+        if get(t, "period_type") == "annual" and get(t, "period_key") == str(trend_year):
             targets_annual = js_to_number(get(t, "amount"))
         if get(t, "period_type") == "monthly":
             targets_monthly[js_to_string(get(t, "period_key"))] = js_to_number(get(t, "amount"))
 
-    months = [_pad2(i + 1) for i in range(month_number)]
+    months = [_pad2(i + 1) for i in range(trend_months)]
     return {
         "ok": True,
         "period": {"year": year, "currentMonth": current_month, "monthNumber": month_number},
@@ -303,11 +313,11 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         },
         "brokerage": {
             "labels": months,
-            "currentStatus": ["closed" if f"{year}-{m}" in closed_months else "estimated" for m in months],
-            "priorStatus": ["closed" if f"{year-1}-{m}" in closed_months else "estimated" for m in months],
-            "current": [monthly[f"{year}-{m}"] for m in months],
-            "prior": [monthly[f"{year - 1}-{m}"] for m in months],
-            "target": [js_or(targets_monthly.get(f"{year}-{m}"), 0) for m in months],
+            "currentStatus": ["closed" if f"{trend_year}-{m}" in closed_months else "estimated" for m in months],
+            "priorStatus": ["closed" if f"{trend_year-1}-{m}" in closed_months else "estimated" for m in months],
+            "current": [monthly[f"{trend_year}-{m}"] for m in months],
+            "prior": [monthly[f"{trend_year - 1}-{m}"] for m in months],
+            "target": [js_or(targets_monthly.get(f"{trend_year}-{m}"), 0) for m in months],
             "annualTarget": targets_annual,
         },
         "classMix": top_rows(class_totals, 5),

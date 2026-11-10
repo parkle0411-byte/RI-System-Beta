@@ -31,7 +31,7 @@ with transaction.atomic():
     actor = {'id': 'qa', 'name': 'qa'}
     rec = im.find_or_create('測試修正被保險人', actor)
     viewer_c, viewer_p = clients['viewer']
-    own = Case.objects.create(status='posted', tw_ref='ZZFIX001', payload={'originalInsuredCn': rec.name, 'insuredDirectoryEnabled': True},
+    own = Case.objects.create(status='posted', announced_at=__import__('django.utils.timezone',fromlist=['now']).now(), tw_ref='ZZFIX001', payload={'originalInsuredCn': rec.name, 'insuredDirectoryEnabled': True},
                               owner_personnel=viewer_p, insured_master=rec, created_by='qa', updated_by='qa')
 
     # 1) Insured Master：Case Viewer 一律 403（清單、單筆、搜尋），不再 500；其他可看全部案件的角色 200

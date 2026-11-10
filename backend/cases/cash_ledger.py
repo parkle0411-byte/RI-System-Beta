@@ -63,6 +63,8 @@ def party(payload, tx):
     source, leg, _ = family(tx)
     cedant = (source == 'premium' and leg == '1') or (source == 'claim' and leg == '2')
     if source == 'premium' and leg == '3':
+        if tx.get('overseaBusiness'):
+            return 'broker', str(tx.get('reinsurer') or '').strip()
         return 'broker', 'Broker'
     if cedant:
         return 'cedant', str(payload.get('reinsured') or payload.get('reinsuredName') or payload.get('cedantName') or '').strip()
@@ -71,7 +73,7 @@ def party(payload, tx):
 
 def direction(tx):
     source, leg, _ = family(tx)
-    incoming = (source == 'premium' and leg == '1') or (source == 'claim' and leg == '1')
+    incoming = (source == 'premium' and leg == '1') or (source == 'claim' and leg == '1') or (source == 'premium' and leg == '3' and tx.get('overseaBusiness'))
     return 'receivable' if incoming != (number_or_zero(tx.get('amount')) < 0) else 'payable'
 
 
@@ -91,6 +93,11 @@ def _matches(item, tx):
 
 
 def transaction_details(payload, now=None, schedule_result=None):
+    from legacy.protocol import is_legacy_payload
+    if is_legacy_payload(payload):
+        from legacy.ledger import details
+        return details(payload, now)
+
     """schedule_result：呼叫端已用同一份 payload 與同一個 now 算好的 build_payment_schedule 結果（Accounting 列表共用，省掉重算）。"""
     now = _as_utc(now)
     today = taipei_date(now)
@@ -106,7 +113,7 @@ def transaction_details(payload, now=None, schedule_result=None):
         source, leg, suffix = family(tx)
         value = cents(number_or_zero(tx.get('amount')))
         sign = -1 if value < 0 else 1
-        derived = source == 'premium' and leg == '3'
+        derived = source == 'premium' and leg == '3' and not tx.get('overseaBusiness')
         historic = bool(tx.get('reversed') or tx.get('isReversalEntry'))
         party_type, party_name = party(payload, tx)
         cash_direction = 'retained' if derived else direction(tx)
@@ -125,6 +132,9 @@ def transaction_details(payload, now=None, schedule_result=None):
                     legacy_targets[item['scheduleKey']].append((no, item['scheduleKey']))
         elif not derived:
             parts[(no, 'transaction:' + no)] = {'capacity':abs(value),'paid':0,'entries':[]}
+        if tx.get('overseaBusiness'):
+            from .oversea import dates as oversea_dates
+            date_rows = [{**oversea_dates(payload, tx), 'termsDays': None}]
         dates = [i['dueDate'] for i in date_rows if i.get('dueDate')]
         if source == 'claim' and tx.get('dueDate'):
             dates = [tx['dueDate']]
@@ -152,9 +162,11 @@ def transaction_details(payload, now=None, schedule_result=None):
             'fullPaymentRequired':source == 'premium',
             'postedMonth':tx.get('postedMonth') if 'productionRecognized' in tx else tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7],
             'canRecord':bool(source and (source != 'claim' or leg in ('1','2')) and leg and not derived and not historic and value and party_name
-                             and (source == 'claim' or (matching and len(dates) == len(matching)))),
+                             and (source == 'claim' or tx.get('overseaBusiness') and dates or (matching and len(dates) == len(matching)))),
             '_sign':sign,'_historic':historic,'_source':source,'_leg':leg,'_suffix':suffix,'_tx':tx,
         }
+        if tx.get('overseaBusiness'):
+            details[no].update(oversea_dates(payload, tx), overseaBusiness=True)
     pending = defaultdict(list)
     for entry in entries:
         if entry.get('entryType') not in ('payment','reversal'):
@@ -266,35 +278,55 @@ def transaction_details(payload, now=None, schedule_result=None):
     shared_policies(payload, details, schedule, now)
     from .property_original import apply_details as property_details
     property_details(payload, details, now)
+    from .finance_workflow import apply_details as finance_details
+    finance_details(payload, details, now)
+    for detail in details.values():
+        if detail['_tx'].get('overseaBusiness'):
+            from .oversea import dates as oversea_dates
+            detail.update(oversea_dates(payload, detail['_tx']), overseaBusiness=True)
     return {no:{k:v for k,v in d.items() if not k.startswith('_')} for no,d in details.items()}
 
 
 def payment_batches(cases):
-    batches={}
+    """All cash and netting registrations, including unbatched historical payments."""
+    batches = {}
     for case in cases:
-        entries=objects(case['payload'].get('paymentEntries'))
-        reversed_ids={e.get('reversalOf') for e in entries if e.get('entryType')=='reversal'}
-        for entry in entries:
-            bid=entry.get('batchId')
-            if not bid or entry.get('entryType')!='payment':
-                continue
-            batch=batches.setdefault(bid,{'batchId':bid,'paymentDate':entry.get('paymentDate'),
-                'amount':entry.get('batchAmount'),'currency':entry.get('currency'),
-                'paymentDirection':entry.get('paymentDirection'),'partyName':entry.get('partyName'),
-                'reference':entry.get('reference') or '', 'note':entry.get('note') or '',
-                'createdAt':entry.get('createdAt'),'createdByName':entry.get('createdByName'), 'allocations':[]})
-            batch['allocations'].append({'caseUid':case['caseUid'],'caseRowVersion':case['rowVersion'],
-                'caseStatus':case['status'],'twRef':case['twRef'],'txNo':entry.get('transactionNo'),
-                'source':next((t.get('source', 'premium') for t in objects(case['payload'].get('transactions')) if t.get('txNo') == entry.get('transactionNo')), 'premium'),
-                'entryId':entry.get('id'),'amount':abs(number_or_zero(entry.get('amount'))),
-                'amountEditLocked':entry_locked(case['payload'], entry),
-                'reversed':entry.get('id') in reversed_ids})
-    for batch in batches.values():
-        allocations=batch['allocations']
-        reversed_count=sum(a['reversed'] for a in allocations)
-        batch['originalAmount'] = batch['amount']
-        batch['amount'] = amount(sum(cents(a['amount']) for a in allocations))
-        complete = True
-        batch['status']='reversed' if reversed_count==len(allocations) else 'partial_reversal' if reversed_count else 'recorded'
-        batch['canReverse']=not reversed_count and complete and all((a['caseStatus'] in ('posted','closed') or (a['caseStatus'] == 'reversed' and a['source'] == 'claim')) and not a['amountEditLocked'] for a in allocations)
-    return sorted(batches.values(),key=lambda b:str(b.get('createdAt') or ''),reverse=True)
+        payload = case['payload']; entries = objects(payload.get('paymentEntries'))
+        reversed_ids = {e.get('reversalOf') for e in entries if e.get('entryType') == 'reversal'}
+        txs = {t.get('txNo'): t for t in objects(payload.get('transactions'))}
+        for e in entries:
+            if e.get('entryType') != 'payment': continue
+            bid = e.get('batchId') or e.get('offsetId') or 'legacy:' + str(e.get('id'))
+            tx = txs.get(e.get('transactionNo'), {})
+            typ, name = party(payload, tx) if tx else (e.get('partyType', ''), e.get('partyName', ''))
+            side = e.get('paymentDirection') or (direction(tx) if tx else
+                'receivable' if (typ == 'cedant') != (number_or_zero(e.get('amount')) < 0) else 'payable')
+            name = e.get('partyName') or name
+            b = batches.setdefault(bid, {'batchId': bid, 'paymentDate': e.get('paymentDate') or '',
+                'currency': e.get('currency') or payload.get('currency'), 'partyName': name,
+                'reference': e.get('reference') or '', 'note': e.get('note') or '',
+                'createdAt': e.get('createdAt') or '', 'createdByName': e.get('createdByName') or '',
+                'replacementOfBatchId': e.get('replacementOfBatchId') or '', 'allocations': []})
+            b['allocations'].append({'caseUid': case['caseUid'], 'caseRowVersion': case['rowVersion'],
+                'caseStatus': case['status'], 'twRef': case['twRef'], 'manualTwRef': payload.get('manualTwRef') or '',
+                'txNo': e.get('transactionNo') or '', 'source': tx.get('source', 'premium'), 'entryId': e.get('id'),
+                'amount': abs(number_or_zero(e.get('amount'))), 'paymentDirection': side,
+                'cashAmount': 0 if e.get('nonCash') else abs(number_or_zero(e.get('amount'))),
+                'offsetAmount': abs(number_or_zero(e.get('amount'))) if e.get('nonCash') else 0,
+                'settlementDueDate': e.get('settlementDueDate') or '',
+                'reversed': e.get('id') in reversed_ids})
+    for b in batches.values():
+        a = b['allocations']; reversed_count = sum(x['reversed'] for x in a)
+        b['receivableSettled'] = amount(sum(cents(x['amount']) for x in a if x['paymentDirection'] == 'receivable'))
+        b['payableSettled'] = amount(sum(cents(x['amount']) for x in a if x['paymentDirection'] == 'payable'))
+        b['amount'] = amount(cents(b['receivableSettled']) - cents(b['payableSettled']))
+        b['netCash'] = amount(sum(cents(x['cashAmount']) * (1 if x['paymentDirection'] == 'receivable' else -1) for x in a))
+        b['pureOffset'] = b['netCash'] == 0 and any(x['offsetAmount'] for x in a)
+        b['allocationCount'] = len({(x['caseUid'], x['txNo'] or x['entryId']) for x in a})
+        b['status'] = 'reversed' if reversed_count == len(a) else 'partial_reversal' if reversed_count else 'recorded'
+        b['canReverse'] = not reversed_count and all(x['entryId'] and (x['caseStatus'] in ('posted', 'closed') or x['caseStatus'] == 'reversed' and x['source'] == 'claim') for x in a)
+    replacements = {}
+    for b in batches.values():
+        if b['replacementOfBatchId']: replacements.setdefault(b['replacementOfBatchId'], []).append(b['batchId'])
+    for b in batches.values(): b['replacementBatchIds'] = replacements.get(b['batchId'], [])
+    return sorted(batches.values(), key=lambda b: (b['paymentDate'], b['createdAt'], b['batchId']), reverse=True)

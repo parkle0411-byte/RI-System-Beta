@@ -212,16 +212,21 @@ def premium_installment_plan(case_data):
     所以 SoA 的 Leg 2 與 Accounting 的各期應付金額相同），Leg 3 = 該期 Leg 1 - Leg 2。沒有分期回傳空陣列。"""
     if get(case_data, "installmentEnabled") is not True:
         return []
+    from ..oversea import enabled as oversea_enabled, periods as oversea_periods
+    if oversea_enabled(case_data):
+        return [dict(id=r['id'],label=r['label'],number=r['number'],amounts=[dict(leg1=0,leg2=0,leg3=r['amount'])]) for r in oversea_periods(case_data)]
     installments = payment_installments(case_data)
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
     legs = [calc_legs_for_reinsurer(case_data, r) for r in reinsurers]
     leg1s = [allocate(row["leg1"], installments, case_data) for row in legs]
     leg2s = [allocate(row["leg2"], installments, case_data) for row in legs]
+    from ..oversea import enabled as oversea_enabled
+    leg3s = [allocate(row["leg3"], installments, case_data) for row in legs] if oversea_enabled(case_data) else None
     return [{
         "id": row["id"], "label": row["label"], "number": index + 1,
         "amounts": [{
-            "leg1": leg1s[r][index], "leg2": leg2s[r][index], "leg3": premium_money(leg1s[r][index] - leg2s[r][index], case_data),
+            "leg1": leg1s[r][index], "leg2": leg2s[r][index], "leg3": leg3s[r][index] if leg3s is not None else premium_money(leg1s[r][index] - leg2s[r][index], case_data),
         } for r in range(len(legs))],
     } for index, row in enumerate(installments)]
 
@@ -283,6 +288,14 @@ def _status_for(due_date, outstanding, paid, today, now):
 
 
 def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
+    from legacy.protocol import is_legacy_payload
+    if is_legacy_payload(case_data):
+        from legacy.ledger import schedule
+        return schedule(case_data, now)
+
+    from ..oversea import enabled as oversea_enabled
+    if oversea_enabled(case_data):
+        return {'items': [], 'issues': [], 'reviewRequired': False, 'totals': {'cedantOutstanding': 0, 'reinsurerOutstanding': 0}}
     now = _as_utc(now)
     reinsurers = get(case_data, "reinsurers")
     reinsurers = reinsurers if is_array(reinsurers) else []
@@ -457,6 +470,11 @@ def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
     items = shared_policies(case_data, items, now)
     from ..property_original import apply_schedules as property_schedules
     items = property_schedules(case_data, items)
+
+    # Cash-only registrations permit partial settlement; collection prerequisites above remain intact.
+    for row in items:
+        row['fullPaymentRequired'] = False
+        row['offsetAllowed'] = False
 
     cedant_out = 0.0
     reinsurer_out = 0.0

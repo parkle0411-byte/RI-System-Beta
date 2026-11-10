@@ -30,16 +30,10 @@ async function save(){
 defineExpose({open})
 </script>
 <template>
-<el-dialog :model-value="!!dialog" :title="dialog==='statement'?'Swiss settlement statement reference':'Manual premium / refund offset'" width="min(680px,94vw)" :close-on-click-modal="false" @close="dialog=''">
+<el-dialog :model-value="!!dialog" :title="'Swiss settlement statement reference'" width="min(680px,94vw)" :close-on-click-modal="false" @close="dialog=''">
  <template v-if="active"><p>{{ active.twRef }} · {{ active.installmentLabel }} · {{ active.partyName }}</p>
  <el-form label-position="top">
-  <template v-if="dialog==='offset'">
-   <el-form-item label="Offset date" required><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-   <el-form-item label="Original policy premium" required><el-select v-model="form.originalKey" style="width:100%"><el-option v-for="row in originals" :key="row.key" :label="row.twRef+' · '+row.installmentLabel+' · '+formatMoney(row.outstanding)" :value="row.key" /></el-select></el-form-item>
-   <p>Full refund offset: {{ active.currency }} {{ formatMoney(Math.abs(active.outstanding)) }}. Settlement remains a separate manual action.</p>
-   <el-form-item label="Note"><el-input v-model="form.note" type="textarea" maxlength="1000" /></el-form-item>
-  </template>
-  <template v-else><p>Swiss due date: {{ active.contractDueDate || active.dueDate }}. All Cedant receipts for this installment must be fully received and automatically settled first.</p><el-form-item label="Settlement statement reference" required><el-input v-model="form.reference" maxlength="200" /></el-form-item></template>
+  <template><p>Swiss due date: {{ active.contractDueDate || active.dueDate }}. All Cedant receipts for this installment must be fully received and automatically settled first.</p><el-form-item label="Settlement statement reference" required><el-input v-model="form.reference" maxlength="200" placeholder="SWRPA-xxxxxxx-xxxxxxxx" /><small>Format: SWRPA-xxxxxxx-xxxxxxxx</small></el-form-item></template>
  </el-form></template>
  <template #footer><el-button @click="dialog=''">Cancel</el-button><el-button type="primary" :loading="busy" @click="save">Save</el-button></template>
 </el-dialog>

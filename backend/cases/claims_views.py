@@ -198,6 +198,9 @@ class ClaimsView(NoStoreMixin, APIView):
         if state is None:
             return _error(404, "root_case_not_found", "The root case was not found.")
         root, chain = state
+        from .oversea import enabled as oversea_enabled
+        if oversea_enabled(root.payload):
+            return _error(409, 'oversea_claims_unavailable', 'Oversea Business supports T3 brokerage only.')
         if not root.tw_ref:
             return _error(409, "claim_reference_required",
                           "Claims can be recorded after the root case has been Announced and assigned a TW Reference.")
@@ -314,6 +317,10 @@ class ClaimsView(NoStoreMixin, APIView):
                 if action == "correct_payment":
                     payload["claimCorrectionHistory"][-1]["after"] = json_roundtrip(payment)
 
+        from .finance_corrections import review_change_error
+        review_problem = review_change_error(root, old_payload, payload)
+        if review_problem:
+            return _error(409, 'review_batch_locked', review_problem)
         payload = json_roundtrip(payload)
         claim_id = _id_out(js_or(get(claim, "id"), None))
         actor_info = actor_from(request.ri_principal)

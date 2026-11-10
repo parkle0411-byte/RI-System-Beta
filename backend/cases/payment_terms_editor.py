@@ -59,9 +59,11 @@ def complete_payment_terms(view, request, body):
             return _error(409, 'fixed_terms_locked', 'AUW, Allianz and Swiss fixed terms cannot be changed here.')
         target, field = ((installment.setdefault('reinsurerPaymentTerms', {}), party)
                          if installment is not None else (row, 'paymentTermsDays'))
+    if payload.get('financeWorkflowVersion'):
+        return _error(409, 'historical_terms_only', 'Complete payment terms in the Case before Announce; this action is only for historical missing data.')
     before = target.get(field)
     from .property_original import enabled
-    if valid_terms(before) is not None and not enabled(payload):
+    if valid_terms(before) is not None:
         return _error(409, 'existing_terms_locked', 'Only missing contract days may be completed; existing valid terms remain locked.')
     target[field] = days
     actor = actor_from(request.ri_principal)

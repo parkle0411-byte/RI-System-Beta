@@ -1,3 +1,4 @@
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Accounting 列表「同一件案件的付款排程與交易明細只算一次、三處共用」(CaseCompute) 必須和「各自重算」的結果完全相同。
 2026-10-15 壓力測試後加入。只在拋棄式 QA 資料庫執行；所有變更在交易內回滾。"""
 import copy, json, os
@@ -31,8 +32,9 @@ def make(ref, status='closed', n=1, drop=(), **over):
     p['transactions'] = build_premium_transactions(p) if status in ('closed', 'reversed') else []
     for key in drop:
         p.pop(key, None)
-    return Case.objects.create(tw_ref=ref, status=status, payload=p, currency='USD', reinsured_name_snapshot='Column Cedant',
+    case = Case.objects.create(tw_ref=ref, status=status, payload=p, currency='USD', reinsured_name_snapshot='Column Cedant',
                                created_by='qa', updated_by='qa')
+    return case
 def tx_no(case, leg, nth=0):
     return [t['txNo'] for t in case.payload['transactions'] if t['legType'] == leg][nth]
 class Rollback(Exception): pass
@@ -44,8 +46,9 @@ try:
         no_keys = make('SC-NOKEYS', drop=('currency', 'reinsured'))       # payload 沒有 currency／reinsured：改用資料表欄位，兩種呼叫的輸入不同
         empty_ccy = make('SC-EMPTY', currency='', reinsured='')
         # 對其中一件記收款（走真正的 API）
-        pay = fin.post('/api/accounting', data=json.dumps({'action': 'record_transaction_payments', 'paymentDate': '2026-10-07', 'amount': 500, 'reference': 'SC',
-              'allocations': [{'caseUid': str(paid.case_uid), 'txNo': tx_no(paid, 'Leg 1'), 'rowVersion': Case.objects.get(pk=paid.pk).row_version, 'amount': 500}]}), content_type='application/json')
+        review_case(paid,fin)
+        pay = reviewed_cash(fin, {'action': 'record_transaction_payments', 'paymentDate': '2026-10-07', 'amount': 500, 'reference': 'SC',
+              'allocations': [{'caseUid': str(paid.case_uid), 'txNo': tx_no(paid, 'Leg 1'), 'rowVersion': Case.objects.get(pk=paid.pk).row_version, 'amount': 500}]})
         check('fixture payment recorded through the API', pay.status_code == 200)
         # 一件有理賠交易的案件（理賠列在付款排程列裡會再讀一次交易明細）
         claim = make('SC-CLAIM')
@@ -85,7 +88,7 @@ try:
         got_rows = [r for r in response['rows'] if r['caseUid'] in mine]
         # 付款排程列另外補了對帳編號欄位；只比較原本就有的欄位
         slim = lambda rs: sorted(({k: v for k, v in r.items() if k not in ('statementNo', 'reconciliationRef', 'originalInsured', 'originalInsuredCn')} for r in json_roundtrip(rs)), key=key)
-        check('GET /api/accounting transaction rows equal the unshared computation', sorted(json_roundtrip(expected_tx), key=key) == sorted([{k:v for k,v in row.items() if k not in ('fxRate','fxMonth','fxEstimated','amountNtd','outstandingNtd')} for row in got_tx], key=key))
+        check('GET /api/accounting transaction rows equal the unshared computation', sorted(json_roundtrip(expected_tx), key=key) == sorted([{k:v for k,v in row.items() if k not in ('fxRate','fxMonth','fxEstimated','amountNtd','outstandingNtd','financeReviewed','reviewCurrencies','reviewBatchId','reviewDate','reviewReference','reviewNote','reviewedByName','historicalTermsMissing')} for row in got_tx], key=key))
         check('GET /api/accounting schedule rows equal the unshared computation', slim(expected_rows) == slim([{k: v for k, v in r.items()} for r in got_rows]))
         check('every fixture case that has transactions is present in the response', {r['caseUid'] for r in got_tx} == {str(c.case_uid) for c in cases if Case.objects.get(pk=c.pk).payload['transactions']} and len(got_tx) == len(expected_tx))
 

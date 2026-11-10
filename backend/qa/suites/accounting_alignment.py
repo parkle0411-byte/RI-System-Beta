@@ -27,24 +27,30 @@ try:
    check(label+' outgoing waits for full Cedant cash',full(fin,c,'Leg 2').status_code==409)
    check(label+' full Cedant receipt accepted',full(fin,c,'Leg 1').status_code==200)
    check(label+' receipt automatically settles',details(c)[tx(c,'Leg 1')]['settlement']=='settled')
-   check(label+' partial outgoing rejected after prerequisite',pay(fin,c,'Leg 2',1).status_code==400)
+   with transaction.atomic():
+    check(label+' partial outgoing accepted after prerequisite',pay(fin,c,'Leg 2',1).status_code==200)
+    transaction.set_rollback(True)
+   c.refresh_from_db()
    check(label+' full outgoing accepted',full(fin,c,'Leg 2').status_code==200)
    check(label+' full outgoing automatically settles and stops overdue',details(c)[tx(c,'Leg 2')]['paymentStatus']=='settled')
    version=c.row_version
-   check(label+' retired undo cannot reopen settled cash',settle(fin,c,'Leg 1',undo=True).status_code==400)
+   check(label+' retired undo cannot reopen settled cash',settle(fin,c,'Leg 1',undo=True).status_code==410)
    c.refresh_from_db();check(label+' rejected undo retains version and settlement',c.row_version==version and details(c)[tx(c,'Leg 1')]['settlement']=='settled')
    ref=make('ALREF'+label,parent=c,originalPremium=-200,endoEffectiveDate='2026-10-01',announced=datetime(2026,10,20,tzinfo=dtz.utc),reinsurers=[{**partyrow(name),'premium':-160}])
    rr=next(i for i in build_payment_schedule({**ref.payload,'endorsementAnnouncedAt':ref.announced_at.isoformat()})['items'] if i['partyType']=='reinsurer')
    if label in ('Allianz','GA'):
     check(label+' refund uses confirmed reminder rule',rr['dueDate']=='2027-01-21' if label=='Allianz' else rr['dueDate']=='2027-03-21',rr)
    check(label+' Cedant refund blocked before RI cash',full(fin,ref,'Leg 1').status_code==409)
-   check(label+' RI refund partial receipt rejected',pay(fin,ref,'Leg 2',1).status_code==400)
+   with transaction.atomic():
+    check(label+' RI refund partial receipt accepted',pay(fin,ref,'Leg 2',1).status_code==200)
+    transaction.set_rollback(True)
+   ref.refresh_from_db()
    check(label+' full RI refund cash accepted early',full(fin,ref,'Leg 2').status_code==200)
    check(label+' full RI recovery automatically releases Cedant refund',details(ref)[tx(ref,'Leg 2')]['settlement']=='settled')
    check(label+' RI refund receipt automatically settles',(details(ref)[tx(ref, 'Leg 2')]['settlement']=='settled'))
    check(label+' full Cedant refund accepted before its original due date',full(fin,ref,'Leg 1').status_code==200)
    check(label+' refund keeps original due date',details(ref)[tx(ref,'Leg 1')]['contractDueDate']==('2026-11-19' if label=='Ordinary' else '2027-01-18'))
-   check(label+' cancelling refund collection after Cedant payment blocked',(settle(fin, ref, 'Leg 2', undo=True).status_code==400))
+   check(label+' cancelling refund collection after Cedant payment blocked',(settle(fin, ref, 'Leg 2', undo=True).status_code==410))
   # Whole-period incoming checks include every RI share, never just the target row.
   for label,name in KINDS[1:]:
    c=make('MIX'+label,reinsurers=[partyrow(name,60),partyrow('Other RI',40)])
@@ -59,20 +65,23 @@ try:
    root=make('NOOFFSET'+label,reinsurers=[partyrow(name)])
    refund=make('NOOFFSETREF'+label,parent=root,originalPremium=-200,reinsurers=[{**partyrow(name),'premium':-160}])
    before=copy.deepcopy(refund.payload)
-   check(label+' RI offset endpoint rejects without changing history',offset(fin,root,refund,'reinsurer').status_code==400 and Case.objects.get(pk=refund.pk).payload==before)
+   check(label+' RI offset endpoint rejects without changing history',offset(fin,root,refund,'reinsurer').status_code==410 and Case.objects.get(pk=refund.pk).payload==before)
    schedule=build_payment_schedule(refund.payload)['items'];ri=next(r for r in schedule if r['partyType']=='reinsurer')
    refund.payload['paymentEntries']=[{'id':'legacy-offset','entryType':'payment','entryKind':'offset','nonCash':True,'scheduleKey':ri['scheduleKey'],'amount':ri['amount'],'paymentDate':'2026-10-01'}];refund.save()
    check(label+' old noncash clearance retains its derived settled history',(details(refund)[tx(refund, 'Leg 2')]['settlement']=='settled'))
    check(label+' offset is not a cash refund receipt',full(fin,refund,'Leg 1').status_code==409)
   # Normal Cedant-side offsets survive only after every RI cash refund is cleared.
   root=make('CEDANTOFFSET');refund=make('CEDANTOFFSETREF',parent=root,originalPremium=-200,reinsurers=[{**partyrow('AR92 RI'),'premium':-160}])
-  check('ordinary Cedant offset waits for all RI refunds',offset(fin,root,refund).status_code==400)
-  check('ordinary Cedant offset remains blocked after full RI cash',full(fin,refund,'Leg 2').status_code==200 and (details(refund)[tx(refund, 'Leg 2')]['settlement']=='settled') and offset(fin,root,refund).status_code==400)
+  check('ordinary Cedant offset waits for all RI refunds',offset(fin,root,refund).status_code==410)
+  check('ordinary Cedant offset remains blocked after full RI cash',full(fin,refund,'Leg 2').status_code==200 and (details(refund)[tx(refund, 'Leg 2')]['settlement']=='settled') and offset(fin,root,refund).status_code==410)
   # A refund endorsement split into T1s must be returned in one batch, not one T1 at a time.
   root=make('REFMULTI',reinsurers=[partyrow('R A',60),partyrow('R B',40)])
   refund=make('REFMULTIREF',parent=root,originalPremium=-200,reinsurers=[{**partyrow('R A',60),'premium':-160},{**partyrow('R B',40),'premium':-160}])
   for i in range(2):assert full(fin,refund,'Leg 2',i).status_code==200 and (details(refund)[tx(refund, 'Leg 2', i)]['settlement']=='settled')
-  check('cannot refund only one split Cedant T1',full(fin,refund,'Leg 1',0).status_code==400)
+  with transaction.atomic():
+   check('can refund one split Cedant T1 after all RI receipts',full(fin,refund,'Leg 1',0).status_code==200)
+   transaction.set_rollback(True)
+  refund.refresh_from_db()
   allocations=[]
   for i in range(2):
    no=tx(refund,'Leg 1',i);allocations.append({'caseUid':str(refund.case_uid),'rowVersion':refund.row_version,'txNo':no,'amount':abs(next(t['amount'] for t in refund.payload['transactions'] if t['txNo']==no))})
@@ -108,7 +117,7 @@ try:
     check(label+' full receipt stops actual runner without settlement',stopped['sent']==0 and sender.call_count==3,(stopped,sender.call_count,transaction_details(Case.objects.get(pk=c.pk).payload)))
    if label in ('Allianz','GA'):
     c.refresh_from_db();action='record_allianz_claim_followup' if label=='Allianz' else 'record_great_american_claim_followup'
-    check(label+' follow-up cannot continue after full receipt',request(fin,action,caseUid=str(c.case_uid),rowVersion=c.row_version,txNo=no,note='completed').status_code==400)
+    check(label+' follow-up cannot continue after full receipt',request(fin,action,caseUid=str(c.case_uid),rowVersion=c.row_version,txNo=no,note='completed').status_code==410)
   # Each period is independent; an unpaid second period must not block a cleared first one.
   for label,name in KINDS[1:]:
    periods=[{'id':'I'+str(i),'performanceMonth':'2026-0'+str(i),'paymentBaseDate':'2026-0'+str(i)+'-10','premium':500,'paymentTermsDays':30,'reinsurerPaymentTerms':{'r1':30}} for i in (1,2)]
@@ -121,7 +130,7 @@ try:
   legacy.payload['paymentEntries']=[copy.deepcopy(old)];legacy.save()
   check('legacy partial history waits for new full Cedant prerequisite',pay(fin,legacy,'Leg 2',600).status_code==409)
   assert full(fin,legacy,'Leg 1').status_code==200 and (details(legacy)[tx(legacy, 'Leg 1')]['settlement']=='settled')
-  check('legacy partial premium permits only one full remaining-balance entry',pay(fin,legacy,'Leg 2',300).status_code==400 and pay(fin,legacy,'Leg 2',600).status_code==200)
+  check('legacy partial premium permits successive partial cash entries',pay(fin,legacy,'Leg 2',300).status_code==200 and pay(fin,legacy,'Leg 2',300).status_code==200)
   legacy.refresh_from_db();check('legacy partial payment record remains byte-for-byte unchanged',legacy.payload['paymentEntries'][0]==old)
   # Scope isolation and frozen date/allocation history are validated separately by parity.
   # Preserve the concurrent GA release: each registration stays within one case/period/request.
@@ -131,20 +140,31 @@ try:
    for case,leg,index in rows:
     no=tx(case,leg,index);alloc.append({'caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no,'amount':abs(details(case)[no]['outstanding'])})
    return request(fin,'record_transaction_payments',paymentDate='2026-10-20',reference=reference,amount=sum(x['amount'] for x in alloc),allocations=alloc)
-  check('GA cannot combine different cases even for same Cedant',batch([(a,'Leg 1',0),(b,'Leg 1',0)]).status_code==400)
+  with transaction.atomic():
+   check('GA same-party cross-case receipt accepted',batch([(a,'Leg 1',0),(b,'Leg 1',0)]).status_code==200)
+   transaction.set_rollback(True)
+  a.refresh_from_db();b.refresh_from_db()
   check('GA rejected mixed-case registration leaves both balances intact',details(a)[tx(a,'Leg 1')]['outstanding']==1000 and details(b)[tx(b,'Leg 1')]['outstanding']==1000)
   check('GA cases may reuse an external reference on separate registrations',batch([(a,'Leg 1',0)]).status_code==200 and batch([(b,'Leg 1',0)]).status_code==200)
   periods=[{'id':'P'+str(i),'performanceMonth':'2026-01','paymentBaseDate':'2026-01-10','premium':500,'paymentTermsDays':30,'reinsurerPaymentTerms':{'r1':30}} for i in (1,2)]
   c=make('REG-PERIOD',installmentEnabled=True,performanceInstallments=periods,reinsurers=[partyrow(GA)])
   c.payload['transactions']=[t for i in premium_installment_plan(c.payload) for t in build_premium_transactions(c.payload,i)];c.save()
-  check('GA same-deadline installments remain separate registrations',batch([(c,'Leg 1',0),(c,'Leg 1',1)]).status_code==400)
+  review_case(c,fin)
+  with transaction.atomic():
+   check('GA may combine installments for same party',batch([(c,'Leg 1',0),(c,'Leg 1',1)]).status_code==200)
+   transaction.set_rollback(True)
+  c.refresh_from_db()
   check('GA each same-deadline installment can be recorded separately',batch([(c,'Leg 1',0)]).status_code==200 and batch([(c,'Leg 1',1)]).status_code==200)
   c=make('REG-CLAIMS',reinsurers=[partyrow(GA)]);claim={'id':1};c.payload['transactions']=[]
   for pid in (1,2):
    payment={'id':pid,'date':'2026-01-01','amount':1000,'createdAt':'2026-01-01T00:00:00Z'}
    c.payload['transactions'] += [{**t,'createdAt':payment['createdAt']} for t in build_claim_payment_transactions(c.payload,c.payload,claim,payment)]
   c.save()
-  check('GA same-date claim requests remain separate registrations',batch([(c,'Claim Leg 1',0),(c,'Claim Leg 1',1)]).status_code==400)
+  review_case(c,fin)
+  with transaction.atomic():
+   check('GA may combine claim requests for same party',batch([(c,'Claim Leg 1',0),(c,'Claim Leg 1',1)]).status_code==200)
+   transaction.set_rollback(True)
+  c.refresh_from_db()
   check('GA claim requests reuse an external reference individually',batch([(c,'Claim Leg 1',0)]).status_code==200 and batch([(c,'Claim Leg 1',1)]).status_code==200)
   raise Rollback()
 except Rollback:pass

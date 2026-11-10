@@ -1,3 +1,4 @@
+import { overseaEnabled, overseaDates, overseaPeriods } from '../oversea.js';
 import { propertyEnabled, propertyTotals, propertyAllocate, propertyLegs, propertyPeriodAllocate, legacyMath, perReinsurer } from '../propertyOriginal.js';
 function numberOrZero(value) {
   const number = Number(String(value ?? '').replace(/,/g, ''));
@@ -48,6 +49,12 @@ export function stripFacilityTag(value) {
 }
 
 export function calcLegsForReinsurer(caseData, reinsurer) {
+  if (overseaEnabled(caseData)) {
+    const round = v => premiumMoney(v,caseData);
+    const cp = caseData.parentTwRef ? 0 : round(round(numberOrZero(caseData.originalPremium)) * numberOrZero(reinsurer.sharePct) / 100);
+    const brokerage = round(numberOrZero(reinsurer.brokerageAmount));
+    return {cp, ri:0, tax:0, leg1:0, reinsurerCp:0, reinsurerRi:0, reinsurerTax:0, leg2:0, leg3:brokerage, brokerage};
+  }
   if (propertyEnabled(caseData)) { const exact=propertyLegs(caseData,reinsurer);if(exact)return exact; }
   const roundMoney = value => premiumMoney(value, caseData);
   const source = value => ['TWD', 'USD'].includes(String(caseData?.currency || '').toUpperCase()) && caseData?.premiumRounding !== 'legacy-cents' ? roundMoney(value) : value;
@@ -70,6 +77,10 @@ export function calcLegsForReinsurer(caseData, reinsurer) {
 }
 
 export function buildPremiumTransactions(caseData) {
+  if (overseaEnabled(caseData)) return overseaPeriods(caseData).flatMap(period=>(caseData.reinsurers || []).map((r,i)=>{
+    const amount=period.amount, split=caseData.installmentEnabled===true
+    return {txNo:`${caseData.twRef || ''}-R${i+1}${split?`-I${period.number}`:''}-T3`,legType:'Leg 3',label:(amount>=0?'Receivable from ':'Payable to ')+(r.name || '')+(split?' · '+period.label:''),amount,reinsurer:r.name || '',reinsurerIdx:i,source:'premium',overseaBusiness:true,settlement:'open',splitParty:null,viaForeignBroker:false,createdAt:caseData.announcedAt || caseData.postedAt || '',postedMonth:'',...(split?{installmentId:period.id,installmentLabel:period.label}:{}),...overseaDates(caseData,split?{installmentId:period.id}:null)}
+  }))
   const roundMoney = value => premiumMoney(value, caseData);
   const transactions = [];
   const reinsurers = Array.isArray(caseData?.reinsurers) ? caseData.reinsurers : [];
@@ -96,7 +107,7 @@ export function buildPremiumTransactions(caseData) {
         const suffix = partyIdx === 0 ? 'a' : 'b';
         const pct = numberOrZero(party?.pct);
         base.forEach((leg, legIdx) => transactions.push({
-          txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${legIdx + 1}${suffix}`,
+          txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${leg.legType.slice(4)}${suffix}`,
           legType: `${leg.legType}${suffix}`,
           label: `${leg.label} (${party?.name || 'Unassigned'}, ${pct}%)`,
           amount: partyIdx === 1 && Math.abs(caseData.splitParties.reduce((n, p) => n + numberOrZero(p.pct), 0) - 100) < 1e-9
@@ -111,7 +122,7 @@ export function buildPremiumTransactions(caseData) {
       });
     } else {
       base.forEach((leg, legIdx) => transactions.push({
-        txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${legIdx + 1}`,
+        txNo: `${caseData.twRef}-R${reinsurerIdx + 1}-T${leg.legType.slice(4)}`,
         legType: leg.legType,
         label: leg.label,
         amount: leg.amount,
@@ -185,6 +196,7 @@ export function reconciliationRefFor(caseData, transaction) {
 
 // Premium period amounts use the same per-RI allocation as accounting T1/T2.
 export function premiumPeriodAmounts(caseData) {
+  if (overseaEnabled(caseData) && caseData.installmentEnabled) return overseaPeriods(caseData).map(r=>({leg1:0,leg2:0,leg3:r.amount}))
   const rows = caseData?.performanceInstallments || [];
   if (!rows.length) return [];
   let weights = rows.map(row => Math.max(0, Number(row.premium != null && row.premium !== '' ? row.premium : row.ratio) || 0));
@@ -207,8 +219,9 @@ export function premiumPeriodAmounts(caseData) {
   const sums = rows.map(() => ({ leg1: 0, leg2: 0, leg3: 0 }));
   (caseData?.reinsurers || []).forEach(row => {
     const legs = calcLegsForReinsurer(caseData, row), a = allocate(legs.leg1), b = allocate(legs.leg2);
+    if (overseaEnabled(caseData)) allocate(legs.leg3).forEach((v,i) => {sums[i].leg3 = round(sums[i].leg3 + v)});
     sums.forEach((total, i) => { total.leg1 = round(total.leg1 + a[i]); total.leg2 = round(total.leg2 + b[i]); });
   });
   if (propertyEnabled(caseData)&&!legacyMath(caseData)&&!perReinsurer(caseData)) { const t1s=allocate(propertyTotals(caseData).leg1); sums.forEach((r,i)=>{r.leg1=t1s[i]}); }
-  return sums.map(row => ({ ...row, leg3: round(row.leg1 - row.leg2) }));
+  return sums.map(row => ({ ...row, leg3: overseaEnabled(caseData) ? row.leg3 : round(row.leg1 - row.leg2) }));
 }

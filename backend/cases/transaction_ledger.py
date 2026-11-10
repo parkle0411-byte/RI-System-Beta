@@ -18,6 +18,8 @@ def transaction_rows(cases, shared=None):
         statement_no = payload.get("statementNo") or ""
         original_insured = payload.get("originalInsured") or payload.get("original_insured") or ""
         original_insured_cn = payload.get("originalInsuredCn") or ""
+        effective_date = payload.get("endoEffectiveDate") if payload.get("parentTwRef") else payload.get("policyFrom")
+        loss_dates = {str(claim.get("id")): claim.get("dateOfLoss") or "" for claim in _objects(payload.get("claims"))}
         for index, tx in enumerate(_objects(payload.get("transactions"))):
             rows.append({
                 **tx,
@@ -35,6 +37,8 @@ def transaction_rows(cases, shared=None):
                 "currency": case["currency"],
                 "source": "claim" if tx.get("source") == "claim" else "premium",
                 "reconciliationRef": reconciliation_ref_for(payload, tx),
+                "accountDisplayDate": (loss_dates.get(str(tx.get("claimId")), "")
+                                       if tx.get("source") == "claim" else effective_date or ""),
                 **cash.get(tx.get("txNo"), {"settlement":"not_tracked", "canRecord":False}),
                 "canRecord": (case["status"] in ("posted", "closed") or (case["status"] == "reversed" and tx.get("source") == "claim")) and cash.get(tx.get("txNo"), {}).get("canRecord", False),
                 **({"returnPremium": True} if payload.get("parentTwRef") and tx.get("source") != "claim"

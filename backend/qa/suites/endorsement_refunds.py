@@ -1,3 +1,5 @@
+from django.db import transaction
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Endorsement premium deltas, signed schedules, real close and refund/recovery APIs.
 
 Synthetic fixtures only; must run against disposable QA database.
@@ -112,10 +114,13 @@ ledger=rows(child);cedant=next(r for r in ledger if r['partyType']=='cedant');ri
 check('signed refund balances are open, not clipped or falsely settled',cedant['amount']==-890 and cedant['outstanding']==-890 and cedant['settlement']=='open' and ri['amount']==-752)
 check('cedant is payable, RI broker is receivable',cedant['partyName']=='QA Refund Cedant' and cedant['paymentDirection']=='payable' and ri['partyName']=='QA Refund RI Broker' and ri['paymentDirection']=='receivable')
 check('refund due dates use endorsement effective date',cedant['baseDate']=='2037-05-10' and cedant['dueDate']=='2037-05-25' and ri['dueDate']=='2037-05-30')
+review_case(child,c)
 def pay(row,amount,version=None):
     child.refresh_from_db()
-    return call('post','/api/accounting',{'action':'record_payment','caseUid':str(child.case_uid),'rowVersion':version or child.row_version,
-        'scheduleKey':row['scheduleKey'],'paymentDate':'2037-05-20','amount':amount, 'note':'QA synthetic registration'})
+    from cases.cash_ledger import transaction_details
+    no=next(n for n,d in transaction_details(child.payload).items() if any(p['scheduleKey']==row['scheduleKey'] for p in d.get('cashParts',[])))
+    return reviewed_cash(c,{'action':'record_transaction_payments','paymentDate':'2037-05-20','amount':amount,'note':'QA synthetic registration',
+      'allocations':[{'caseUid':str(child.case_uid),'txNo':no,'rowVersion':version or child.row_version,'amount':amount}]})
 def leg(name):
     child.refresh_from_db();return next(t['txNo'] for t in child.payload['transactions'] if t['legType']==name)
 # 2026-10-20 四類統一：須先收到所有再保人退款並逐筆人工銷帳，才可一次全額退清 Cedant
@@ -125,7 +130,10 @@ check('Cedant refund is blocked until every reinsurer refund is received and set
 check('the block message tells the user to settle every reinsurer refund first','reinsurer refund' in r.json().get('message','').lower())
 check('refund recovery still rejects overpayment',pay(ri,752.01).status_code==400)
 # 2026-10-16 92 項規則（第 52 項）：保費（含退費）每次須登錄整筆餘額，不得部分收付（取代舊的部分退款情境）
-check('partial reinsurer refund receipt is rejected',pay(ri,100).status_code==400)
+with transaction.atomic():
+ check('partial reinsurer refund receipt accepted',pay(ri,100).status_code==200)
+ transaction.set_rollback(True)
+child.refresh_from_db()
 stale=child.row_version
 check('reinsurer recovery accepts a positive cash magnitude for the full balance',pay(ri,752).status_code==200)
 check('stale refund writes are rejected',pay(ri,1,version=stale).status_code==409)
@@ -134,9 +142,12 @@ check('recovery entry stores signed amount and explicit direction',ri_entry['amo
 check('full RI receipt automatically releases the Cedant refund',next(x for x in rows(child) if x['partyType']=='reinsurer')['settlement']=='settled')
 child.refresh_from_db()
 r=call('post','/api/accounting',{'action':'confirm_facility_settlement','caseUid':str(child.case_uid),'rowVersion':child.row_version,'txNo':leg('Leg 2'),'note':'QA RI refund write-off'})
-check('retired manual confirmation is rejected',r.status_code==400)
+check('retired manual confirmation is rejected',r.status_code==410)
 check('Cedant refund still rejects overpayment',pay(cedant,890.01).status_code==400)
-check('Cedant refund still rejects a partial amount',pay(cedant,100).status_code==400)
+with transaction.atomic():
+ check('Cedant refund accepts partial actual amount after collection',pay(cedant,100).status_code==200)
+ transaction.set_rollback(True)
+child.refresh_from_db()
 check('Cedant refund API accepts a positive cash magnitude for the full balance',pay(cedant,890).status_code==200)
 child.refresh_from_db();entry=child.payload['paymentEntries'][-1]
 check('refund entry stores signed amount and explicit direction',entry['amount']==-890 and entry['paymentDirection']=='payable')
@@ -150,9 +161,9 @@ child.refresh_from_db()
 # 2026-10-16：record_payment 改為單筆匯款批次，更正須整筆沖回該匯款
 r=call('post','/api/accounting',{'action':'reverse_batch_payment','batchId':entry['batchId'],'paymentDate':'2037-05-21','note':'QA mistaken refund',
     'cases':[{'caseUid':str(child.case_uid),'rowVersion':child.row_version}]})
-check('settled refund cannot be reopened by reversing cash',r.status_code==409 and r.json()['error']=='settled_amount_locked')
+check('settled refund can be reversed before downstream dependencies',r.status_code==200)
 cedant=next(r for r in rows(child) if r['partyType']=='cedant')
-check('rejected reversal preserves exact settled refund balance',cedant['outstanding']==0 and cedant['paid']==-890)
+check('whole refund reversal restores original obligation',cedant['outstanding']==-890 and cedant['paid']==0)
 check('reversing the Cedant refund keeps the reinsurer receipt',next(r for r in rows(child) if r['partyType']=='reinsurer')['paid']==-752)
 child.refresh_from_db()
 unpaid=copy.deepcopy(child.payload);unpaid['paymentEntries']=[]

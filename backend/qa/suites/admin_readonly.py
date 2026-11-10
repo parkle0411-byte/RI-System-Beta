@@ -75,18 +75,19 @@ try:
         # --- 註冊了什麼 ---
         registered = {m.__name__ for m in admin.site._registry}
         # 2026-10-19：Lloyd's Market 共用信評（MarketRatingProfile）也以唯讀方式註冊
-        check("exactly the 12 RI models are registered (incl. the two reminder logs and the Lloyd's rating profile)", registered == {"MarketRatingProfile", "Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot", "SignedSlipAlert", "PaymentAlert"}, registered)
+        check("exactly 18 RI models are registered, including Legacy entry support", registered == {"NumberCounter", "LegacyReason", "ImportBatch", "LegacyTransaction", "LegacyAudit", "FinanceReconciliationBatch", "MarketRatingProfile", "Case", "CaseDocument", "ReferenceSequence", "DraftRecycleBin", "Personnel", "MasterRecord", "FxRate", "AuditLog", "EntitySnapshot", "SignedSlipAlert", "PaymentAlert"}, registered)
         check("Django User / Group (password hashes) are NOT registered", User not in admin.site._registry and "Group" not in registered)
         try: admin.site.register(User, admin.ModelAdmin)
         except Exception: pass
         check("registering a writable ModelAdmin is ignored", User not in admin.site._registry and LogEntry not in admin.site._registry)
-        check("every registered admin is read-only class", all(type(a).__mro__[1].__name__ == "ReadOnlyModelAdmin" for a in admin.site._registry.values()))
+        from ri_system.admin_site import ReadOnlyModelAdmin
+        check("every registered admin inherits the read-only class", all(isinstance(a,ReadOnlyModelAdmin) for a in admin.site._registry.values()))
         check("/admin/auth/user/ and /admin/auth/group/ do not exist", adm.get("/admin/auth/user/").status_code == 404 and adm.get("/admin/auth/group/").status_code == 404)
         page = adm.get("/admin/").content.decode()
         check("index lists the data areas, not the user/group area", "Cases" in page and "Audit" in page and "/admin/auth/" not in page, page[:200])
 
         # --- 可以看 ---
-        lists = ["cases/case", "cases/casedocument", "cases/referencesequence", "cases/draftrecyclebin", "personnel/personnel", "masterdata/masterrecord", "fxrates/fxrate", "audit/auditlog", "audit/entitysnapshot"]
+        lists = ["legacy/importbatch", "legacy/legacytransaction", "legacy/legacyaudit", "cases/case", "cases/casedocument", "cases/referencesequence", "cases/draftrecyclebin", "personnel/personnel", "masterdata/masterrecord", "fxrates/fxrate", "audit/auditlog", "audit/entitysnapshot"]
         for l in lists:
             r = adm.get(f"/admin/{l}/"); check(f"list page /admin/{l}/ -> 200", r.status_code == 200, r.status_code)
         for label, url, needle in [("case", f"/admin/cases/case/{case.pk}/change/", "ZZ 中文 Insured"), ("personnel", f"/admin/personnel/personnel/{sales_p.pk}/change/", sales_p.name),

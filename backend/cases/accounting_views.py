@@ -171,6 +171,11 @@ class AccountingView(NoStoreMixin, APIView):
             warnings.extend(case_warnings)
             transactions.extend(case_transactions)
             swiss_rows.extend(case_swiss)
+        from legacy.ledger import accounting_data,accounting_schedules
+        legacy_views,legacy_rows=accounting_data()
+        case_views.extend(legacy_views)
+        transactions.extend(legacy_rows)
+        swiss_rows.extend(accounting_schedules())
         # 與 ledger_rows 相同的排序（twRef，再依到期日；穩定排序）
         rows.sort(key=lambda r: (js_locale_key_cached(r["twRef"]), js_locale_key_cached(_text(r.get("dueDate")))))
         currencies = []
@@ -178,14 +183,36 @@ class AccountingView(NoStoreMixin, APIView):
             if js_truthy(currency) and currency not in currencies:
                 currencies.append(currency)
         currencies.sort(key=js_to_string)
+        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches
+        from .models import FinanceReconciliationBatch
+        reviews = active_reviews()
+        payload_by_uid = {c['caseUid']: c['payload'] for c in case_views}
+        versions = {c['caseUid']: c['rowVersion'] for c in case_views}
+        for row in transactions:
+            if row.get('legacyHistorical'):
+                continue  # Historical review is read-only; never infer a new review event.
+            row['historicalTermsMissing'] = not payload_by_uid[row['caseUid']].get('financeWorkflowVersion')
+            row.update(review_fields(row['caseUid'], row.get('txNo'), payload_by_uid[row['caseUid']], row, reviews))
+        review_batches = [{
+            'id': str(b.pk), 'status': b.status, 'date': str(b.review_date),
+            'currency': b.currency if len(getattr(b, 'currencies', [b.currency])) == 1 else '',
+            'currencies': getattr(b, 'currencies', [b.currency]),
+            'partyName': b.party_name, 'reference': b.reference, 'note': b.note,
+            'createdAt': b.created_at.isoformat(), 'createdByName': b.created_by_name,
+            'cancelledAt': b.cancelled_at.isoformat() if b.cancelled_at else '', 'cancelReason': b.cancel_reason,
+            'members': [{**m, 'rowVersion': versions.get(m['caseUid'])} for m in b.members],
+        } for b in grouped_review_batches()]
         return Response(json_roundtrip({
             "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,
             "scope": {"canEdit": _can_edit(request.ri_principal)},
-            "cashBatches": payment_batches(case_views), "swissRows": swiss_rows, "scheduleRows": schedule_rows,
+            "caseHistories": {uid: p.get("financeCorrectionHistory", []) for uid,p in payload_by_uid.items() if p.get("financeCorrectionHistory")}, "reviewBatches": review_batches, "cashBatches": payment_batches(case_views), "swissRows": swiss_rows, "scheduleRows": schedule_rows,
         }))
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
+        from legacy.services import contains_legacy_reference
+        if contains_legacy_reference(body):
+            return _error(403,"legacy_read_only","Imported historical transactions are read-only.")
         action = _text(body.get("action"))
         from .allianz_accounting import record_followup
         from .great_american_accounting import record_followup as ga_followup
@@ -202,6 +229,21 @@ class AccountingView(NoStoreMixin, APIView):
         from .facility_accounting import settlement_action
         for manual_action in ('confirm_facility_settlement', 'unconfirm_facility_settlement'):
             handlers[manual_action] = lambda r, b: settlement_action(self, r, b)
+        from . import finance_workflow as finance
+        handlers.update({
+            'review_accounts': lambda r,b: finance.reconcile(self,r,b),
+            'cancel_review_batch': lambda r,b: finance.cancel_review(self,r,b),
+            'record_transaction_payments': lambda r,b: finance.register(self,r,b),
+            'reverse_batch_payment': lambda r,b: finance.reverse_registration(self,r,b),
+            'record_claim_followup': lambda r,b: finance.followup(self,r,b),
+        })
+        retired = {'record_allianz_claim_followup','record_great_american_claim_followup','record_qbe_claim_followup','edit_payment','record_payment','reverse_payment','record_premium_offset',
+            'confirm_facility_settlement','unconfirm_facility_settlement','confirm_swiss_collection',
+            'unconfirm_swiss_collection','record_swiss_clearance','record_swiss_offset'}
+        if action in retired:
+            if not _can_edit(request.ri_principal):
+                return _error(403, 'permission_denied', 'Finance access is required.')
+            return _error(410, 'retired_accounting_action', 'Use the reviewed account registration and whole-registration reversal workflow.')
         if action not in handlers:
             return _error(400, "unsupported_action", "Unsupported Accounting action.")
         try:
@@ -219,12 +261,15 @@ class AccountingView(NoStoreMixin, APIView):
             return None
         if str(parsed) != case_uid:  # Alpha 比對 case_uid::text，只接受小寫、有連字號的標準寫法
             return None
-        return _live(Case.objects.select_for_update()).filter(case_uid=parsed).first()
+        native=_live(Case.objects.select_for_update()).filter(case_uid=parsed).first()
+        if native:return native
+        from legacy.ledger import locked_facades
+        return locked_facades([parsed]).get(str(parsed))
 
     @staticmethod
     def _status_error(case, verb):
         from .data_integrity import response_error
-        invalid=response_error(case.payload)
+        invalid=None if getattr(case,'legacy',False) else response_error(case.payload)
         if invalid is not None:return invalid
         if case.status in LEDGER_STATUSES:
             return None
@@ -233,8 +278,20 @@ class AccountingView(NoStoreMixin, APIView):
 
     @staticmethod
     def _save(request, body, case, payload, action, metadata):
+        if getattr(case,'legacy',False):
+            from legacy.services import audit,state
+            if case.row_version != body.get('rowVersion'):
+                return _error(409,'version_conflict','Refresh this transaction before continuing.')
+            from .property_original import persist_settlements
+            if action not in ('finance_accounts_reviewed','finance_review_cancelled','record_claim_followup'):
+                persist_settlements(payload,_iso_now(),actor_from(request.ri_principal))
+            before=state(case.record)
+            case.payload=payload;case.row_version+=1;case.save()
+            audit(request.ri_principal,case.case_uid,action,before,{**state(case.record),'financeOperation':metadata},str(metadata.get('reason') or ''))
+            return Response({'ok':True,'rowVersion':case.row_version})
         from .property_original import persist_settlements
-        persist_settlements(payload, _iso_now(), actor_from(request.ri_principal))
+        if action not in ('finance_accounts_reviewed', 'finance_review_cancelled', 'record_claim_followup'):
+            persist_settlements(payload, _iso_now(), actor_from(request.ri_principal))
         actor_info = actor_from(request.ri_principal)
         expected = js_to_number(body.get("rowVersion", UNDEFINED))  # Number(undefined) 是 NaN，不是 0
         if case.row_version != expected:

@@ -76,6 +76,9 @@ def next_production_month(month):
 
 
 def base_month(case_data):
+    from cases.oversea import enabled as oversea_enabled
+    if oversea_enabled(case_data):
+        return year_month(case_data.get('receiptPaymentDate'))
     # An endorsement's premium belongs to its own effective month. The original
     # policy's policyFrom can be months earlier than the amendment.
     if js_truthy(get(case_data, "parentTwRef")):
@@ -87,10 +90,10 @@ def base_month(case_data):
         effective = year_month(get(case_data, "endoEffectiveDate")) or year_month(get(case_data, "policyFrom"))
         announced = year_month(get(case_data, "announcedAt")) or year_month(get(case_data, "endorsementAnnouncedAt")) or year_month(get(case_data, "postedAt"))
         return max(effective, announced)
-    effective = year_month(get(case_data, "policyFrom"))
-    activity_source = js_or(get(case_data, "announcedAt"), get(case_data, "postedAt"))
-    activity = year_month(activity_source)
-    return effective if _utf16(effective) > _utf16(activity) else activity
+    # Original / renewal single premiums belong to policy inception, even when
+    # Announce occurs later. Closed-month routing is handled by deferrals;
+    # installment_allocations keeps explicit installment performance months.
+    return year_month(get(case_data, "policyFrom"))
 
 
 def _utf16(text):
@@ -98,6 +101,10 @@ def _utf16(text):
 
 
 def reinsurer_legs(case_data, reinsurer):
+    from cases.oversea import enabled as oversea_enabled, legs as oversea_legs
+    if oversea_enabled(case_data):
+        result = oversea_legs(case_data, reinsurer)
+        return {"cedantPremium": result["cp"], "brokerage": result["brokerage"]}
     order = number_or_zero(get(reinsurer, "sharePct")) / 100
     cedant_premium = number_or_zero(get(case_data, "originalPremium")) * order
     cedant_commission = cedant_premium * number_or_zero(get(case_data, "riCommPct")) / 100
@@ -130,6 +137,9 @@ def installment_allocations(case_data, periods_list=None):
                  "performanceMonth":r.get("performanceMonth", base_month(case_data)),
                  "ratio":number_or_zero(r.get("weight"))/total_premium if total_premium and get(case_data,"installmentEnabled") else 1,
                  "income":r["t3"]} for r in (property_periods(case_data) if periods_list is None else periods_list)]
+    from cases.oversea import enabled as oversea_enabled, periods as oversea_periods
+    if oversea_enabled(case_data):
+        return [dict(id=r['id'],performanceMonth=r['actualPaymentDate'][:7],ratio=number_or_zero(r['ratio'])/100,income=r['amount']) for r in oversea_periods(case_data)]
     income = total_income(case_data)
     if not js_truthy(get(case_data, "installmentEnabled")):
         return [{"id": "FULL", "performanceMonth": base_month(case_data), "ratio": 1.0, "income": income}]

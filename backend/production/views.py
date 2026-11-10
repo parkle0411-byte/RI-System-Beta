@@ -112,6 +112,10 @@ def load_month(month, *, cached=False):
         fingerprint = (result_cache.table_fingerprint(_live_cases()), result_cache.table_fingerprint(Case.objects.filter(tw_ref__isnull=False)),
                        result_cache.table_fingerprint(FxRate.objects.filter(year_month=month)),
                        result_cache.table_fingerprint(_exclusions(month), version=None, stamp="created_at"))
+        from legacy.production import report_sources
+        # Corrections inherit rates from another month; include all rate edits.
+        fingerprint += (result_cache.table_fingerprint(report_sources(month),version='version'),
+                        result_cache.table_fingerprint(FxRate.objects.all()))
     fx_rows = list(FxRate.objects.filter(year_month=month).order_by("currency"))
     exclusions = list(_exclusions(month))
     exclusions.sort(key=lambda e: (e.created_at, str(e.id)))
@@ -124,6 +128,8 @@ def load_month(month, *, cached=False):
         # First Policy No 要沿著續保鏈往回追：連結表用「所有有 TW Ref 的案件」建（含已封存），中間有一張被封存也不會斷
         links = calc.reference_links(Case.objects.filter(tw_ref__isnull=False).values_list("tw_ref", "payload").iterator())
         preview = calc.build_production_preview(sources, month, fx_rates, [exclusion_row(e) for e in exclusions], links)
+        from legacy.production import append_preview
+        preview = append_preview(preview,month)
         return cases, sources, preview
 
     if fingerprint is None:
@@ -234,6 +240,8 @@ class ProductionReportView(NoStoreMixin, APIView):
         row = next((r for r in state["preview"]["rows"] if r["id"] == row_id), None)
         if row is None:
             return _error(409, "row_not_available", "This row is no longer available. Refresh the preview.")
+        if row.get('legacyTransactionId'):
+            return _error(409,'legacy_month_fixed','Legacy transactions retain their explicitly selected Revenue Month. The selected month cannot be deferred from this screen.')
         actor_info = actor_from(person)
         try:
             with transaction.atomic():
@@ -308,6 +316,7 @@ class ProductionReportView(NoStoreMixin, APIView):
 
         rows_by_case = {}
         for row in [*(report.rows if is_array(report.rows) else []), *state["preview"].get("accountingRows", [])]:
+            if row.get('legacyTransactionId'):continue
             rows_by_case.setdefault(js_to_number(get(row, "caseId")), []).append(row)
         sources = {float(s["id"]): s for s in state["sources"]}
         cases = {float(c.pk): c for c in state["cases"]}
@@ -344,6 +353,8 @@ class ProductionReportView(NoStoreMixin, APIView):
                 if load_month(month)["preview"] != state["preview"]:
                     return _error(409, "source_changed", "Production source data changed while closing. Generate a new version before closing.")
                 now = timezone.now()
+                from legacy.production import freeze_report
+                freeze_report(person,report.rows)
                 locked_report.status = "closed"
                 locked_report.row_version += 1
                 locked_report.close_token = close_token

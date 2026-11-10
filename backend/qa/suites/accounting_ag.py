@@ -1,3 +1,4 @@
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """A–G business-rule regression. Synthetic records in a disposable database only."""
 import os
 assert os.environ.get('RI_DISPOSABLE_QA')=='true'
@@ -18,7 +19,7 @@ def check(n,ok,d=''):
  print(('PASS ' if ok else 'FAIL ')+n+(' '+str(d)[:700] if not ok else ''),flush=True)
 
 def apay(client,c,leg,index=0,value=None,ref='SYNTHETIC-EXTERNAL',note=''):
- c.refresh_from_db();candidates=tx_rows(c,leg)
+ review_case(c,globals().get('fin'));c.refresh_from_db();candidates=tx_rows(c,leg)
  if leg=='Leg 1' and value is None:
   periods=list(dict.fromkeys(t.get('installmentId') for t in candidates))
   group=[t for t in candidates if t.get('installmentId')==periods[index]]
@@ -26,7 +27,7 @@ def apay(client,c,leg,index=0,value=None,ref='SYNTHETIC-EXTERNAL',note=''):
  details=transaction_details(c.payload)
  allocations=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'txNo':t['txNo'],
   'amount':abs(details[t['txNo']]['outstanding']) if value is None else value} for t in group]
- r=call(client,'post','/api/accounting',{'action':'record_transaction_payments','paymentDate':'2026-10-01',
+ r=reviewed_cash(client,{'action':'record_transaction_payments','paymentDate':'2026-10-01',
   'amount':sum(a['amount'] for a in allocations),'reference':ref,'note':note,'allocations':allocations})
  c.refresh_from_db();return r
 
@@ -61,12 +62,15 @@ with transaction.atomic():
    check(label+' Announce creates no cash',not c.payload['paymentEntries'])
    check(label+' premature T2 payment blocked',apay(fin,c,'Leg 2').status_code>=400)
    check(label+' missing reference and note blocked',apay(fin,c,'Leg 1',ref='').status_code==400)
-   check(label+' partial premium blocked',apay(fin,c,'Leg 1',value=1).status_code==400)
+   with transaction.atomic():
+    check(label+' partial premium accepted',apay(fin,c,'Leg 1',value=1).status_code==200)
+    transaction.set_rollback(True)
+   c.refresh_from_db()
    check(label+' sales cannot register finance cash',apay(sales,c,'Leg 1').status_code==403)
    r=apay(fin,c,'Leg 1');check(label+' finance can collect full T1 before Production',r.status_code==200,(r.status_code,r.content[:400]))
    t1=tx_rows(c,'Leg 1')[0];details=transaction_details(c.payload)
    check(label+' T1 automatically settled and locked',t1['settlement']=='settled' and details[t1['txNo']]['amountEditLocked'] and not details[t1['txNo']]['canCancelSettlement'])
-   check(label+' manual confirm endpoint disabled',request(fin,c,'confirm_facility_settlement',txNo=t1['txNo'],note='manual bypass').status_code==400)
+   check(label+' manual confirm endpoint disabled',request(fin,c,'confirm_facility_settlement',txNo=t1['txNo'],note='manual bypass').status_code==410)
    check(label+' cancelling settlement disabled',request(fin,c,'unconfirm_facility_settlement',txNo=t1['txNo'],note='cancel bypass').status_code>=400)
    check(label+' settled T1 money cannot change',update(sales,c,{'originalPremium':2000}).status_code==409)
    ris=copy.deepcopy(c.payload['reinsurers']);ris[0]['premium']=750
@@ -93,23 +97,29 @@ with transaction.atomic():
    payable=tx_rows(c,'Claim Leg 2')[0]
    check(label+' claim correct due in both directions',d['contractDueDate']==expected and transaction_details(c.payload)[payable['txNo']]['contractDueDate']==expected,(d['contractDueDate'],expected))
    check(label+' no dedicated Facility followup',not any(d.get(k) for k in ('allianzClaim','greatAmericanClaim','qbeClaim')))
-   r=apay(fin,c,'Claim Leg 2',value=100);check(label+' claim cannot pay before receipt',r.status_code in (400,409) and r.json().get('error')=='collection_settlement_required',r.content[:400])
+   r=apay(fin,c,'Claim Leg 2',value=100);check(label+' claim cannot pay before receipt',r.status_code in (400,409) and r.json().get('error')=='payment_dependency',r.content[:400])
    check(label+' partial claim receipt allowed',apay(fin,c,'Claim Leg 1',value=100).status_code==200)
-   d=transaction_details(c.payload)[no];check(label+' partial claim keeps due and stays open',d['contractDueDate']==expected and d['settlement']=='partial' and not d['amountEditLocked'])
+   d=transaction_details(c.payload)[no];check(label+' partial claim keeps due and stays open',d['contractDueDate']==expected and d['settlement']=='partial' and d['amountEditLocked'])
    entry=next(e for e in c.payload['paymentEntries'] if e.get('transactionNo')==no)
-   r=request(fin,c,'edit_payment',entryId=entry['id'],amount=80,reason='Synthetic correction');check(label+' partial unclosed receipt may be corrected with history',r.status_code==200,r.content[:300]);c.refresh_from_db()
-   r=apay(fin,c,'Claim Leg 2',value=100);check(label+' claim cannot pay beyond registered receipts',r.status_code in (400,409) and r.json().get('error')=='collection_settlement_required',r.content[:400])
+   r=request(fin,c,'edit_payment',entryId=entry['id'],amount=80,reason='Synthetic correction');check(label+' direct amount editing retired',r.status_code==410,r.content[:300])
+   r=request(fin,c,'reverse_batch_payment',batchId=entry['batchId'],paymentDate='2026-10-02',note='Synthetic correction',cases=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version}]);check(label+' partial receipt whole reversal succeeds',r.status_code==200,r.content[:300]);c.refresh_from_db()
+   check(label+' corrected receipt is registered anew',apay(fin,c,'Claim Leg 1',value=80).status_code==200)
+   entry=next(e for e in reversed(c.payload['paymentEntries']) if e.get('transactionNo')==no and e.get('entryType')=='payment')
+   r=apay(fin,c,'Claim Leg 2',value=100);check(label+' claim cannot pay beyond registered receipts',r.status_code in (400,409) and r.json().get('error')=='payment_dependency',r.content[:400])
    check(label+' partial Cedant claim payment allowed',apay(fin,c,'Claim Leg 2',value=50).status_code==200)
-   r=request(fin,c,'edit_payment',entryId=entry['id'],amount=30,reason='Would break outgoing cap');check(label+' lowering receipts below paid claims rejected',r.status_code==409)
+   r=request(fin,c,'reverse_batch_payment',batchId=entry['batchId'],paymentDate='2026-10-02',note='Would break outgoing cap',cases=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version}]);check(label+' reversal below paid claims rejected',r.status_code==409)
    check(label+' remaining RI claim cash completes automatically',apay(fin,c,'Claim Leg 1').status_code==200)
    d=transaction_details(c.payload)[no];check(label+' full claim locks and stops overdue',d['settlement']=='settled' and d['amountEditLocked'] and not d['trackingDue'] and not d['nextTrackingDate'])
-   r=request(fin,c,'edit_payment',entryId=entry['id'],amount=90,reason='Attempt locked change');check(label+' settled claim amount modification blocked',r.status_code==409)
+   r=request(fin,c,'edit_payment',entryId=entry['id'],amount=90,reason='Attempt locked change');check(label+' direct settled claim amount modification retired',r.status_code==410)
    check(label+' remaining Cedant claim payment auto settles',apay(fin,c,'Claim Leg 2').status_code==200 and tx_rows(c,'Claim Leg 2')[0]['settlement']=='settled')
    # Every case / period is independent; cross-case/period batches are rejected atomically.
    a=newpost(name,inst=True);first=tx_rows(a,'Leg 1')[0];second=tx_rows(a,'Leg 1')[2]
    allocations=[dict(caseUid=str(a.case_uid),rowVersion=a.row_version,txNo=t['txNo'],amount=abs(t['amount'])) for t in (first,second)]
-   r=call(fin,'post','/api/accounting',dict(action='record_transaction_payments',paymentDate='2026-10-01',reference='AG-BATCH',amount=sum(x['amount'] for x in allocations),allocations=allocations))
-   check(label+' cross-period cash batch rejected atomically',r.status_code==400 and not Case.objects.get(pk=a.pk).payload['paymentEntries'])
+   with transaction.atomic():
+    r=call(fin,'post','/api/accounting',dict(action='record_transaction_payments',paymentDate='2026-10-01',reference='AG-BATCH',amount=sum(x['amount'] for x in allocations),allocations=allocations))
+    check(label+' same-party cross-period receipt accepted',r.status_code==200,r.content[:300])
+    transaction.set_rollback(True)
+   a.refresh_from_db()
    check(label+' per-period T1 can collect independently',apay(fin,a,'Leg 1',0).status_code==200)
    check(label+' second-period T2 remains blocked',apay(fin,a,'Leg 2',2).status_code>=400)
    # Refund obligations come from an actual workflow and never require Production.
@@ -129,9 +139,9 @@ with transaction.atomic():
    original_key=build_payment_schedule(root.payload)['items'][0]['scheduleKey'];refund_key=build_payment_schedule(refund.payload)['items'][0]['scheduleKey']
    root.refresh_from_db();refund.refresh_from_db()
    r=call(fin,'post','/api/accounting',dict(action='record_swiss_offset',originalCaseUid=str(root.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=root.row_version,refundRowVersion=refund.row_version,originalKey=original_key,refundKey=refund_key,paymentDate='2026-10-22',amount=200))
-   check(label+' offsets disabled on Cedant side',r.status_code==400 and r.json().get('error')=='offset_not_allowed',r.content[:300])
+   check(label+' offsets disabled on Cedant side',r.status_code==410 and r.json().get('error')=='retired_accounting_action',r.content[:300])
    r=call(fin,'post','/api/accounting',dict(action='record_premium_offset',originalCaseUid=str(root.case_uid),refundCaseUid=str(refund.case_uid),originalRowVersion=root.row_version,refundRowVersion=refund.row_version,originalKey=build_payment_schedule(root.payload)['items'][1]['scheduleKey'],refundKey=build_payment_schedule(refund.payload)['items'][1]['scheduleKey'],paymentDate='2026-10-22',amount=200))
-   check(label+' offsets disabled on reinsurer side',r.status_code==400 and r.json().get('error')=='offset_not_allowed',r.content[:300])
+   check(label+' offsets disabled on reinsurer side',r.status_code==410 and r.json().get('error')=='retired_accounting_action',r.content[:300])
   # Ordinary non-Property financial rules share the reviewed policy.
   generic=posted(sales,ae=staff.name,ownerPersonnelId=staff.pk,classOfBusiness='Marine',classCode='MAR',situations=[dict(address='Test',postcode='100')],riCommPct=0,taxPct=0,reinsurers=[dict(name='AG Marine RI',sharePct=100,premium=800,riCommPct=0,taxPct=0,paymentTermsDays=30)])
   check('Other ordinary classes build aggregate ledgers on Announce',len(generic.payload['transactions'])==3)

@@ -155,7 +155,7 @@ onMounted(loadProductionPreview)
           <el-table-column prop="remark" label="Remark" width="90"></el-table-column>
           <el-table-column prop="tranxDate" label="Tranx Date" width="120"></el-table-column>
           <el-table-column prop="firstPolicyNo" label="First Policy No" width="170"><template #default="{ row }">{{ row.firstPolicyNo || '—' }}</template></el-table-column>
-          <el-table-column v-if="productionPreview.scope?.canOperate && !productionPreview.scope?.monthClosed" label="Action" width="210"><template #default="{ row }"><el-button text type="primary" :disabled="Boolean(productionSaving)" @click="excludeProductionRow(row, 'reinsurer')">Exclude R/I</el-button><el-button text type="warning" :disabled="Boolean(productionSaving)" @click="excludeProductionRow(row, 'case')">Exclude case</el-button></template></el-table-column>
+          <el-table-column v-if="productionPreview.scope?.canOperate && !productionPreview.scope?.monthClosed" label="Action" width="210"><template #default="{ row }"><span v-if="row.legacyTransactionId">Fixed Revenue Month</span><el-button v-else text type="primary" :disabled="Boolean(productionSaving)" @click="excludeProductionRow(row, 'reinsurer')">Exclude R/I</el-button><el-button v-if="!row.legacyTransactionId" text type="warning" :disabled="Boolean(productionSaving)" @click="excludeProductionRow(row, 'case')">Exclude case</el-button></template></el-table-column>
         </el-table>
       </div>
     </section>

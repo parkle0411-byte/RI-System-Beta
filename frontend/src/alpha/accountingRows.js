@@ -10,6 +10,7 @@ export function accountingRows(body) {
     const current = row.source !== 'claim' && !row.reversed && !row.isReversalEntry
     const associated = current ? [...new Set((row.cashParts || []).map(part => row.caseUid + ':' + part.scheduleKey))]
       .map(key => byKey.get(key)).filter(Boolean).map(item => {
+        if (row.financeDates) return {...item, ...row.financeDates}
         if (!row.swissCgl || row.settlement !== 'settled') return item
         const dates = Object.fromEntries(['baseDate','dueDate','contractDueDate','termsDays','reminderDate','paymentRule']
           .filter(key => row[key] !== undefined && row[key] !== null).map(key => [key,row[key]]))

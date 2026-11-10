@@ -1,3 +1,4 @@
+from qa.finance_fixtures import review_case, cash as reviewed_cash, prepare_case_correction
 """Exercise owner-approved business outcomes through API and production calculations."""
 from pathlib import Path
 exec(Path('/app/qa/suites/case_workflow.py').read_text().split('try:\n    with transaction.atomic():')[0])
@@ -35,17 +36,21 @@ def documents(c):
 def posted(client,**over):
     c=new_case(client,**over);documents(c);r=announce(client,c)
     assert r.status_code==200,(r.status_code,r.content)
-    c.refresh_from_db();return c
+    c.refresh_from_db();review_case(c,globals().get('fin'));return c
 
 def update(client,c,changes,reason='Approved test change'):
+    prepare_case_correction(c,changes,globals().get('fin'))
     c.refresh_from_db();payload=copy.deepcopy(c.payload);payload.update(changes)
     r=call(client,'put','/api/cases',{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'case':payload,'reason':reason,'reverseCorrectionConfirmed':True})
-    c.refresh_from_db();return r
+    c.refresh_from_db()
+    if r.status_code==200:review_case(c,globals().get('fin'))
+    return r
 
 def tx_rows(c,leg):
     c.refresh_from_db();return [t for t in c.payload.get('transactions',[]) if t.get('legType')==leg and not t.get('reversed') and not t.get('isReversalEntry')]
 
 def pay(client,c,leg,index=0,value=None):
+    review_case(c,globals().get('fin'))
     candidates=tx_rows(c,leg)
     if leg=='Leg 1' and value is None:
         periods=list(dict.fromkeys(t.get('installmentId') for t in candidates))
@@ -54,13 +59,16 @@ def pay(client,c,leg,index=0,value=None):
     details=transaction_details(c.payload)
     allocations=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'txNo':row['txNo'],
                   'amount':abs(details[row['txNo']]['outstanding']) if value is None else value} for row in group]
-    response=call(client,'post','/api/accounting',{'action':'record_transaction_payments','paymentDate':'2026-10-22',
+    response=reviewed_cash(client,{'action':'record_transaction_payments','paymentDate':'2026-10-22',
         'note':'QA synthetic registration','amount':sum(a['amount'] for a in allocations),'allocations':allocations})
     if response.status_code>=400 and value is None:print('PAY CHECK',leg,index,response.status_code,response.content[:1200],flush=True)
     return response
 
 def preview(c,month=None,rate=30):
-    c.refresh_from_db();month=month or timezone.localtime(c.announced_at).strftime('%Y-%m')
+    c.refresh_from_db()
+    # Originals use policy inception; reversals use their explicitly recorded reversal month.
+    reversal=c.payload.get('productionReversals') or []
+    month=month or (reversal[-1]['month'] if c.status=='reversed' and reversal else c.payload['policyFrom'][:7])
     return build_production_preview([case_source(c)],month,{month:{'USD':rate}},[])
 
 from io import StringIO
@@ -120,7 +128,7 @@ with transaction.atomic():
     # Existing valid terms can change with a reason before Settlement, through the Accounting API too.
     e=posted(sales,**shared)
     response=call(sales,'post','/api/accounting',{'action':'complete_payment_terms','caseUid':str(e.case_uid),'rowVersion':e.row_version,'partyKey':'r1','days':100,'reason':'Revised contract days'})
-    e.refresh_from_db();check('existing RI days can change through guarded editor',response.status_code==200,response.content[:700])
+    e.refresh_from_db();check('normal accounts cannot use historical missing-days editor',response.status_code==409,response.content[:700])
     if response.status_code==200:
         check('updated terms retained in history',e.payload['reinsurers'][0]['paymentTermsDays']==100 and bool(e.payload.get('paymentTermsHistory')))
     # Account Executive and Split may change only before any Production / affected T3 lock.

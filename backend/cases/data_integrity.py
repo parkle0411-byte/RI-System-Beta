@@ -42,6 +42,9 @@ def financial_issues(payload):
             field=f'{key}.{i}'
             if not isinstance(row,dict):add(field);continue
             numbers(row,keys,field+'.')
+            from .oversea import enabled as oversea_enabled
+            if key == 'reinsurers' and oversea_enabled(payload):
+                numbers(row, ('brokerageAmount',), field+'.')
             if key=='reinsurers' and row.get('name') is not None and not isinstance(row['name'],str):add(field+'.name')
     return issues
 

@@ -35,6 +35,9 @@ def strip_facility_tag(value):
 
 
 def calc_legs_for_reinsurer(case_data, reinsurer):
+    from ..oversea import enabled as oversea_enabled, legs as oversea_legs
+    if oversea_enabled(case_data):
+        return oversea_legs(case_data, reinsurer)
     from ..property_original import enabled, totals, allocate, money as exact_money, num
     from ..accounting_policy import legacy_math
     if enabled(case_data) and not legacy_math(case_data):
@@ -84,6 +87,21 @@ def build_premium_transactions(case_data, installment=None):
     if enabled(case_data):
         result = transactions(case_data, get(case_data,"announcedAt") or get(case_data,"postedAt") or "")
         return [t for t in result if not installment or t["installmentId"] == installment["id"]]
+    from ..oversea import enabled as oversea_enabled, periods as oversea_periods
+    if oversea_enabled(case_data):
+        rows=case_data.get('reinsurers') or []
+        result=[]
+        for period in oversea_periods(case_data):
+            if installment and period['id']!=installment['id']:continue
+            for i,r in enumerate(rows):
+                amount=period['amount'];split=case_data.get('installmentEnabled') is True
+                extra=dict(installmentId=period['id'],installmentLabel=period['label']) if split else {}
+                result.append(dict(txNo=f"{case_data.get('twRef') or ''}-R{i+1}"+(f"-I{period['number']}" if split else '')+'-T3',legType='Leg 3',
+                    label=('Receivable from ' if amount>=0 else 'Payable to ')+str(r.get('name') or '')+(' · '+period['label'] if split else ''),
+                    amount=amount,reinsurer=r.get('name') or '',reinsurerIdx=i,source='premium',overseaBusiness=True,settlement='open',splitParty=None,viaForeignBroker=False,
+                    createdAt=case_data.get('announcedAt') or case_data.get('postedAt') or '',postedMonth='',**extra,
+                    **{k:period[k] for k in ('baseDate','dueDate','contractDueDate','actualPaymentDate','accountingDate','paymentRule')}))
+        return result
     installment = None if is_nullish(installment) else installment
     round_money = lambda value: premium_money(value, case_data)
     transactions = []
@@ -129,7 +147,7 @@ def build_premium_transactions(case_data, installment=None):
                     if complete and party_idx == 1:
                         amount = round_money(leg["amount"] - round_money(leg["amount"] * pct_a / 100))
                     transactions.append({
-                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg_idx + 1}{suffix}{tag}",
+                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg['legType'][4]}{suffix}{tag}",
                         "legType": f"{leg['legType']}{suffix}",
                         "label": f"{leg['label']} ({js_to_string(js_or(party_name, 'Unassigned'))}, {js_num_str(pct)}%){note}",
                         "amount": amount,
@@ -143,7 +161,7 @@ def build_premium_transactions(case_data, installment=None):
         else:
             for leg_idx, leg in enumerate(base):
                 transactions.append({
-                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg_idx + 1}{tag}",
+                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg['legType'][4]}{tag}",
                     "legType": leg["legType"],
                     "label": f"{leg['label']}{note}",
                     "amount": leg["amount"],

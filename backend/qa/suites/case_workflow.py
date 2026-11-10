@@ -254,7 +254,7 @@ try:
         from cases.calc.accounting import calc_legs_for_reinsurer
         # 2026-11-02：系統不再有 Treaty，儲存時拒絕。
         r = call(sales, "post", "/api/cases", {"case": ready(reinsuranceStructure="TREATY")})
-        check("Treaty structure is rejected on save", r.status_code == 400 and code(r) == "validation_failed" and any("Quota Share or Excess of Loss" in e for e in r.json().get("errors", [])), r.content[:250])
+        check("Treaty structure is rejected on save", r.status_code == 400 and code(r) == "validation_failed" and any("Quota Share, Excess of Loss or Oversea Business" in e for e in r.json().get("errors", [])), r.content[:250])
         for structure in ("QS", "XOL"):
             for value in (None, "", 0, 10):
                 optional = create(sales, reinsuranceStructure=structure, riCommPct=value, ae=sales_p.name, reinsuredRetention="Advice of Reinsured's retention waived.", underlyingLimits="Primary layer limit")

@@ -85,6 +85,12 @@ class DashboardView(NoStoreMixin, APIView):
         see_all = has_permission(person, "dashboard.read.all")   # VM：Finance 也看全部（Alpha 用 cases.read.all）
         now = _now()
         local = now.astimezone(TAIPEI)
+        raw_year = request.query_params.get('brokerageYear')
+        brokerage_year = local.year
+        if raw_year is not None:
+            if not _YEAR.fullmatch(raw_year) or not local.year - 4 <= int(raw_year) <= local.year:
+                return _error(400, 'invalid_brokerage_year', 'Select a brokerage year within the past five calendar years, including the current year.')
+            brokerage_year = int(raw_year)
         # 先取得資料變更指紋、再讀資料（見 ri_system/result_cache.py）。「今天」「本月」與 12:00 前後也是依據。
         live = Case.objects.filter(recycled_at__isnull=True, is_archived=False)
         if see_all:
@@ -94,7 +100,7 @@ class DashboardView(NoStoreMixin, APIView):
         else:
             case_fingerprint = result_cache.table_fingerprint(live)   # 只看自己的案件：可見範圍可能因草稿內容改變，用完整指紋
         fingerprint = (case_fingerprint, result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()), result_cache.table_fingerprint(ProductionReport.objects.filter(status="closed"), stamp="closed_at"))   # 報表沒有 updated_at，用關帳時間
-        key = ("dashboard", "all" if see_all else ("person", person.pk), local.strftime("%Y-%m-%d"), local.strftime("%H:%M") > "12:00")
+        key = ("dashboard", "all" if see_all else ("person", person.pk), local.strftime("%Y-%m-%d"), local.strftime("%H:%M") > "12:00", brokerage_year)
 
         def compute():
             cases = Case.objects.filter(recycled_at__isnull=True, is_archived=False).order_by("id")
@@ -106,7 +112,7 @@ class DashboardView(NoStoreMixin, APIView):
             fx = [{"year_month": f.year_month, "currency": f.currency, "rate": float(f.rate)}
                   for f in FxRate.objects.order_by("year_month", "id")]
             closed = list(ProductionReport.objects.filter(status="closed").values("year_month", "rows"))
-            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed)
+            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year)
 
         return Response(json_roundtrip(result_cache.get_or_compute(key, fingerprint, compute)))
 

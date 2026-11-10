@@ -32,7 +32,7 @@ def rows(value):
     return [r for r in value if isinstance(r,dict)] if isinstance(value,list) else []
 
 def scope(p):
-    if not isinstance(p,dict) or p.get('_legacyCalculation'):
+    if not isinstance(p,dict) or p.get('_legacyCalculation') or str(p.get('reinsuranceStructure') or '').upper() == 'OVERSEA':
         return False
     names=[r.get('name') for r in rows(p.get('reinsurers')) if r.get('name')]
     if p.get('endorsementRules') == 'facultative-v1' and p.get('reinsuranceStructure') in ('QS', 'XOL'):

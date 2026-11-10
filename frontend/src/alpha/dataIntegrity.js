@@ -1,3 +1,4 @@
+import { overseaEnabled } from './oversea.js'
 // Read-only data quality checks. Empty draft values are allowed; saved data is never repaired here.
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const numberPattern = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/
@@ -25,6 +26,7 @@ export function financialIssues(payload) {
       const field=`${key}.${i}`
       if(!object(row)){add(field);return}
       numbers(row,keys,field+'.')
+      if (key === 'reinsurers' && overseaEnabled(payload)) numbers(row,['brokerageAmount'],field+'.')
       if(key==='reinsurers' && row.name!=null && typeof row.name!=='string')add(field+'.name')
     })
   }

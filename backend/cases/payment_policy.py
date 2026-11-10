@@ -39,7 +39,7 @@ def actual_cash(payload, row):
     paid = sum(number_or_zero(e.get('amount')) * (-1 if e.get('entryType') == 'reversal' else 1)
                for e in objects(payload.get('paymentEntries'))
                if e.get('scheduleKey') == row['scheduleKey'] and e.get('entryType') in ('payment', 'reversal')
-               and not e.get('nonCash'))
+               and (not e.get('nonCash') or e.get('entryKind') == 'finance-offset'))
     return paid * (-1 if row['amount'] < 0 else 1) + .004 >= abs(row['amount'])
 
 

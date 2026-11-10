@@ -1,3 +1,4 @@
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Synthetic API fixtures shared by current accounting suites, never production data."""
 import json,os
 from datetime import datetime,timezone
@@ -33,10 +34,17 @@ def make(ref,names=None,shares=None,parent=None,**changes):
  if p.get('installmentEnabled'):
   p['transactions']=[t for period in premium_installment_plan(p) for t in build_premium_transactions(p,period)]
  else:p['transactions']=build_premium_transactions(p)
- return Case.objects.create(tw_ref=ref,status='posted',payload=p,currency=p['currency'],parent_case=parent,
+ case = Case.objects.create(tw_ref=ref,status='posted',payload=p,currency=p['currency'],parent_case=parent,
   case_kind='endorsement' if parent else 'original',announced_at=datetime(2026,1,1,tzinfo=timezone.utc),created_by='qa',updated_by='qa')
+ global _fixture_review_client
+ if '_fixture_review_client' not in globals(): _fixture_review_client=client('fixture-review')[0]
+ review_client=_fixture_review_client
+ review_case(case,review_client)
+ return case
 
 def post(client,action,**body):
+ if action=='reverse_batch_payment':body.setdefault('paymentDate','2026-11-03')
+ if action=='record_transaction_payments':return reviewed_cash(client,dict(action=action,**body))
  return client.post('/api/accounting',json.dumps(dict(action=action,**body)),content_type='application/json')
 
 def details(case,now=None):
@@ -47,6 +55,7 @@ def nos(case,leg,period=None):
  return [t['txNo'] for t in case.payload['transactions'] if t.get('legType')==leg and (period is None or t.get('installmentId')==period)]
 
 def pay(client,case,numbers,value=None,**extra):
+ review_case(case,globals().get('_fixture_review_client'))
  case.refresh_from_db();data=details(case)
  amounts=numbers if isinstance(numbers,dict) else {no:abs(data[no]['outstanding']) if value is None else value for no in numbers}
  allocations=[dict(caseUid=str(case.case_uid),rowVersion=case.row_version,txNo=no,amount=amount) for no,amount in amounts.items()]

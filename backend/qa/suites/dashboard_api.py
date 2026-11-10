@@ -132,6 +132,19 @@ try:
             per = call(viewer, "get", "/api/dashboard").json()["period"]
         check("VM: at 2026-09-30 17:00 UTC the dashboard is already October (Taipei)", per == {"year": 2026, "currentMonth": "2026-10", "monthNumber": 10}, per)
 
+        # Historical selection changes only the trend, with calendar-year limits.
+        baseline = call(admin, "get", "/api/dashboard").json()
+        for selected in range(year, year - 5, -1):
+            response = call(admin, "get", f"/api/dashboard?brokerageYear={selected}")
+            selected_body = response.json()
+            check(f"year {selected}: valid selection", response.status_code == 200)
+            check(f"year {selected}: current metrics and period unchanged", selected_body['metrics'] == baseline['metrics'] and selected_body['period'] == baseline['period'])
+            check(f"year {selected}: correct month count", len(selected_body['brokerage']['labels']) == (now_tpe.month if selected == year else 12))
+        for invalid in (str(year+1), str(year-5), 'abc', '', '2026.0'):
+            response = call(admin, 'get', '/api/dashboard?brokerageYear=' + invalid)
+            check(f"invalid year {invalid!r}: rejected", response.status_code == 400 and code(response) == 'invalid_brokerage_year')
+        check('selecting historical year preserves default current trend', call(admin, 'get', '/api/dashboard').json() == baseline)
+
         # ================= 目標 =================
         r = call(admin, "post", T, {"periodType": "annual", "periodKey": str(year), "amount": 1234567.895})
         t1 = r.json().get("target", {})

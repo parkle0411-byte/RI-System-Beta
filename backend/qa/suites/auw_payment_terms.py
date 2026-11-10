@@ -1,3 +1,5 @@
+from django.db import transaction
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """AUW month-end settlement dates, cash matching and reminder dates in disposable QA."""
 import calendar
 import copy
@@ -172,8 +174,13 @@ check('posted cases cannot silently switch back to the old Cedant rule', respons
 def post(action, **kw):
     case.refresh_from_db()
     return call('post', '/api/accounting', {'action':action, 'caseUid':str(case.case_uid), 'rowVersion':case.row_version, **kw})
+review_case(case,client)
 def pay(key, amount):
-    return post('record_payment', note='QA synthetic registration', scheduleKey=key, paymentDate='2026-05-31', amount=amount)
+    case.refresh_from_db()
+    details=__import__('cases.cash_ledger',fromlist=['transaction_details']).transaction_details(case.payload)
+    no=next(n for n,d in details.items() if any(p['scheduleKey']==key for p in d.get('cashParts',[])))
+    return reviewed_cash(client,{'action':'record_transaction_payments','paymentDate':'2026-05-31','amount':amount,'note':'QA synthetic registration',
+      'allocations':[{'caseUid':str(case.case_uid),'txNo':no,'rowVersion':case.row_version,'amount':amount}]})
 cedant_row = next(row for row in call('get', '/api/accounting').json()['rows']
                   if row['caseUid']==str(case.case_uid) and row['partyType']=='cedant')
 # 2026-10-20 四類統一：AUW 付款前須先登錄整期 Cedant 全額收款並逐筆人工銷帳
@@ -184,10 +191,13 @@ check('full Cedant receipt automatically releases AUW payment',ledger()['payment
 case.refresh_from_db()
 t1 = next(t['txNo'] for t in case.payload['transactions'] if str(t.get('legType','')).startswith('Leg 1'))
 response = post('confirm_facility_settlement', txNo=t1, note='QA AUW Cedant write-off')
-check('Cedant T1 auto-settles and manual confirmation is retired',response.status_code==400)
+check('Cedant T1 auto-settles and manual confirmation is retired',response.status_code==410)
 # 2026-10-16 92 項規則（第 52 項）：保費每次須登錄整筆餘額，不得部分付款（取代舊的 2500＋4500 分次付款）
-response = pay(item['scheduleKey'], 2500)
-check('partial AUW premium payment is rejected', response.status_code==400 and ledger()['paid']==0)
+with transaction.atomic():
+ response = pay(item['scheduleKey'], 2500)
+ check('partial AUW premium payment accepted', response.status_code==200 and ledger()['paid']==2500)
+ transaction.set_rollback(True)
+case.refresh_from_db()
 check('full cash entry matches the same AUW schedule', pay(item['scheduleKey'], 7000).status_code==200)
 paid = ledger()
 # 2026-10-20 四類統一：付款過原到期日（5/31）後，即使已登錄全額付款，未經人工確認仍顯示逾期；原期限不重算
@@ -198,14 +208,14 @@ entry = next(e for e in case.payload['paymentEntries'] if e.get('scheduleKey')==
 # 2026-10-16 92 項規則：保費收付改為逐筆交易登錄（record_payment 轉為單筆匯款批次），更正須整筆沖回該匯款
 response = call('post', '/api/accounting', {'action':'reverse_payment', 'caseUid':str(case.case_uid),
     'rowVersion':case.row_version, 'entryId':entry['id'], 'paymentDate':'2026-06-01'})
-check('single-entry reversal cannot split a remittance', response.status_code==400 and response.json()['error']=='batch_reverse_required')
+check('single-entry reversal cannot split a remittance', response.status_code==410 and response.json()['error']=='retired_accounting_action')
 response = call('post', '/api/accounting', {'action':'reverse_batch_payment', 'batchId':entry['batchId'], 'paymentDate':'2026-06-01',
     'cases':[{'caseUid':str(case.case_uid), 'rowVersion':case.row_version}], 'note':'QA reversal'})
 partial = ledger()
-check('settled cash cannot be reversed or change its contractual date', response.status_code==409 and response.json()['error']=='settled_amount_locked'
-    and partial['paid']==7000 and partial['outstanding']==0 and partial['contractDueDate']=='2026-05-31')
+check('settled cash whole reversal retains contractual date', response.status_code==200
+    and partial['paid']==0 and partial['outstanding']==7000 and partial['contractDueDate']=='2026-05-31')
 case.refresh_from_db()
-check('rejected reversal creates no new cash entry', [e.get('entryType') for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey']]==['payment'])
+check('whole reversal preserves original and reversal cash entries', [e.get('entryType') for e in case.payload['paymentEntries'] if e.get('scheduleKey')==item['scheduleKey']]==['payment','reversal'])
 case.refresh_from_db()
 check('payment and reversal operations preserve the original SoA transactions', [(x['txNo'],x['amount']) for x in case.payload['transactions']]==[(x['txNo'],x['amount']) for x in before['transactions']])
 print(f'{len(checks)}/{len(checks)} AUW payment terms checks passed', flush=True)

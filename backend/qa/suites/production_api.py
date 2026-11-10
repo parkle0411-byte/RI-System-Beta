@@ -112,14 +112,14 @@ try:
             {"txNo": "ZZ-OLD-R1-TX2", "amount": 90, "legType": "Leg 2", "reversed": True, "reversalOffsetApplied": True}])
         c5 = make_case(sales, "draft", policyFrom="2031-05-01", policyTo="2032-05-01")                                                     # Draft 不列入
         c9 = at(make_case(sales, "posted", policyFrom="2031-05-01", policyTo="2032-05-01", currency="TWD"), EARLY)   # 整案排除用
-        c6 = at(make_case(sales, "posted", policyFrom="2031-05-01", policyTo="2032-05-01"),                         # 台北 6/1 01:00 Announce
+        c6 = at(make_case(sales, "posted", policyFrom="2031-06-01", policyTo="2032-06-01"),                         # 台北 6/1 01:00 Announce
                 datetime(2031, 5, 31, 17, 0, tzinfo=tz.utc))
 
         j = get(fin, M1).json(); rows = mine(j["rows"], c1, c2, c3, c4, c5, c6)
         by = lambda case: [r for r in rows if r["caseUid"] == str(case.case_uid)]
         check("Draft case is not in the preview", by(c5) == [])
-        check("VM (Taipei month): announced 2031-05-31 17:00 UTC = 06-01 Taipei -> not in May", by(c6) == [], [r["id"] for r in by(c6)])
-        check("... but in June", len(mine(get(fin, M2).json()["rows"], c6)) == 2)
+        check("June-effective original stays out of May despite UTC May announcement", by(c6) == [], [r["id"] for r in by(c6)])
+        check("June-effective original appears in June", len(mine(get(fin, M2).json()["rows"], c6)) == 2)
         check("USD without a May rate: missingRateCurrencies, rows have null NTD amounts, cannot generate",
               "USD" in j["summary"]["missingRateCurrencies"]
               and all(r["premium"] is None and r["missingRate"] for r in by(c1)) and j["scope"]["canGenerate"] is False, j["summary"])
@@ -280,8 +280,8 @@ try:
         got = call(sales, "get", f"/api/cases?caseUid={c3.case_uid}").json()["case"]["payload"]["transactions"]
         st = lambda inst, name, r: [t["paymentScheduleSettlement"] for t in got if t["installmentId"] == inst and t["legType"] == name and t["reinsurerIdx"] == r][0]
         # 2026-10-14：不再自動結清；餘額歸零後為 pending_confirmation，須會計人工確認
-        check("SoA settlement per installment: Leg 1 of I1 awaits confirmation (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 open until T1 and T2 are confirmed",
-              st("I1", "Leg 1", 0) == "pending_confirmation" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "open",
+        check("SoA settlement per installment: Leg 1 of I1 automatically settles (I1 cedant fully paid), Leg 1 of I2 still open, Leg 2 open, Leg 3 open until T1 and T2 are confirmed",
+              st("I1", "Leg 1", 0) == "settled" and st("I2", "Leg 1", 0) == "open" and st("I1", "Leg 2", 0) == "open" and st("I1", "Leg 3", 0) == "open",
               [(t["txNo"], t["paymentScheduleSettlement"]) for t in got])
 
         # ================= 關帳衝突：產生之後案件被改（簽章不變） =================

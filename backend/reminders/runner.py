@@ -165,12 +165,32 @@ def run_signed_slip(today=None):
 
 # ---------------------------------------------------------------- 付款提醒（台北 09:30）
 
+def _previous_oversea_transaction_keys(case):
+    """Resolve old references for cadence without rewriting historical alerts."""
+    from cases.oversea import enabled as oversea_enabled
+    payload = case_payload(case)
+    previous = payload.get('previousTwRefs')
+    if not oversea_enabled(payload) or not case.tw_ref or not isinstance(previous, list):
+        return {}
+    aliases = {}
+    for tx in msg_objects(payload.get('transactions')):
+        number = tx.get('txNo')
+        if not isinstance(number, str) or not number.startswith(case.tw_ref + '-'):
+            continue
+        suffix = number[len(case.tw_ref):]
+        for old in previous:
+            if isinstance(old, str) and old:
+                aliases['transaction:' + old + suffix] = 'transaction:' + number
+    return aliases
+
+
 def run_payment(today=None):
     today = today or taipei_date()
     cases = list(_open_cases())
     people = _people("role_code")
     finance = msg.finance_emails(people)
     success = {}
+    old_keys = {case.pk: _previous_oversea_transaction_keys(case) for case in cases}
     # 2026-10-21 使用者決定：寄信暫停（suppressed）時，逾期提醒也維持每 7 天一次，不會每天記一筆；
     # 各筆 Accounting 提醒日與實際到期日只在當天觸發，suppressed 不影響日後開啟寄信。
     for case_id, kind, keys, alert_date, status in PaymentAlert.objects.filter(status__in=("sent", "simulated", "suppressed")).values_list(
@@ -178,6 +198,8 @@ def run_payment(today=None):
         if status == "suppressed" and kind != "weekly_overdue":
             continue
         for key in keys if isinstance(keys, list) else []:
+            if isinstance(key, str):
+                key = old_keys.get(case_id, {}).get(key, key)
             index = f"{case_id}::{key}::{kind}"
             text = alert_date.isoformat()
             if text > success.get(index, ""):

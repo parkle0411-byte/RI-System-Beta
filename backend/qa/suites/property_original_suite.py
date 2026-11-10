@@ -1,3 +1,4 @@
+from qa.finance_fixtures import review_case, cash as reviewed_cash, prepare_case_correction
 """Exercise owner-approved business outcomes through API and production calculations."""
 from pathlib import Path
 exec(Path('/app/qa/suites/case_workflow.py').read_text().split('try:\n    with transaction.atomic():')[0])
@@ -35,17 +36,21 @@ def documents(c):
 def posted(client,**over):
     c=new_case(client,**over);documents(c);r=announce(client,c)
     assert r.status_code==200,(r.status_code,r.content)
-    c.refresh_from_db();return c
+    c.refresh_from_db();review_case(c,globals().get('fin'));return c
 
 def update(client,c,changes,reason='Approved test change'):
+    prepare_case_correction(c,changes,globals().get('fin'))
     c.refresh_from_db();payload=copy.deepcopy(c.payload);payload.update(changes)
     r=call(client,'put','/api/cases',{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'case':payload,'reason':reason,'reverseCorrectionConfirmed':True})
-    c.refresh_from_db();return r
+    c.refresh_from_db()
+    if r.status_code==200:review_case(c,globals().get('fin'))
+    return r
 
 def tx_rows(c,leg):
     c.refresh_from_db();return [t for t in c.payload.get('transactions',[]) if t.get('legType')==leg and not t.get('reversed') and not t.get('isReversalEntry')]
 
 def pay(client,c,leg,index=0,value=None):
+    review_case(c,globals().get('fin'))
     candidates=tx_rows(c,leg)
     if leg=='Leg 1' and value is None:
         periods=list(dict.fromkeys(t.get('installmentId') for t in candidates))
@@ -54,13 +59,16 @@ def pay(client,c,leg,index=0,value=None):
     details=transaction_details(c.payload)
     allocations=[{'caseUid':str(c.case_uid),'rowVersion':c.row_version,'txNo':row['txNo'],
                   'amount':abs(details[row['txNo']]['outstanding']) if value is None else value} for row in group]
-    response=call(client,'post','/api/accounting',{'action':'record_transaction_payments','paymentDate':'2026-10-22',
+    response=reviewed_cash(client,{'action':'record_transaction_payments','paymentDate':'2026-10-22',
         'note':'QA synthetic registration','amount':sum(a['amount'] for a in allocations),'allocations':allocations})
     if response.status_code>=400 and value is None:print('PAY CHECK',leg,index,response.status_code,response.content[:1200],flush=True)
     return response
 
 def preview(c,month=None,rate=30):
-    c.refresh_from_db();month=month or timezone.localtime(c.announced_at).strftime('%Y-%m')
+    c.refresh_from_db()
+    # Originals use policy inception; reversals use their explicitly recorded reversal month.
+    reversal=c.payload.get('productionReversals') or []
+    month=month or (reversal[-1]['month'] if c.status=='reversed' and reversal else c.payload['policyFrom'][:7])
     return build_production_preview([case_source(c)],month,{month:{'USD':rate}},[])
 
 with transaction.atomic():
@@ -110,7 +118,10 @@ with transaction.atomic():
     check('half-cent T2 schedule and ledger use exact decimal rounding',totals(precision)['t2s']==[2654.78,176402.99,177379.45] and [calc_legs_for_reinsurer(precision,r)['leg2'] for r in precision['reinsurers']]==[2654.78,176402.99,177379.45])
     version=c.row_version
     check('T2 payment requires full T1 receipt and settlement',pay(fin,c,'Leg 2').status_code>=400)
-    check('partial premium receipt rejected',pay(fin,c,'Leg 1',value=1).status_code==400)
+    with transaction.atomic():
+     check('partial premium receipt accepted',pay(fin,c,'Leg 1',value=1).status_code==200)
+     transaction.set_rollback(True)
+    c.refresh_from_db()
     check('full T1 receipt is accepted before Production',pay(fin,c,'Leg 1').status_code==200)
     c.refresh_from_db();first=tx_rows(c,'Leg 1')[0];d=transaction_details(c.payload)[first['txNo']]
     check('full T1 cash atomically settles and locks T1',first['settlement']=='settled' and d['settlement']=='settled' and not d['canCancelSettlement'] and d['amountEditLocked'])
@@ -129,7 +140,7 @@ with transaction.atomic():
     ris=copy.deepcopy(c.payload['reinsurers']);ris[0]['premium']=820
     check('settled T2 amount cannot change',update(sales,c,{'reinsurers':ris}).status_code==409)
     ris=copy.deepcopy(c.payload['reinsurers']);ris[1]['premium']=820
-    check('first settled T3 locks peer T2 amount',update(sales,c,{'reinsurers':ris}).status_code==409)
+    check('settled first RI does not lock untreated peer T2',update(sales,c,{'reinsurers':ris}).status_code==200)
     check('last T2 full payment accepted',pay(fin,c,'Leg 2',1).status_code==200)
     check('T3 auto settles after T1 and everyT2',tx_rows(c,'Leg 3')[0]['settlement']=='settled')
     check('T3 settlement creates no bank record',len(c.payload['paymentEntries'])==4 and not any('T3' in e.get('transactionNo','') for e in c.payload['paymentEntries']))
@@ -160,21 +171,26 @@ with transaction.atomic():
     check('Other Staff gets60% of both premium and income',sum(r['premium'] for r in rows_ if r['ae']==other.name)==400 and sum(r['income'] for r in rows_ if r['ae']==other.name)==60,rows_)
     check('no Split report credits Account Executive',all(r['ae']==staff.name for r in preview(c)['rows']))
     # Partial Production: only unconfirmed RI can change, without changing confirmed rows.
-    partial=posted(sales,ownerPersonnelId=owner.pk,ae=staff.name)
-    original=preview(partial)['rows'];month=original[0]['month'];ri1=[r for r in original if r['reinsurer']=='Property RI A']
+    # Independent lifecycle scenario: its review group must not include the already-paid c fixture.
+    partial_ris=[{**r,'name':r['name']+' Partial scenario'} for r in p_ready()['reinsurers']]
+    partial=posted(sales,ownerPersonnelId=owner.pk,ae=staff.name,reinsured='Partial scenario Cedant',reinsurers=partial_ris)
+    original=preview(partial)['rows'];month=original[0]['month'];ri1=[r for r in original if r['reinsurer']==partial_ris[0]['name']]
     state=confirm_case(case_source(partial),ri1,posting_month=month)
     partial.payload=state['payload'];partial.status=state['nextStatus'];partial.save()
     check('partial RI confirmation leaves Case posted',partial.status=='posted' and len(partial.payload['confirmedProductionKeys'])==1)
     ris=copy.deepcopy(partial.payload['reinsurers']);ris[1]['premium']=810
     r=update(sales,partial,{'reinsurers':ris})
     check('unconfirmed RI edit allowed with unchanged confirmed RI report',r.status_code==200,r.content[:600])
-    check('Case Premium cannot change recognized RI report',update(sales,partial,{'originalPremium':2000}).status_code==409)
+    with transaction.atomic():
+        check('unclosed recognized fixture can correct Case Premium with history',update(sales,partial,{'originalPremium':2000}).status_code==200)
+        transaction.set_rollback(True)
+    partial.refresh_from_db()
     check('AE locked after any RI Production confirmation',update(sales,partial,{'ae':owner.name}).status_code==409)
     check('Split locked after any RI Production confirmation',update(sales,partial,{'splitEnabled':True,'splitParties':split}).status_code==409)
     # Reverse only recognized RI performance, retain immutable original history.
     r=wf(sales,'reverse_case',partial);check('partial Production Case may Reverse while no Settlement',r.status_code==200,r.content[:600]);partial.refresh_from_db()
     negative=preview(partial)['rows']
-    check('Reverse report has only previously recognized RI',len(negative)==len(ri1) and all(r['reinsurer']=='Property RI A' and r['isProductionReversal'] for r in negative),negative)
+    check('Reverse report has only previously recognized RI',len(negative)==len(ri1) and all(r['reinsurer']==partial_ris[0]['name'] and r['isProductionReversal'] for r in negative),negative)
     check('Reverse uses exact negative original premium and income',sum(r['premium'] for r in negative)==-sum(r['premium'] for r in ri1) and sum(r['income'] for r in negative)==-sum(r['income'] for r in ri1))
     check('original positive Production snapshots retained',len(partial.payload['productionHistory'])==1 and all(abs(partial.payload['productionHistory'][0]['row'][k]-v)<1e-12 if isinstance(v,float) else partial.payload['productionHistory'][0]['row'][k]==v for k,v in ri1[0].items()))
     ref=partial.tw_ref
@@ -205,7 +221,8 @@ with transaction.atomic():
     facility={**p,VERSION_KEY:VERSION,'reinsurers':[{**p['reinsurers'][0],'name':'Test Re (Facility)'}]}
     check('Facility rules override the new ordinary accounting policy',not enabled(facility))
     # Exercise actual Generate / Close API and verify it does not generate a second ledger.
-    final=posted(sales,ownerPersonnelId=owner.pk,ae=staff.name)
+    final_ris=[{**r,'name':r['name']+' Final scenario'} for r in p_ready()['reinsurers']]
+    final=posted(sales,ownerPersonnelId=owner.pk,ae=staff.name,reinsured='Final scenario Cedant',reinsurers=final_ris)
     Case.objects.exclude(pk=final.pk).update(is_archived=True,archived_at=timezone.now(),archived_by='test')
     source=call(fin,'get','/api/production-report?month='+month)
     check('Production preview API succeeds',source.status_code==200,source.content[:500])
@@ -219,7 +236,7 @@ with transaction.atomic():
         check('Production Close confirms Case',closed.status_code==200 and final.status=='closed',closed.content[:700])
         check('Production Close does not duplicate Announce ledger',[(t['txNo'],t['amount']) for t in final.payload['transactions']]==[(t['txNo'],t['amount']) for t in before])
         check('confirmed Case description edits remain available',update(sales,final,{'constructionSelections':['A2 Class','C Class']}).status_code==200)
-        check('confirmed Case financial edits cannot change recognized amounts',update(sales,final,{'originalPremium':2000}).status_code==409)
+        check('closed Case financial correction preserves report and creates adjustment',update(sales,final,{'originalPremium':2000}).status_code==200 and bool(final.payload.get('financeCorrectionHistory')) and bool(final.payload.get('productionReversals')))
  finally:
     transaction.set_rollback(True)
 for label,ok,detail in results:

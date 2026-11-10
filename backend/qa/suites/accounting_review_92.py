@@ -1,3 +1,4 @@
+from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Integration regression of the owner's 92 accounting decisions; disposable DB only."""
 import copy,json,os
 from datetime import datetime,timedelta,timezone as dtz
@@ -30,14 +31,19 @@ def make(prefix='P',**changes):
  if parent:p.update(parentTwRef=parent.tw_ref,endoEffectiveDate=p.get('endoEffectiveDate','2026-01-01'),endorsementAnnouncedAt=announced.isoformat())
  p['transactions']=build_premium_transactions(p)
  for t in p['transactions']:t.update(postedMonth='2026-01',createdAt='2026-01-01T00:00:00Z')
- return Case.objects.create(tw_ref=ref,status=status,payload=p,currency=p['currency'],parent_case=parent,case_kind='endorsement' if parent else 'original',announced_at=announced,created_by='qa',updated_by='qa')
+ case = Case.objects.create(tw_ref=ref,status=status,payload=p,currency=p['currency'],parent_case=parent,case_kind='endorsement' if parent else 'original',announced_at=announced,created_by='qa',updated_by='qa')
+ review_case(case,globals().get('fin'))
+ return case
 def details(case):case.refresh_from_db();return transaction_details(case.payload)
 def tx(case,leg,index=0):case.refresh_from_db();return [t['txNo'] for t in case.payload['transactions'] if t['legType']==leg][index]
-def request(c,action,**body):return c.post('/api/accounting',data=json.dumps({'action':action,**body}),content_type='application/json')
+def request(c,action,**body):
+ if action=='reverse_batch_payment':body.setdefault('paymentDate','2026-11-03')
+ if action=='record_transaction_payments':return reviewed_cash(c,{'action':action,**body})
+ return c.post('/api/accounting',data=json.dumps({'action':action,**body}),content_type='application/json')
 def pay(c,case,leg,value,index=0,date='2026-10-01'):
- no=tx(case,leg,index);return request(c,'record_transaction_payments',note='QA synthetic registration', paymentDate=date,amount=value,allocations=[{'caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no,'amount':value}])
+ review_case(case,globals().get('fin'));no=tx(case,leg,index);return request(c,'record_transaction_payments',note='QA synthetic registration', paymentDate=date,amount=value,allocations=[{'caseUid':str(case.case_uid),'rowVersion':case.row_version,'txNo':no,'amount':value}])
 def settle(c,case,leg,index=0,undo=False,**extra):
- no=tx(case,leg,index);return request(c,'unconfirm_facility_settlement' if undo else 'confirm_facility_settlement',caseUid=str(case.case_uid),rowVersion=case.row_version,txNo=no,note='AR92 checked',**extra)
+ review_case(case,globals().get('fin'));no=tx(case,leg,index);return request(c,'unconfirm_facility_settlement' if undo else 'confirm_facility_settlement',caseUid=str(case.case_uid),rowVersion=case.row_version,txNo=no,note='AR92 checked',**extra)
 def offset(c,root,refund,party='cedant'):
  from cases.calc.payment_terms import build_payment_schedule
  from cases.calc.swiss_facility import case_payload
@@ -50,19 +56,22 @@ try:
  with transaction.atomic():
   fin,fp=client('finance','accounting','finance');mgr,mp=client('manager','accounting_manager','finance');sales,sp=client('sales','sales','reinsurance');admin,ap=client('admin','admin','admin')
   a=make()
-  check('premium partial receipt rejected',pay(fin,a,'Leg 1',200).status_code==400)
+  with transaction.atomic():
+   check('premium partial receipt accepted',pay(fin,a,'Leg 1',200).status_code==200)
+   transaction.set_rollback(True)
+  a.refresh_from_db()
   check('full premium receipt accepted',pay(fin,a,'Leg 1',1000).status_code==200)
   check('full received premium automatically settles',details(a)[tx(a,'Leg 1')]['settlement']=='settled')
   check('full T1 settlement is derived from actual cash',(details(a)[tx(a, 'Leg 1')]['settlement']=='settled'))
   a.refresh_from_db();entry=a.payload['paymentEntries'][0]
-  check('settled amount editing rejected',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=900,reason='test').status_code==409)
-  check('retired undo cannot reopen T1 before T3',(settle(fin, a, 'Leg 1', undo=True).status_code==400))
-  a.refresh_from_db();check('ever-settled amount stays locked after rejected cancellation',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=1000,reason='test').status_code==409)
+  check('settled amount editing rejected',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=900,reason='test').status_code==410)
+  check('retired undo cannot reopen T1 before T3',(settle(fin, a, 'Leg 1', undo=True).status_code==410))
+  a.refresh_from_db();check('ever-settled amount stays locked after rejected cancellation',request(fin,'edit_payment',caseUid=str(a.case_uid),rowVersion=a.row_version,entryId=entry['id'],amount=1000,reason='test').status_code==410)
   check('T1 remains automatically settled after rejected undo',(details(a)[tx(a, 'Leg 1')]['settlement']=='settled'))
   check('full T2 payment accepted',pay(fin,a,'Leg 2',800).status_code==200)
-  check('retired manual T3 confirmation is rejected',settle(fin,a,'Leg 3').status_code==400)
+  check('retired manual T3 confirmation is rejected',settle(fin,a,'Leg 3').status_code==410)
   check('full T2 cash automatically settles T2 and T3',(details(a)[tx(a, 'Leg 2')]['settlement']=='settled') and (details(a)[tx(a, 'Leg 3')]['settlement']=='settled'))
-  check('final T3 locks all three cancellation paths',all((settle(fin, a, l, undo=True).status_code==400) for l in ['Leg 1','Leg 2','Leg 3']))
+  check('final T3 locks all three cancellation paths',all((settle(fin, a, l, undo=True).status_code==410) for l in ['Leg 1','Leg 2','Leg 3']))
   from cases.workflow import build_reversed_payload
   try:build_reversed_payload(a.payload);blocked=False
   except ValueError:blocked=True
@@ -80,14 +89,19 @@ try:
   check('claim due is creation Taiwan date +15, ignoring backdated obligation date',all(t['dueDate']==expected for t in claims))
   check('unprocessed claim amount can be corrected',claimwrite('correct_payment',claimId=1,paymentId=1,reason='Correct total',payment={'date':'2026-01-01','amount':900}).status_code==200)
   claimroot.refresh_from_db();check('claim correction keeps before/after history',len(claimroot.payload['claimCorrectionHistory'])==1 and claimroot.payload['claimCorrectionHistory'][0]['before']['amount']==1000)
-  check('claim outgoing cannot precede receipts',pay(fin,claimroot,'Claim Leg 2',1).status_code==400)
+  check('claim outgoing cannot precede receipts',pay(fin,claimroot,'Claim Leg 2',1).status_code==409)
   check('partial claim receipt accepted',pay(fin,claimroot,'Claim Leg 1',100).status_code==200)
-  check('outgoing above received cap rejected',pay(fin,claimroot,'Claim Leg 2',101).status_code==400)
+  check('outgoing above received cap rejected',pay(fin,claimroot,'Claim Leg 2',101).status_code==409)
   check('partial outgoing within recorded receipts accepted',pay(fin,claimroot,'Claim Leg 2',40).status_code==200)
   claimroot.refresh_from_db();incoming=next(e for e in claimroot.payload['paymentEntries'] if e.get('transactionNo')==tx(claimroot,'Claim Leg 1'))
-  check('receipt edit cannot lower total below already reported outgoing',request(fin,'edit_payment',caseUid=str(claimroot.case_uid),rowVersion=claimroot.row_version,entryId=incoming['id'],amount=30,reason='Correction').status_code==409)
-  claimroot.refresh_from_db();check('unsettled receipt amount can be edited with reason',request(fin,'edit_payment',caseUid=str(claimroot.case_uid),rowVersion=claimroot.row_version,entryId=incoming['id'],amount=80,reason='Correction').status_code==200)
-  claimroot.refresh_from_db();check('receipt edit history records before/after',claimroot.payload['paymentEditHistory'][-1]['before']['amount']==100 and claimroot.payload['paymentEditHistory'][-1]['after']['amount']==80)
+  check('receipt edit cannot lower total below already reported outgoing',request(fin,'edit_payment',caseUid=str(claimroot.case_uid),rowVersion=claimroot.row_version,entryId=incoming['id'],amount=30,reason='Correction').status_code==410)
+  claimroot.refresh_from_db();check('unsettled direct amount edit is retired',request(fin,'edit_payment',caseUid=str(claimroot.case_uid),rowVersion=claimroot.row_version,entryId=incoming['id'],amount=80,reason='Correction').status_code==410)
+  outgoing=next(e for e in claimroot.payload['paymentEntries'] if e.get('transactionNo')==tx(claimroot,'Claim Leg 2'))
+  claimroot.refresh_from_db();check('receipt cannot reverse while its outgoing depends on it',request(fin,'reverse_batch_payment',batchId=incoming['batchId'],note='Correction',cases=[{'caseUid':str(claimroot.case_uid),'rowVersion':claimroot.row_version}]).status_code==409)
+  claimroot.refresh_from_db();check('outgoing reverses before correcting its source',request(fin,'reverse_batch_payment',batchId=outgoing['batchId'],note='Correction',cases=[{'caseUid':str(claimroot.case_uid),'rowVersion':claimroot.row_version}]).status_code==200)
+  claimroot.refresh_from_db();check('receipt can now reverse in full',request(fin,'reverse_batch_payment',batchId=incoming['batchId'],note='Correction',cases=[{'caseUid':str(claimroot.case_uid),'rowVersion':claimroot.row_version}]).status_code==200)
+  no=tx(claimroot,'Claim Leg 1');check('replacement receipt records original relationship',request(fin,'record_transaction_payments',paymentDate='2026-11-03',note='Correction',replacementOfBatchId=incoming['batchId'],amount=80,allocations=[{'caseUid':str(claimroot.case_uid),'rowVersion':claimroot.row_version,'txNo':no,'amount':80}]).status_code==200)
+  check('corrected source supports new outgoing',pay(fin,claimroot,'Claim Leg 2',40).status_code==200)
   check('claim source amount is locked once any claim receipt exists',claimwrite('correct_payment',claimId=1,paymentId=1,reason='test',payment={'date':'2026-01-01','amount':800}).status_code==409)
   untouched=make('REVERSE');untouched.payload['transactions']+=copy.deepcopy(claims);untouched.save()
   reversed_payload=build_reversed_payload(untouched.payload)
@@ -100,10 +114,10 @@ try:
   check('Finance cannot edit case contract terms',request(fin,'complete_payment_terms',**key).status_code==403)
   check('case staff can complete missing terms without Reverse',request(sales,'complete_payment_terms',**key).status_code==200)
   pending.refresh_from_db();key['rowVersion']=pending.row_version
-  check('unhandled contract days remain editable with an explicit reason',request(sales,'complete_payment_terms',**key).status_code==200)
+  check('existing valid days cannot be changed through missing-data editor',request(sales,'complete_payment_terms',**key).status_code==409)
   root=make('OFFSET');refund=make('REFUND',parent=root,originalPremium=-200,reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
   assert pay(fin,refund,'Leg 2',160).status_code==200 and (details(refund)[tx(refund, 'Leg 2')]['settlement']=='settled')
-  check('ordinary offsets remain rejected after all RI refunds settle',offset(fin,root,refund).status_code==400)
+  check('ordinary offsets remain rejected after all RI refunds settle',offset(fin,root,refund).status_code==410)
   check('rejected offset leaves all balances and cash records unchanged',details(root)[tx(root,'Leg 1')]['cashPaid']==0 and details(root)[tx(root,'Leg 1')]['outstanding']==1000 and details(refund)[tx(refund,'Leg 1')]['outstanding']==-200)
   try:build_reversed_payload(root.payload);blocked=False
   except ValueError:blocked=True
@@ -111,15 +125,15 @@ try:
   sname='Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)'
   swiss=make('SWISS',reinsurers=[{'name':sname,'sharePct':100,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':90}])
   swissrefund=make('SWISSREF',parent=swiss,endoEffectiveDate='2026-09-01',announced=datetime(2026,9,1,tzinfo=dtz.utc),originalPremium=-200,reinsurers=[{'name':sname,'sharePct':100,'premium':-160,'riCommPct':0,'taxPct':0,'paymentTermsDays':90}])
-  check('Swiss cannot offset before collection prerequisites',offset(fin,swiss,swissrefund,'reinsurer').status_code==400 and offset(fin,swiss,swissrefund,'cedant').status_code==400)
+  check('Swiss cannot offset before collection prerequisites',offset(fin,swiss,swissrefund,'reinsurer').status_code==410 and offset(fin,swiss,swissrefund,'cedant').status_code==410)
   check('Swiss payment waits for full Cedant cash settlement',pay(fin,swiss,'Leg 2',800).status_code==409)
   check('Swiss full Cedant receipt and settlement accepted',pay(fin,swiss,'Leg 1',1000).status_code==200 and (details(swiss)[tx(swiss, 'Leg 1')]['settlement']=='settled'))
   check('Swiss still requires statement reference',pay(fin,swiss,'Leg 2',800).status_code==409)
   swiss.refresh_from_db();key={'caseUid':str(swiss.case_uid),'rowVersion':swiss.row_version,'scheduleKey':'case-effective-date:reinsurer:r1'}
   check('Swiss statement ref can be entered after collection',request(fin,'mark_swiss_statement',**key,reference='SWISS-AR92').status_code==200)
   check('Swiss payment accepted after collection and reference',pay(fin,swiss,'Leg 2',800).status_code==200)
-  swiss.refresh_from_db();check('bank fees/shortfall endpoint removed',request(fin,'record_swiss_clearance',caseUid=str(swiss.case_uid),rowVersion=swiss.row_version,scheduleKey='case-effective-date:cedant',amount=1,clearingType='bank_fee',note='x').status_code==400)
-  check('separate Swiss collected checkbox removed',request(fin,'confirm_swiss_collection',caseUid=str(swiss.case_uid),rowVersion=swiss.row_version,scheduleKey='case-effective-date:cedant').status_code==400)
+  swiss.refresh_from_db();check('bank fees/shortfall endpoint removed',request(fin,'record_swiss_clearance',caseUid=str(swiss.case_uid),rowVersion=swiss.row_version,scheduleKey='case-effective-date:cedant',amount=1,clearingType='bank_fee',note='x').status_code==410)
+  check('separate Swiss collected checkbox removed',request(fin,'confirm_swiss_collection',caseUid=str(swiss.case_uid),rowVersion=swiss.row_version,scheduleKey='case-effective-date:cedant').status_code==410)
   # Close a month containing only a zero-income obligation: no Production rows.
   zero=make('ZERO',status='posted',policyFrom='2031-05-01',policyTo='2032-05-01',announced=datetime(2031,5,1,tzinfo=dtz.utc),reinsurers=[{'name':'AR92 RI','sharePct':100,'premium':1000,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
   zero_ids=[(t['txNo'],t['amount']) for t in zero.payload['transactions']]
@@ -163,10 +177,11 @@ try:
   from cases.calc.accounting import build_claim_payment_transactions
   legacy=make('LEGACY',reinsurers=[{'name':'Old A','sharePct':60,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':30},{'name':'Old B','sharePct':40,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
   later=make('LEGACYENDO',parent=legacy,endoEffectiveDate='2026-07-01',announced=datetime(2026,7,1,tzinfo=dtz.utc),reinsurers=[{'name':'Old A','sharePct':50,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':30},{'name':'Old B','sharePct':50,'premium':800,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}])
+  legacy_snapshot_version=legacy.row_version+1
   before=copy.deepcopy(legacy.payload);claim={'id':1,'dateOfLoss':'2026-03-01','payments':[]};before['claims']=[copy.deepcopy(claim)]
-  payment={'id':1,'date':'2026-02-01','amount':1000};claim['payments']=[payment];legacy.payload['claims']=[claim];legacy.payload['transactions'].extend(build_claim_payment_transactions(legacy.payload,later.payload,claim,payment));legacy.row_version=2;legacy.save()
-  EntitySnapshot.objects.create(entity_type='case',entity_id=str(legacy.case_uid),entity_version=1,snapshot_reason='claim_created',snapshot_data={'payload':before},created_by='qa',created_at=datetime(2026,4,1,tzinfo=dtz.utc))
-  EntitySnapshot.objects.create(entity_type='case',entity_id=str(legacy.case_uid),entity_version=2,snapshot_reason='claim_payment_recorded',snapshot_data={'payload':copy.deepcopy(legacy.payload)},created_by='qa',created_at=datetime(2026,4,2,tzinfo=dtz.utc))
+  payment={'id':1,'date':'2026-02-01','amount':1000};claim['payments']=[payment];legacy.payload['claims']=[claim];legacy.payload['transactions'].extend(build_claim_payment_transactions(legacy.payload,later.payload,claim,payment));legacy.row_version=legacy_snapshot_version+1;legacy.save()
+  EntitySnapshot.objects.create(entity_type='case',entity_id=str(legacy.case_uid),entity_version=legacy_snapshot_version,snapshot_reason='claim_created',snapshot_data={'payload':before},created_by='qa',created_at=datetime(2026,4,1,tzinfo=dtz.utc))
+  EntitySnapshot.objects.create(entity_type='case',entity_id=str(legacy.case_uid),entity_version=legacy_snapshot_version+1,snapshot_reason='claim_payment_recorded',snapshot_data={'payload':copy.deepcopy(legacy.payload)},created_by='qa',created_at=datetime(2026,4,2,tzinfo=dtz.utc))
   oldzero=make('OLDZERO',status='posted',policyFrom='2031-05-01',policyTo='2032-05-01',announced=datetime(2031,5,1,tzinfo=dtz.utc),reinsurers=[{'name':'AR92 Legacy Other (Facility)','sharePct':100,'premium':1000,'riCommPct':0,'taxPct':0,'paymentTermsDays':30}]);oldzero.payload['transactions']=[];oldzero.save()
   def preview_repair(**kw):
    out=StringIO();call_command('apply_accounting_review',stdout=out,**kw);return json.loads(out.getvalue())
