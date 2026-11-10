@@ -13,6 +13,7 @@ DEPARTMENT_CHOICES = [
 ]
 
 ROLE_CODE_CHOICES = [
+    ("legacy_supervisor", "Read-only Supervisor"),
     ("president", "President"),
     ("sales", "Sales"),
     ("accounting", "Accounting"),

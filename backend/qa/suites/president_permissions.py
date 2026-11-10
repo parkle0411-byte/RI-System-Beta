@@ -90,6 +90,7 @@ try:
         president = client(president_person)
         perms = set(serialize_principal(president_person)['permissions'])
         check('President has only the agreed business read permissions', perms == {
+            'legacy.read',
             'dashboard.read', 'dashboard.read.all', 'cases.read.all',
             'mdm.read', 'production.read', 'fx.read', 'accounting.read', 'personnel.read',
         })

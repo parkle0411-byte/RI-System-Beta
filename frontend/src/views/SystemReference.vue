@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, apiFetch } from '../api'
 import { can } from '../auth'
+import ReferenceSortTable from '../components/ReferenceSortTable.vue'
 
 const files = ref([])
 const manuals = ref([])
@@ -13,17 +14,38 @@ const loading = ref(false)
 const saving = ref(false)
 const selectedFile = ref(null)
 const fileList = ref([])
+const ordering = ref(false)
+const orderVersions = ref({})
 const endpoint = '/api/system-reference'
 async function load() {
   loading.value = true
   try {
     const data = await api(endpoint)
+    orderVersions.value = data.orderVersions
     files.value = data.files
     manuals.value = data.manuals
     trash.value = data.trash || []
     unreadable.value = Number(data.unreadable) || 0
   } catch (error) { ElMessage.error(error.message) }
   finally { loading.value = false }
+}
+async function reorder(category, next) {
+  if (ordering.value || managing.value || saving.value || loading.value) return
+  const rows = category === 'manuals' ? manuals : files
+  const previous = rows.value
+  ordering.value = true
+  rows.value = next
+  try {
+    const data = await api(endpoint, { method: 'PATCH', body: {
+      action: 'reorder', category, ids: next.map(row => row.id), orderVersion: orderVersions.value[category],
+    } })
+    orderVersions.value[category] = data.orderVersion
+    ElMessage.success('Order saved for all users.')
+  } catch (error) {
+    rows.value = previous
+    ElMessage.error(error.message || 'Could not save the order.')
+    await load()
+  } finally { ordering.value = false }
 }
 function choose(file) { selectedFile.value = file.raw; fileList.value = [file] }
 function clear() { selectedFile.value = null; fileList.value = [] }
@@ -103,32 +125,33 @@ onMounted(load)
 <template>
   <div v-loading="loading" class="reference-page">
     <el-alert v-if="unreadable" type="warning" :closable="false" show-icon :title="`${unreadable} document template record(s) could not be read and are not listed.`" />
+    <p class="reference-sort-help" role="status">{{ ordering ? 'Saving order…' : 'Drag the handles to reorder each list. You can also focus a handle and use the Up or Down arrow key. The saved order is shared by all users.' }}</p>
     <section class="reference-card">
       <h2>System Guides</h2>
       <p>Download system guides for master data management, database structure and Facility accounting.</p>
-      <el-table :data="manuals" empty-text="The system guides are in the Recycle Bin. Restore them below.">
+      <ReferenceSortTable :rows="manuals" :disabled="loading || ordering || managing || saving" @reorder="rows => reorder('manuals', rows)" empty-text="The system guides are in the Recycle Bin. Restore them below.">
         <el-table-column prop="filename" label="Filename" min-width="260" />
         <el-table-column prop="release_date" label="Release date" width="160" />
-        <el-table-column label="Actions" width="320"><template #default="{ row }"><div class="reference-actions"><el-button :disabled="managing" @click="download(row, true)">Download</el-button><el-button :disabled="managing" @click="rename(row)">Rename</el-button><el-button type="danger" plain :disabled="managing" @click="remove(row)">Delete</el-button></div></template></el-table-column>
-      </el-table>
+        <el-table-column label="Actions" width="320"><template #default="{ row }"><div class="reference-actions"><el-button :disabled="managing || ordering" @click="download(row, true)">Download</el-button><el-button :disabled="managing || ordering" @click="rename(row)">Rename</el-button><el-button type="danger" plain :disabled="managing || ordering" @click="remove(row)">Delete</el-button></div></template></el-table-column>
+      </ReferenceSortTable>
     </section>
     <section class="reference-card">
       <h2>Document Templates</h2>
       <p>Upload, download and manage document templates. Uploading a file with the same name keeps each version. Deleted files can be restored from the Recycle Bin.</p>
       <div v-if="can('accounts.manage')" class="reference-upload">
-        <el-upload action="#" :auto-upload="false" :limit="1" accept=".docx,.dotx,.xlsx,.xltx,.pptx,.pdf" :file-list="fileList" :on-change="choose" :on-remove="clear" :disabled="saving">
-          <el-button :disabled="saving">Select template</el-button>
+        <el-upload action="#" :auto-upload="false" :limit="1" accept=".docx,.dotx,.xlsx,.xltx,.pptx,.pdf" :file-list="fileList" :on-change="choose" :on-remove="clear" :disabled="saving || ordering">
+          <el-button :disabled="saving || ordering">Select template</el-button>
           <template #tip><div class="el-upload__tip">DOCX, DOTX, XLSX, XLTX, PPTX or PDF. Maximum file size: 10 MB.</div></template>
         </el-upload>
-        <el-button class="primary-button" :loading="saving" :disabled="!selectedFile" @click="upload">Upload template</el-button>
+        <el-button class="primary-button" :loading="saving" :disabled="!selectedFile || ordering" @click="upload">Upload template</el-button>
       </div>
-      <el-table :data="files" empty-text="No document templates uploaded yet." row-key="id">
+      <ReferenceSortTable :rows="files" :disabled="loading || ordering || managing || saving" @reorder="rows => reorder('files', rows)" empty-text="No document templates uploaded yet." row-key="id">
         <el-table-column prop="filename" label="Filename" min-width="240" />
         <el-table-column label="Size" width="120"><template #default="{ row }">{{ (row.byte_size / 1024).toFixed(1) }} KB</template></el-table-column>
         <el-table-column prop="uploaded_by" label="Uploaded by" min-width="130" />
         <el-table-column label="Uploaded at (Taipei)" min-width="220"><template #default="{ row }">{{ date(row.uploaded_at) }}</template></el-table-column>
-        <el-table-column label="Actions" width="320"><template #default="{ row }"><div class="reference-actions"><el-button :disabled="managing" @click="download(row)">Download</el-button><el-button :disabled="managing" @click="rename(row)">Rename</el-button><el-button type="danger" plain :disabled="managing" @click="remove(row)">Delete</el-button></div></template></el-table-column>
-      </el-table>
+        <el-table-column label="Actions" width="320"><template #default="{ row }"><div class="reference-actions"><el-button :disabled="managing || ordering" @click="download(row)">Download</el-button><el-button :disabled="managing || ordering" @click="rename(row)">Rename</el-button><el-button type="danger" plain :disabled="managing || ordering" @click="remove(row)">Delete</el-button></div></template></el-table-column>
+      </ReferenceSortTable>
     </section>
     <section class="reference-card">
       <h2>Recycle Bin ({{ trash.length }})</h2>
@@ -138,15 +161,16 @@ onMounted(load)
         <el-table-column label="Category" width="130"><template #default="{ row }">{{ row.kind === 'manual' ? 'System Guides' : 'Document Templates' }}</template></el-table-column>
         <el-table-column prop="deleted_by" label="Deleted by" min-width="130" />
         <el-table-column label="Deleted at (Taipei)" min-width="220"><template #default="{ row }">{{ date(row.deleted_at) }}</template></el-table-column>
-        <el-table-column label="Actions" width="100"><template #default="{ row }"><el-button :disabled="managing" @click="restore(row)">Restore</el-button></template></el-table-column>
+        <el-table-column label="Actions" width="100"><template #default="{ row }"><el-button :disabled="managing || ordering" @click="restore(row)">Restore</el-button></template></el-table-column>
       </el-table>
     </section>
   </div>
 </template>
 
 <style scoped>
-.reference-page { display: grid; gap: 24px; }
-.reference-card { background: var(--surface-card, #fff); border: 1px solid #e3e6eb; border-radius: 12px; padding: 24px; }
+.reference-sort-help { margin: 0; color: #606775; line-height: 1.6; }
+.reference-page { min-width: 0; display: grid; gap: 24px; }
+.reference-card { min-width: 0; background: var(--surface-card, #fff); border: 1px solid #e3e6eb; border-radius: 12px; padding: 24px; }
 .reference-card h2 { margin: 0 0 12px; font-size: 20px; }
 .reference-card p { color: #606775; line-height: 1.6; }
 .reference-upload { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 20px; margin: 24px 0; }

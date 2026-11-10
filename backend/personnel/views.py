@@ -32,7 +32,7 @@ DEPARTMENTS = {
     "business_1", "business_2", "special_risk", "reinsurance",
     "finance", "admin", "business_development", "board_of_directors",
 }
-ROLES = {"sales", "accounting", "accounting_manager", "general_manager", "admin", "viewer", "president"}
+ROLES = {"legacy_supervisor", "sales", "accounting", "accounting_manager", "general_manager", "admin", "viewer", "president"}
 DEFAULT_ROLES = {
     "board_of_directors": "president",
     "business_1": "viewer", "business_2": "viewer", "special_risk": "viewer",

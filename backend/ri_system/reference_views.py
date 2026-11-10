@@ -28,6 +28,7 @@ from .authz import NoStoreMixin, RIPermission, AuthError, object_body
 log = logging.getLogger(__name__)
 MAX_BYTES = 10 * 1024 * 1024
 MANUALS = {
+    'insured-list': 'Insured_List_2026-11-03.xlsx',
     'mdm': 'MDM_主檔管理說明.docx',
     'schema': 'Schema_資料庫結構說明.docx',
     'swiss-pd': 'Swiss_Re_Facility_PD_Exclusive_Rules_2026-10-29.docx',
@@ -62,6 +63,7 @@ def validated_type(filename, data):
 
 
 MANUAL_DOWNLOAD_NAMES = {
+    'insured-list': 'Insured 清單_2026-11-03.xlsx',
     'mdm': 'MDM_Master_Data_Management.docx',
     'schema': 'Schema_Database_Structure.docx',
     'swiss-pd': 'Swiss Re Facility - PD 專屬規則_2026-10-29.docx',
@@ -73,7 +75,7 @@ MANUAL_DOWNLOAD_NAMES = {
 }
 
 
-MANUAL_RELEASE_DATES = {'mdm': '2026-11-02', 'schema': '2026-11-02', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
+MANUAL_RELEASE_DATES = {'insured-list': '2026-11-03', 'mdm': '2026-11-02', 'schema': '2026-11-02', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
 
 def manual_row(key):
     return {'id': key, 'filename': MANUAL_DOWNLOAD_NAMES[key], 'release_date': MANUAL_RELEASE_DATES[key], 'kind': 'manual'}
@@ -119,6 +121,70 @@ def write_row(key, row):
     storage.put(f'system-reference/{key}.json', json.dumps(row, ensure_ascii=False).encode('utf-8'))
 
 
+def reference_rows():
+    directory = storage.path_for('system-reference')
+    rows, unreadable = [], 0
+    if directory.exists():
+        for path in directory.glob('*.json'):
+            if not path.name.startswith('manual-'):
+                # 2026-10-14：單一損壞的中繼資料只略過該檔，不讓整個清單失敗
+                try:
+                    row = json.loads(path.read_text(encoding='utf-8'))
+                    if not isinstance(row, dict) or not row.get('id') or not row.get('uploaded_at') or not row.get('filename'):
+                        raise ValueError('incomplete metadata')
+                except (ValueError, OSError, UnicodeDecodeError):
+                    log.warning('System Reference metadata %s is unreadable; skipped', path.name)
+                    unreadable += 1
+                    continue
+                rows.append({**row, 'kind': 'template'})
+    rows.sort(key=lambda row: (str(row['uploaded_at']), str(row['id'])), reverse=True)
+    manuals = [read_row('manual-' + key, key) for key in MANUALS]
+    trash = [row for row in rows + manuals if row.get('deleted_at')]
+    trash.sort(key=lambda row: str(row['deleted_at']), reverse=True)
+    return rows, manuals, trash, unreadable
+
+
+def read_order(category):
+    try:
+        with storage.open_read(f'system-reference/.orders/{category}.json') as handle:
+            ids = json.load(handle)
+        if not isinstance(ids, list) or any(not isinstance(key, str) for key in ids) or len(ids) != len(set(ids)):
+            raise ValueError('invalid order')
+        return ids
+    except FileNotFoundError:
+        return []
+    except (ValueError, OSError, UnicodeDecodeError):
+        raise AuthError(503, 'reference_order_unreadable', 'The saved order could not be read. Contact the System Administrator.')
+
+
+def ordered_rows(category, rows):
+    ranks = {key: index for index, key in enumerate(read_order(category))}
+    return sorted(rows, key=lambda row: ranks.get(row['id'], len(ranks)))
+
+
+def order_version(rows):
+    return hashlib.sha256(json.dumps([row['id'] for row in rows]).encode()).hexdigest()
+
+
+def reorder(body):
+    category = body.get('category')
+    ids = body.get('ids')
+    if category not in ('files', 'manuals') or not isinstance(ids, list) or any(not isinstance(key, str) for key in ids) or len(ids) != len(set(ids)):
+        raise AuthError(400, 'invalid_reference_order', 'Choose a category and provide each file ID exactly once.')
+    with locked('order-' + category):
+        files, manuals, _, _ = reference_rows()
+        rows = ordered_rows(category, [row for row in (manuals if category == 'manuals' else files) if not row.get('deleted_at')])
+        if body.get('orderVersion') != order_version(rows) or set(ids) != {row['id'] for row in rows}:
+            raise AuthError(409, 'reference_order_conflict', 'The list changed. Reload and try ordering it again.')
+        # Keep deleted entries in their existing slots so Restore retains their position.
+        old = read_order(category)
+        remaining = iter(ids)
+        merged = [next(remaining) if key in ids else key for key in old]
+        merged.extend(remaining)
+        storage.put(f'system-reference/.orders/{category}.json', json.dumps(merged).encode())
+    return Response({'orderVersion': order_version([{'id': key} for key in ids])})
+
+
 class SystemReferenceView(NoStoreMixin, APIView):
     permission_classes = [RIPermission]
     permission_map = {method: 'accounts.manage' for method in ('GET', 'POST', 'PATCH', 'DELETE')}
@@ -135,35 +201,21 @@ class SystemReferenceView(NoStoreMixin, APIView):
                           if manual else storage.open_read(f'system-reference/{key}.bin'))
             except FileNotFoundError:
                 raise AuthError(404, 'reference_content_missing', 'File content is missing. Contact the System Administrator.')
-            response = FileResponse(handle, content_type=OFFICE['docx'][1] if manual else row['content_type'])
+            response = FileResponse(handle, content_type=OFFICE[Path(MANUALS[manual]).suffix.lstrip('.')][1] if manual else row['content_type'])
             response['Content-Disposition'] = content_disposition(row['filename'])
             return response
-        directory = storage.path_for('system-reference')
-        rows, unreadable = [], 0
-        if directory.exists():
-            for path in directory.glob('*.json'):
-                if not path.name.startswith('manual-'):
-                    # 2026-10-14：單一損壞的中繼資料只略過該檔，不讓整個清單失敗
-                    try:
-                        row = json.loads(path.read_text(encoding='utf-8'))
-                        if not isinstance(row, dict) or not row.get('id') or not row.get('uploaded_at') or not row.get('filename'):
-                            raise ValueError('incomplete metadata')
-                    except (ValueError, OSError, UnicodeDecodeError):
-                        log.warning('System Reference metadata %s is unreadable; skipped', path.name)
-                        unreadable += 1
-                        continue
-                    rows.append({**row, 'kind': 'template'})
-        rows.sort(key=lambda row: (str(row['uploaded_at']), str(row['id'])), reverse=True)
-        manuals = [read_row('manual-' + key, key) for key in MANUALS]
-        trash = [row for row in rows + manuals if row.get('deleted_at')]
-        trash.sort(key=lambda row: str(row['deleted_at']), reverse=True)
-        return Response({'unreadable': unreadable, 'files': [row for row in rows if not row.get('deleted_at')],
-                         'manuals': [row for row in manuals if not row.get('deleted_at')], 'trash': trash})
+        rows, manuals, trash, unreadable = reference_rows()
+        files = ordered_rows('files', [row for row in rows if not row.get('deleted_at')])
+        manuals = ordered_rows('manuals', [row for row in manuals if not row.get('deleted_at')])
+        return Response({'unreadable': unreadable, 'files': files, 'manuals': manuals, 'trash': trash,
+                         'orderVersions': {'files': order_version(files), 'manuals': order_version(manuals)}})
 
     def patch(self, request):
         body = object_body(request)
-        key, manual = target(body)
         action = body.get('action')
+        if action == 'reorder':
+            return reorder(body)
+        key, manual = target(body)
         if action not in ('rename', 'restore'):
             raise AuthError(400, 'invalid_action', 'Choose Rename or Restore.')
         with locked(key):

@@ -16,6 +16,7 @@ from personnel.models import Personnel
 from personnel.supervision import is_supervisor, supervisor_permissions
 
 ROLE_LABELS = {
+    "legacy_supervisor": "Read-only Supervisor",
     "admin": "System Administrator",
     "sales": "Reinsurance Staff",
     "accounting": "Finance Staff",
@@ -33,6 +34,7 @@ ROLE_LABELS = {
 # dashboard.read.all 是 VM 才有的權限：Dashboard 顯示全部案件（沒有它就只看自己負責或列在分績裡的案件）。
 # 修改此表時，同步更新 VM-RULES.md 與 qa/suites/auth_permissions.py 的權限矩陣測試。
 ROLE_PERMISSIONS = {
+    "legacy_supervisor": ["legacy.read","dashboard.read","dashboard.read.all","cases.read.all","mdm.read","production.read","fx.read","accounting.read"],
     "admin": [
         "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",
         "documents.read", "documents.write", "mdm.read", "mdm.write",
@@ -68,6 +70,10 @@ ROLE_PERMISSIONS = {
         "mdm.read", "production.read", "fx.read", "accounting.read", "personnel.read",
     ],
 }
+
+
+for _legacy_role in ("admin","sales","accounting","accounting_manager","general_manager","president"):
+    ROLE_PERMISSIONS[_legacy_role].append("legacy.read")
 
 
 class AuthError(APIException):

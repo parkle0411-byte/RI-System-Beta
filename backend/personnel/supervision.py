@@ -42,13 +42,13 @@ def is_general_subordinate(supervisor, person):
 
 
 def can_create_subordinate_account(supervisor, person):
-    return (supervisor is not None and supervisor.role_code != "president"
+    return (supervisor is not None and supervisor.role_code not in ("president", "legacy_supervisor")
             and is_general_subordinate(supervisor, person) and person.is_active
             and not person.auth_user_id and person.account_status == "not_configured")
 
 
 def supervisor_permissions(person):
     """Supervisor grants respect role-specific restrictions as well as team scope."""
-    if person is not None and person.role_code == "president":
+    if person is not None and person.role_code in ("president", "legacy_supervisor"):
         return ()
     return SUBORDINATE_PERMISSIONS

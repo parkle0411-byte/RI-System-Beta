@@ -3,7 +3,9 @@
 // （loadMasterData、openMasterDialog、add/removeMdmFixedClause、add/removeMdmRating、masterPayloadFromForm、saveMasterRecord、toggleMasterStatus 等）。
 // VM 才有（2026-09-29 決定）：再保人的 Fixed Clause 可指定適用 Class（classIds；沒有 = All classes，新增時預設 Property），
 // Class 主檔也可以有自己的 Fixed Clause。
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import InsuredMaster from './InsuredMaster.vue'
 import { ElMessage } from 'element-plus'
 import { apiFetch } from '../api'
 import { can } from '../auth'
@@ -19,18 +21,42 @@ const masterTypes = [
   { value: 'ae', label: 'Account Executive', tabLabel: 'Account Executive' },
   { value: 'class', label: 'Class', tabLabel: 'Classes' }
 ]
+const route = useRoute()
+const router = useRouter()
+const directoryTypes = computed(() => {
+  const types = [...masterTypes]
+  types.splice(types.findIndex(item => item.value === 'class'), 0, { value: 'insured', label: 'Insured', tabLabel: 'Insured' })
+  return types.filter(item => item.value === 'insured' ? can('cases.read.all') : can('mdm.read'))
+})
 const mdmLoading = ref(false)
 const mdmSaving = ref(false)
 const mdmDialogVisible = ref(false)
 const editingMasterId = ref(null)
 const editingMasterRowVersion = ref(null)
 const activeMdmType = ref('reinsurer')
+watch(() => [route.query.tab, directoryTypes.value], () => {
+  activeMdmType.value = directoryTypes.value.find(item => item.value === route.query.tab)?.value || directoryTypes.value[0]?.value || ''
+}, { immediate: true })
+function selectMasterType(value) {
+  router.push({ path: '/mdm', query: { tab: value } })
+}
 const openReinsurerMarkets = ref([])
 const lloydsMarketProfile = ref(null)
 const lloydsRatingDialogVisible = ref(false)
 const lloydsRatingSaving = ref(false)
 const lloydsRatingRows = ref([])
 const editingLloydsRatingVersion = ref(null)
+const insuredCount = ref(null)
+let insuredCountGeneration = 0
+async function loadInsuredCount() {
+  if (!can('cases.read.all')) return
+  const generation = ++insuredCountGeneration
+  try {
+    const data = await jsonOrThrow(await apiFetch('/api/insured-masters?summary=1', {headers:{Accept:'application/json'}}))
+    if (generation === insuredCountGeneration) insuredCount.value = data.formalTotal
+  } catch { if (generation === insuredCountGeneration) insuredCount.value = null }
+}
+function insuredCountsChanged(data) { ++insuredCountGeneration; insuredCount.value = data.formalTotal }
 const mdmRecords = ref([])
 const mdmCounts = ref({ ae: 0, reinsurer: 0, reinsured: 0, class: 0, foreign_broker: 0, clause: 0 })
 const mdmForm = reactive({ entityType: 'ae', code: '', name: '', abbreviation: '', address: '', fixedClauses: [], ratings: [] })
@@ -283,19 +309,20 @@ async function toggleMasterStatus(row) {
   } finally { mdmSaving.value = false }
 }
 
-onMounted(loadMasterData)
+onMounted(() => { if (can('mdm.read')) void loadMasterData(); void loadInsuredCount() })
 </script>
 
 <template>
   <!-- Development begins this page with its master-data tabs. -->
 
   <div class="mdm-tabs" role="tablist" aria-label="Master data types">
-    <button v-for="item in masterTypes" :key="item.value" type="button" class="mdm-tab" :class="{ active: activeMdmType === item.value }" @click="activeMdmType = item.value">
-      <span>{{ item.tabLabel }} ({{ mdmCounts[item.value] || 0 }})</span>
+    <button v-for="item in directoryTypes" :key="item.value" type="button" role="tab" :aria-selected="activeMdmType === item.value" class="mdm-tab" :class="{ active: activeMdmType === item.value }" @click="selectMasterType(item.value)">
+      <span>{{ item.tabLabel }} ({{ item.value === 'insured' ? (insuredCount ?? '—') : (mdmCounts[item.value] || 0) }})</span>
     </button>
   </div>
 
-  <section class="table-card" v-loading="mdmLoading">
+  <InsuredMaster @counts="insuredCountsChanged" v-if="activeMdmType === 'insured' && can('cases.read.all')" />
+  <section v-else-if="can('mdm.read')" class="table-card" v-loading="mdmLoading">
     <div class="section-heading"><div><h2>{{ masterTypeLabel(activeMdmType) }}</h2><p>Ordering and Development data are preserved through versioned Edit and lifecycle controls; routine physical deletion is not exposed.</p></div><div><el-button v-if="can('mdm.write')" class="primary-button" @click="openMasterDialog()">+ Add {{ masterTypeLabel(activeMdmType) }}</el-button><el-button class="secondary-button" :loading="mdmLoading" @click="loadMasterData">Refresh</el-button></div></div>
     <el-collapse v-if="activeMdmType === 'reinsurer'" v-model="openReinsurerMarkets" class="mdm-market-groups">
       <el-collapse-item name="lloyds" :title="`Lloyd's Market (${lloydsMarketRecords.length})`">
@@ -398,6 +425,7 @@ onMounted(loadMasterData)
 </template>
 
 <style scoped>
+.mdm-tabs { flex-wrap: wrap; }
 .mdm-market-groups { margin: 0 20px 20px; }
 .lloyds-market-ratings { padding: 16px 18px; }
 .lloyds-rating-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
