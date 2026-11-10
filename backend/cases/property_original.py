@@ -22,7 +22,7 @@ DESCRIPTION_FIELDS = frozenset(('occupation', 'construction', 'specialAgreement'
     'sumInsured', 'limitOfLiability', 'aggregateLimit', 'subLimits', 'lossAdvisedDate',
     'lossRecordYears', 'lossRecord', 'ownerPersonnelId', 'ownerPersonnelName'))
 SERVER_FIELDS = (VERSION_KEY, 'propertyEditHistory', 'productionHistory', 'productionReversals',
-                 'propertyReversalHistory', 'propertyDateOverrides', 'accountingRules', 'accountingLegacyMath', 'premiumLedgerLayout', 'accountingLayoutHistory')
+                 'propertyReversalHistory', 'propertyDateOverrides', 'financeCorrectionHistory', 'financeClaimTracking', 'financeWorkflowVersion', 'accountingRules', 'accountingLegacyMath', 'premiumLedgerLayout', 'accountingLayoutHistory')
 
 
 def rows(value):
@@ -264,13 +264,6 @@ def apply_details(p, details, now=None):
             manualSettlementConfirmed=cleared,canConfirmSettlement=False,canCancelSettlement=False,
             amountEditLocked=cleared,settlementFinalized=cleared,paid=d['amount'] if cleared else 0,
             outstanding=0 if cleared else d['amount'],paymentStatus='settled' if cleared else 'open')
-    locked_periods={d['_tx'].get('installmentId') for d in details.values()
-        if d['_source']=='premium' and not d['_historic'] and d['_leg']=='3'
-        and d['_tx'].get('perReinsurer') and d['settlement']=='settled'}
-    for d in details.values():
-        if d['_source']=='premium' and not d['_historic'] and d['_leg'] in ('2','3') and d['_tx'].get('installmentId') in locked_periods:
-            d['amountEditLocked']=True
-            d['periodAmountLocked']=True
     return details
 
 
@@ -282,6 +275,8 @@ def persist_settlements(p, now, actor=None):
     details=transaction_details(p,now)
     for tx in rows(p.get('transactions')):
         d=details.get(tx.get('txNo'),{})
+        if not tx.get('reversed') and not tx.get('isReversalEntry') and d.get('settlement') != 'settled':
+            tx['settlement'] = d.get('settlement', 'open')
         if d.get('settlement')=='settled' and tx.get('settlement')!='settled' and not tx.get('reversed') and not tx.get('isReversalEntry'):
             tx.update(settlement='settled',settledAt=now,settledBy=(actor or {}).get('id'),settlementSource='automatic',
                 settledDates={k:d.get(k) for k in ('baseDate','dueDate','contractDueDate','termsDays','reminderDate','paymentRule') if d.get(k) is not None})
@@ -394,7 +389,7 @@ def edit_guard(case, p, body, actor, now):
         'policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays','splitParties','splitEnabled','endoEffectiveDate'}
     ignored=set(SERVER_FIELDS)|{'transactions','paymentEntries','claims','facilityAccounting','swissAccounting',
         'status','confirmedProductionKeys','productionPartiallyConfirmed','premiumRounding','cedantTermsBasis',
-        'paymentTermsHistory','paymentEditHistory','claimCorrectionHistory','accountingAdjustmentHistory','accountingRules','accountingLegacyMath','insuredDirectoryEnabled','accountingLayoutHistory'}
+        'paymentTermsHistory','paymentEditHistory','claimCorrectionHistory','accountingAdjustmentHistory','financeCorrectionHistory','financeClaimTracking','financeWorkflowVersion','accountingRules','accountingLegacyMath','insuredDirectoryEnabled','accountingLayoutHistory'}
     changed={k for k in set(old)|set(p) if k not in ignored and old.get(k)!=p.get(k)}
     # Normalization may add empty compatibility fields; they are not business changes.
     changed={k for k in changed if old.get(k) not in (None,'',[],{}) or p.get(k) not in (None,'',[],{})}
@@ -450,56 +445,8 @@ def edit_guard(case, p, body, actor, now):
     old_details=transaction_details(old)
     fresh_expected=[{k:v for k,v in t.items() if k!='settledDates'} for t in expected]
     new_details=transaction_details({**p,'transactions':fresh_expected})
-    for tx in old_live:
-        no=tx['txNo'];replacement=expected_by_no.get(no)
-        money_change=(not replacement or replacement['amount']!=tx['amount'] or replacement.get('reinsurer')!=tx.get('reinsurer') or replacement.get('reinsurerName')!=tx.get('reinsurerName') or p.get('currency')!=old.get('currency'))
-        activity=any(e.get('transactionNo')==no for e in rows(old.get('paymentEntries')))
-        settled=tx.get('settlement')=='settled' or old_details.get(no,{}).get('settlement')=='settled'
-        period_locked=any(t.get('perReinsurer') and t.get('legType')=='Leg 3'
-            and t.get('installmentId')==tx.get('installmentId')
-            and old_details.get(t['txNo'],{}).get('settlement')=='settled' for t in old_live)
-        if money_change and period_locked and tx.get('legType') in ('Leg 2','Leg 3'):
-            return 'T2 and T3 amounts for this installment are locked after any reinsurer T3 settles.'
-        if money_change and (activity or settled):
-            return 'This change would affect a transaction with receipt/payment or Settlement history.'
-        if settled:
-            before=old_details.get(no,{})
-            after=new_details.get(no,{})
-            if any(before.get(k)!=after.get(k) for k in ('baseDate','dueDate','contractDueDate','termsDays')):
-                return 'Payment Terms and the shared Payment Base Date are locked once the corresponding transaction settles.'
-    # A shared base date locks as soon as any cash leg in that period settles.
-    for tx in old_live:
-        if str(tx.get('legType')) not in ('Leg 1','Leg 2') or old_details.get(tx['txNo'],{}).get('settlement')!='settled':continue
-        pid=tx.get('installmentId')
-        before=next((r for r in periods(old) if r['id']==pid),None)
-        after=next((r for r in periods(p) if r['id']==pid),None)
-        if not after or before and before.get('baseDate')!=after.get('baseDate'):
-            return 'This installment Payment Base Date is locked by a settled T1 or T2.'
-    if changed & {'splitParties','splitEnabled','ae'}:
-        if old.get('confirmedProductionKeys') or any(t.get('legType')=='Leg 3' and old_details.get(t['txNo'],{}).get('settlement')=='settled' for t in old_live):
-            return 'Account Executive and Performance Split are locked after any Production confirmation or affected T3 Settlement.'
-    for key in old.get('confirmedProductionKeys') or []:
-        if confirmed_facts(old,key)!=confirmed_facts(p,key):
-            return 'This change would alter a reinsurer already confirmed in Production.'
-    for history in rows(old.get('productionHistory')):
-        row=history.get('row') or {}
-        if history.get('cycle',0)!=int(old.get('reversalCycle') or 0) or not row.get('reinsurerKey'):continue
-        try:
-            prefix,index=row['reinsurerKey'].rsplit(':R',1)
-            pid=prefix.split(':',1)[1]
-            pi=int(row['id'].rsplit(':P',1)[1])
-            premiums,incomes=report_amounts(p,pid,row['rate'])[int(index)]
-            if (premiums[pi],incomes[pi])!=(row['premium'],row['income']):
-                return 'This change would alter rounded staff amounts already confirmed in Production.'
-        except (KeyError,ValueError,IndexError,StopIteration):
-            return 'Keep the original confirmed Production allocation unchanged.'
-    # Confirmed periods retain their performance month even when their common dates change.
-    p['transactions']=[*[t for t in rows(old.get('transactions')) if t.get('source')=='claim' or t.get('reversed') or t.get('isReversalEntry')],*expected]
-    changes={k:{'before':copy.deepcopy(old.get(k)),'after':copy.deepcopy(p.get(k))} for k in sorted(changed)}
-    p.setdefault('propertyEditHistory',[]).append({'at':now,'by':actor.get('id'),'byName':actor.get('name'),
-        'reason':reason,'changes':changes,'amountsBefore':totals(old),'amountsAfter':totals(p)})
-    persist_settlements(p,now,actor)
-    return ''
+    from .finance_corrections import correct_accounts
+    return correct_accounts(case, p, old, old_live, expected, old_details, changed, actor, now, reason)
 
 
 def report_amounts(p, period_id, rate, all_periods=None):
@@ -538,6 +485,11 @@ def reverse_payload(p, month, now, actor, reason):
     result=copy.deepcopy(p)
     cycle=int(p.get('reversalCycle') or 0)
     history=[h for h in rows(p.get('productionHistory')) if h.get('cycle',0)==cycle and not h.get('isReversal')]
+    effective={h['row']['id']:h for h in history if isinstance(h.get('row'),dict)}
+    for correction in rows(p.get('financeCorrectionHistory')):
+        for row in correction.get('productionEffectiveRows',[]):
+            effective[row.get('financeSourceId',row['id'])]={'row':row,'cycle':cycle}
+    history=list(effective.values())
     new_cycle=cycle+1
     live=[t for t in rows(p.get('transactions')) if t.get('source')!='claim' and not t.get('reversed') and not t.get('isReversalEntry')]
     retained=[t for t in rows(p.get('transactions')) if t not in live]
@@ -550,7 +502,7 @@ def reverse_payload(p, month, now, actor, reason):
             row=copy.deepcopy(h['row'])
             row.update(id=row['id']+f':REV{new_cycle}',key=row['key']+f':REV{new_cycle}',
                 reinsurerKey=row['reinsurerKey']+f':REV{new_cycle}',premium=-row['premium'],income=-row['income'],
-                isProductionReversal=True,reversalCycle=new_cycle)
+                isProductionReversal=True,reversalCycle=new_cycle,correctionBatchId=None,financeCorrectionSide='case_reversal')
             negative.append(row)
         result.setdefault('productionReversals',[]).append({'cycle':new_cycle,'month':month,'rows':negative,'confirmedKeys':[]})
     result.update(transactions=retained,reversalCycle=new_cycle,pendingReversalOffset=False,
@@ -589,7 +541,8 @@ def confirm_production(source, report_rows, month):
     for batch in rows(p.get('productionReversals')):
         keys=batch.setdefault('confirmedKeys',[])
         for row in negative:
-            if row.get('reversalCycle')==batch['cycle'] and row['id'] not in keys:keys.append(row['id'])
+            matches = row.get('correctionBatchId') == batch.get('financeCorrectionId') if batch.get('financeCorrectionId') else not row.get('correctionBatchId') and row.get('reversalCycle') == batch['cycle']
+            if matches and row['id'] not in keys: keys.append(row['id'])
     status=get(source,'status')
     remaining=any(k not in confirmed for k in production_keys_for_case(source))
     if current:

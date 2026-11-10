@@ -8,10 +8,11 @@ export const FIXED_TEXT = {
 
 export const STRUCTURE_SUFFIX = {
   QS: 'Facultative Reinsurance',
-  XOL: 'Excess of Loss Facultative Reinsurance'
+  XOL: 'Excess of Loss Facultative Reinsurance',
+  OVERSEA: 'Oversea Business'
 };
 
-export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss' };
+export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss', OVERSEA: 'Oversea Business' };
 export const UNIVERSAL_CLAUSES = [
   // VM 與 Alpha 不同（2026-09-29）：標題含代碼，文件上印出「LMA3333 …」
   { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },
@@ -29,6 +30,7 @@ export const PERSONNEL_DEPARTMENTS = [
   { value: 'business_development', label: 'Business Development Dept.' }
 ];
 export const PERSONNEL_ROLES = [
+  { value: 'legacy_supervisor', label: 'Read-only Supervisor' },
   { value: 'president', label: 'President' },
   { value: 'general_manager', label: 'General Manager' },
   { value: 'sales', label: 'Reinsurance Staff' },

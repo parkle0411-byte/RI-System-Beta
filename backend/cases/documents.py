@@ -36,6 +36,10 @@ __all__ = ["reinsurer_key", "required_reinsurers", "coverage_for", "safe_filenam
 
 def coverage_for(payload, files):
     """文件頁的涵蓋狀態（與 Announce 的 coverage 不同：多了 covered、selected 不排序、再保人名稱不去掉 Facility）。"""
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        from .oversea import broker_note_coverage
+        return broker_note_coverage(payload, files)
     selected = [f for f in files if js_truthy(get(f, "is_selected"))]
     required = required_reinsurers(payload)
     offer = any(get(f, "kind") == "offer" for f in selected)

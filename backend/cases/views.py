@@ -47,6 +47,20 @@ from .resolve import (
 DISPLAY_VERSION = "V 0.003"
 LIST_LIMIT = 250
 
+# These records belong to server workflows, including when absent on an existing Case.
+FINANCIAL_HISTORY_KEYS = ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory",
+    "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking", "financeClaimTracking",
+    "financeCorrectionHistory", "financeWorkflowVersion", "productionHistory", "productionReversals",
+    "propertyReversalHistory", "propertyEditHistory", "propertyDateOverrides", "facilityAccounting", "swissAccounting")
+
+def financial_input(value, stored=None):
+    if not isinstance(value, dict):
+        return value
+    clean = {k:v for k,v in value.items() if k not in FINANCIAL_HISTORY_KEYS}
+    if stored:
+        clean.update({k:copy.deepcopy(stored[k]) for k in FINANCIAL_HISTORY_KEYS if k in stored})
+    return clean
+
 # Alpha：party->>'personnelId' = $2::text。JSON_TABLE 把 splitParties 展開成列，逐一比對。
 _SPLIT_MEMBER_SQL = (
     "EXISTS (SELECT 1 FROM JSON_TABLE(ri_cases.payload, '$.splitParties[*]' "
@@ -159,6 +173,7 @@ class CasesView(NoStoreMixin, APIView):
                 **manual_tw_ref_fields(payload),
                 **list_financials(row.payload),
                 "caseKind": row.case_kind, "reinsuranceStructure": row.reinsurance_structure,
+                **({"receiptPaymentDate": payload.get("receiptPaymentDate") or ""} if row.reinsurance_structure == "OVERSEA" else {}),
                 "ownerPersonnelId": row.owner_personnel_id,
                 "ownerPersonnelName": _json_text(payload, "ownerPersonnelName") or "",
                 "originalInsured": _first_text(payload, "originalInsured", "original_insured"),
@@ -223,7 +238,9 @@ class CasesView(NoStoreMixin, APIView):
             return _error(400,"workflow_required","Create endorsements through the Case workflow.")
         from .placing_rules import promote
         if isinstance(body.get('case'), dict):
-            body['case'] = promote(dict(body['case']))
+            body['case'] = promote(financial_input(body['case']))
+            from .facility_rules import prepare_new_draft
+            body['case'] = prepare_new_draft(body['case'])
         incomplete = body.get('incompleteDraft') is True
         if incomplete and not draft_input.scope(body.get('case')):
             return _error(400, 'incomplete_draft_scope', 'Incomplete drafts require Property or CGL Quota Share with ordinary reinsurers.')
@@ -252,6 +269,11 @@ class CasesView(NoStoreMixin, APIView):
         # These are owned by Production / Claims / Accounting for every case type.
         for field in ("transactions", "paymentEntries", "claims", "confirmedProductionKeys"):
             payload[field] = []
+        for field in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory",
+                      "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking", "financeClaimTracking",
+                      "financeCorrectionHistory", "financeWorkflowVersion", "productionHistory", "productionReversals",
+                      "propertyReversalHistory", "propertyEditHistory", "propertyDateOverrides"):
+            payload.pop(field, None)
         payload["swissAccounting"] = {}
         payload["facilityAccounting"] = {}
         payload["cedantTermsBasis"] = "case"
@@ -344,7 +366,7 @@ class CasesView(NoStoreMixin, APIView):
                 return _error(409, "version_conflict", "This Draft was changed elsewhere. Reload it before saving again.",
                               currentRowVersion=current.row_version)
 
-            supplied_case = dict(body.get("case")) if isinstance(body.get("case"),dict) else body.get("case")
+            supplied_case = financial_input(body.get("case"), current.payload)
             if isinstance(supplied_case,dict):
                 from .placing_rules import KEY
                 supplied_case.pop(KEY, None)
@@ -357,6 +379,9 @@ class CasesView(NoStoreMixin, APIView):
             if not isinstance(candidate, dict):
                 # 2026-10-29：沒有 case 物件時回 400（原本批單會在下面的批單檢查出錯 500）；訊息同 normalize_draft
                 return _error(400, "validation_failed", "case must be an object.", errors=["case must be an object."])
+            if current.status == 'draft' and not current.tw_ref and current.case_kind != 'endorsement':
+                from .facility_rules import prepare_new_draft
+                candidate = prepare_new_draft(candidate, previous=current.payload)
             endorsement_context = None
             if current.case_kind == "endorsement" and current.parent_case_id:
                 from .endorsement_rules import context_for, apply_fixed, date_edit_error
@@ -376,6 +401,11 @@ class CasesView(NoStoreMixin, APIView):
             if endorsement_context:
                 apply_fixed(payload, endorsement_context)
                 payload["manualTwRef"] = (current.payload or {}).get("manualTwRef") or ""
+            if current.status != 'draft' and current.case_kind != 'endorsement':
+                from .facility_rules import legacy_ga_tax_error
+                problem = legacy_ga_tax_error(current.payload, payload)
+                if problem:
+                    return _error(409, 'fixed_tax_locked', problem)
             if (current.payload or {}).get("renewalPremiumBasis"):
                 from .renewal_premiums import refresh_renewal_premiums
                 if current.status == 'draft':
@@ -394,6 +424,16 @@ class CasesView(NoStoreMixin, APIView):
                     return _error(400, "case_not_ready", term_issues[0]["label"], issues=term_issues)
             columns = normalized["columns"]
             stored = current.payload if isinstance(current.payload, dict) else {}
+            from .oversea import enabled as oversea_enabled, edit_error as oversea_edit_error
+            if oversea_enabled(stored) or oversea_enabled(payload):
+                problem = oversea_edit_error(current,payload,body)
+                if problem:
+                    return _error(409,'oversea_edit_locked',problem)
+                if current.status != 'draft' and oversea_enabled(payload):
+                    from .oversea import issues as oversea_issues
+                    problems = oversea_issues(payload,ready=True)
+                    if problems:
+                        return _error(400,'case_not_ready',problems[0]['label'],issues=problems)
             adopt(payload, stored)
             if incomplete:
                 for key in ('accountingRules', 'accountingLegacyMath', 'propertyOriginalRules'):
@@ -440,16 +480,16 @@ class CasesView(NoStoreMixin, APIView):
             payload["claims"] = stored.get("claims") or []
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
-            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory", "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking"):
+            for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory", "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking", "financeClaimTracking", "financeCorrectionHistory", "financeWorkflowVersion", "productionHistory", "productionReversals", "propertyReversalHistory", "propertyEditHistory", "propertyDateOverrides", "facilityAccounting"):
                 if key in stored:
                     payload[key] = stored[key]
-            if "facilityAccounting" in stored:
-                payload["facilityAccounting"] = stored["facilityAccounting"]
+                else:
+                    payload.pop(key, None)
             from .calc.swiss_facility import applies as swiss_applies
             if "swissAccounting" in stored or swiss_applies(payload):
                 payload["swissAccounting"] = stored.get("swissAccounting") or {}
 
-            if current.status == "posted" and not property_enabled(stored) and not property_enabled(payload) and not same_content(
+            if current.status == "posted" and not oversea_enabled(payload) and not property_enabled(stored) and not property_enabled(payload) and not same_content(
                 payment_terms_signature(payload), payment_terms_signature(stored)
             ):
                 return _error(409, "payment_terms_locked",
@@ -480,6 +520,10 @@ class CasesView(NoStoreMixin, APIView):
                 return _error(403, "owner_transfer_denied",
                               "Only the current Case Owner or System Administrator can change the Case Owner.")
 
+            try:
+                insured_master.check_change(current, payload, body)
+            except insured_master.ChangeRequired as exc:
+                return Response(exc.data, status=409)
             now = timezone.now().isoformat()
             if property_enabled(stored) and current.status != "draft":
                 if payload.get("reinsurers") != stored.get("reinsurers"):
@@ -499,6 +543,10 @@ class CasesView(NoStoreMixin, APIView):
                 refresh_transactions(payload,now)
                 persist_settlements(payload,now,actor_info)
                 payload.setdefault("propertyEditHistory",[]).append({"at":now,"by":actor_info["id"],"reason":reason,"operation":"ordinary_rules_selected"})
+            if oversea_enabled(payload) and current.status == 'posted':
+                from .oversea import refresh_transactions as refresh_oversea
+                payload['announcedAt'] = stored.get('announcedAt') or (current.announced_at.isoformat() if current.announced_at else '')
+                refresh_oversea(payload,current.tw_ref,now)
             masters = resolve_master_references(payload)
             before = _case_state(
                 case_uid=current.case_uid, status=current.status, case_kind=current.case_kind,
@@ -512,7 +560,8 @@ class CasesView(NoStoreMixin, APIView):
             )
             try:
                 insured=insured_master.sync(current,payload,actor_info,body)
-            except insured_master.MergeRequired as exc:
+            except (insured_master.MergeRequired, insured_master.ChangeRequired) as exc:
+                transaction.set_rollback(True)
                 return Response(exc.data,status=409)
             current.insured_master=insured
             was_draft = current.status == "draft"

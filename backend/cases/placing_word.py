@@ -98,13 +98,14 @@ def loss_text(p):
     return '\n'.join([summary]+details+([p['lossRecordText']] if p.get('lossRecordText') else []))
 
 def document_values(p, annual):
+    from .facility_rules import fixed_interest
     is_cgl=rules.cgl(p); currency=p.get('currency') or ''
     address='\n'.join(' '.join(str(x.get(k) or '').strip() for k in ('address','postcode')).strip() for x in p.get('situations') or [] if str(x.get('address') or '').strip())
     opt=lambda key: str(p.get(key) or '').strip() or None
     values={
         'TYPE':p.get('type'), 'REINSURED':p.get('reinsured'), 'INSURED':p.get('originalInsured'),
         'ORIGINAL INSURED':p.get('originalInsured'),'PERIOD':period(p), 'LOCATION':address or None,
-        'INTEREST':opt('interest') or (rules.INTEREST if is_cgl else ''),
+        'INTEREST':fixed_interest(p) or opt('interest') or (rules.INTEREST if is_cgl else ''),
         'LIMIT OF LIABILITY':money(p.get('limitOfLiability'),currency)+(' each occurrence' if is_cgl else ''),
         'AGGREGATE LIMIT':money(p.get('aggregateLimit'),currency) if p.get('aggregateLimit') else None,
         'SUB-LIMITS':opt('subLimits'),'DEDUCTIBLES':opt('deductibles'),
@@ -192,7 +193,8 @@ def render(p, ae_email, *, annual=True, previous=None, references=None):
             'EXTENDED REPORTINGPERIOD':(ci.get('extendedReportingPeriod') if ci.get('extendedReportingApplies')=='applicable' else 'Not Applicable') if ci.get('policyForm')=='Claims-Made Form' else None,
             'TERRITORIAL/ JURISDICTION LIMITS':ci.get('territorialOther') if ci.get('territorialLimits')=='Other' else ci.get('territorialLimits'),
             'INSURED’S BUSINESS':rules.business_text(ci),'INSURED’S PRODUCTS':ci.get('insuredProducts'),'ESTIMATED TURNOVER':turnover,'INSURED’S WEBSITE':ci.get('insuredWebsite') or None}
-        if rules.cgl(p) and ci.get('specialAgreementApplies')!='applicable':iv['SPECIAL AGREEMENT']=None
+        from .facility_rules import property_qs_facility
+        if property_qs_facility(p) or (rules.cgl(p) and ci.get('specialAgreementApplies')!='applicable'):iv['SPECIAL AGREEMENT']=None
         replace_rows(info,iv,{'BREAKFOWN OF SUM INSURED':'BREAKDOWN OF SUM INSURED'})
         for table in tables[2:]:replace_rows(table,values)
         # Signing page always has empty Written/Signed Lines and current year.

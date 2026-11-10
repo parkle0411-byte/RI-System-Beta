@@ -29,6 +29,9 @@ def reinsurer_key(value):
 
 
 def required_reinsurers(payload):
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        return []
     rows = get(payload, "reinsurers")
     keys = [reinsurer_key(get(row, "name")) for row in (rows if is_array(rows) else [])]
     return list(dict.fromkeys(k for k in keys if k))  # new Set(...) 保留第一次出現的順序
@@ -36,6 +39,10 @@ def required_reinsurers(payload):
 
 def coverage_for(payload, files):
     """files：[{id, kind, reinsurers, is_selected}]，回傳與 Alpha 相同的 coverage 物件。"""
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        from .oversea import broker_note_coverage
+        return broker_note_coverage(payload, files)
     selected = [f for f in files if f["is_selected"]]
     required = required_reinsurers(payload)
     offer = any(f["kind"] == "offer" for f in selected)
@@ -100,7 +107,7 @@ def shift_year(value):
 def reset_shared_payload(payload):
     """Endorsement / Renewal 的新 Draft：清掉屬於「舊案件實際發生過的事」的欄位。"""
     return {
-        **{k:v for k,v in payload.items() if k not in ('renewalPremiumBasis', 'renewalPremiumManual', 'renewalPremiumIssues', 'endorsementSource', 'endorsementRules')},
+        **{k:v for k,v in payload.items() if k not in ('renewalPremiumBasis', 'renewalPremiumManual', 'renewalPremiumIssues', 'endorsementSource', 'endorsementRules', 'financeCorrectionHistory', 'financeClaimTracking', 'financeWorkflowVersion', 'productionHistory', 'productionReversals', 'propertyReversalHistory')},
         **({"premiumRounding": "currency-stepwise-v1"} if payload.get("currency") == "TWD" else {}),
         **({"manualTwRef": ""} if "manualTwRef" in payload else {}),
         "twRefSource": "", "previousTwRefs": [],
@@ -130,6 +137,13 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     payload["endoText"] = ""
     payload["installmentEnabled"] = False
     payload["performanceInstallments"] = []
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        payload.pop('announcedAt',None)
+        payload['receiptPaymentDate']=''
+        payload['endoTypes']=['Brokerage']
+        payload['reinsurers']=[{**r,'brokerageAmount':None} for r in payload.get('reinsurers') or []]
+        return payload
     payload["originalPremium"] = None
     payload["exchRate"] = None
     payload["statementNo"] = ""

@@ -88,7 +88,9 @@ def readiness_issues(payload, kind, ae_email):
     installments = installments if isinstance(installments, list) else []
     split = payload.get("installmentEnabled") is True
     if kind == "cover":
-        missing("interest", "interest_required", "Complete Interest in the case before generating a Cover Note.")
+        from .facility_rules import fixed_interest
+        if not fixed_interest(payload):
+            missing("interest", "interest_required", "Complete Interest in the case before generating a Cover Note.")
         missing("limitOfLiability", "limit_of_liability_required", "Complete Limit of Liability in the case before generating a Cover Note.")
         missing("deductibles", "deductibles_required", "Complete Deductibles in the case before generating a Cover Note.")
         # Retention is optional here: the document prints its confirmed fixed sentence.

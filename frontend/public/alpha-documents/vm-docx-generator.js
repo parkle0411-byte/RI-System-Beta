@@ -20,6 +20,20 @@
   function text(value) {
     return value === null || value === undefined ? '' : String(value).trim();
   }
+  function allFacility(c) {
+    const named = (Array.isArray(c && c.reinsurers) ? c.reinsurers : []).filter(r => text(r && r.name));
+    return named.length > 0 && named.every(r => /\(Facility\)\s*$/i.test(text(r.name)));
+  }
+  function facilityInterest(c) {
+    if (!allFacility(c)) return '';
+    const klass = text(c && c.classOfBusiness).toLowerCase();
+    if (klass === 'property') return "The Reinsured's Insurance Interest in the Real and Personal Property of the Insured including Property whilst in their Care, Custody or Control.";
+    if (klass === 'commercial general liability') return 'Reinsurance of the Reinsured’s liability under the original policy.';
+    return '';
+  }
+  function hideFacilitySpecialAgreement(c) {
+    return allFacility(c) && text(c && c.classOfBusiness).toLowerCase() === 'property' && text(c && c.reinsuranceStructure).toUpperCase() === 'QS';
+  }
   // Document-only QS Property presentation. Never reorder or write Case rows.
   function newQs(c) { return c && c.placingRulesVersion === 'placing-qs-20261028-v1' && c.reinsuranceStructure === 'QS'; }
   function newCgl(c) { return newQs(c) && c.classOfBusiness === 'Commercial General Liability'; }
@@ -462,7 +476,7 @@
       REINSURED: text(c && c.reinsured),
       PERIOD: period(c, true),
       PERIOD_SHORT: period(c, false),
-      INTEREST: text(c && c.interest) || (newCgl(c) ? 'Reinsurance of the Reinsured’s liability under the original policy.' : ''),
+      INTEREST: facilityInterest(c) || text(c && c.interest) || (newCgl(c) ? 'Reinsurance of the Reinsured’s liability under the original policy.' : ''),
       LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c) + (newCgl(c) ? ' each occurrence' : ''),
       AGGREGATE_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
       UNDERLYING_LIMITS: qsProperty(c) ? '' : Array.isArray(c && c.cglInformationRows) && text(c && c.reinsuranceStructure).toUpperCase() !== 'XOL' ? '' : text(c && c.underlyingLimits),
@@ -500,7 +514,7 @@
       LOSS_DATES: losses.dates,
       LOSS_CAUSES: losses.causes,
       LOSS_PAID: losses.paid,
-      SPECIAL_AGREEMENT: c && Array.isArray(c.cglInformationRows) && c.cglInformation?.specialAgreementApplies !== 'applicable' ? '' : text(c && c.specialAgreement),
+      SPECIAL_AGREEMENT: hideFacilitySpecialAgreement(c) || c && Array.isArray(c.cglInformationRows) && c.cglInformation?.specialAgreementApplies !== 'applicable' ? '' : text(c && c.specialAgreement),
       SECURITY_NAMES: reinsurers.map(row => stripFacility(row.name) || '(Reinsurer)').join('\n'),
       SECURITY_SHARES: reinsurers.map(row => percentTrim(row.sharePct, shareDecimals)).join('\n'),
       LOSS_LIMIT: money(c && c.limitOfLiability, c),

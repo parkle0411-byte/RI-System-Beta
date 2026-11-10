@@ -38,6 +38,7 @@ MAX_ROWS = 50
 STRUCTURE_SUFFIX = {
     "QS": "Facultative Reinsurance",
     "XOL": "Excess of Loss Facultative Reinsurance",
+    "OVERSEA": "Oversea Business",
 }
 # VM 與 Alpha 不同（2026-09-29 你的決定）：LMA3333 的標題含代碼，文件上才會印出「LMA3333 …」
 LMA3333_TITLE = "LMA3333 Reinsurers Liability Clause"
@@ -181,6 +182,15 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if not isinstance(input_, dict):
         return {"errors": ["case must be an object."], "value": None}
     inp = input_
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(inp):
+        keep = {'installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
+        inp = {k:v for k,v in inp.items() if k in keep}
+        inp['typePrefix'] = ''
+        inp['newOrRenew'] = 'New'
+        if inp.get('installmentEnabled'):
+            inp['receiptPaymentDate']=next((r.get('paymentBaseDate') or '' for r in inp.get('performanceInstallments') or [] if isinstance(r,dict)), '')
+        else:inp['performanceInstallments']=[]
     inactive = {}
     if cgl_qs_scope(inp):
         # These preserved legacy values have no CGL QS input or output.
@@ -214,6 +224,9 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "foreignBroker": AUW_FOREIGN_BROKER if auw else text(get(row, "foreignBroker"), 240),
             "settlementRef": text(get(row, "settlementRef"), 160),
         })
+        from .oversea import enabled as oversea_enabled
+        if oversea_enabled(inp):
+            reinsurers[-1]["brokerageAmount"] = nullable_number(get(row, "brokerageAmount"), f"Reinsurance Broker {n} Brokerage", errors)
 
     sum_insured = []
     for index, row in enumerate(rows(get(inp, "sumInsured"), "Breakdown of Sum Insured", errors)):
@@ -241,6 +254,10 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "ratio": nullable_number(get(row, "ratio"), f"Installment {n} ratio", errors, min=0, max=100),
         })
 
+    if oversea_enabled(inp):
+        for row in performance_installments:
+            row['premium']=None
+            row['performanceMonth']=row['paymentBaseDate'][:7]
     for installment in performance_installments:
         for index, reinsurer in enumerate(reinsurers):
             if allianz_target(inp, reinsurer.get("name")) or (ga_target(inp, reinsurer.get("name")) or qbe_target(inp,reinsurer.get("name"))):
@@ -286,10 +303,12 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if effective_date and expiration_date and (expiration_date < effective_date or (property_scope(inp) or cgl_qs_scope(inp)) and expiration_date == effective_date):
         errors.append("Expiration date must be later than Effective date." if property_scope(inp) else "Expiration date cannot be earlier than Effective date.")
 
+    from .oversea import issues as oversea_issues
+    errors.extend(i["label"] for i in oversea_issues(inp))
     requested_structure = js_upper(text(get(inp, "reinsuranceStructure"), 20))
     reinsurance_structure = "QS" if requested_structure == "FACULTATIVE" else requested_structure
-    if reinsurance_structure and reinsurance_structure not in ("QS", "XOL"):
-        errors.append("Reinsurance structure must be Quota Share or Excess of Loss.")
+    if reinsurance_structure and reinsurance_structure not in ("QS", "XOL", "OVERSEA"):
+        errors.append("Reinsurance type must be Quota Share, Excess of Loss or Oversea Business.")
     suffix = STRUCTURE_SUFFIX.get(reinsurance_structure, "")
     stored_type = text(get(inp, "type"), 200)
     type_prefix = text(get(inp, "typePrefix"), 120)
@@ -345,6 +364,9 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["classOfBusiness"] = text(get(inp, "classOfBusiness"), 160)
     value["classCode"] = text(get(inp, "classCode"), 80)
     value["reinsuranceStructure"] = reinsurance_structure
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(inp):
+        value["receiptPaymentDate"] = nullable_date(get(inp, "receiptPaymentDate"), "Receipt / Payment Date", errors) or ""
     value["policyFrom"] = effective_date or ""
     value["policyFromTime"] = policy_from_time if policy_from_time in ("00:00", "12:00") else "12:00"
     value["policyTo"] = expiration_date or ""
@@ -358,7 +380,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         value["cedantTermsBasis"] = "case"
     value["installmentEnabled"] = get(inp, "installmentEnabled") is True
     value["performanceInstallments"] = performance_installments
-    if value["installmentEnabled"] and len(performance_installments) < 2 and not property_scope(inp):
+    if value["installmentEnabled"] and len(performance_installments) < 2 and not property_scope(inp) and not oversea_enabled(inp):
         errors.append(MINIMUM_INSTALLMENTS_MESSAGE)
     if allow_negative_premiums and (value["installmentEnabled"] or performance_installments):
         errors.append("Endorsements must use a single premium settlement; installments are not allowed.")
@@ -381,7 +403,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["autoClauses"] = auto_clauses
     value["manualClauses"] = manual_clauses
     value["status"] = "draft"
-    value["interest"] = text(get(inp, "interest"), 3000)
+    from .facility_rules import fixed_interest
+    value["interest"] = fixed_interest(inp) or text(get(inp, "interest"), 3000)
     value["limitOfLiability"] = nullable_number(get(inp, "limitOfLiability"), liability_limit_label(inp), errors, min=0)
     value["aggregateLimit"] = nullable_number(get(inp, "aggregateLimit"), "Aggregate Limit", errors, min=0)
     value["underlyingLimits"] = "" if reinsurance_structure == "QS" else text(get(inp, "underlyingLimits"), 3000)
@@ -474,6 +497,9 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
                 row[key] = bool(row.get(key) or prior.get(row.get("id"),{}).get(key))
     from .calc.premium_money import premium_input_errors
     errors.extend(premium_input_errors(value, existing_premiums))
+    if oversea_enabled(inp) and inp.get('parentTwRef'):
+        for key in ('endorsementSource','endorsementRules'):
+            if key in inp:value[key]=inp[key]
     value.update(inactive)
     from .cgl_information import normalize_aggregate
     normalize_aggregate(inp, value)
@@ -505,6 +531,9 @@ def _filled(value):
 def loss_record_save_errors(payload, *, case_kind="original"):
     """Fields required when a Case is saved, including an incomplete Draft."""
     errors = []
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        return []
     if property_scope(payload):
         years = get(payload, "lossRecordYears")
         if _filled(years) and years == 0:
@@ -531,6 +560,9 @@ def _is_int_number(value):
 
 
 def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=None):
+    from .oversea import enabled as oversea_enabled, issues as oversea_issues
+    if oversea_enabled(payload):
+        return oversea_issues(payload, ready=True)
     from .data_integrity import financial_issues
     integrity=financial_issues(payload)
     if integrity:return integrity
@@ -539,6 +571,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     if raw_issues:
         return raw_issues
     issues = facility_selection_issues(payload)
+    from .oversea import issues as oversea_issues
+    issues.extend(oversea_issues(payload, ready=True))
 
     def add(field, label):
         issues.append({"field": field, "label": label})
@@ -549,7 +583,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     if not _is_int_number(get(value, "ownerPersonnelId")) or js_to_number(get(value, "ownerPersonnelId")) < 1:
         add("ownerPersonnelId", "Case Owner")
     for field, label in (
-        ("reinsuranceStructure", "Reinsurance structure"), ("ae", "Account Executive"), ("currency", "Currency"),
+        ("reinsuranceStructure", "Reinsurance type"), ("ae", "Account Executive"), ("currency", "Currency"),
         ("classOfBusiness", "Class"), ("newOrRenew", "New / Renew"), ("type", "Type"),
         ("reinsured", "Reinsured"), ("originalInsured", "Original insured (EN)"), ("originalInsuredCn", "Original insured (CN)"),
         ("policyFrom", "Effective date"), ("policyTo", "Expiration date"), ("interest", "Interest"),
@@ -592,6 +626,9 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
             add(f"reinsurers.{index}.name", f"Reinsurer {n}")
         if not _filled(get(row, "sharePct")):
             add(f"reinsurers.{index}.sharePct", f"Reinsurer {n} Order hereon")
+        from .oversea import enabled as oversea_enabled
+        if oversea_enabled(value):
+            continue
         if not _filled(get(row, "premium")):
             add(f"reinsurers.{index}.premium", f"Reinsurer {n} Premium")
         if not _filled(get(row, "riCommPct")):
@@ -608,7 +645,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         add("limitOfLiability", liability_limit_label(value))
     if not _filled(get(value, "deductibles")):
         add("deductibles", "Deductibles")
-    if not _filled(get(value, "originalConditions")):
+    from .sum_insured import all_facility
+    if not all_facility(value) and not _filled(get(value, "originalConditions")):
         add("originalConditions", "Original Conditions")
     if not is_standard_cgl(value) and get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
         add("basisOfValuationOther", "Basis of Valuation — Other")

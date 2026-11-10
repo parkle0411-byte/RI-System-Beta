@@ -5,6 +5,7 @@ from .calc.jsnum import WS_CLASS, js_or, js_to_string, js_trim
 COVERAGES = (
     'Premises-Operations Liability',
     'Products & Completed-Operation Liability',
+    'Products Liability',
     'Personal & Advertising Injury Liability',
     'Medical Payment',
     'Other',

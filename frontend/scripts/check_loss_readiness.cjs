@@ -14,11 +14,12 @@ const context = {
   requiresManualTwRef: () => false, isAuwReinsurer: () => false,
 };
 vm.createContext(context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/oversea.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext('(function(){'+fs.readFileSync(path.join(__dirname,'../src/alpha/construction.js'),'utf8').replace(/export /g,'')+'\nObject.assign(globalThis,{constructionIssues,constructionScope,constructionText,initializeConstruction});})()',context);
 vm.runInContext("(function(){" + fs.readFileSync(path.join(__dirname, "../src/alpha/placingRules.js"), "utf8").replace(/export /g, "") + "\nObject.assign(globalThis,{placingRulesEnabled,newCgl,adjustClientIssues,shareClientIssues,placingExtraIssues,businessText});})()", context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/endorsementRules.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{insuranceIssues});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/facilitySelection.js'), 'utf8').replace(/export /g, ''), context);
-vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/dataIntegrity.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{financialIssues,pendingTotals});})()', context);
+vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/dataIntegrity.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{financialIssues,pendingTotals});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/propertyOriginal.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/lib/accounting.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{premiumInputErrors});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/swissCgl.js'), 'utf8').replace(/export /g, ''), context);
@@ -28,6 +29,8 @@ vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/al
 vm.runInContext(extract('  const keyInScope =', '\n  const draftFamily =').replace('const ordinaryDraftScope =','globalThis.ordinaryDraftScope ='),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRiskDetails.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/sumInsured.js'), 'utf8').replace(/export /g, ''), context);
+context.FIXED_TEXT = { interest: "The Reinsured's Insurance Interest in the Real and Personal Property of the Insured including Property whilst in their Care, Custody or Control." };
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/facilityRules.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext(extract('  function validSumInsuredAmount(value)', '\n  function validPostcode')
   + extract('  function validPostcode(value', '\n  function validPositiveInteger')
   + extract('  function validLossRecordYears(value, caseData)', '\n  function fieldInvalid'), context);

@@ -7,7 +7,7 @@ export function transactionParty(transaction, caseData = transaction) {
   if (leg.startsWith('Claim Leg 2') || leg.startsWith('Leg 1') || transaction?.partyType === 'cedant') {
     return String(caseData?.reinsured || '').trim() || 'Cedant'
   }
-  if (leg.startsWith('Leg 3')) return 'Broker'
+  if (leg.startsWith('Leg 3')) return transaction?.overseaBusiness ? (transaction.partyName || transaction.reinsurer || '—') : 'Broker'
   return transaction?.partyName || transaction?.reinsurer || '—'
 }
 

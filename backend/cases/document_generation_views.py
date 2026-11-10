@@ -120,6 +120,9 @@ def _check_case(request, body):
         case_uid = _text(body, "caseUid")
         case = _find_case(request, case_uid) if case_uid else None
         payload = case.payload if case is not None and isinstance(case.payload, dict) else {}
+        from .oversea import enabled as oversea_enabled
+        if oversea_enabled(payload):
+            return None, kind, _error(409, 'oversea_documents_unavailable', 'Document generation is not available for Oversea Business.')
         if case is not None and payload.get("parentTwRef"):
             err = _endorsement_note_error(case, payload, kind)
             if err:
@@ -147,6 +150,9 @@ def _check_case_base(request, body):
             return None, kind, _error(409, "debit_requires_tw_ref", "Debit Note is only available after Announce assigns a TW Reference.")
         return None, kind, _error(404, "case_not_found", "Case was not found.")
     payload = case.payload if isinstance(case.payload, dict) else {}
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):
+        return None, kind, _error(409, 'oversea_documents_unavailable', 'Document generation is not available for Oversea Business.')
     from .data_integrity import response_error
     invalid=response_error(case.payload)
     if invalid is not None:return None,kind,invalid
@@ -226,7 +232,8 @@ def _check_case_base(request, body):
         cgl_issues = information_issues(payload)
         if cgl_issues:
             return None, kind, _error(409, "cgl_information_required", "Complete Information before generating a Cover Note: " + "; ".join(row["label"] for row in cgl_issues))
-    if kind == "cover" and not _text(payload, "interest"):
+    from .facility_rules import fixed_interest
+    if kind == "cover" and not fixed_interest(payload) and not _text(payload, "interest"):
         return None, kind, _error(409, "interest_required", "Complete Interest in the case before generating a Cover Note.")
     if kind == "cover" and not _text(payload, "limitOfLiability"):
         return None, kind, _error(409, "limit_of_liability_required", f"Complete {liability_limit_label(payload)} in the case before generating a Cover Note.")

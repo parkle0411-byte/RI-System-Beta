@@ -143,6 +143,9 @@ class AnnounceView(NoStoreMixin, APIView):
         if integrity:
             return _error(400,'case_not_ready','Case data is invalid. Amounts are pending confirmation.',issues=integrity)
         payload = copy.deepcopy(_payload(current))
+        if not current.tw_ref and current.case_kind != 'endorsement':
+            from .facility_rules import prepare_new_draft
+            payload = prepare_new_draft(payload, previous=payload)
         from .draft_input import validate as validate_draft_input
         payload, draft_errors = validate_draft_input(payload)
         if draft_errors:
@@ -186,8 +189,17 @@ class AnnounceView(NoStoreMixin, APIView):
             {"id": d.pk, "kind": d.kind, "reinsurers": d.reinsurers, "is_selected": d.is_selected}
             for d in CaseDocument.objects.filter(case=current).order_by("uploaded_at", "id")
         ]
+        from .oversea import enabled as oversea_enabled
+        if oversea_enabled(payload):
+            from . import storage
+            available = {str(d.pk): storage.exists(d.storage_key) for d in CaseDocument.objects.filter(case=current)}
+            for f in files:
+                f['contentAvailable'] = available[str(f['id'])]
         coverage = wf.coverage_for(payload, files)
         if not coverage["ready"]:
+            if oversea_enabled(payload):
+                note = 'Debit Note or Credit Note' if current.case_kind == 'endorsement' else 'Credit Note'
+                return _error(400, 'documents_not_ready', f'Upload and select the foreign RI Broker {note} for this case before Announce.', coverage=coverage)
             return _error(400, "documents_not_ready",
                           ("Announce requires an Endorsement plus a Signed Slip or Confirmation E-mail covering every reinsurer." if current.case_kind == "endorsement" else "Announce requires an Offer Slip plus a Signed Slip or Confirmation E-mail covering every reinsurer."),
                           coverage=coverage)
@@ -211,8 +223,9 @@ class AnnounceView(NoStoreMixin, APIView):
 
         from . import insured_master
         try:
-            current.insured_master=insured_master.sync(current,payload,actor_info,body)
-        except insured_master.MergeRequired as exc:
+            current.insured_master=insured_master.sync(current,payload,actor_info,body,announcing=True)
+        except (insured_master.MergeRequired, insured_master.ChangeRequired) as exc:
+            transaction.set_rollback(True)
             return Response(exc.data,status=409)
         if payload.get(insured_master.KEY) and not current.insured_master_id:
             return _error(400,'insured_master_required','Link an insured master before Announce.')
@@ -261,6 +274,9 @@ class AnnounceView(NoStoreMixin, APIView):
                     current.tw_ref = candidate
                     break
             payload["twRefSource"] = "system"
+        from .oversea import enabled as oversea_enabled, refresh_transactions as refresh_oversea
+        if oversea_enabled(payload):
+            refresh_oversea(payload, current.tw_ref, now.isoformat())
         if property_enabled(payload):
             payload.update(twRef=current.tw_ref,announcedAt=now.isoformat(),postedAt=now.isoformat())
             refresh_transactions(payload,now.isoformat())
@@ -272,6 +288,7 @@ class AnnounceView(NoStoreMixin, APIView):
         current.row_version += 1
         current.announced_by = actor_info["id"]
         current.announced_at = now
+        payload["financeWorkflowVersion"] = 1
         current.payload = payload
         current.updated_by = actor_info["id"]
         current.save()
@@ -382,6 +399,7 @@ class WorkflowView(NoStoreMixin, APIView):
 
     # ---- Endorsement ----
     def create_endorsement(self, source, request, body, actor_info):
+        from .oversea import enabled as oversea_enabled
         expected = _integer_version(body.get("rowVersion"))
         if expected is None or expected != source.row_version:
             return _error(409, "version_conflict", "This case changed elsewhere. Reload before creating the endorsement.",
@@ -427,6 +445,9 @@ class WorkflowView(NoStoreMixin, APIView):
 
     # ---- Renewal ----
     def create_renewal(self, source, request, body, actor_info):
+        from .oversea import enabled as oversea_enabled
+        if oversea_enabled(source.payload):
+            return _error(409,'oversea_workflow_unavailable','Create a new Oversea Business entry for a separate brokerage record.')
         expected = _integer_version(body.get("rowVersion"))
         if expected is None or expected != source.row_version:
             return _error(409, "version_conflict", "This case changed elsewhere. Reload before creating the renewal.",
@@ -449,6 +470,8 @@ class WorkflowView(NoStoreMixin, APIView):
             return _error(409, "renewal_already_exists",
                           "A renewal already exists for this case, or the source case changed. Reload and try again.")
         payload = wf.build_renewal_payload(_payload(source), source.tw_ref)
+        from .facility_rules import prepare_new_draft
+        payload = prepare_new_draft(payload)
         from .renewal_premiums import seed_renewal_premiums
         seed_renewal_premiums(payload, _payload(root), [_payload(child) for child in children], _payload(source))
         scope_issues = facility_selection_issues(payload)

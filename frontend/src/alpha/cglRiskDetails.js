@@ -3,6 +3,7 @@ import { isStandardCgl } from './cglInformation'
 export const CGL_COVERAGES = [
   'Premises-Operations Liability',
   'Products & Completed-Operation Liability',
+  'Products Liability',
   'Personal & Advertising Injury Liability',
   'Medical Payment',
   'Other'

@@ -55,6 +55,8 @@ def attach_source(p, source):
                                  for r in prior.get('reinsurers', [])],
                   **{k: prior.get(k) for k in DATES},
                   'previousEffectiveDate': prior.get('endoEffectiveDate') if source.parent_case_id else ''}
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(prior):p[CONTEXT]['overseaOriginalPremium']=prior.get('originalPremium')
     return p[CONTEXT]
 
 
@@ -93,6 +95,8 @@ def context_for(case):
 def apply_fixed(p, context):
     p['endorsementRules'] = VERSION
     p[CONTEXT] = copy.deepcopy(context)
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(p) and 'overseaOriginalPremium' in context:p['originalPremium']=context['overseaOriginalPremium']
     for key in FIXED:
         p[key] = copy.deepcopy(context['fixed'].get(key))
     def fixed_rows(submitted):
@@ -140,6 +144,8 @@ def date_edit_error(candidate, stored, *, unlocked=False):
 
 
 def all_zero(p):
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(p):return bool(p.get('parentTwRef')) and all(r.get('brokerageAmount')==0 for r in p.get('reinsurers') or [])
     rows = p.get('reinsurers')
     return (bool(p.get('parentTwRef')) and p.get('originalPremium') == 0
             and isinstance(rows, list) and bool(rows)

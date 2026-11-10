@@ -7,7 +7,7 @@ const accountingFacilities=new Set(["Lloyd's Underwriter Syndicate No. 0609 AUW 
 const accountingName=n=>String(n||'').trim().replace(/\s+/g,' ').toLowerCase()
 export const fixedCedant=p=>objectRows(p?.reinsurers).some(r=>accountingFacilities.has(accountingName(r.name)))
 export const legacyMath=p=>Boolean(p?.accountingLegacyMath || p?.premiumRounding==='legacy-cents' || p?.propertyOriginalRules==='historical')
-export const propertyEnabled=p=>!p?._legacyCalculation && objectRows(p?.reinsurers).some(r=>r.name) && objectRows(p?.reinsurers).filter(r=>r.name).every(r=>accountingFacilities.has(accountingName(r.name)) || !/facility|\bpws\b/i.test(r.name))
+export const propertyEnabled=p=>p?.reinsuranceStructure !== 'OVERSEA' && !p?._legacyCalculation && objectRows(p?.reinsurers).some(r=>r.name) && objectRows(p?.reinsurers).filter(r=>r.name).every(r=>accountingFacilities.has(accountingName(r.name)) || !/facility|\bpws\b/i.test(r.name))
 
 export const perReinsurer=p=>p?.premiumLedgerLayout==='per-reinsurer-v1' || (!p?.premiumLedgerLayout && !legacyMath(p) && !objectRows(p?.transactions).some(t=>t.source!=='claim'&&!t.reversed&&!t.isReversalEntry))
 
