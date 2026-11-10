@@ -25,6 +25,7 @@ from .reference_views import SystemReferenceView
 from .views import HealthView
 
 urlpatterns = [
+    path("api/", include("legacy.urls")),  # /api/legacy、/api/legacy/imports、/api/legacy/options
     path("api/system-reference", SystemReferenceView.as_view(), name="system-reference"),
     path("admin/", admin.site.urls),
     path("health/", HealthView.as_view(), name="health"),

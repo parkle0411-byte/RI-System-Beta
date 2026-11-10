@@ -7,7 +7,6 @@ import Login from '../views/Login.vue'
 import ForgotPassword from '../views/ForgotPassword.vue'
 import ResetPassword from '../views/ResetPassword.vue'
 import CaseWorkspace from '../views/CaseWorkspace.vue'
-import InsuredMaster from '../views/InsuredMaster.vue'
 import RecycleBin from '../views/RecycleBin.vue'
 import FxRates from '../views/FxRates.vue'
 import MasterData from '../views/MasterData.vue'
@@ -19,14 +18,15 @@ import Dashboard from '../views/Dashboard.vue'
 import SystemStatus from '../views/SystemStatus.vue'
 import NoAccess from '../views/NoAccess.vue'
 import SystemReference from '../views/SystemReference.vue'
+import LegacyTransactions from '../views/LegacyTransactions.vue'
 
 // 左側選單與頁首文字：與 Alpha public/app.js 的 allNavigation／headers 相同（順序、名稱、權限、階段標籤）。
 // Alpha 用 activeView 切換畫面；VM 每一項是一個路由，方便重新整理與瀏覽器上一頁。
 export const allNavigation = [
   { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: NAV_ICONS.dashboard, permission: 'dashboard.read' },
   { id: 'cases', path: '/cases', label: 'Account List', icon: NAV_ICONS.cases, anyPermission: ['cases.read.all', 'cases.read.own'] },
-  { id: 'insured', path: '/insured', label: 'Insured Master', icon: NAV_ICONS.mdm, anyPermission: ['cases.read.all'] },   // 2026-10-29：Case Viewer 不顯示
-  { id: 'mdm', path: '/mdm', label: 'Reinsurance MDM', icon: NAV_ICONS.mdm, permission: 'mdm.read' },
+  { id: 'legacy', path: '/legacy', label: 'Legacy Data (Old Register)', icon: NAV_ICONS.accounting, permission: 'legacy.read' },
+  { id: 'mdm', path: '/mdm', label: 'Master Data Management', icon: NAV_ICONS.mdm, anyPermission: ['mdm.read', 'cases.read.all'] },
   { id: 'personnel', path: '/personnel', label: 'Personnel & Accounts', icon: NAV_ICONS.personnel, anyPermission: ['personnel.read', 'personnel.read.team'] },
   { id: 'production', path: '/production', label: 'Production Report', icon: NAV_ICONS.production, permission: 'production.read' },
   { id: 'accounting', path: '/accounting', label: 'Accounting', icon: NAV_ICONS.accounting, permission: 'accounting.read' },
@@ -37,12 +37,13 @@ export const allNavigation = [
 ]
 
 export const headers = {
+  legacy: { kicker: 'Facultative Property', title: 'Legacy Data (Old Register)', subtitle: 'Historical transactions, endorsements and claims' },
   'system-reference': { kicker: 'Reference', title: 'System Reference Data', subtitle: 'Document templates and system guides' },
   dashboard: { kicker: 'Operations', title: 'Dashboard', subtitle: 'Production & Records Overview' },
   insured: { kicker: 'Insured', title: 'Insured Master', subtitle: 'Chinese names, former names and linked policies' },
   cases: { kicker: 'Placement', title: 'Account List', subtitle: 'All outward cases' },
   recycle: { kicker: 'Placement governance', title: 'Draft Recycle Bin', subtitle: 'Five-year restore window · permanent deletion prohibited' },
-  mdm: { kicker: 'Master data', title: 'Reinsurance MDM', subtitle: 'Versioned master records, fixed clauses and lifecycle controls' },
+  mdm: { kicker: 'Master data', title: 'Master Data Management', subtitle: 'Insureds, reinsurers, clauses and business master records' },
   personnel: { kicker: 'Administration', title: 'Personnel & Accounts', subtitle: 'Unified personnel, future accounts and target settings' },
   production: { kicker: 'Reporting', title: 'Production Report', subtitle: 'Monthly read-only production preview' },
   accounting: { kicker: 'Accounting', title: 'Accounting', subtitle: 'Statement of account, transactions and settlement' },
@@ -56,7 +57,7 @@ export function navAllowed(item) {
   return item.permission ? can(item.permission) : (item.anyPermission || []).some(can)
 }
 
-const component = { 'system-reference': SystemReference, cases: CaseWorkspace, insured: InsuredMaster, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
+const component = { legacy: LegacyTransactions, 'system-reference': SystemReference, cases: CaseWorkspace, recycle: RecycleBin, mdm: MasterData, personnel: Personnel, fxrates: FxRates, audit: AuditLog, accounting: Accounting, production: Production, dashboard: Dashboard }
 const routes = [
   { path: '/login', name: 'login', component: Login, meta: { public: true } },
   // 忘記密碼（VM 專有；寄信啟用後登入頁才有入口）
@@ -64,6 +65,7 @@ const routes = [
   { path: '/reset-password', name: 'reset-password', component: ResetPassword, meta: { public: true } },
   { path: '/', name: 'home', redirect: () => (allNavigation.find(navAllowed) || { path: can('foundation.read') ? '/system-status' : '/no-access' }).path },
   ...allNavigation.map((item) => ({ path: item.path, name: item.id, component: component[item.id], meta: { nav: item } })),
+  { path: '/insured', redirect: to => ({ path: '/mdm', query: { ...to.query, tab: 'insured' } }) },
   // System status：只有 System Administrator（foundation.read；後端 /health/ 同樣檢查）
   { path: '/system-status', name: 'system-status', component: SystemStatus, meta: { permission: 'foundation.read' } },
   { path: '/no-access', name: 'no-access', component: NoAccess },

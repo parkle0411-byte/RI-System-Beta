@@ -31,8 +31,8 @@ mysql_root() {  # 密碼在容器內讀取，不出現在命令列或日誌；�
 TABLES=$(echo "SELECT table_name FROM information_schema.tables WHERE table_schema='${DB}' AND table_type='BASE TABLE' ORDER BY 1" | mysql_root "-N ${DB}")
 [ -n "$TABLES" ] || { echo "could not list tables" >&2; exit 1; }
 
-APPEND_ONLY="ri_audit_log ri_entity_snapshots"
-READ_ONLY="django_migrations django_content_type auth_permission"
+APPEND_ONLY="ri_audit_log ri_entity_snapshots ri_legacy_audit"
+READ_ONLY="django_migrations django_content_type auth_permission ri_legacy_import_batches"
 CAN_DELETE="django_session ri_case_documents"
 INSERT_ONLY="ri_production_exclusions ri_data_migration_items"
 in_list() { [[ " $2 " == *" $1 "* ]]; }

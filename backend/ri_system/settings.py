@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     "conversion",
     "reminders",
     "audit",
+    "legacy",
 ]
 
 MIDDLEWARE = [

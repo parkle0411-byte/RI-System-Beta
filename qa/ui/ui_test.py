@@ -14,13 +14,15 @@
   python3 ui_test.py D   （案件此時是 Announced）Finance Staff：Accounting 帳本、記付款、沖銷；管理員：從帳本開啟案件的 SOA 分頁
 """
 import re
+import time
 import sys
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 BASE = "http://nginx"
 PASSWORD = "Ui-Test-Pass-1"
 PHASE = sys.argv[1] if len(sys.argv) > 1 else "A"
 results, console_errors = [], []
+API_TRACKING_SCRIPT = "(() => {\n  const pending = window.__riPendingApi = new Map();\n  const apiUrl = value => {\n    try {\n      const url = new URL(value instanceof Request ? value.url : String(value), location.href);\n      return url.origin === location.origin && url.pathname.startsWith('/api/') ? url.href : null;\n    } catch { return null; }\n  };\n  const nativeFetch = window.fetch.bind(window);\n  window.fetch = (...args) => {\n    const url = apiUrl(args[0]), token = {};\n    if (url) pending.set(token, url);\n    return nativeFetch(...args).then(response => {\n      if (url) {\n        try { response.clone().arrayBuffer().then(() => pending.delete(token), () => pending.delete(token)); }\n        catch { pending.delete(token); }\n      }\n      return response;\n    }, error => { pending.delete(token); throw error; });\n  };\n  const nativeOpen = XMLHttpRequest.prototype.open;\n  const nativeSend = XMLHttpRequest.prototype.send;\n  XMLHttpRequest.prototype.open = function(method, url, ...rest) {\n    this.__riApiUrl = apiUrl(url);\n    return nativeOpen.call(this, method, url, ...rest);\n  };\n  XMLHttpRequest.prototype.send = function(...args) {\n    const token = {};\n    if (this.__riApiUrl) {\n      pending.set(token, this.__riApiUrl);\n      this.addEventListener('loadend', () => pending.delete(token), { once: true });\n    }\n    try { return nativeSend.apply(this, args); }\n    catch (error) { pending.delete(token); throw error; }\n  };\n})();\n"
 shot = [0]
 
 
@@ -76,14 +78,14 @@ def section(page, title):
 
 
 def structure_card(page):
-    """2026-10-16 起 Reinsurance Structure 與 Class 在表單最上方同一張卡片，兩項都選了才顯示後續區塊。"""
+    """2026-10-16 起 Reinsurance Type 與 Class 在表單最上方同一張卡片，兩項都選了才顯示後續區塊。"""
     return page.locator('[data-testid="reinsurance-structure-section"]')
 
 
 def choose_structure_class(page, structure="Quota Share", klass="Property"):
     card = structure_card(page)
-    pick(card, page, "Reinsurance Structure", structure)
-    pick(card, page, "Class", klass)
+    pick(card, page, "Reinsurance Type", structure)
+    pick(card, page, "Insurance Type", klass)
     section(page, "Risk Details").wait_for()
     page.wait_for_timeout(300)
 
@@ -108,16 +110,46 @@ def confirm_box(page, button):
     page.locator(".el-message-box__btns button", has_text=button).click()
 
 
+def wait_api_idle(page):
+    # Drain application requests before changing identity; ignore preview iframe resources.
+    deadline = time.monotonic() + 30
+    quiet_since = None
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(100)
+        pending = page.evaluate("Array.from(window.__riPendingApi?.values() || [])")
+        if pending:
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = time.monotonic()
+        elif time.monotonic() - quiet_since >= .6:
+            return
+    raise TimeoutError("Application requests did not finish before the session transition: " + repr(pending))
+
+
+def goto(page, url):
+    # Full document navigation can discard request completion events from the old
+    # page. Drain its API work first, then wait for the new document's startup calls.
+    wait_api_idle(page)
+    page.goto(url)
+    wait_api_idle(page)
+
+
 def login(page, username):
-    page.goto(BASE + "/login")
+    goto(page, BASE + "/login")
     page.get_by_label("Username").fill(username)
     page.get_by_label("Password").fill(PASSWORD)
     page.get_by_role("button", name="Sign in").click()
     page.wait_for_selector(".app-shell", timeout=15000)
+    wait_api_idle(page)
     console_errors.clear()  # 登入前檢查登入狀態的 401 是預期的
 
 
 def logout(page):
+    # Leaving the editor flushes delayed draft saves before invalidating its session.
+    # Keep console checks intact: no application requests should outlive logout.
+    page.locator(".nav-item", has_text="Dashboard").click()
+    page.wait_for_url(BASE + "/dashboard")
+    wait_api_idle(page)
     page.locator(".page-header button", has_text="Log out").click()
     page.wait_for_url(BASE + "/login")
 
@@ -148,10 +180,10 @@ def phase_a(page):
     page.locator(".rdash").wait_for()
     check("admin lands on the first navigation entry (Dashboard)", page.url.endswith("/dashboard") and page.get_by_text("Total Bound YTD").is_visible(), page.url)
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("sidebar shows the full navigation for an admin (Insured Master added 2026-10-24)", labels == ["Dashboard", "Account List", "Insured Master", "Reinsurance MDM", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
-    for label, marker in [("Account List", "All cases"), ("Insured Master", "Chinese names, former names and linked policies"), ("Reinsurance MDM", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
+    check("sidebar shows unified Master Data Management for an admin", labels == ["Dashboard", "Account List", "Legacy Data (Old Register)", "Master Data Management", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
+    for label, marker in [("Account List", "All cases"), ("Master Data Management", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
-                          ("Production Report", "Versioned monthly close"), ("Accounting", "SoA / Transactions (")]:
+                          ("Production Report", "Versioned monthly close"), ("Accounting", "All Accounts (")]:
         nav(page, label)
         check(f"{label} page loads", page.get_by_text(marker).first.is_visible())
     logout(page)
@@ -159,21 +191,21 @@ def phase_a(page):
     # ---------------- 業務人員：新增草稿 ----------------
     login(page, "ui.sales")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("sales sees Dashboard, Account List, MDM, Production, Accounting (read-only, 2026-09-27), FX", labels == ["Dashboard", "Account List", "Insured Master", "Reinsurance MDM", "Production Report", "Accounting", "FX Rates"], labels)
+    check("sales sees Dashboard, Account List, MDM, Production, Accounting (read-only, 2026-09-27), FX", labels == ["Dashboard", "Account List", "Legacy Data (Old Register)", "Master Data Management", "Production Report", "Accounting", "FX Rates"], labels)
     nav(page, "Account List")
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
     page.wait_for_timeout(800)
-    # 2026-10-16「Reinsurance Structure 與 Class 同區塊先選」：一開始只有 Structure 與 Class，兩項都選了才出現其他欄位與 Save draft
-    check("new case: header 'Account', only Reinsurance Structure and Class shown, Save draft hidden until both are chosen",
+    # 2026-10-16「Reinsurance Type 與 Class 同區塊先選」：一開始只有 Structure 與 Class，兩項都選了才出現其他欄位與 Save draft
+    check("new case: header 'Account', only Reinsurance Type and Class shown, Save draft hidden until both are chosen",
           header_title(page) == "Account" and page.locator(".page-header button", has_text="Cancel").is_visible()
-          and item(structure_card(page), page, "Reinsurance Structure").is_visible() and item(structure_card(page), page, "Class").is_visible()
+          and item(structure_card(page), page, "Reinsurance Type").is_visible() and item(structure_card(page), page, "Insurance Type").is_visible()
           and page.locator(".case-form .el-collapse-item").count() == 0 and item(page, page, "Case Owner").count() == 0
           and page.locator(".page-header button", has_text="Save draft").count() == 0 and page.locator(".form-actions button", has_text="Save draft").count() == 0)
     snap(page, "new-case-structure-class")
-    pick(structure_card(page), page, "Reinsurance Structure", "Quota Share")
+    pick(structure_card(page), page, "Reinsurance Type", "Quota Share")
     check("Structure alone does not reveal the rest of the form", page.locator(".case-form .el-collapse-item").count() == 0)
-    pick(structure_card(page), page, "Class", "Property")
+    pick(structure_card(page), page, "Insurance Type", "Property")
     section(page, "Risk Details").wait_for()
     page.wait_for_timeout(500)
     check("after Structure and Class: Risk Details, Save draft in the header, Review & confirm / Save draft at the bottom",
@@ -202,6 +234,7 @@ def phase_a(page):
           and page.locator(".page-header button", has_text="Save draft").count() == 0, page.locator(".page-header button").all_inner_texts())
     page.locator(".page-header button", has_text="Cancel").click()
     page.locator(".case-table").wait_for()
+    page.locator(".insured-preview-link", has_text="UI Test Insured Ltd").first.wait_for()
     check("the new Draft is listed", page.locator(".insured-preview-link", has_text="UI Test Insured Ltd").count() == 1)
     snap(page, "list-after-draft")
 
@@ -213,9 +246,9 @@ def phase_a(page):
     page.wait_for_timeout(800)
     # 既有案件沿用已存的 Structure 與 Class，直接顯示後續內容（2026-10-16）
     check("editing the Draft: saved Structure and Class kept, details shown directly",
-          selected_label(structure_card(page), page, "Reinsurance Structure") == "Quota Share"
-          and selected_label(structure_card(page), page, "Class").startswith("Property") and section(page, "Risk Details").is_visible(),
-          (selected_label(structure_card(page), page, "Reinsurance Structure"), selected_label(structure_card(page), page, "Class")))
+          selected_label(structure_card(page), page, "Reinsurance Type") == "Quota Share"
+          and selected_label(structure_card(page), page, "Insurance Type").startswith("Property") and section(page, "Risk Details").is_visible(),
+          (selected_label(structure_card(page), page, "Reinsurance Type"), selected_label(structure_card(page), page, "Insurance Type")))
     risk = section(page, "Risk Details")
     pick(risk, page, "Account Executive", "UI AE One")
     pick(risk, page, "Currency", "USD")
@@ -278,7 +311,13 @@ def phase_a(page):
     check("Review blocked: one required field missing", message(page, "Please complete 1 required field before Review & confirm."))
     basis = item(terms, page, "Basis of Valuation")
     check("the missing Basis of Valuation is outlined in red", "is-required-error" in (basis.get_attribute("class") or ""), basis.get_attribute("class"))
+    # Let the existing Draft autosave finish before selecting the missing field.
+    # This keeps a slow test server response from replacing the form mid-click.
+    page.wait_for_timeout(800)
+    wait_api_idle(page)
     pick(terms, page, "Basis of Valuation", "Replacement Value")
+    expect(basis).to_contain_text("Replacement Value")
+    expect(basis).not_to_have_class(re.compile(r".*\bis-required-error\b.*"))
     check("after choosing it the red outline is gone", "is-required-error" not in (basis.get_attribute("class") or ""))
     page.locator(".form-actions button", has_text="Review & confirm").click()
     try:
@@ -380,6 +419,25 @@ def phase_a(page):
                  [item(c, page, "Payment Terms (Days)").locator("input").first.input_value() for c in section(page, "Schedule of Security").locator(".repeat-card").all()])
     check("endorsement inherits Cedant Collection Days and each reinsurer's Payment Terms (Days) from the source case",
           endo_days == ("30", ["45", "60"]), endo_days)
+    security = section(page, "Schedule of Security")
+    ref_inputs = security.locator('.el-form-item').filter(has=page.locator('.el-form-item__label', has_text='Reinsurer Ref.')).locator('input')
+    if not ref_inputs.first.is_visible(): security.locator('.el-collapse-item__header').click()
+    check("endorsement Reinsurer Ref. fields are editable", all(not ref_inputs.nth(i).is_disabled() for i in range(ref_inputs.count())))
+    for i in range(ref_inputs.count()):
+        ref_inputs.nth(i).fill('UI-ENDO-REF-' + str(i + 1)); ref_inputs.nth(i).press('Tab')
+    page.wait_for_timeout(1400); wait_api_idle(page)
+    from urllib.parse import urlparse, parse_qs
+    uid = parse_qs(urlparse(page.url).query)['draft'][0]
+    response = page.context.request.get(BASE + '/api/cases?caseUid=' + uid)
+    payload = response.json()['case']['payload']
+    check("endorsement reference autosave persists each reinsurer independently", [r['settlementRef'] for r in payload['reinsurers']] == ['UI-ENDO-REF-1', 'UI-ENDO-REF-2'])
+    page.reload(); page.locator('.endorsement-editor').wait_for(); page.wait_for_timeout(500)
+    security = section(page, "Schedule of Security")
+    ref_inputs = security.locator('.el-form-item').filter(has=page.locator('.el-form-item__label', has_text='Reinsurer Ref.')).locator('input')
+    if not ref_inputs.first.is_visible(): security.locator('.el-collapse-item__header').click()
+    check("endorsement references survive reload", [ref_inputs.nth(i).input_value() for i in range(ref_inputs.count())] == ['UI-ENDO-REF-1', 'UI-ENDO-REF-2'])
+    check("editing references retains source reinsurer and share locks", all(item(card, page, label).locator('input').first.is_disabled() for card in security.locator('.repeat-card').all() for label in ['Reinsurer', 'Order Hereon (%)', 'Foreign RI Broker', 'Payment Terms (Days)']))
+    snap(page, "endorsement-reference-editable")
     snap(page, "endorsement-form")
     page.locator(".page-header button", has_text="Cancel").click()
     page.locator(".case-table").wait_for()
@@ -460,7 +518,7 @@ def phase_b(page):
     check("restored Draft is back in the list", page.locator(".insured-preview-link", has_text="UI Recycle Me").count() == 1)
 
     # ---------------- MDM（主檔 payload 以 JSON 字串送出，驗證 VM 的相容修正） ----------------
-    nav(page, "Reinsurance MDM")
+    nav(page, "Master Data Management")
     page.locator(".mdm-tab", has_text="Clauses").click()
     page.get_by_role("button", name="+ Add Clause").click()
     dlg = page.locator(".master-dialog")
@@ -533,13 +591,13 @@ def phase_c(page):
     login(page, "ui.viewer")
     labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
     check("Case Viewer sees only Dashboard and Account List (no Insured Master, owner 2026-10-29)", labels == ["Dashboard", "Account List"], labels)
-    page.goto(f"{BASE}/insured")
+    goto(page, f"{BASE}/insured")
     page.wait_for_timeout(1200)
     check("Case Viewer cannot open the Insured Master page directly", "/insured" not in page.url and page.get_by_text("Chinese names, former names and linked policies").count() == 0, page.url)
     nav(page, "Account List")
     check("Case Viewer sees no other people's cases and no + New case", page.locator(".case-table .el-table__row").count() == 0
           and page.get_by_role("button", name="+ New case").count() == 0)
-    page.goto(BASE + "/system-status")
+    goto(page, BASE + "/system-status")
     page.wait_for_timeout(800)
     status = page.request.get(BASE + "/health/")
     check("Case Viewer cannot open System status (page redirected, /health/ 403)", "/system-status" not in page.url
@@ -574,169 +632,71 @@ def row_cells(page, tx):
 
 
 def phase_d(page):
-    """Accounting（SoA／Transactions）。要在階段 F（Production close 產生保費交易）之後執行。
-    2026-10-14 起沒有任何自動結清：餘額歸零後一律是 Awaiting confirmation，由會計按 Confirm settlement。
-    2026-10-16 起（92 項會計規則）保費只能整筆登錄餘額、曾銷帳的金額永久鎖定。"""
+    """Finance-reviewed accounts, full cash, whole reversal and separated Brokerage."""
     login(page, "ui.finance")
-    labels = page.locator(".nav-item span:not(.nav-phase)").all_inner_texts()
-    check("Finance Staff sees Dashboard, Account List, Production Report, Accounting, FX Rates (Account List read-only since 2026-10-07)",
-          labels == ["Dashboard", "Account List", "Insured Master", "Production Report", "Accounting", "FX Rates"], labels)
-    nav(page, "Dashboard")
-    page.locator(".rdash").wait_for()
-    page.wait_for_timeout(1000)
-    kpi = page.locator(".kpi", has_text="In-Force Policies").locator(".val").inner_text()
-    check("Finance Staff Dashboard shows all cases (the Confirmed case is counted)", kpi.isdigit() and int(kpi) >= 1, kpi)
     nav(page, "Accounting")
-    page.locator(".table-card .el-table__row").first.wait_for()
-    check("list shows the premium legs (T1-T3 x 2 reinsurers) and the claim transactions of the case",
-          page.locator(".table-card .el-table__row").filter(has_text="TWPAR2603001").count() == 10, page.locator(".table-card .el-table__row").count())
-    t1 = row_cells(page, "TWPAR2603001-R1-T1")
-    check("Cedant T1 row: receivable of USD 540.00, open, Record payment and Confirm settlement buttons, no case link for Finance",
-          "Receivable" in t1 and "540.00" in t1 and "Open" in t1 and acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Record payment").is_visible()
-          and acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Confirm settlement").is_disabled(), t1)
-    snap(page, "accounting-list")
-
+    page.get_by_test_id("accounting-table").locator(".el-table__row").first.wait_for()
+    for name in ("All Accounts", "Unreconciled Accounts", "Reconciled Accounts", "Settled/Closed", "Brokerage"):
+        check("Accounting tab: " + name, page.get_by_role("tab", name=name, exact=True).is_visible())
+    check("no cash T3 in unreconciled accounts", not page.get_by_test_id("accounting-table").locator(".el-table__row").filter(has_text="-T3").count())
     filters = page.locator(".table-card").first
-    fill(filters, page, "SoA / Transaction / Reference", "nothing-matches")
-    page.wait_for_timeout(300)
-    check("reference filter: no rows", page.get_by_text("No accounting entries.").is_visible())
-    fill(filters, page, "SoA / Transaction / Reference", "twpar2603")
-    page.wait_for_timeout(300)
-    pick(filters, page, "Type", "Claim")
-    check("Type = Claim: 4 claim transactions", page.locator(".table-card .el-table__row").filter(has_text="TWPAR2603001").count() == 4)
-    item(filters, page, "Type").locator(".el-select__wrapper").first.hover()
-    item(filters, page, "Type").locator(".el-select__clear").first.click()
-    page.wait_for_timeout(300)
-
-    check("10 rows (50 or fewer): no pagination bar (2026-10-15 Accounting 表格分頁)", page.locator('[data-testid="accounting-pagination"]').count() == 0)
-
-    # 2026-10-16 92 項會計規則：保費每次須登錄整筆餘額（不能部分收款），只有賠款可部分收付；餘額歸零後仍須人工銷帳
-    acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Record payment").click()
-    dlg = page.locator(".el-dialog").filter(has_text="Record receipt / payment")
-    dlg.wait_for()
-    today = page.evaluate("new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())")
-    shown = item(dlg, page, "Payment date").locator("input").first.input_value()
-    check("payment date defaults to today in Taipei", shown == today, (shown, today))
-    amount = item(dlg, page, "Recorded receipt / payment amount").locator("input").first
-    check("premium: amount fixed to the whole outstanding balance (540.00, not editable), allocation difference 0.00",
-          amount.is_disabled() and amount.input_value().replace(",", "") == "540.00" and "Difference: 0.00" in dlg.inner_text()
-          and "Premiums must be recorded for their full remaining balance" in dlg.inner_text(), (amount.input_value(), dlg.inner_text()[-300:]))
-    # 畫面已鎖住金額；再直接對伺服器送一筆部分保費收款，確認伺服器也拒絕（不能繞過畫面）
-    partial = page.evaluate("""async () => {
-      const list = await (await fetch('/api/accounting?view=list', {cache: 'no-store'})).json()
-      const row = (list.transactionRows || []).find((r) => String(r.txNo || '').startsWith('TWPAR2603001-R1-T1'))
-      if (!row) return {status: 'no row', keys: Object.keys(list)}
-      await fetch('/api/auth/csrf', {cache: 'no-store'})
-      const token = (document.cookie.split('; ').find((c) => c.startsWith('csrftoken=')) || '').split('=')[1] || ''
-      const r = await fetch('/api/accounting', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': decodeURIComponent(token)},
-        body: JSON.stringify({action: 'record_transaction_payments', paymentDate: new Date().toISOString().slice(0, 10), amount: 100, reference: 'UI-PARTIAL', note: '',
-                              allocations: [{caseUid: row.caseUid, txNo: row.txNo, rowVersion: row.caseRowVersion, amount: 100}]})})
-      return {status: r.status, body: await r.text()}
-    }""")
-    console_errors.clear()   # 上面故意送出部分保費，400 在 console 會有一行網路錯誤，屬預期
-    check("server rejects a partial premium receipt (USD 100 of 540)", partial.get("status") in (400, 409, 422), str(partial)[:300])
-    fill(dlg, page, "External system reference", "UI-REMIT-1")
-    snap(page, "accounting-remittance")
-    dlg.get_by_role("button", name="Record payment").click()
-    check("whole-balance receipt recorded", message(page, "Payment recorded"))
-    page.wait_for_timeout(800)
-    t1 = row_cells(page, "TWPAR2603001-R1-T1")
-    check("fully received T1 is NOT settled automatically: received 540.00, outstanding 0.00, Awaiting confirmation",
-          "540.00" in t1 and "0.00" in t1 and "Awaiting confirmation" in t1 and "Settled" not in t1 and "Reported received" in t1, t1)
-    check("T3 (brokerage) stays open until T1 and T2 are confirmed", "Open" in row_cells(page, "TWPAR2603001-R1-T3"), row_cells(page, "TWPAR2603001-R1-T3"))
-    acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="Confirm settlement").click()
-    box = page.locator(".el-message-box")
-    box.wait_for()
-    box.locator("button.el-button--primary").click()
-    check("confirming without a reference is refused", box.get_by_text("A reference or reason is required.").is_visible())
-    box.locator("input").fill("UI bank statement 2026-03")
-    box.locator("button.el-button--primary").click()
-    check("settlement confirmed by Accounting", message(page, "Settlement confirmed by Accounting"))
-    page.wait_for_timeout(800)
-    t1 = row_cells(page, "TWPAR2603001-R1-T1")
-    check("T1 row: Settled after the manual confirmation", "Settled" in t1 and "Awaiting" not in t1, t1)
-
-    # 2026-10-16：曾銷帳的金額永久鎖定（不能再沖回或改金額）——取代原本「沖回已確認的整筆匯款」的檢查
-    acc_row(page, "TWPAR2603001-R1-T1").get_by_role("button", name="History").click()
-    hist = page.locator(".el-dialog").filter(has_text="Payment history")
-    hist.wait_for()
-    check("history lists the receipt and the settlement confirmation", "UI-REMIT-1" in hist.inner_text() and "Confirmed settlement" in hist.inner_text()
-          and "UI bank statement 2026-03" in hist.inner_text(), hist.inner_text()[:400])
-    check("settled amount locked: no Edit amount", hist.get_by_role("button", name="Edit amount").count() == 0)
-    hist.get_by_role("button", name="View registration").first.click()
-    batch = page.locator(".el-dialog").filter(has_text="Receipt / payment record details")
-    batch.wait_for()
-    check("settled receipt cannot be reversed (no Reverse button)", batch.get_by_role("button", name="Reverse recorded amounts").count() == 0, batch.inner_text()[:300])
-    batch.get_by_role("button", name="Close").first.click()
-    page.wait_for_timeout(300)
-    page.keyboard.press("Escape")   # Payment history 對話框也還開著
-    page.wait_for_timeout(300)
-
-    # 尚未銷帳的收款可整筆沖回：Cedant 對 UI Re Beta 的 T1（USD 360.00）
-    acc_row(page, "TWPAR2603001-R2-T1").get_by_role("button", name="Record payment").click()
-    dlg = page.locator(".el-dialog").filter(has_text="Record receipt / payment")
-    dlg.wait_for()
-    fill(dlg, page, "External system reference", "UI-REMIT-2")
-    dlg.get_by_role("button", name="Record payment").click()
-    check("R2 T1 whole-balance receipt recorded", message(page, "Payment recorded"))
-    page.wait_for_timeout(800)
-    check("R2 T1: Awaiting confirmation", "Awaiting confirmation" in row_cells(page, "TWPAR2603001-R2-T1"), row_cells(page, "TWPAR2603001-R2-T1"))
-    acc_row(page, "TWPAR2603001-R2-T1").get_by_role("button", name="History").click()
-    hist = page.locator(".el-dialog").filter(has_text="Payment history")
-    hist.wait_for()
-    hist.get_by_role("button", name="View registration").first.click()
-    batch = page.locator(".el-dialog").filter(has_text="Receipt / payment record details")
-    batch.wait_for()
-    reverse = batch.get_by_role("button", name="Reverse recorded amounts")
-    check("unsettled receipt details offer a whole reversal", reverse.is_visible())
-    reverse.click()
-    box = page.locator(".el-message-box")
-    box.wait_for()
-    box.locator("input").fill("UI wrong remittance")
-    box.locator("button.el-button--primary").click()
-    check("whole receipt reversed", message(page, "Receipt / payment records reversed"))
-    page.wait_for_timeout(800)
-    t = row_cells(page, "TWPAR2603001-R2-T1")
-    check("after the reversal the balance is open again (no confirmation pending)", "Awaiting confirmation" not in t and "Settled" not in t and "Open" in t and "360.00" in t, t)
-    check("record details stay open showing the reversed status (no further Reverse button)",
-          batch.is_visible() and batch.get_by_role("button", name="Reverse recorded amounts").count() == 0 and "reversed" in batch.inner_text().lower(), batch.inner_text()[:300])
-    snap(page, "accounting-after-reversal")
-    batch.get_by_role("button", name="Close").first.click()
-    page.wait_for_timeout(300)
-    page.keyboard.press("Escape")
-    page.wait_for_timeout(300)
-
-    # 2026-10-16：回到 Accounting 先顯示上次清單並在背景更新（更新完成前不能記收款或確認）。先把更新的請求擋住，才看得到「Updating…」
-    nav(page, "Dashboard")
-    held = []
-    page.route("**/api/accounting?view=list", lambda route: held.append(route))
-    nav(page, "Accounting")
-    banner = page.locator('[data-testid="accounting-refreshing"]')
-    try:
-        banner.wait_for(timeout=5000)
-    except Exception:  # noqa: BLE001
-        pass
-    check("returning to Accounting: last list shown at once with the 'Updating…' banner, recording hidden while refreshing",
-          banner.is_visible() and "Updating" in banner.inner_text() and "Settled" in row_cells(page, "TWPAR2603001-R1-T1")
-          and page.locator(".table-card").get_by_role("button", name="Record payment").count() == 0, banner.all_inner_texts())
-    snap(page, "accounting-refreshing")
-    for route in held:   # 放行擋住的更新請求，再取消攔截
-        route.continue_()
-    page.unroute("**/api/accounting?view=list")
-    banner.wait_for(state="hidden", timeout=15000)
-    check("after the refresh the banner disappears and recording is available again",
-          acc_row(page, "TWPAR2603001-R2-T1").get_by_role("button", name="Record payment").is_visible())
-    logout(page)
-
-    login(page, "ui.admin")
-    nav(page, "Accounting")
-    page.locator(".table-card .el-table__row").first.wait_for()
-    acc_row(page, "TWPAR2603001-R1-T1").locator(".table-action").first.click()
-    page.locator(".case-detail-tabs").wait_for()
-    page.wait_for_timeout(800)
-    active = page.locator(".case-detail-tabs .el-tabs__item.is-active").inner_text().strip()
-    check("admin: transaction number in Accounting opens the case on the SOA tab", page.url.endswith("/cases") and "SOA" in active, (page.url, active))
-    snap(page, "accounting-open-case")
+    fill(filters, page, "TW Ref", "nothing-matches")
+    check("TW Ref filter finds no unrelated rows", page.get_by_text("No matching accounts. Premium accounts are created at Announce.").is_visible())
+    fill(filters, page, "TW Ref", "TWPAR2603001")
+    r = acc_row(page, "TWPAR2603001-R1-T1")
+    check("unreviewed T1 has review action instead of cash action", r.get_by_role("button", name="Mark reviewed", exact=True).is_visible() and r.get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
+    r.get_by_role("button", name="Mark reviewed", exact=True).click()
+    dlg = page.get_by_role("dialog", name="Finance account review", exact=True)
+    fill(dlg,page,"Review reference","UI-FINANCE-REVIEW")
+    dlg.get_by_role("button",name="Mark reviewed",exact=True).click()
+    dlg.wait_for(state="hidden")
+    page.get_by_role("tab",name="Reconciled Accounts",exact=True).click()
+    r=acc_row(page,"TWPAR2603001-R1-T1")
+    check("Finance review moves account into reviewed tab", r.get_by_role("button",name="Record receipt / payment",exact=True).is_visible())
+    r.get_by_role("button",name="Record receipt / payment",exact=True).click()
+    dlg=page.get_by_role("dialog",name="Record receipts / payments",exact=True)
+    fill(dlg,page,"Accounting Dept. Ref.","UI-REMIT-1")
+    ar=dlg.locator('.el-table__body-wrapper tbody tr').first
+    check('Cash Amount prefills the outstanding balance',float(ar.locator('.el-input-number input').first.input_value().replace(',',''))==540)
+    ar.locator('.el-input-number input').first.fill('100');ar.locator('.el-input-number input').first.press('Tab')
+    dlg.get_by_role("button",name="Record registrations",exact=True).click()
+    expect(ar).to_contain_text('Recorded')
+    dlg.get_by_role('button',name='Close',exact=True).click();dlg.wait_for(state='hidden')
+    r=acc_row(page,"TWPAR2603001-R1-T1")
+    check('partially received premium stays Open', 'Open' in r.inner_text())
+    r.get_by_role('button',name='Record receipt / payment',exact=True).click()
+    dlg=page.get_by_role('dialog',name='Record receipts / payments',exact=True)
+    fill(dlg,page,'Accounting Dept. Ref.','UI-REMIT-REMAINDER')
+    check('remaining Cash Amount is prefilled',float(dlg.locator('.el-input-number input').first.input_value().replace(',',''))==440)
+    dlg.get_by_role('button',name='Record registrations',exact=True).click()
+    expect(dlg.locator('.el-table__body-wrapper tbody tr').first).to_contain_text('Recorded')
+    dlg.get_by_role('button',name='Close',exact=True).click();dlg.wait_for(state='hidden')
+    page.get_by_role("tab",name="Settled/Closed",exact=True).click()
+    bank=acc_row(page,"TWPAR2603001-R1-T1")
+    check('Settled/Closed shows fully settled T1', 'Settled' in bank.inner_text())
+    bank.get_by_role('button',name='History',exact=True).click()
+    hist=page.get_by_role('dialog',name='Account history',exact=True)
+    hist.get_by_role('button',name='View registration',exact=True).first.click()
+    dlg=page.get_by_role('dialog',name='Receipt / payment registration details',exact=True)
+    check('settled registration can be reversed before downstream payment',dlg.get_by_role('button',name='Reverse entire registration',exact=True).is_visible())
+    check('direct payment amount edit is removed',page.get_by_role('button',name='Edit amount',exact=True).count()==0)
+    dlg.get_by_role('button',name='Reverse entire registration',exact=True).click();box=page.locator('.el-message-box');box.locator('input').fill('UI correction');box.get_by_role('button',name='OK',exact=True).click();box.wait_for(state='hidden')
+    check('whole reversal preserves registration with replacement entry',dlg.get_by_role('button',name='Re-register',exact=True).is_visible())
+    dlg.get_by_role('button',name='Close',exact=True).click()
+    hist.get_by_role('button',name='Close this dialog',exact=True).click()
+    page.get_by_role('tab',name='Reconciled Accounts',exact=True).click()
+    check('reversed receipt reopens balance and retains Finance review','Open' in row_cells(page,'TWPAR2603001-R1-T1'))
+    page.get_by_role('tab',name='Brokerage',exact=True).click()
+    check('Brokerage has independent dependency details',page.get_by_role('button',name='Brokerage settlement details',exact=True).count()>0)
+    snap(page,'accounting-brokerage')
+    nav(page,'Dashboard');held=[];page.route('**/api/accounting?view=list',lambda route:held.append(route));nav(page,'Accounting')
+    banner=page.get_by_test_id('accounting-refreshing');banner.wait_for(timeout=8000)
+    check('cached list remains read-only during background update',banner.is_visible() and page.get_by_role('button',name='Mark reviewed',exact=True).count()==0)
+    for route in held:route.continue_()
+    page.unroute('**/api/accounting?view=list');banner.wait_for(state='hidden',timeout=15000)
+    logout(page);login(page,'ui.admin');nav(page,'Accounting')
+    acc_row(page,'TWPAR2603001-R2-T1').locator('.table-action').first.click();page.locator('.case-detail-tabs').wait_for();page.wait_for_timeout(400)
+    check('account identifier opens case SoA', '/cases' in page.url and 'soa' in page.locator('.case-detail-tabs .el-tabs__item.is-active').inner_text().lower())
     logout(page)
 
 
@@ -831,8 +791,10 @@ def phase_f(page):
     import zipfile
     login(page, "ui.admin")
     nav(page, "Production Report")
-    label, ym = month_label(0)
-    next_label, next_ym = month_label(1)
+    # The fixture policy starts on 2026-03-01; the current rule attributes
+    # original-policy performance to inception, not the Announce month.
+    label, ym = "Mar 2026", "2026-03"
+    next_label, next_ym = "Apr 2026", "2026-04"
     production_month(page, label)
     rows = page.locator(".production-table .el-table__body-wrapper .el-table__row").filter(has_text="TWPAR2603001")
     check(f"{ym} preview lists the case: one row per reinsurer", rows.count() == 2, rows.count())
@@ -942,14 +904,29 @@ def phase_g(page):
     page.wait_for_timeout(1200)
     kpi = page.locator(".kpi", has_text="In-Force Policies").locator(".val").inner_text()
     check("Dashboard: In-Force Policies >= 1 (the Confirmed case from phase F)", kpi.isdigit() and int(kpi) >= 1, kpi)
-    check("trend chart drawn with current, prior and target lines", page.locator(".trend-svg polyline").count() == 3
+    check("trend chart drawn with two bar series and target line", page.locator(".trend-svg polyline").count() == 1
+          and page.locator(".trend-bar.prior").count() == tpe.month and page.locator(".trend-bar.current").count() == tpe.month
           and page.locator(".trend-point.target").count() == tpe.month)
     check("reinsurer mix lists the case's reinsurers", "UI Re Alpha" in page.locator(".card", has_text="Top Reinsurers").inner_text())
     fill_width = page.locator(".card", has_text="Top Reinsurers").locator(".mix-fill").first.bounding_box()["width"]
     track_width = page.locator(".card", has_text="Top Reinsurers").locator(".mix-track").first.bounding_box()["width"]
     check("VM fix: mix bars are filled (60% bar about 60% of the track)", 0.55 < fill_width / track_width < 0.65, (fill_width, track_width))
+    year_select = page.get_by_test_id('dashboard-trend-year')
+    year_select.click()
+    options = page.locator('.el-select__popper[aria-hidden="false"] .el-select-dropdown__item')
+    check('trend selector offers the latest five years', options.all_text_contents() == [str(tpe.year-i) for i in range(5)])
+    options.filter(has_text=str(tpe.year-1)).click()
+    page.wait_for_timeout(1800)
+    check('historical year renders twelve pairs of bars', page.locator('.trend-bar.prior').count() == 12 and page.locator('.trend-bar.current').count() == 12)
+    left=page.locator('.trend-bar.prior').first; right=page.locator('.trend-bar.current').first
+    check('prior bar lies to the left of current bar', float(left.get_attribute('x')) + float(left.get_attribute('width')) < float(right.get_attribute('x')))
+    check('year selection preserves other KPIs', page.locator('.kpi', has_text='In-Force Policies').locator('.val').inner_text() == kpi)
+    year_select.click()
+    page.locator('.el-select__popper[aria-hidden="false"] .el-select-dropdown__item').filter(has_text=str(tpe.year)).click()
+    page.wait_for_timeout(1800)
+    check('returning to current year restores current month count', page.locator('.trend-bar.current').count() == tpe.month)
     snap(page, "dashboard")
-    page.goto(BASE + "/system-status")
+    goto(page, BASE + "/system-status")
     page.locator(".el-descriptions").wait_for()
     page.wait_for_timeout(800)
     check("System Administrator can open System status (backend and database OK)", page.locator(".el-descriptions .el-tag", has_text="正常").count() == 3,
@@ -1012,7 +989,7 @@ def phase_h(page):
     endo = next((r for r in chain if r.get("caseKind") == "endorsement" and r.get("status") == "draft"), None)
     check("endorsement Draft found through the workflow API", endo is not None, [(r.get("caseKind"), r.get("status")) for r in chain])
     if endo:
-        page.goto(f"{BASE}/cases?case={endo['caseUid']}")
+        goto(page, f"{BASE}/cases?case={endo['caseUid']}")
         page.locator(".case-detail-tabs").wait_for()
         page.locator(".case-detail-tabs .el-tabs__item", has_text="Documentation").click()
         page.wait_for_timeout(800)
@@ -1061,8 +1038,9 @@ def phase_r(page):
 
 
 def phase_p1(page):
-    page.goto(BASE + "/login")
+    goto(page, BASE + "/login")
     page.get_by_text("Forgot password?").wait_for(timeout=10000)
+    wait_api_idle(page)
     console_errors.clear()  # 登入前檢查登入狀態的 401 是預期的（同 login()）
     check("e-mail enabled: 'Forgot password?' is shown on the login page", page.get_by_text("Forgot password?").is_visible())
     page.get_by_text("Forgot password?").click()
@@ -1084,7 +1062,7 @@ def message_text(page, text):
 def phase_p2(page):
     link = open("out/reset-link.txt").read().strip()
     check("reset link taken from the e-mail", link.startswith(BASE + "/reset-password?uid="), link[:80])
-    page.goto(link)
+    goto(page, link)
     page.get_by_label("New password", exact=True).fill("short")
     page.get_by_label("Confirm new password").fill("short")
     page.get_by_role("button", name="Set new password").click()
@@ -1094,7 +1072,7 @@ def phase_p2(page):
     page.get_by_role("button", name="Set new password").click()
     check("new password set", message_text(page, "Your password has been reset"))
     snap(page, "reset-password")
-    page.goto(BASE + "/login")
+    goto(page, BASE + "/login")
     page.get_by_label("Username").fill("ui.sales")
     page.get_by_label("Password").fill("Ui-Test-Pass-9")
     page.get_by_role("button", name="Sign in").click()
@@ -1102,7 +1080,7 @@ def phase_p2(page):
     check("sign in with the new password", page.locator(".app-shell").is_visible())
     console_errors.clear()
     logout(page)
-    page.goto(link)
+    goto(page, link)
     page.get_by_label("New password", exact=True).fill("Ui-Test-Pass-8")
     page.get_by_label("Confirm new password").fill("Ui-Test-Pass-8")
     page.get_by_role("button", name="Set new password").click()
@@ -1113,7 +1091,7 @@ def phase_p2(page):
 def phase_k(page):
     """VM 才有（2026-09-29）：Fixed Clause 依 Class。MDM 設定 Class 條款與再保人條款的適用 Class，案件表單依 Class 帶入。"""
     login(page, "ui.admin")
-    nav(page, "Reinsurance MDM")
+    nav(page, "Master Data Management")
     dlg = page.locator(".master-dialog")
     page.locator(".mdm-tab", has_text="Classes").click()
     page.get_by_role("button", name="+ Add Class").click()
@@ -1128,6 +1106,17 @@ def phase_k(page):
     row = page.locator(".el-table__row", has_text="UI Marine Cargo")
     check("class row shows 1 fixed clause", re.search(r"\b1\b", row.inner_text()) is not None, row.inner_text())
 
+    # QS key-in currently permits Property/CGL only. Keep Marine MDM coverage,
+    # and create the permitted CGL fixture for the case class-switch assertion.
+    page.get_by_role("button", name="+ Add Class").click()
+    dlg.wait_for()
+    fill(dlg, page, "Code", "GL")
+    fill(dlg, page, "Name", "Commercial General Liability")
+    pick(dlg, page, "Clause", "NMA2918")
+    dlg.get_by_role("button", name="+ Add fixed clause").click()
+    dlg.locator(".el-dialog__footer button", has_text="Add record").click()
+    check("permitted CGL class carries the fixed clause for the case-switch check", message(page, "Class added"))
+    page.wait_for_timeout(500)
     page.locator(".mdm-tab", has_text="Reinsurers").click()
     page.locator(".el-table__row", has_text="UI Re Alpha").get_by_role("button", name="Edit").click()
     dlg.wait_for()
@@ -1155,7 +1144,7 @@ def phase_k(page):
     page.get_by_role("button", name="+ New case").click()
     page.locator(".case-form").wait_for()
     page.wait_for_timeout(800)
-    # 2026-10-16 起 Class 在最上方的 Structure 卡片（與 Reinsurance Structure 一起先選）
+    # 2026-10-16 起 Class 在最上方的 Structure 卡片（與 Reinsurance Type 一起先選）
     top = structure_card(page)
     security = section(page, "Schedule of Security")
     def conditions():
@@ -1163,12 +1152,14 @@ def phase_k(page):
         return section(page, "Reinsurance Conditions").inner_text()
     choose_structure_class(page, "Quota Share", "Property")
     pick(security.locator(".repeat-card").nth(0), page, "Reinsurer", "UI Re Alpha")
+    section(page, "Reinsurance Conditions").get_by_text("LPO9999", exact=True).wait_for()
     text = conditions()
     check("Property case: all-class and Property-only reinsurer clauses, no Marine class clause",
           all(c in text for c in ("LMA3333", "INTERMEDIARY", "LMA5390", "LPO9999")) and "NMA2918" not in text, text[:400])
-    pick(top, page, "Class", "UI Marine Cargo")
+    pick(top, page, "Insurance Type", "Commercial General Liability")
+    section(page, "Reinsurance Conditions").get_by_text("NMA2918", exact=True).wait_for()
     text = conditions()
-    check("changing Class re-applies clauses: Marine class clause in, Property-only clause out",
+    check("changing Class re-applies clauses: CGL class clause in, Property-only clause out",
           all(c in text for c in ("LMA3333", "LMA5390", "NMA2918")) and "LPO9999" not in text, text[:400])
     pick(security.locator(".repeat-card").nth(0), page, "Reinsurer", "UI Re Beta (Facility)")
     text = conditions()
@@ -1177,14 +1168,17 @@ def phase_k(page):
     logout(page)
 
 
+exec(open('legacy_entry_ui.py').read())
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
     page.set_default_timeout(15000)
+    page.add_init_script(API_TRACKING_SCRIPT)
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"L": phase_l, "A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")
