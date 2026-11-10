@@ -60,7 +60,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 **測試方式**
 - **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 111 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有 Oversea Business 的 O 專項 29 項＋分期／批單 22 項、舊案 L 專項 15 項（2026-11-10 起完整執行時一併跑，L 會自動準備舊案測試資料），合計 272 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有 Oversea Business 的 O 專項 29 項＋分期／批單 22 項、舊案 L 專項 15 項、Accounting 載入失敗 X 專項 9 項（2026-11-10 起完整執行時一併跑，L 會自動準備舊案測試資料），合計 281 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
 - **實作前確認（2026-11-08 業主決定，所有修改都適用，含小改與 bug 修正）**：動工前先向業主說明——理解的需求、預計做法、影響範圍、屬於必問或小改、預計的測試範圍；業主確認後才開始實作（業主在指示中明說「直接做」即視為已確認）。實作中發現做法或範圍需要改變，先停下再問。
@@ -82,6 +82,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
     - **部署前測試**的對象是**這次要部署的候選映像**＝以最新已部署版本為基礎＋本次修改建置的 `ri-backend`／`ri-frontend`。API 測試用 `QA_BACKEND_IMAGE=<候選後端映像> scripts/run_isolated_qa.sh …`；畫面測試必須用 `UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定同一組候選映像（不可用預設的正式映像）。部署時直接部署測過的那組映像，不重新建置；回報寫明測試用的映像名稱。
     - 候選映像若含其他 session 尚未完成的修改（`git status` 有不屬於本次的變更），先問業主是否一起部署，不要自行帶上線。
 - **Docker 映像保留（2026-11-06 業主決定）**：`ri-*` 自建映像一律保留——容器使用中（含已停止）、7 天內建立或 tag 日期在 7 天內、本文件／腳本／compose 有寫到（含「部署與回復紀錄」的回復映像）、每個功能最後一個 `before-*` 回滾點；其餘可刪。第三方映像（mysql、nginx、node、python…）不自動刪。清理用 `scripts/docker_cleanup.sh`（預設預覽，`--apply` 才刪；`KEEP_DAYS` 可調），同時清超過 7 天的建置快取與 dangling 映像。每週三 06:00（台灣時間）由 parkle 的 crontab 自動執行，紀錄在 `logs/docker-cleanup.log`。不要用 `docker system prune -a` 或 `docker rmi -f`。
+- **大型測試時段與記憶體（2026-11-10 業主決定）**：VM 只有 8 GB，測試與正式系統共用。壓測（`qa/stress/`）、全部 API／全部畫面測試等大型測試在下班後執行；跑完檢查 `free -m`，有 swap 時在空閒記憶體大於 swap 用量的前提下執行 `sudo swapoff -a && sudo swapon -a`，把正式系統搬回記憶體（約數分鐘，網站不停）。用不到的測試環境要停止（不刪除）。2026-11-10 已停止：`ri-legacy-preview`（`~/RI System/legacy-tab-work/qa/legacy-preview`）、`ri-legacy-release-pilot`（`~/RI System/legacy-tab-work/deployment/pilot`）、`ri-oversea-effective-ref-api-a`（`/tmp/ri-oversea-effective-ref-20261109/api-a/qa/isolated`）；資料 volume 保留，需要時 `docker start $(docker ps -aq --filter label=com.docker.compose.project=<名稱>)` 重新啟動（取代 11-09「兩組舊案環境保持執行」的決定）。
 - **開發工具舊版本清理（2026-11-07 業主決定）**：`scripts/tools_cleanup.sh`（預設預覽，`--apply` 才刪）每週三 06:00 接在 Docker 清理之後由 parkle 的 crontab 自動執行，紀錄在 `logs/tools-cleanup.log`。清 parkle 家目錄內 Codex、Claude Code、VS Code 伺服器與擴充套件的舊版本、VS Code 擴充安裝檔快取，以及 `/tmp/ri-*` 暫存；一律保留執行中、目前版本、最新版本與 7 天內的項目，工具正在更新時跳過。不處理其他帳號（如 olin1）。
 
 **開發注意**
@@ -326,7 +327,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 原收付登錄歷史由帳款明細查看（History主分頁已改為Settled/Closed）。整筆登錄保留有效／已沖回狀態及實際收付款日期。分三欄：應收沖銷合計、應付沖銷合計、實收付淨額（新登錄按幣別及方向分開，淨額僅供參考；純抵銷只限既有歷史）。可查會計參考號、TW Ref、對象與日期，展開逐筆現金／抵銷、沖回與替代關係。
 - 明細 Applied amount 改 Receipt / Payment Amount；一般歷史不顯示 Swiss period，Swiss需要時列 Swiss settlement due date。T3按鈕 Brokerage settlement details。
 - 移除舊人工結清、取消結清、直接更改付款金額及 Offset with original 入口。Complete missing days 只補歷史缺漏，有效天數與新公告帳款不能用此入口更改。
-- 每頁預設100列（50／100／200／500）；?view=list精簡資料，返回頁面先顯示快取並背景更新，更新前財務操作停用。窄螢幕表格橫向捲動，不以左固定欄遮擋操作。
+- 每頁預設100列（50／100／200／500）；?view=list精簡資料，返回頁面先顯示快取並背景更新，更新前財務操作停用。載入失敗（伺服器錯誤、連線中斷）時在表格上方常駐紅色提示與 Retry，不顯示「No matching accounts」；已有上次載入的清單時保留並註明載入時間，財務操作停用到重新載入成功（2026-11-10）。窄螢幕表格橫向捲動，不以左固定欄遮擋操作。
 
 - 所有新收付金額及合計以 ISO 幣別代碼顯示（例 USD 1,000.00、TWD 30,000），各幣別分列應收、應付、參考淨額；待登錄與已登錄合計分開。彈窗已完成列唯讀，失敗列可更正／移出後重試。
 
@@ -560,6 +561,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-10 | 每週 Debug＋優化：舊案清單頁碼上限、Great American 稅率依名稱比對、舊案網址無 W002 警告、Accounting 舊案歷史快取、nginx 記錄回應時間、畫面測試併入 L | `backups/debug_fixes_1110_20261110_190455` | `ri-backend:before-debug-fixes-1110-20261110_190455`／`ri-frontend:before-debug-fixes-1110-20261110_190455` | 候選映像 111 組 API、272 項畫面（含 L）；正式資料 Accounting 回應逐位元組相同；無 migration、無資料寫入 |
 
+| 11-10 | Accounting 載入失敗時常駐錯誤＋Retry（只換前端）；畫面測試加 X 專項 | `backups/accounting_load_error_20261110_234645` | `ri-frontend:before-accounting-load-error-20261110_234645` | 前端建置、完整畫面 281 項（含 X 9 項）；後端與資料不變（業主決定不跑 API） |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 ## 近期變更
@@ -646,3 +649,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 2026-11-10：依業主確認部署 Facility 共通欄位、Property QS 畫面及 Great American 再保人 Tax 規則；續保 0%，批單沿用來源稅率。
 
 - 2026-11-10：每週 Debug＋優化（業主確認部署）：舊案清單頁碼超大時回空白頁（原本伺服器錯誤）；已公告案件的 Great American 原稅率改依再保人名稱比對（調換／刪除其他再保人不再誤擋，新原單／續保仍固定 0%）；舊案網址寫法調整（網址不變）；Accounting 舊案歷史結果快取（逐位元組相同）；nginx 記錄回應時間；`run_ui_test.sh` 完整執行加入舊案 L 專項。
+
+- 2026-11-10：§3 新增「大型測試時段與記憶體」：大型測試下班後跑、跑完把 swap 搬回記憶體；停止 3 組已不使用的測試環境（不刪除）。
+
+- 2026-11-10：Accounting 載入失敗時常駐紅色提示與 Retry，保留上次清單並停用財務操作；不再顯示「0 筆」（業主確認部署）。
