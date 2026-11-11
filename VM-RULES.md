@@ -449,6 +449,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
   - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（僅資料，**不進 Production 報表**）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
   - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
   - 匯入列不建立 Case、不進 Production／Dashboard、不能退回草稿或編輯業務資料。
+  - 從匯入列新增批單／理賠時沿用來源險種（GL 匯入列新增的仍為 CGL；2026-11-11 修正）。
 - 以下為 2026-11-09 首次匯入（已於 2026-11-11 清空）的說明，保留供查。
 - 歷史匯入資料保持唯讀：`2022~2025 Swiss Re (PD).xlsx` 的 Facultative Property，共 **3,693 筆**；原流水號 **F13333 排除、不匯入**。不建立舊案 Case，不產生歷史 Production Report。
 - 所有歷史交易均已完成對帳及結清；Accounting 的已對帳／Settled/Closed 可查，未對帳區不納入；不補造對帳人、對帳日期或銀行收付明細。新舊資料用獨立的來源欄區分，不更動既有 premium／claim 分類。
@@ -581,6 +582,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | 11-11 | 清空 Legacy Data (Old Register) 全部 3,694 筆（業主要求，之後重新匯入；不換映像） | `backups/legacy_clear_20261111_155937` | （資料變更，無映像；回復＝還原該備份的 database.sql） | 正式資料副本演練：只有 3 個 Legacy 資料表改變；Accounting 去除 Legacy 後、Dashboard、Production 5 個月份逐位元組一致；重跑腳本自動停止 |
 
 | 11-11 | Legacy 網頁匯入 Register（系統管理員預覽→匯入；PD／GL、已收付建 Accounting Dept. Ref. 收付登錄、未收付續追 Accounting；不進 Production）；資料庫權限調整 | `backups/legacy_import_web_20261111_174810` | `ri-backend:before-legacy-import-web-20261111_174810`／`ri-frontend:before-legacy-import-web-20261111_174810` | 全部 API（含新 `legacy_import_web`）、完整畫面測試（含新 I 專項）；以 AGSC Register 在正式資料副本演練 181 筆逐筆核對、其他資料不變；無 migration、部署時未匯入任何資料 |
+
+| 11-11 | 修正：從匯入的 GL 舊資料新增批單／理賠時險種誤為 Property，改為沿用來源險種（只換後端） | `backups/legacy_gl_entry_20261111_182515` | `ri-backend:before-legacy-gl-entry-20261111_182515` | Legacy 相關 API 6 組（含 legacy_import_web 48 項，新檢查以舊程式驗證會失敗）、畫面 A＋L＋I；無 migration |
 
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 

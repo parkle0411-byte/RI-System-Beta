@@ -34,6 +34,9 @@ def create(person,body):
     data.update(kind=body['kind'],currency=source.currency,revenueMonth='',expiryDate=source.data.get('expiryDate',''),
         sourceEffectiveDate=source.data.get('effectiveDate',''),sourceExpiryDate=source.data.get('expiryDate',''),
         sourceAe=source.data.get('ae',''),sourceReference=source.reference)
+    # 2026-11-11: keep the source class (imported GL rows stay CGL); not an editable field.
+    for key in ('classOfBusiness','classCode'):
+        if source.data.get(key):data[key]=source.data[key]
     if body['kind']=='claim':data.update(gross=0,commissionRate=0,taxRate=0,brokerage=0,subAe='',aePct=100)
     t=LegacyTransaction.objects.create(reference=source.reference,currency=source.currency,
         owner_id=person.pk,created_by_id=person.pk,reference_transaction=source,data=data)

@@ -189,6 +189,17 @@ try:
         hist = LegacyTransaction.objects.get(number='QA9001')
         fpost(dict(action='review_accounts', date='2026-11-11', members=[mem('QA9001-T1')]), 403)
 
+        from legacy.ledger import payload_for
+        for kind in ('endorsement', 'claim'):
+            r = clients['sales'].post('/api/legacy', json.dumps(dict(referenceTransaction=str(t['QA9003'].uid), kind=kind)), content_type='application/json')
+            new = LegacyTransaction.objects.get(pk=r.json()['uid']) if r.status_code == 201 else None
+            check('new ' + kind + ' from a GL import keeps GL (CGL) in data and Accounting', new and new.data.get('classCode') == 'GL'
+                  and new.data.get('classOfBusiness') == 'Commercial General Liability' and payload_for(new)['classCode'] == 'GL', r.content[:300])
+            if new:
+                r = clients['sales'].patch('/api/legacy', json.dumps(dict(id=str(new.uid), version=new.version, action='save', data={'remark': 'QA'})), content_type='application/json')
+                check('saving the ' + kind + ' draft keeps GL', r.status_code == 200 and LegacyTransaction.objects.get(pk=new.uid).data.get('classCode') == 'GL', r.content[:300])
+        r = clients['sales'].post('/api/legacy', json.dumps(dict(referenceTransaction=str(t['QA9001'].uid), kind='endorsement')), content_type='application/json')
+        check('new endorsement from a PD import stays PD', r.status_code == 201 and LegacyTransaction.objects.get(pk=r.json()['uid']).data.get('classCode') == 'PD', r.content[:300])
         r = admin.patch('/api/legacy', json.dumps(dict(id=str(t['QA9003'].uid), version=t['QA9003'].version, action='retract')), content_type='application/json')
         check('imported rows cannot be returned to draft', r.status_code == 409, r.content[:200])
         check('imported endorsement never feeds Production', admin.get('/api/production-report?month=2026-09').json()['rows'] == [])
