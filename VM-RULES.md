@@ -129,7 +129,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 ### 4.4 共通驗證
 - 期間：Expiration 必須晚於 Effective（Property 與 CGL QS 不接受同日）；所有原單、續保與改期後的完整期間**最長 18 個曆月**（剛好上限可以；月底按曆月末日）。
 - 付款天數：有填或正式檢查時，必須是至少 15 的整數。每期 Cedant 及每期每家一般再保人天數各自獨立填寫（不繼承），缺漏列「待確認」且不能收付。
-- **Premium Installments**：啟用時至少兩期（儲存即檢查，零期／一期拒絕）；批單不能分期。CGL QS 另有：第一期 Payment Base Date／Performance Month 預帶 Effective Date，各期預帶 Case 與各再保人天數，每期保費合計須等於 100% Premium。
+- **Premium Installments**：啟用時至少兩期（儲存即檢查，零期／一期拒絕）；一般批單不能分期，Oversea 依 §4.8。CGL QS 另有：第一期 Payment Base Date／Performance Month 預帶 Effective Date，各期預帶 Case 與各再保人天數，每期保費合計須等於 100% Premium。
 - **TWD 保費**（Case 100% Premium、每家再保人、每期）只准整數，前後端擋小數，不偷偷取整；USD 兩位小數。
 - **Order Hereon**：新填或修改時每家 > 0、≤ 100%、最多 8 位小數，合計 ≤ 100%；未修改的歷史比例保留。
 - **Loss Record**：一般保費 Case 儲存時（Oversea Business 依 §4.8）年數與 broker advised date 必填；New 可填 0 年（明細必須為空，文件顯示 Loss Clean since operation.）；Renew 至少 1 年（續保可帶入 0 但儲存前要改）；明細的日期、原因、金額都必填（CGL QS 金額 > 0）。Additional Loss Record Notes 輸入已隱藏（舊資料保留）。
@@ -156,9 +156,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 ### 4.8 Oversea Business（國外業務特殊案件，2026-11-05）
 - 結構 `OVERSEA`，Class 只能 Fine Art／Terrorism；獨立簡化表單的財務必填項目為 **100% Premium、Share (%)、Brokerage 金額、Reinsurance Broker、Cedant、實際收付款日期**。Currency 隨 Premium 選定，新案預設 USD；負責人與 AE 預帶登入者。不要求一般案件的承保條件、Loss Record、條款。
 - 補充 Insured (EN)、Insured (CN)、Policy Period（日期及時間）與 Account Executive；AE 預帶登入者，可由主檔選擇調整。所有列出的輸入欄位均為 Announce 必填，包含中英文被保險人、保單起訖日期與 AE；Draft 可暫存未完成資料。中文被保險人沿用既有 Announce 建立正式主檔規則。Policy Period 與實際收付款日分別保存。
-- **Brokerage 直接是 T3 金額**，不乘保費或 Share、不從 T1−T2 推算。100% Premium × Share 僅作分攤保費資訊。TWD 為整數，其他貨幣最多兩位小數；正佣金為向所選 Broker 收款、負佣金為付款。不建 T1／T2、零額保費排程、分績或 Claim。原單可選擇 Brokerage 分期，比例各期 >0 且總和 100%；依貨幣精度自動分攤，尾差優先調整第一期；若該期不足以吸收，依序調整後續期，避免反向金額。每期分別填實際收付款日，分別產生獨立 T3。
+- **Brokerage 直接是 T3 金額**，不乘保費或 Share、不從 T1−T2 推算。100% Premium × Share 僅作分攤保費資訊。TWD 為整數，其他貨幣最多兩位小數；正佣金為向所選 Broker 收款、負佣金為付款。不建 T1／T2、零額保費排程、分績或 Claim。原單與批單可各自選擇 Brokerage 分期，比例各期 >0 且總和 100%；依貨幣精度自動分攤，尾差優先調整第一期；若該期不足以吸收，依序調整後續期，避免反向金額。每期分別填實際收付款日，分別產生獨立 T3。
 - **Accounting Date＝實際收付款日期−10 個日曆天**，可跨月、跨年、閏年；實際日期原樣保留。原單 Announce 以 Policy Period 的 Effective Date 年月及 Class 代碼分配 TW Ref；實際收付款日及分期日期不影響取號；單筆 `...-R1-T3`，分期為 `...-R1-I1-T3`、`...-R1-I2-T3` 等。各期 Accounting Date 依各自實際日減 10 天，Production 依各期實際月份認列各期精確 Brokerage，關帳不重複建帳。
-- 批單沿用既有最新來源與原單鏈限制，編號接原單 `-E01`、`-E02`。100% Premium、Share、Currency、Broker、Cedant 與 Policy Period 沿用來源並鎖定；另填批單生效日、說明、本次 Brokerage 增減金額（加收正、退款負）及實際收付款日。每張批單為單筆獨立 T3，不改寫原單分期、收付或已認列業績。Brokerage-only 批單的 Production 保費為 0，僅認列本次 Brokerage 增減，沿用的原單保費資訊不再計入保費統計。
+- 批單沿用既有最新來源與原單鏈限制，編號接原單 `-E01`、`-E02`。100% Premium、Share、Currency、Broker、Cedant 與 Policy Period 沿用來源並鎖定；另填批單生效日、說明、本次 Brokerage 增減金額（加收正、退款負）及實際收付款日。每張批單可選擇單筆或分期，每期建立獨立 T3；不改寫原單分期、收付或已認列業績。Brokerage-only 批單的 Production 保費為 0，僅認列本次 Brokerage 增減，沿用的原單保費資訊不再計入保費統計。
 - 不生成任何文件（畫面隱藏，後端封鎖），Announce 前須上傳並選用國外 RI Broker 提供的 Note：Original 僅接受 Credit Note；批單可用 Debit Note 或 Credit Note，不依金額正負自動決定種類。每案／每張批單獨立附件，不能沿用原單附件；未選用、已刪或檔案本體遺失均不能 Announce。不要求一般 Offer Slip／Signed Slip。Draft 可先儲存，最終須確認 Note、Brokerage 及實際日期。
 - 更正 TW Ref. 後，既有提醒紀錄的主旨、內容及交易鍵原樣保留；系統依舊號與目前交易編號的對應延續提醒節奏，不重發或跳過既有週期。
 - T3 是獨立佣金現金帳款，不依賴不存在的 T1／T2。未結清時在 Accounting 未對帳／已對帳清單處理；部分收付仍為 Open，全額完成才移入 Brokerage，All Accounts 始終保留。每次財務登錄可用不同實際收付款日，案件／期別日期、Accounting Date 與 Production 認列月份維持原值；不因部分收付款改動。
@@ -230,7 +230,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **固定沿用來源、不可改**：幣別、險種、結構、Reinsured、再保人名單與 Order Hereon、Foreign RI Broker、Cedant 與再保人的佣金／Deductions／Tax／付款天數、Performance Split。AE／Case Owner 可改；其他風險資料須在該區塊按 Edit 才能改。
 - **逐區塊 Edit**：批單所有區塊預設收合；每次只能有一個區塊在編輯，按 Done、收合或切換前先保存再鎖回。Endorsement details 與 Premium 可直接填。Schedule of Security 的 Reinsurer Ref. 可直接填寫／修改並沿用草稿自動儲存；其餘固定來源欄位及 Performance Split 仍只能看。
 - 改期：Risk Details 選 Period 並按 Edit；生效日依最新已公告期間檢查（可等於起日或到期日）；後續批單生效日不得早於前一張（可同日）；完整期間最長 18 個曆月。
-- 保費為帶正負號的差額（補費正、退費負）；同張可不同再保人混合補退。**Case 與每家再保人全為 0** 才於 Announce 後直接 Confirmed 並排除 Production。批單單期、不可分期。
+- 保費為帶正負號的差額（補費正、退費負）；同張可不同再保人混合補退。**Case 與每家再保人全為 0** 才於 Announce 後直接 Confirmed 並排除 Production。一般批單單期、不可分期；Oversea 可分期，見 §4.8。
 - 正式編號 Announce 才配置：Original 編號 -E01、E02…；雙編號兩邊同序號；純 AUW 只衍生 AUW 編號。
 - 有較新的批單，或批單鏈上有未完成批單時不能續保（案件頁顯示原因）。
 
@@ -578,6 +578,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-11 | 更新完整 MDM／Schema 指南 | `backups/release_guides_20261111_093819` | `ri-backend:before-release-guides-20261111_093819` | 35 表、354 欄逐一核對，離線版面、隔離與正式下載及權限驗證；無 migration 或業務資料寫入 |
 
+| 11-11 | Oversea 批單 Brokerage 分期 | `backups/oversea_endo_installments_20261111_111953` | `ri-backend:before-oversea-endo-installments-20261111_111953`／`ri-frontend:before-oversea-endo-installments-20261111_111953` | 完整 API／畫面與批單正負分期驗證；無 migration |
+
 | 11-11 | 左側選單圖示每項不同（範本 A：Legacy 與 Accounting、MDM 與 System Reference Data 不再共用圖示；只換前端） | `backups/nav_icons_20261111_114334` | `ri-frontend:before-nav-icons-20261111_114334` | 前端建置、完整畫面 283 項（候選映像 `ri-frontend:nav-icons-candidate`）；正式檔案與原始碼建置逐檔一致；後端與資料不變 |
 
 | 11-11 | 畫面文字：移除側欄左下角環境說明；Dashboard Total Gross Premium 固定顯示兩位小數；Top Reinsurers 標題改為 Top Reinsurers/RI Broker by Ceded Premium（只換前端） | `backups/sidebar_dashboard_text_20261111_134156` | `ri-frontend:before-sidebar-dashboard-text-20261111_134156` | 前端建置、畫面 A 56／56＋G 20／20（候選映像 `ri-frontend:sidebar-dashboard-text-candidate`）；正式檔案與候選映像逐檔一致；後端與資料不變 |
@@ -689,3 +691,5 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 2026-11-10：§3 新增「大型測試時段與記憶體」：大型測試下班後跑、跑完把 swap 搬回記憶體；停止 3 組已不使用的測試環境（不刪除）。
 
 - 2026-11-10：Accounting 載入失敗時常駐紅色提示與 Retry，保留上次清單並停用財務操作；不再顯示「0 筆」（業主確認部署）。
+
+- 2026-11-11：Oversea 批單可自行選擇 Brokerage 分期；完成驗證、備份及部署。
