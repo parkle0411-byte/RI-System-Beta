@@ -421,7 +421,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - Insured 清單（2026-11-03）：以使用者人工整理的 1,752 筆為基礎，依明確選定的 15 組名稱統一寫法，並去除完全重複的力山工業，整理為 1,736 筆。寶結企業／寶結實業、台耀科技／台燿科技各自保留；勇信貿易／勇信物流組合及天后闆妹的江X諺／江効諺兩版待查原文件，這次不合併。其餘未確認候選繼續分開。System Guides 的 `insured-list` 提供 Excel、來源核對明細及整理說明；僅參考清單，未更動正式主檔或 Case。
 
-現行指南（Word）：完整 MDM 指南、完整 Schema 指南（2026-11-02 版）；Swiss Re Facility PD、Swiss Re Facility CGL、Great American Facility PD、QBE Facility PD、Allianz Facility PD（10-30 改提醒日）、Syndicate 609 AUW Facility PD 專屬規則（皆 2026-10-29 版）。舊問卷與舊版隨備份保留。
+現行指南（Word）：完整 MDM 指南、完整 Schema 指南（2026-11-11 版）；Swiss Re Facility PD、Swiss Re Facility CGL、Great American Facility PD、QBE Facility PD、Allianz Facility PD（10-30 改提醒日）、Syndicate 609 AUW Facility PD 專屬規則（皆 2026-10-29 版）。舊問卷與舊版隨備份保留。
 
 ## 15. 效能設定與量測（1 萬件壓測資料）
 
@@ -576,6 +576,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-10 | Accounting 載入失敗時常駐錯誤＋Retry（只換前端）；畫面測試加 X 專項 | `backups/accounting_load_error_20261110_234645` | `ri-frontend:before-accounting-load-error-20261110_234645` | 前端建置、完整畫面 281 項（含 X 9 項）；後端與資料不變（業主決定不跑 API） |
 
+| 11-11 | 更新完整 MDM／Schema 指南 | `backups/release_guides_20261111_093819` | `ri-backend:before-release-guides-20261111_093819` | 35 表、354 欄逐一核對，離線版面、隔離與正式下載及權限驗證；無 migration 或業務資料寫入 |
+
 | 11-11 | 左側選單圖示每項不同（範本 A：Legacy 與 Accounting、MDM 與 System Reference Data 不再共用圖示；只換前端） | `backups/nav_icons_20261111_114334` | `ri-frontend:before-nav-icons-20261111_114334` | 前端建置、完整畫面 283 項（候選映像 `ri-frontend:nav-icons-candidate`）；正式檔案與原始碼建置逐檔一致；後端與資料不變 |
 
 | 11-11 | 畫面文字：移除側欄左下角環境說明；Dashboard Total Gross Premium 固定顯示兩位小數；Top Reinsurers 標題改為 Top Reinsurers/RI Broker by Ceded Premium（只換前端） | `backups/sidebar_dashboard_text_20261111_134156` | `ri-frontend:before-sidebar-dashboard-text-20261111_134156` | 前端建置、畫面 A 56／56＋G 20／20（候選映像 `ri-frontend:sidebar-dashboard-text-candidate`）；正式檔案與候選映像逐檔一致；後端與資料不變 |
@@ -597,6 +599,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 2026-11-11：依業主要求清空 Legacy Data (Old Register) 全部 3,694 筆，準備重新匯入；匯入批次標記 withdrawn，稽核紀錄保留。
 
 - 2026-11-11：部署流程改版（2026-11-17 起生效）：實作前確認即含部署同意，測試通過後直接部署並回報；測試未全過、範圍變更、寫入正式資料、基礎版本已變時仍先問業主。
+
+- 2026-11-11：本次公告與完整 MDM／Schema 指南更新：依目前 VM 核對資料表、對帳及部分收付、Oversea、Insured 與舊案流程；只更新參考文件。
 
 - 2026-11-04：System Guides 與 Document Templates 新增全體共用拖拉／鍵盤排序、持久保存及衝突保護。
 
