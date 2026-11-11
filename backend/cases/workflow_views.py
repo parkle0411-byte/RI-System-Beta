@@ -159,7 +159,8 @@ class AnnounceView(NoStoreMixin, APIView):
             latest = _live(Case.objects).filter(parent_case_id=root.pk).order_by('-id').first()
             if latest is not None and latest.pk != current.pk:
                 return _error(409, 'latest_endorsement_required', 'A newer endorsement exists. Continue from the latest case in the chain.', latestCaseUid=str(latest.case_uid))
-            if payload.get("installmentEnabled") is True or payload.get("performanceInstallments"):
+            from .oversea import enabled as oversea_enabled
+            if not oversea_enabled(current.payload) and (payload.get("installmentEnabled") is True or payload.get("performanceInstallments")):
                 return _error(400, "endorsement_installments_not_allowed", "Endorsements must use a single premium settlement.")
             from .endorsement_rules import context_for, apply_fixed
             apply_fixed(payload, context_for(current))

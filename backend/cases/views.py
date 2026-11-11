@@ -386,7 +386,8 @@ class CasesView(NoStoreMixin, APIView):
             if current.case_kind == "endorsement" and current.parent_case_id:
                 from .endorsement_rules import context_for, apply_fixed, date_edit_error
                 endorsement_context = context_for(current)
-                if candidate.get('installmentEnabled') is True or candidate.get('performanceInstallments'):
+                from .oversea import enabled as oversea_enabled
+                if not oversea_enabled(current.payload) and (candidate.get('installmentEnabled') is True or candidate.get('performanceInstallments')):
                     return _error(400, 'endorsement_installments_not_allowed', 'Endorsements must use a single premium settlement.')
                 error = date_edit_error(candidate, draft_input.input_for(current.payload or {}), unlocked=body.get("endorsementUnlocked") is True)
                 if error:

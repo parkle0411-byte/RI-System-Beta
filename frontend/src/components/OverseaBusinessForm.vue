@@ -37,7 +37,7 @@ function togglePeriods(enabled) {
       <div class="form-grid cols-2"><el-form-item label="Endorsement Effective Date" required><DraftDate v-model="payload.endoEffectiveDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" /></el-form-item><el-form-item label="Endorsement Description" required><el-input v-model="payload.endoText" type="textarea" maxlength="5000" /></el-form-item></div>
       <p class="document-help">Enter this endorsement's Brokerage movement: positive for an additional receipt; negative for a refund.</p>
     </section>
-    <section v-if="!payload.parentTwRef" data-testid="oversea-installments">
+    <section data-testid="oversea-installments">
       <el-switch :model-value="payload.installmentEnabled" @update:model-value="togglePeriods" active-text="Brokerage Installments" />
       <div v-if="payload.installmentEnabled">
         <p>Enter ratios totaling 100%. Each installment has its own actual receipt / payment date. Rounding differences are adjusted in the first installment.</p>

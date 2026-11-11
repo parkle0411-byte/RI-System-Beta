@@ -104,13 +104,15 @@ def apply_fixed(p, context):
         return [{**(submitted[i] if i < len(submitted) and isinstance(submitted[i], dict) else {}),
                  **copy.deepcopy(row)} for i, row in enumerate(context['reinsurers'])]
     p['reinsurers'] = fixed_rows(p.get('reinsurers'))
-    p['installmentEnabled'], p['performanceInstallments'] = False, []
+    if not oversea_enabled(p):
+        p['installmentEnabled'], p['performanceInstallments'] = False, []
     if isinstance(p.get('draftInput'), dict):
         raw = p['draftInput']
         for key in FIXED:
             raw[key] = copy.deepcopy(p[key])
         raw['reinsurers'] = fixed_rows(raw.get('reinsurers'))
-        raw['installmentEnabled'], raw['performanceInstallments'] = False, []
+        if not oversea_enabled(p):
+            raw['installmentEnabled'], raw['performanceInstallments'] = False, []
 
 
 def endorsement_issues(p, context=None):

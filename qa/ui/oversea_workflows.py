@@ -28,12 +28,15 @@ with sync_playwright() as pw:
  for index,(amount,date) in enumerate([(12.34,'2050-04-05'),(-5.67,'2050-05-05')]):
   fill(page,'Brokerage Adjustment',amount);field(page,'Endorsement Description').locator('textarea').fill('Additional Brokerage' if amount>0 else 'Brokerage refund')
   f=field(page,'Endorsement Effective Date').locator('input');f.fill('2049-06-01' if index==0 else '2049-07-01');f.press('Enter');page.keyboard.press('Escape')
-  f=field(page,'Receipt / Payment Date').locator('input');f.fill(date);f.press('Enter');page.keyboard.press('Escape')
+  page.get_by_test_id('oversea-installments').locator('.el-switch').click();expect(page.get_by_test_id('oversea-installment-row')).to_have_count(2)
+  for n,stamp in enumerate([date,'2050-06-05'],1):
+   f=field(page,f'Installment {n} Receipt / Payment Date').locator('input');f.fill(stamp);f.press('Enter');page.keyboard.press('Escape')
+  check('endorsement accepts installment dates '+str(amount))
   with page.expect_response(lambda r:r.url.endswith('/api/cases') and r.request.method=='PUT') as saved:page.get_by_role('button',name='Save changes',exact=True).last.click()
   check('signed endorsement saves '+str(amount),saved.value.status==200);child_uid=saved.value.json()['case']['caseUid'];page.goto('http://nginx/cases?case='+child_uid)
   upload_broker_note(page, 'Credit Note' if index==0 else 'Debit Note', 'endorsement-note.pdf')
   page.get_by_role('button',name='Review & Announce',exact=True).click();dialog=page.locator('.announce-dialog');dialog.locator('.announce-attestation').click();dialog.get_by_role('button',name='Announce',exact=True).click();waitapi(page)
-  child=request(page,'/api/cases?caseUid='+child_uid,None,'GET')['body']['case'];check('signed endorsement has independent E reference and T3 '+str(amount),child['twRef']==root+f'-E{index+1:02d}' and len(child['payload']['transactions'])==1 and child['payload']['transactions'][0]['amount']==amount)
+  child=request(page,'/api/cases?caseUid='+child_uid,None,'GET')['body']['case'];parts=child['payload']['transactions'];check('signed endorsement has independent E reference and T3 installments '+str(amount),child['twRef']==root+f'-E{index+1:02d}' and len(parts)==2 and round(sum(t['amount'] for t in parts),2)==amount and all((t['amount']>=0 if amount>0 else t['amount']<=0) for t in parts))
   page.screenshot(path=f'out/oversea-endorsement-{index+1}.png',full_page=True)
   page.get_by_role('tab',name='Documentation',exact=True).click();expect(page.get_by_role('heading',name='Generated documents',exact=True)).to_have_count(0);check('signed endorsements offer no generated documents '+str(amount))
   if index==0:page.get_by_role('tab',name='Endorsements',exact=True).click();page.get_by_role('button',name='Create endorsement',exact=True).click();page.locator('.el-message-box:visible').get_by_role('button',name='Create draft',exact=True).click();expect(page.get_by_test_id('oversea-endorsement-fields')).to_be_visible()

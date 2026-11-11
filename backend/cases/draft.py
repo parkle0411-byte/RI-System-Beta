@@ -382,7 +382,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["performanceInstallments"] = performance_installments
     if value["installmentEnabled"] and len(performance_installments) < 2 and not property_scope(inp) and not oversea_enabled(inp):
         errors.append(MINIMUM_INSTALLMENTS_MESSAGE)
-    if allow_negative_premiums and (value["installmentEnabled"] or performance_installments):
+    if allow_negative_premiums and not oversea_enabled(inp) and (value["installmentEnabled"] or performance_installments):
         errors.append("Endorsements must use a single premium settlement; installments are not allowed.")
     if allow_negative_premiums and value["installmentEnabled"] and value["originalPremium"] is not None:
         for index, row in enumerate(performance_installments):
@@ -578,7 +578,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         issues.append({"field": field, "label": label})
 
     value = payload if isinstance(payload, (dict, list)) else {}
-    if js_truthy(get(value, "parentTwRef")) and (get(value, "installmentEnabled") is True or get(value, "performanceInstallments")):
+    if js_truthy(get(value, "parentTwRef")) and not oversea_enabled(value) and (get(value, "installmentEnabled") is True or get(value, "performanceInstallments")):
         add("installmentEnabled", "Endorsements must use a single premium settlement")
     if not _is_int_number(get(value, "ownerPersonnelId")) or js_to_number(get(value, "ownerPersonnelId")) < 1:
         add("ownerPersonnelId", "Case Owner")

@@ -19,7 +19,6 @@ export function overseaIssues(p, ready = false) {
     const scale = p.currency === 'TWD' ? 1 : 100
     if (Math.abs(Number(value)*scale - Math.round(Number(value)*scale)) > 1e-7) add(field,(field==='originalPremium'?'100% Premium':'Brokerage')+(scale===1?' must be a whole number for TWD.':' must have at most two decimal places.'))
   }
-  if (p.parentTwRef && p.installmentEnabled) add('installmentEnabled','Endorsements use one T3 brokerage movement.')
   const periods=p.performanceInstallments || []
   if (p.installmentEnabled && new Set(periods.map(r=>r.id)).size!==periods.length) add('performanceInstallments','Installment IDs must be unique.')
   if (!ready) return result

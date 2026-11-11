@@ -33,8 +33,6 @@ def issues(payload, ready=False):
         add('reinsurers', 'Select one Reinsurance Broker for Oversea Business.')
     if payload.get('splitEnabled'):
         add('reinsuranceStructure', 'Oversea Business does not support staff splitting.')
-    if payload.get('parentTwRef') and payload.get('installmentEnabled'):
-        add('installmentEnabled', 'Endorsements use one T3 brokerage movement.')
     rows = payload.get('performanceInstallments') or []
     if payload.get('installmentEnabled'):
         ids = [str(r.get('id') or '') for r in rows if isinstance(r, dict)]

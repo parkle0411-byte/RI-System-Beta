@@ -12,8 +12,10 @@ def apply_endorsement_terms(payload, root, *, announced_at=None):
     """The original policy owns Cedant days; the server owns Announce time."""
     from .calc.swiss_facility import applies as swiss_applies
     payload["cedantTermsBasis"] = "case"
-    payload["installmentEnabled"] = False
-    payload["performanceInstallments"] = []
+    from .oversea import enabled as oversea_enabled
+    if not oversea_enabled(payload):
+        payload["installmentEnabled"] = False
+        payload["performanceInstallments"] = []
     payload["endorsementAnnouncedAt"] = announced_at.isoformat() if announced_at else ""
 
 
