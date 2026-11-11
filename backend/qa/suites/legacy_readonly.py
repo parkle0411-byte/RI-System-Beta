@@ -63,13 +63,14 @@ try:
                     r=getattr(c,method)('/api/legacy',json.dumps(dict(id=str(t.uid),version=t.version,action='confirm',data={'brokerage':9999})),content_type='application/json')
                     check(role+' cannot '+method+' a legacy transaction',r.status_code==403,r.content[:200])
                 r=post(c,'/api/legacy/imports',{'action':'commit','id':str(batch.pk),'sha256':batch.sha256})
-                check(role+' cannot import or withdraw through HTTP',r.status_code==403)
+                # 2026-11-11: System Administrators import on the web; an imported batch cannot be committed again.
+                check(role+(' cannot re-import an imported batch' if role=='admin' else ' cannot import through HTTP'),r.status_code==(409 if role=='admin' else 403),r.content[:200])
         c=clients['admin'];rows=c.get('/api/accounting?view=list').json()['transactionRows']
         old=[r for r in rows if r.get('origin')=='legacy']
         check('one old transaction renders three native-style legs',len(old)==3)
         check('historical rows already reconciled without fabricated review identity',all(r['financeReviewed'] and not r['reviewDate'] and not r['reviewedByName'] and not r['reviewBatchId'] for r in old))
         check('historical rows remain settled with no cash events',all(r['settlement']=='settled' and r['outstanding']==0 and not r['entries'] and not r['canRecord'] for r in old))
-        check('historical display month is preserved',all(r['accountDisplayDate']=='2020-01' for r in old))
+        check('historical display date is the Effective Date (same position as native rows)',all(r['accountDisplayDate']=='2020-01-01' for r in old))
         check('Statement No. remains the source statement',all(r['statementNo']=='OLD-STATEMENT-1' for r in old))
         check('no new native Finance review batch inferred',FinanceReconciliationBatch.objects.count()==0)
         check('history never creates native Cases or Production reports',Case.objects.count()==before_cases and ProductionReport.objects.count()==0)
@@ -81,11 +82,11 @@ try:
             dict(caseUid=str(uuid.uuid4()),txNo='native-pretend',rowVersion=1),
             dict(caseUid=str(t.uid),txNo='QA-LEG-1-T1',rowVersion=t.version)]))
         check('mixed native/legacy write rejected before partial work',r.status_code==403 and FinanceReconciliationBatch.objects.count()==0)
-        for sql in ('DELETE FROM ri_legacy_transactions',
-                    'UPDATE ri_legacy_import_batches SET filename=filename','DELETE FROM ri_legacy_import_batches',
-                    "INSERT INTO ri_legacy_import_batches(id,filename,sha256,storage_key,status,manifest,created_by,created_at,withdrawal) VALUES('00000000000000000000000000000001','x','x','x','preview','{}','qa',NOW(),'{}')",
+        for sql in ('DELETE FROM ri_legacy_transactions','DELETE FROM ri_legacy_import_batches',
                     'UPDATE ri_legacy_audit SET action=action','DELETE FROM ri_legacy_audit'):
             check('runtime SQL mutation denied: '+sql.split(' SET')[0],denied(sql))
+        check('runtime may record web import batches (INSERT/UPDATE, still no DELETE)',not denied(
+            "INSERT INTO ri_legacy_import_batches(id,filename,sha256,storage_key,status,manifest,created_by,created_at,withdrawal) VALUES('00000000000000000000000000000001','x','x','x','preview','{}','qa',NOW(),'{}')") and not denied('UPDATE ri_legacy_import_batches SET filename=filename'))
         unchanged=LegacyTransaction.objects.get(pk=t.pk)
         check('all rejected writes preserve the old record',unchanged.version==1 and unchanged.data==t.data and unchanged.financial=={})
         check('no historical Production preview rows',c.get('/api/production-report?month=2020-01').json()['rows']==[])

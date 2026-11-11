@@ -306,7 +306,9 @@ def payment_batches(cases):
                 'currency': e.get('currency') or payload.get('currency'), 'partyName': name,
                 'reference': e.get('reference') or '', 'note': e.get('note') or '',
                 'createdAt': e.get('createdAt') or '', 'createdByName': e.get('createdByName') or '',
-                'replacementOfBatchId': e.get('replacementOfBatchId') or '', 'allocations': []})
+                'replacementOfBatchId': e.get('replacementOfBatchId') or '', 'allocations': [],
+                # 2026-11-11: receipts/payments settled in a Register before import are read-only.
+                **({'importedSettlement': True} if e.get('entryKind') == 'legacy-import' else {})})
             b['allocations'].append({'caseUid': case['caseUid'], 'caseRowVersion': case['rowVersion'],
                 'caseStatus': case['status'], 'twRef': case['twRef'], 'manualTwRef': payload.get('manualTwRef') or '',
                 'txNo': e.get('transactionNo') or '', 'source': tx.get('source', 'premium'), 'entryId': e.get('id'),
@@ -324,7 +326,7 @@ def payment_batches(cases):
         b['pureOffset'] = b['netCash'] == 0 and any(x['offsetAmount'] for x in a)
         b['allocationCount'] = len({(x['caseUid'], x['txNo'] or x['entryId']) for x in a})
         b['status'] = 'reversed' if reversed_count == len(a) else 'partial_reversal' if reversed_count else 'recorded'
-        b['canReverse'] = not reversed_count and all(x['entryId'] and (x['caseStatus'] in ('posted', 'closed') or x['caseStatus'] == 'reversed' and x['source'] == 'claim') for x in a)
+        b['canReverse'] = not b.get('importedSettlement') and not reversed_count and all(x['entryId'] and (x['caseStatus'] in ('posted', 'closed') or x['caseStatus'] == 'reversed' and x['source'] == 'claim') for x in a)
     replacements = {}
     for b in batches.values():
         if b['replacementOfBatchId']: replacements.setdefault(b['replacementOfBatchId'], []).append(b['batchId'])

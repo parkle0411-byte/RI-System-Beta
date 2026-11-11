@@ -7,7 +7,8 @@ from .services import rate_for, audit, fail
 
 
 def report_sources(month):
-    return LegacyTransaction.objects.filter(status='confirmed',historical=False,revenue_month=month,data__kind='endorsement').select_related('corrects').order_by('uid')
+    # Imported Register rows (batch set) never feed Production (owner 2026-11-11: Revenue Month is data only).
+    return LegacyTransaction.objects.filter(status='confirmed',historical=False,batch__isnull=True,revenue_month=month,data__kind='endorsement').select_related('corrects').order_by('uid')
 
 
 def append_preview(preview,month):

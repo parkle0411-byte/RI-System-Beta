@@ -61,6 +61,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 111 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有 Oversea Business 的 O 專項 29 項＋分期／批單 22 項、舊案 L 專項 15 項、Accounting 載入失敗 X 專項 9 項（2026-11-10 起完整執行時一併跑，L 會自動準備舊案測試資料），合計 281 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
 - **實作前確認（2026-11-08 業主決定，所有修改都適用，含小改與 bug 修正）**：動工前先向業主說明——理解的需求、預計做法、影響範圍、屬於必問或小改、預計的測試範圍；業主確認後才開始實作（業主在指示中明說「直接做」即視為已確認）。實作中發現做法或範圍需要改變，先停下再問。
@@ -442,13 +443,20 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - **2026-11-11 業主要求清空、之後重新匯入**：以維護者身分刪除全部 3,694 筆交易（匯入 3,693 筆＋草稿 TWPF241010 1 筆）；匯入批次標記 `withdrawn`（保留紀錄與原始 Excel），Legacy Audit 新增 `register_cleared` 一筆並保留既有紀錄，原因選項 4 筆保留。清空前演練確認 Accounting（扣除 Legacy 項目）、Dashboard、Production（含已凍結 2026-08／10）逐位元組不變。備份 `backups/legacy_clear_20261111_155937`。下方 3,693 筆等描述為清空前狀態；重新匯入沿用業主授權維護程序（HTTP 匯入仍不開放）。
 
+- **網頁匯入 Register（2026-11-11 業主決定）**：
+  - 限 System Administrator，在 Legacy 分頁 Import Batches 上傳 Register（工作表 `Facultative`）→ 預覽 → 確認匯入（核對 SHA256）。預覽有任何錯誤或警告都不能匯入；沒有新交易可匯入時也不能確認。不提供網頁撤回；匯錯以業主授權維護程序處理。可分批匯入各再保人的 Register；已匯入的流水號自動略過。
+  - 接受 Class PD 與 GL（GL 以 CGL 舊資料呈現）；Fac / Claim 必填；不再限定已結清。業主指定的排除（`import_exclusions.json`，F13333）與更正（`import_corrections.json`，F2898：Fac / Claim＝Fac、New / Renew＝New）在預覽列出，原始 Excel 值保留。
+  - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（僅資料，**不進 Production 報表**）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
+  - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
+  - 匯入列不建立 Case、不進 Production／Dashboard、不能退回草稿或編輯業務資料。
+- 以下為 2026-11-09 首次匯入（已於 2026-11-11 清空）的說明，保留供查。
 - 歷史匯入資料保持唯讀：`2022~2025 Swiss Re (PD).xlsx` 的 Facultative Property，共 **3,693 筆**；原流水號 **F13333 排除、不匯入**。不建立舊案 Case，不產生歷史 Production Report。
 - 所有歷史交易均已完成對帳及結清；Accounting 的已對帳／Settled/Closed 可查，未對帳區不納入；不補造對帳人、對帳日期或銀行收付明細。新舊資料用獨立的來源欄區分，不更動既有 premium／claim 分類。
 - Description = 英文被保險人；Cedant's Policy No. = Statement No.；Bkg. (in TWD) 是整筆，Re Dept. Bkg. (in TWD) 是 AE，差額歸 Sub AE。13 筆分績保留原金額，不重算。原幣金額、台幣金額、匯率及原始 Excel 保留。
 - 3,663 筆 Swiss Facility、30 筆確實非 Facility（一般付款規則）；不將後者改名或改成 Facility。歷史 Receive Date／Pay Date 是提醒日；無原始約定到期日就留空，不從匯入日重新推算。
 - 一般業務、會計、General Manager、President、System Administrator 及新增主管唯讀角色可查閱；Case Viewer 不授權讀舊帳。
-- 歷史交易保持唯讀；依 §17.1 開放新增批單／理賠及其 Accounting 寫入。歷史更正、作廢、匯入與撤回 HTTP 寫入仍不開放。
-- `ri_runtime` 對 `ri_legacy_transactions`、號碼計數及原因表為 SELECT／INSERT／UPDATE，永無 DELETE；`ri_legacy_import_batches` 僅 SELECT；獨立 `ri_legacy_audit` 僅 SELECT／INSERT，永久不可 UPDATE／DELETE。全系統 Audit 暫停與 SMTP 關閉設定維持。
+- 歷史交易保持唯讀；依 §17.1 開放新增批單／理賠及其 Accounting 寫入。歷史更正、作廢與撤回 HTTP 寫入仍不開放；匯入自 2026-11-11 起由系統管理員在網頁進行（見上）。
+- `ri_runtime` 對 `ri_legacy_transactions`、號碼計數及原因表為 SELECT／INSERT／UPDATE，永無 DELETE；`ri_legacy_import_batches` 為 SELECT／INSERT／UPDATE（2026-11-11 起網頁匯入，仍無 DELETE）；獨立 `ri_legacy_audit` 僅 SELECT／INSERT，永久不可 UPDATE／DELETE。全系統 Audit 暫停與 SMTP 關閉設定維持。
 - 正式首次匯入採業主授權維護程序，核對來源 SHA256、排除清單及 3,693 筆原值。新增批單／理賠及收付流程依 §17.1；受保護交易金額更正留待下一階段。
 
 ### 17.1 批單與理賠（2026-11-10 業主確認部署）
@@ -572,9 +580,13 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-11 | 清空 Legacy Data (Old Register) 全部 3,694 筆（業主要求，之後重新匯入；不換映像） | `backups/legacy_clear_20261111_155937` | （資料變更，無映像；回復＝還原該備份的 database.sql） | 正式資料副本演練：只有 3 個 Legacy 資料表改變；Accounting 去除 Legacy 後、Dashboard、Production 5 個月份逐位元組一致；重跑腳本自動停止 |
 
+| 11-11 | Legacy 網頁匯入 Register（系統管理員預覽→匯入；PD／GL、已收付建 Accounting Dept. Ref. 收付登錄、未收付續追 Accounting；不進 Production）；資料庫權限調整 | `backups/legacy_import_web_20261111_174810` | `ri-backend:before-legacy-import-web-20261111_174810`／`ri-frontend:before-legacy-import-web-20261111_174810` | 全部 API（含新 `legacy_import_web`）、完整畫面測試（含新 I 專項）；以 AGSC Register 在正式資料副本演練 181 筆逐筆核對、其他資料不變；無 migration、部署時未匯入任何資料 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 ## 近期變更
+
+- 2026-11-11：Legacy Data (Old Register) 改為系統管理員網頁匯入 Register（PD／GL、已收付與未收付皆可）；收付編號成為 Accounting Dept. Ref.；Accounting 日期改顯示 Effective Date／DOL；不進 Production。
 
 - 2026-11-11：依業主要求清空 Legacy Data (Old Register) 全部 3,694 筆，準備重新匯入；匯入批次標記 withdrawn，稽核紀錄保留。
 

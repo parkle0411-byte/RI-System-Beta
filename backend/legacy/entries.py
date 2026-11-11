@@ -140,7 +140,7 @@ def change(person,body):
 
 
 def can_retract(person,t):
-    if t.historical or t.status!='confirmed' or t.owner_id!=person.pk or person.role_code not in BUSINESS:return False
+    if t.historical or t.batch_id or t.status!='confirmed' or t.owner_id!=person.pk or person.role_code not in BUSINESS:return False
     if t.financial.get('paymentEntries'):return False
     from cases.finance_workflow import active_reviews
     if any(uid==str(t.uid) for uid,no in active_reviews({str(t.uid)})):return False

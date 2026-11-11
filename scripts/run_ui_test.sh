@@ -30,7 +30,7 @@ docker exec -i ri-ut-backend python manage.py shell < qa/ui/seed.py 2>&1 | grep 
 
 rm -rf qa/ui/out && mkdir -p qa/ui/out
 run_phase() {
-  case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" $1 "*) ;; *) return 0 ;; esac
+  case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" $1 "*) ;; *) return 0 ;; esac
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 ui_test.py "$1"
 }
@@ -39,7 +39,7 @@ run_phase A || STATUS=1
 # 提醒信（不寄信模式）：先在 AE 沒有人員資料時跑一次（設定錯誤），補上 AE／主管／Finance 的 e-mail 後再跑（Suppressed），階段 R 在畫面上檢查。
 # 2026-10-13 起產生 Word 文件需要 AE 的 Email（由 Personnel 依姓名帶入），所以「設定錯誤」那一次提醒先在階段 H 之前跑，再補上聯絡資料。
 reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" H "*|*" R "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" H "*|*" R "*)
   reminders run_signed_slip_reminders >/dev/null
   docker exec ri-ut-backend python manage.py shell -c "
 from personnel.models import Personnel
@@ -49,7 +49,7 @@ Personnel.objects.filter(name='UI Finance').update(email='ui.fin@tw-insure.com')
 esac
 run_phase H || STATUS=1
 # 階段 H：每次 Word 下載都記錄 Audit，PDF 引擎已退役。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" H "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" H "*)
 docker exec ri-ut-backend python manage.py shell -c "
 from audit.models import AuditLog
 q = AuditLog.objects.filter(action='generate_document')
@@ -61,7 +61,7 @@ esac
 # 畫面上要到 Production close 才會變成 Confirmed（尚未移植）：在測試環境直接把案件設成 Confirmed，才能測 Reverse／Renewal／修正
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
 
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" R "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" R "*)
   echo "signed slip: $(reminders run_signed_slip_reminders)"
   echo "payment:     $(reminders run_payment_reminders)"
 esac
@@ -95,7 +95,7 @@ run_phase F || STATUS=1
 run_phase D || STATUS=1
 run_phase G || STATUS=1
 # 忘記密碼（階段 P1／P2）：打開測試環境的寄信（寫成檔案），P1 在畫面申請，腳本從信件取出連結，P2 打開連結設定新密碼
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" P1 "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" P1 "*)
   UT_EMAIL_ENABLED=true "${COMPOSE[@]}" up -d backend >/dev/null 2>&1
   for i in $(seq 1 30); do docker exec ri-ut-backend python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/auth/password-reset')" >/dev/null 2>&1 && break; sleep 1; done
   docker exec ri-ut-backend python manage.py shell -c "
@@ -113,19 +113,24 @@ print(msg['To']); print(re.search(r'http://nginx/reset-password\\?uid=\\S+', tex
   run_phase P2 || STATUS=1
 esac
 # O: Overseas brokerage uses its own six-field form and cash T3 dates.
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" O "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" O "*)
   docker exec -i ri-ut-backend python manage.py shell < qa/ui/oversea_business_seed.py || STATUS=1
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 oversea_business.py || STATUS=1
 esac
 # L: Legacy Data (Old Register) 新增批單／理賠與 Accounting（2026-11-10 起併入完整執行）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" L "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" L "*)
   docker exec -i ri-ut-backend python manage.py shell < qa/ui/legacy_entry_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
   run_phase L || STATUS=1
 esac
 # X: Accounting 載入失敗時顯示常駐錯誤與 Retry（2026-11-10；模擬伺服器 502，不改資料）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X} " in *" X "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" X "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 accounting_load_error.py || STATUS=1
+esac
+# I: Legacy 網頁匯入（2026-11-11；系統管理員上傳 Register → 預覽 → 匯入 → Accounting）。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I} " in *" I "*)
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 legacy_import_ui.py || STATUS=1
 esac
 exit $STATUS

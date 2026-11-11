@@ -55,6 +55,10 @@ def settlement_name(t):
 def payload_for(t):
     d=t.data; a=d.get('amounts',{}); fin=copy.deepcopy(t.financial)
     stamp=d.get('confirmedAt') or (t.first_confirmed_at.isoformat() if t.first_confirmed_at else '')
+    if t.batch_id and d.get('kind')=='claim' and d.get('claimIssueDate'):
+        # 2026-11-11 owner: an imported claim is created on its Issue Date of Claim; the native claim
+        # rule (creation date + 15 calendar days, reminder 7 days before) then applies unchanged.
+        stamp=d['claimIssueDate']+'T00:00:00+08:00'
     no=t.number or str(t.uid)
     claim=d.get('kind')=='claim'
     source='claim' if claim else 'premium'
@@ -73,13 +77,13 @@ def payload_for(t):
         legacyAmounts=a,legacyData=copy.deepcopy(d),legacyStatus=t.status,
         financeWorkflowVersion='finance-review-v1',accountingRules='accounting-ag-20261022',
         currency=t.currency,twRef=t.reference,statementNo=d.get('statementNo',''),reinsured=d.get('cedant',''),originalInsured=d.get('insured',''),
-        originalInsuredCn=d.get('insuredCn',''),ae=d.get('ae',''),classOfBusiness='Property',classCode='PD',
+        originalInsuredCn=d.get('insuredCn',''),ae=d.get('ae',''),classOfBusiness=d.get('classOfBusiness') or 'Property',classCode=d.get('classCode') or 'PD',
         reinsuranceStructure='QS',originalPremium=a.get('premium',0),riCommPct=d.get('commissionRate',0),taxPct=d.get('taxRate',0),
         paymentTermsDays=d.get('cedantDays',90),policyFrom=d.get('effectiveDate',''),policyTo=d.get('expiryDate',''),
         announcedAt=stamp,endorsementAnnouncedAt=stamp,endoEffectiveDate=d.get('effectiveDate',''),
         parentTwRef=t.reference if d.get('kind')=='endorsement' else '',
         reinsurers=[dict(name=RULE_NAMES.get(d.get('rule'),'Ordinary legacy counterparty'),
-            foreignBroker=settlement,settlementRef=d.get('reinsurerRef','') if not t.historical else '',sharePct=100,premium=a.get('premium',0),riCommPct=0,taxPct=0,
+            foreignBroker=settlement,settlementRef=d.get('reinsurerRef',''),sharePct=100,premium=a.get('premium',0),riCommPct=0,taxPct=0,
             paymentTermsDays=d.get('reinsurerDays',90))],transactions=txs,
         paymentEntries=fin.get('paymentEntries',[]),financeClaimTracking=fin.get('financeClaimTracking',[]),
         swissAccounting=fin.get('swissAccounting',{}))
@@ -209,10 +213,17 @@ def _accounting_one(t):
     view=dict(caseUid=str(t.uid),rootCaseUid=str(t.uid),rowVersion=t.version,twRef=t.reference,
         status='closed' if t.historical else 'posted',announcedAt=t.first_confirmed_at,reinsured=t.data.get('cedant',''),currency=t.currency,payload=p)
     rows=[]
+    imported={e.get('transactionNo') for e in p.get('paymentEntries',[]) if e.get('entryKind')=='legacy-import'}
     for row in transaction_rows([view],{view['caseUid']:Snapshot(p)}):
+        # 2026-11-11 owner: same position/logic as native rows (premium Effective Date, claim DOL).
         row.update(origin='legacy',legacyTransactionId=str(t.uid),legacyHistorical=t.historical,
-            accountDisplayDate=(t.data.get('issueDate') or t.data.get('revenueMonth','')) if t.historical else
-                (t.data.get('lossDate') if t.data.get('kind')=='claim' else t.data.get('effectiveDate') or ''))
+            legacyImported=bool(t.batch_id),legacyInstallmentNo=t.data.get('installmentNo',''),
+            accountDisplayDate=(t.data.get('lossDate') if t.data.get('kind')=='claim' else t.data.get('effectiveDate')) or '')
+        if not t.historical and row.get('txNo') in imported:
+            # Settled in the Register before import: reconciled before import, never re-reviewed.
+            row.update(legacyImportSettled=True,financeReviewed=True,reviewBatchId='',reviewDate='',reviewedByName='',reviewReference='',
+                reviewNote='Settled before import.',historicalTermsMissing=False,canRecord=False,
+                canConfirmSettlement=False,canCancelSettlement=False,manualSettlementRequired=False)
         if t.historical:
             row.update(financeReviewed=True,reviewBatchId='',reviewDate='',reviewedByName='',reviewReference='',
                 reviewNote='Historical reconciliation completed before import.',historicalTermsMissing=False,

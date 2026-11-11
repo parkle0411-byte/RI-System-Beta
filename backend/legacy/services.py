@@ -25,7 +25,7 @@ def state(t):
 def representation(t,person=None):
     result=state(t)
     result.update(reference=t.reference,currency=t.currency,revenueMonth=t.revenue_month,
-        historical=t.historical,originalSerial=t.original_serial,operation=t.operation,
+        historical=t.historical,imported=bool(t.batch_id),originalSerial=t.original_serial,operation=t.operation,
         referenceTransaction=str(t.reference_transaction_id or ''),corrects='',performance=rate_for(t),
         createdAt=t.created_at.isoformat(),firstConfirmedAt=t.first_confirmed_at.isoformat() if t.first_confirmed_at else '',
         permissions=dict(edit=False,confirm=False,correct=False,transfer=False,retract=False),readOnly=True)

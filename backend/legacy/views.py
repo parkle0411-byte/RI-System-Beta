@@ -53,7 +53,20 @@ class TransactionsView(NoStoreMixin,APIView):
 
 class ImportView(NoStoreMixin,APIView):
     permission_classes=[RIPermission]
-    permission_map={'GET':'accounts.manage'}
+    permission_map={'GET':'accounts.manage','POST':'accounts.manage'}
+
+    def post(self,request):
+        # 2026-11-11 owner: web import for System Administrators (preview, then commit the reviewed SHA256).
+        from .importer import preview,commit
+        upload=request.FILES.get('file')
+        if upload is not None:
+            if upload.size>30*1024*1024:fail('Select a nonempty XLSX file no larger than 30 MiB.')
+            batch=preview(request.ri_principal,upload.name,upload.read())
+            return Response(_batch(batch),status=201)
+        body=object_body(request)
+        if body.get('action')!='commit' or not isinstance(body.get('id'),str) or not isinstance(body.get('sha256'),str):
+            fail('Upload an XLSX file to preview, or commit a reviewed batch.')
+        return Response(_batch(commit(request.ri_principal,body['id'],body['sha256'])))
 
     def get(self,request):
         if request.query_params.get('download'):
@@ -63,9 +76,12 @@ class ImportView(NoStoreMixin,APIView):
             r=FileResponse(storage.open_read(b.storage_key),content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             r['Content-Disposition']=content_disposition(b.filename)
             return r
-        return Response(dict(readOnly=True,batches=[dict(id=str(b.pk),filename=b.filename,status=b.status,
-            sha256=b.sha256,createdAt=b.created_at.isoformat(),manifest=b.manifest)
-            for b in ImportBatch.objects.order_by('-created_at')[:100]]))
+        return Response(dict(readOnly=False,batches=[_batch(b) for b in ImportBatch.objects.order_by('-created_at')[:100]]))
+
+
+def _batch(b):
+    return dict(id=str(b.pk),filename=b.filename,status=b.status,sha256=b.sha256,createdAt=b.created_at.isoformat(),
+        importedAt=b.imported_at.isoformat() if b.imported_at else '',manifest=b.manifest)
 
 
 class OptionsView(NoStoreMixin,APIView):

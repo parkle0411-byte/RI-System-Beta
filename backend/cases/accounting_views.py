@@ -189,8 +189,8 @@ class AccountingView(NoStoreMixin, APIView):
         payload_by_uid = {c['caseUid']: c['payload'] for c in case_views}
         versions = {c['caseUid']: c['rowVersion'] for c in case_views}
         for row in transactions:
-            if row.get('legacyHistorical'):
-                continue  # Historical review is read-only; never infer a new review event.
+            if row.get('legacyHistorical') or row.get('legacyImportSettled'):
+                continue  # Historical / settled-before-import review is read-only; never infer a new review event.
             row['historicalTermsMissing'] = not payload_by_uid[row['caseUid']].get('financeWorkflowVersion')
             row.update(review_fields(row['caseUid'], row.get('txNo'), payload_by_uid[row['caseUid']], row, reviews))
         review_batches = [{

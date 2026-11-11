@@ -426,6 +426,8 @@ def reverse_registration(view, request, body):
                      (e.get('batchId') or e.get('offsetId') or 'legacy:' + str(e.get('id'))) == bid]
         if any(e.get('id') in reversed_ids or not writable_case(c, e.get('transactionNo', '')) for e in originals):
             return fail('registration_locked', 'This registration is already reversed or an affected case is inactive.')
+        if any(e.get('entryKind') == 'legacy-import' for e in originals):
+            return fail('registration_locked', 'Receipts and payments settled before import are read-only.')
         p.setdefault('paymentEntries', []).extend({**e, 'id': str(uuid.uuid4()), 'entryType': 'reversal',
             'reversalOf': e['id'], 'reversalOfBatchId': bid, 'batchId': reversal_id,
             'paymentDate': body['paymentDate'], 'note': reason[:1000],
