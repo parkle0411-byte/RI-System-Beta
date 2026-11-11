@@ -440,6 +440,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ## 17. 舊案專區：Legacy Data (Old Register)（2026-11-10 部署）
 
+- **2026-11-11 業主要求清空、之後重新匯入**：以維護者身分刪除全部 3,694 筆交易（匯入 3,693 筆＋草稿 TWPF241010 1 筆）；匯入批次標記 `withdrawn`（保留紀錄與原始 Excel），Legacy Audit 新增 `register_cleared` 一筆並保留既有紀錄，原因選項 4 筆保留。清空前演練確認 Accounting（扣除 Legacy 項目）、Dashboard、Production（含已凍結 2026-08／10）逐位元組不變。備份 `backups/legacy_clear_20261111_155937`。下方 3,693 筆等描述為清空前狀態；重新匯入沿用業主授權維護程序（HTTP 匯入仍不開放）。
+
 - 歷史匯入資料保持唯讀：`2022~2025 Swiss Re (PD).xlsx` 的 Facultative Property，共 **3,693 筆**；原流水號 **F13333 排除、不匯入**。不建立舊案 Case，不產生歷史 Production Report。
 - 所有歷史交易均已完成對帳及結清；Accounting 的已對帳／Settled/Closed 可查，未對帳區不納入；不補造對帳人、對帳日期或銀行收付明細。新舊資料用獨立的來源欄區分，不更動既有 premium／claim 分類。
 - Description = 英文被保險人；Cedant's Policy No. = Statement No.；Bkg. (in TWD) 是整筆，Re Dept. Bkg. (in TWD) 是 AE，差額歸 Sub AE。13 筆分績保留原金額，不重算。原幣金額、台幣金額、匯率及原始 Excel 保留。
@@ -568,9 +570,13 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-11 | 畫面文字：移除側欄左下角環境說明；Dashboard Total Gross Premium 固定顯示兩位小數；Top Reinsurers 標題改為 Top Reinsurers/RI Broker by Ceded Premium（只換前端） | `backups/sidebar_dashboard_text_20261111_134156` | `ri-frontend:before-sidebar-dashboard-text-20261111_134156` | 前端建置、畫面 A 56／56＋G 20／20（候選映像 `ri-frontend:sidebar-dashboard-text-candidate`）；正式檔案與候選映像逐檔一致；後端與資料不變 |
 
+| 11-11 | 清空 Legacy Data (Old Register) 全部 3,694 筆（業主要求，之後重新匯入；不換映像） | `backups/legacy_clear_20261111_155937` | （資料變更，無映像；回復＝還原該備份的 database.sql） | 正式資料副本演練：只有 3 個 Legacy 資料表改變；Accounting 去除 Legacy 後、Dashboard、Production 5 個月份逐位元組一致；重跑腳本自動停止 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 ## 近期變更
+
+- 2026-11-11：依業主要求清空 Legacy Data (Old Register) 全部 3,694 筆，準備重新匯入；匯入批次標記 withdrawn，稽核紀錄保留。
 
 - 2026-11-11：部署流程改版（2026-11-17 起生效）：實作前確認即含部署同意，測試通過後直接部署並回報；測試未全過、範圍變更、寫入正式資料、基礎版本已變時仍先問業主。
 
