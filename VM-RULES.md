@@ -450,6 +450,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
   - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
   - 匯入列不建立 Case、不進 Production／Dashboard、不能退回草稿或編輯業務資料。
   - 從匯入列新增批單／理賠時沿用來源險種（GL 匯入列新增的仍為 CGL；2026-11-11 修正）。
+  - R/I Comm. %／Tax %（2026-11-11）：匯入時由 Register 公式「Our Share Premium × 固定比率」讀出（只辨識公式文字，不執行）；直接填數值者以金額 ÷ 承接保費換算；比率 × 承接保費與金額不符或公式無法辨識時預覽警告、不能匯入。理賠不存比率。Legacy 明細顯示；從匯入列新增批單時預帶來源比率（可修改）。舊交易金額仍以 Excel 為準。
 - 以下為 2026-11-09 首次匯入（已於 2026-11-11 清空）的說明，保留供查。
 - 歷史匯入資料保持唯讀：`2022~2025 Swiss Re (PD).xlsx` 的 Facultative Property，共 **3,693 筆**；原流水號 **F13333 排除、不匯入**。不建立舊案 Case，不產生歷史 Production Report。
 - 所有歷史交易均已完成對帳及結清；Accounting 的已對帳／Settled/Closed 可查，未對帳區不納入；不補造對帳人、對帳日期或銀行收付明細。新舊資料用獨立的來源欄區分，不更動既有 premium／claim 分類。
@@ -584,6 +585,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | 11-11 | Legacy 網頁匯入 Register（系統管理員預覽→匯入；PD／GL、已收付建 Accounting Dept. Ref. 收付登錄、未收付續追 Accounting；不進 Production）；資料庫權限調整 | `backups/legacy_import_web_20261111_174810` | `ri-backend:before-legacy-import-web-20261111_174810`／`ri-frontend:before-legacy-import-web-20261111_174810` | 全部 API（含新 `legacy_import_web`）、完整畫面測試（含新 I 專項）；以 AGSC Register 在正式資料副本演練 181 筆逐筆核對、其他資料不變；無 migration、部署時未匯入任何資料 |
 
 | 11-11 | 修正：從匯入的 GL 舊資料新增批單／理賠時險種誤為 Property，改為沿用來源險種（只換後端） | `backups/legacy_gl_entry_20261111_182515` | `ri-backend:before-legacy-gl-entry-20261111_182515` | Legacy 相關 API 6 組（含 legacy_import_web 48 項，新檢查以舊程式驗證會失敗）、畫面 A＋L＋I；無 migration |
+
+| 11-11 | 舊資料匯入存 R/I Comm. %／Tax %（由 Register 公式讀取並核對），新增批單預帶來源比率 | `backups/legacy_rates_20261111_184913` | `ri-backend:before-legacy-rates-20261111_184913`／`ri-frontend:before-legacy-rates-20261111_184913` | Legacy API 6 組（legacy_import_web 53）、畫面 A＋L＋I；AGSC 演練 181 筆可匯入，540 條帳款與前一版逐欄相同；無 migration |
 
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 

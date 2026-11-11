@@ -1,4 +1,7 @@
-"""Read cached XLSX values only. Never execute formulas, load comments or pivots."""
+"""Read cached XLSX values only. Never execute formulas, load comments or pivots.
+
+Formula text is kept as plain text (2026-11-11) so simple rate formulas such as ROUND(U4*0.15,0)
+can be recognised; it is never evaluated."""
 import hashlib
 import posixpath
 import re
@@ -48,11 +51,13 @@ def read_workbook(content):
             strings = [''.join(n.text or '' for n in e.iter(T+'t')) for e in ET.fromstring(archive.read('xl/sharedStrings.xml'))]
         header = None
         rows = []
+        shared = {}
         for _, row in ET.iterparse(archive.open(path), events=('end',)):
             if row.tag != T+'row':
                 continue
             cells = {}
             errors = []
+            formulas = {}
             for cell in row.findall(T+'c'):
                 col = re.sub(r'\d', '', cell.get('r',''))
                 value = cell.find(T+'v')
@@ -66,6 +71,13 @@ def read_workbook(content):
                     errors.append(cell.get('r'))
                 if value is not None:
                     cells[col] = value
+                f = cell.find(T+'f')
+                if f is not None:
+                    text = f.text
+                    if f.get('t') == 'shared':
+                        if text: shared[f.get('si')] = text
+                        else: text = shared.get(f.get('si'))
+                    if text: formulas[col] = text[:500]
             if header is None and cells:
                 header = {k: label(v) for k,v in cells.items()}
                 if not {'流水號','TW Ref. No.','Currency','Class','Full-closed'}.issubset(set(header.values())):
@@ -73,7 +85,8 @@ def read_workbook(content):
             elif cells:
                 values = {header[k]:v for k,v in cells.items() if k in header}
                 if values.get('流水號'):
-                    rows.append(dict(row=int(row.get('r')), values=values, errors=errors))
+                    rows.append(dict(row=int(row.get('r')), values=values, errors=errors,
+                                     formulas={header[k]: v for k, v in formulas.items() if k in header}))
                     if len(rows) > 50000:
                         raise ValueError('A batch may contain at most 50,000 transactions.')
             row.clear()

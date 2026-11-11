@@ -55,6 +55,8 @@ def col(i):
 
 def workbook(rows):
     def cell(ref, value):
+        if isinstance(value, tuple):  # (formula, cached value)
+            return f'<c r="{ref}"><f>{escape(value[0])}</f><v>{escape(str(value[1]))}</v></c>'
         return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{escape(str(value))}</t></is></c>'
     lines = []
     for n, values in enumerate([dict(zip(HEAD, HEAD))] + rows, 1):
@@ -82,6 +84,7 @@ ROWS = [
         'Bkg.\n(Original Currency)': '0', 'Bkg. (in TWD)': '0', 'Re Dept. Bkg.\n(in TWD)': '0', 'Bkg.(%)': '0',
         'Net Premium from Cedant': '-5000', 'Net Premium to Reinsurer': '-5000', 'Revenue Month': 'N/A', 'Receive Date': 'Claim',
         'Pay Date': 'Claim', 'DOL': D('2026-04-15'), 'Issue Date of Claim': D('2026-10-13')}),                                    # open claim
+    row('QA9007', **{'R/I Comm.': ('ROUND(U8*0.125,0)', '1250'), 'Tax': ('U8*0.01', '100'), 'Net Premium from Cedant': '8650', 'Net Premium to Reinsurer': '6650'}),  # formula rates
     row('F2898', **{'Fac / Claim': None, 'New / Renew': None, ' Cedant Receipt No': 'CR-2898', ' Reinsurer Payment No.': 'RP-2898'}),  # owner correction
     row('F13333'),                                                                                                             # owner exclusion
 ]
@@ -121,31 +124,38 @@ try:
         'Net Premium from Cedant': '-5000', 'Net Premium to Reinsurer': '-5000', 'Revenue Month': 'N/A', 'Receive Date': 'Claim',
         'Pay Date': 'Claim', 'DOL': D('2026-04-15')})])); noissue = r.json(); keys.append(ImportBatch.objects.get(pk=noissue['id']).storage_key)
         check('an open claim without Issue Date of Claim is a blocking warning', 'Issue Date of Claim is required' in noissue['manifest']['warnings'][0]['message'], noissue['manifest'])
+        r = upload(admin, workbook([row('QA9105', **{'R/I Comm.': ('ROUND(U2*0.1,0)', '1500')})])); badrate = r.json(); keys.append(ImportBatch.objects.get(pk=badrate['id']).storage_key)
+        check('a commission amount that is not premium x formula rate is a blocking warning', 'R/I Comm. does not equal' in badrate['manifest']['warnings'][0]['message'], badrate['manifest'])
         r = upload(admin, workbook([row('QA9103', **{' Cedant Receipt No': 'CR', 'Receive Date': 'Claim'})])); nodate = r.json(); keys.append(ImportBatch.objects.get(pk=nodate['id']).storage_key)
         check('a settled premium side needs its Receive Date', 'Receive Date is required' in nodate['manifest']['errors'][0]['message'], nodate['manifest'])
 
         r = upload(admin, good); b = r.json(); m = b['manifest']; keys.append(ImportBatch.objects.get(pk=b['id']).storage_key)
-        check('preview counts rows, classes and settlement', r.status_code == 201 and m['eligible'] == 7 and m['classes'] == {'PD': 6, 'GL': 1}
-              and m['settlement'] == {'fully': 3, 'open': 4} and not m['errors'] and not m['warnings'], m)
+        check('preview counts rows, classes and settlement', r.status_code == 201 and m['eligible'] == 8 and m['classes'] == {'PD': 7, 'GL': 1}
+              and m['settlement'] == {'fully': 3, 'open': 5} and not m['errors'] and not m['warnings'], m)
         check('owner exclusion F13333 is listed and skipped', [x['serial'] for x in m['excluded']] == ['F13333'])
         check('owner correction F2898 is listed', m['corrections'][0]['serial'] == 'F2898' and m['corrections'][0]['changes']['Fac / Claim']['after'] == 'Fac')
-        check('preview writes no transactions', not LegacyTransaction.objects.exists() and LegacyAudit.objects.filter(action='import_preview').count() == 5)
+        check('preview writes no transactions', not LegacyTransaction.objects.exists() and LegacyAudit.objects.filter(action='import_preview').count() == 6)
         check('a stale SHA256 is refused', commit(admin, b, 'f' * 64).status_code == 409)
         check('non-admin cannot commit', commit(fin, b).status_code == 403)
         r = commit(admin, b); done = r.json()
-        check('admin commits the reviewed preview', r.status_code == 200 and done['status'] == 'imported' and done['manifest']['imported'] == 7, r.content[:400])
+        check('admin commits the reviewed preview', r.status_code == 200 and done['status'] == 'imported' and done['manifest']['imported'] == 8, r.content[:400])
         check('a committed batch cannot be committed again', commit(admin, b).status_code == 409)
         t = {x.number: x for x in LegacyTransaction.objects.filter(batch_id=b['id'])}
         check('fully settled rows stay historical; open rows are trackable',
-              {k for k, v in t.items() if v.historical} == {'QA9001', 'QA9004', 'F2898'} and {k for k, v in t.items() if not v.historical} == {'QA9002', 'QA9003', 'QA9005', 'QA9006'})
+              {k for k, v in t.items() if v.historical} == {'QA9001', 'QA9004', 'F2898'} and {k for k, v in t.items() if not v.historical} == {'QA9002', 'QA9003', 'QA9005', 'QA9006', 'QA9007'})
         check('correction applied, original Register value kept', t['F2898'].data['kind'] == 'premium' and t['F2898'].data['newRenew'] == 'New'
               and t['F2898'].original.get('Fac / Claim') is None)
+        check('rates from the Register formula (12.5% / 1%) are stored', t['QA9007'].data['commissionRate'] == 12.5 and t['QA9007'].data['taxRate'] == 1
+              and t['QA9007'].data['rateSource'] == {'commissionRate': 'formula', 'taxRate': 'formula'}, t['QA9007'].data.get('rateSource'))
+        check('rates from typed amounts (15% / 1%) are stored', t['QA9001'].data['commissionRate'] == 15 and t['QA9001'].data['taxRate'] == 1
+              and t['QA9001'].data['rateSource'] == {'commissionRate': 'amount', 'taxRate': 'amount'})
+        check('claims carry no premium rates', 'commissionRate' not in t['QA9004'].data)
         check('GL row stored as CGL', t['QA9003'].data['classOfBusiness'] == 'Commercial General Liability' and t['QA9003'].data['classCode'] == 'GL')
         check('import audit lists every transaction', set(LegacyAudit.objects.get(entity=b['id'], action='batch_imported').after['transactions']) == {str(x.uid) for x in t.values()})
 
         acc = admin.get('/api/accounting?view=list').json()
         legs = {x['txNo']: x for x in acc['transactionRows'] if x.get('origin') == 'legacy'}
-        check('Accounting has every imported leg without warnings', len(legs) == 19 and not acc['warnings'], (len(legs), acc['warnings'][:2]))
+        check('Accounting has every imported leg without warnings', len(legs) == 22 and not acc['warnings'], (len(legs), acc['warnings'][:2]))
         a = legs['QA9001-T1']
         check('settled side: receipt with Accounting Dept. Ref. and Receive Date', a['settlement'] == 'settled' and a['paid'] == 8400
               and [(e['reference'], e['paymentDate'], e['entryKind']) for e in a['entries']] == [('CR-9001', '2026-05-10', 'legacy-import')])
@@ -198,15 +208,19 @@ try:
             if new:
                 r = clients['sales'].patch('/api/legacy', json.dumps(dict(id=str(new.uid), version=new.version, action='save', data={'remark': 'QA'})), content_type='application/json')
                 check('saving the ' + kind + ' draft keeps GL', r.status_code == 200 and LegacyTransaction.objects.get(pk=new.uid).data.get('classCode') == 'GL', r.content[:300])
-        r = clients['sales'].post('/api/legacy', json.dumps(dict(referenceTransaction=str(t['QA9001'].uid), kind='endorsement')), content_type='application/json')
-        check('new endorsement from a PD import stays PD', r.status_code == 201 and LegacyTransaction.objects.get(pk=r.json()['uid']).data.get('classCode') == 'PD', r.content[:300])
+        r = clients['sales'].post('/api/legacy', json.dumps(dict(referenceTransaction=str(t['QA9007'].uid), kind='endorsement')), content_type='application/json')
+        new = LegacyTransaction.objects.get(pk=r.json()['uid'])
+        check('new endorsement from a PD import stays PD and pre-fills R/I Comm. % and Tax %', r.status_code == 201 and new.data.get('classCode') == 'PD'
+              and new.data.get('commissionRate') == 12.5 and new.data.get('taxRate') == 1, r.content[:300])
+        r = clients['sales'].post('/api/legacy', json.dumps(dict(referenceTransaction=str(t['QA9007'].uid), kind='claim')), content_type='application/json')
+        check('new claim keeps zero rates', LegacyTransaction.objects.get(pk=r.json()['uid']).data.get('commissionRate') == 0)
         r = admin.patch('/api/legacy', json.dumps(dict(id=str(t['QA9003'].uid), version=t['QA9003'].version, action='retract')), content_type='application/json')
         check('imported rows cannot be returned to draft', r.status_code == 409, r.content[:200])
         check('imported endorsement never feeds Production', admin.get('/api/production-report?month=2026-09').json()['rows'] == [])
         check('native Case, Production and reconciliation records unchanged (apart from QA review)', native()[:2] == before[:2])
 
         r = upload(admin, good); again = r.json(); keys.append(ImportBatch.objects.get(pk=again['id']).storage_key)
-        check('re-uploading skips already imported serials', again['manifest']['eligible'] == 0 and len(again['manifest']['duplicates']) == 7)
+        check('re-uploading skips already imported serials', again['manifest']['eligible'] == 0 and len(again['manifest']['duplicates']) == 8)
         check('nothing to import cannot be committed', commit(admin, again).status_code == 409 and LegacyTransaction.objects.filter(batch_id=again['id']).count() == 0)
         raise Rollback()
 except Rollback:

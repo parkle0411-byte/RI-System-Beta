@@ -12,7 +12,8 @@ FIELDS={'reference','currency','revenueMonth','kind','insured','insuredCn','ceda
     'reinsurerRef','effectiveDate','lossDate','claimNote','gross','share','commissionRate','taxRate','brokerage',
     'claim','claimReason','brokerageNote','ae','subAe','aePct','rule','cedantDays','reinsurerDays',
     'endorsementNo','installmentNo','newRenew','remark','oldReason','oldReasonText'}
-EMPTY_ON_COPY={'revenueMonth','gross','commissionRate','taxRate','brokerage','claim','claimReason','lossDate',
+# 2026-11-11 owner: R/I Commission % and Tax % are pre-filled from the source (editable).
+EMPTY_ON_COPY={'revenueMonth','gross','brokerage','claim','claimReason','lossDate',
     'claimNote','brokerageNote','endorsementNo','oldReason','oldReasonText','remark'}
 
 

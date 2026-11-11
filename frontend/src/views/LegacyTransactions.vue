@@ -17,7 +17,7 @@ const moneyLabels={gross:'100% Premium',premium:'Our Share Premium',commission:'
   brokerage:'Bkg. (Original Currency)',brokeragePct:'Bkg.(%)',claim:'Claim',cedantNet:'Net Premium from Cedant',reinsurerNet:'Net Premium to Reinsurer'}
 const fields={reference:'Old Reference',classOfBusiness:'Class',newRenew:'New / Renew',statementNo:'Statement No.',insured:'Insured (English)',insuredCn:'Insured (Chinese)',
   cedant:'Cedant',party:'Settlement Party',effectiveDate:'Effective Date',expiryDate:'Expiry Date',currency:'Currency',
-  revenueMonth:'Revenue Month (Production)',share:'Share (%)',ae:'AE',subAe:'Sub AE',installmentNo:'Installment No.',
+  revenueMonth:'Revenue Month (Production)',share:'Share (%)',commissionRate:'R/I Comm. (%)',taxRate:'Tax (%)',ae:'AE',subAe:'Sub AE',installmentNo:'Installment No.',
   endorsementNo:'Endorsement No.',reinsurerRef:"Reinsurer's Ref. No.",remark:'Remark'}
 const visibleFields=computed(()=>({...fields,...Object.fromEntries(Object.entries({lossDate:'DOL',claimNote:'Note for Claim',claimReason:'Negative Claim Reason',brokerageNote:'Note for Bkg.',oldReasonText:'Endorsement Reason Details'}).filter(([key])=>selected.value?.data?.[key]!=null && selected.value.data[key]!==''))}))
 const number=v=>v==null?'—':new Intl.NumberFormat('en-US',{maximumFractionDigits:8}).format(v)

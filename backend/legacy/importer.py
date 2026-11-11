@@ -15,6 +15,7 @@ Imported rows never create Cases or Production rows. No row is ever changed afte
 import copy
 import hashlib
 import json
+import re
 import uuid
 from pathlib import Path
 from decimal import Decimal
@@ -60,6 +61,25 @@ def _month_end(iso):
     import calendar
     y,m=int(iso[:4]),int(iso[5:7])
     return f'{y:04d}-{m:02d}-{calendar.monthrange(y,m)[1]:02d}'
+
+
+RATE_FORMULA=re.compile(r'^=?\s*(?:ROUND\(\s*)?\$?[A-Z]{1,3}\$?\d+\s*\*\s*([0-9]*\.?[0-9]+)\s*(?:,\s*-?\d+\s*\))?\s*$',re.I)
+
+
+def _rate(row,column,amount,premium,currency):
+    """R/I Comm. % / Tax % (owner 2026-11-11): the constant of a simple Register formula
+    (Our Share Premium x rate, never evaluated), else amount / premium. Returns (rate, source, ok)."""
+    text=(row.get('formulas') or {}).get(column)
+    if text:
+        m=RATE_FORMULA.match(text.strip())
+        if not m:return None,'formula',False
+        rate=round(float(m.group(1))*100,6);source='formula'
+    elif premium:
+        rate=round(amount/premium*100,6);source='amount'
+    else:
+        return (0.0,'amount',True) if not amount else (None,'amount',False)
+    tolerance=0.5 if currency=='TWD' else 0.005
+    return rate,source,abs(premium*rate/100-amount)<=tolerance+1e-9
 
 
 def _refs(v,side):
@@ -120,6 +140,13 @@ def converted(row, rule_cache):
         brokeragePct=money('Bkg.(%)',False))
     if a['brokeragePct'] is not None:a['brokeragePct']*=100
     data['amounts']=a;data['brokerage']=a['brokerage'];data['claim']=a['claim']
+    if not claim:
+        sources={}
+        for key,column,amount in (('commissionRate','R/I Comm.',a['commission']),('taxRate','Tax',a['tax'])):
+            rate,source,ok=_rate(row,column,amount,a['premium'],currency)
+            if not ok:notes.append(f'{column} does not equal Our Share Premium x a fixed rate; check the Register formula.')
+            data[key]=rate;sources[key]=source
+        data['rateSource']=sources
     rate=money('Exchange Rate');total=money('Bkg. (in TWD)');ae=money('Re Dept. Bkg. (in TWD)')
     premium_twd=rounded(a['premium']*rate,'TWD')
     people=[dict(name=data['ae'],income=ae,premium=premium_twd,incomeOriginal=None,pct=None)]
