@@ -25,14 +25,14 @@ import LegacyTransactions from '../views/LegacyTransactions.vue'
 export const allNavigation = [
   { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: NAV_ICONS.dashboard, permission: 'dashboard.read' },
   { id: 'cases', path: '/cases', label: 'Account List', icon: NAV_ICONS.cases, anyPermission: ['cases.read.all', 'cases.read.own'] },
-  { id: 'legacy', path: '/legacy', label: 'Legacy Data (Old Register)', icon: NAV_ICONS.accounting, permission: 'legacy.read' },
+  { id: 'legacy', path: '/legacy', label: 'Legacy Data (Old Register)', icon: NAV_ICONS.legacy, permission: 'legacy.read' },
   { id: 'mdm', path: '/mdm', label: 'Master Data Management', icon: NAV_ICONS.mdm, anyPermission: ['mdm.read', 'cases.read.all'] },
   { id: 'personnel', path: '/personnel', label: 'Personnel & Accounts', icon: NAV_ICONS.personnel, anyPermission: ['personnel.read', 'personnel.read.team'] },
   { id: 'production', path: '/production', label: 'Production Report', icon: NAV_ICONS.production, permission: 'production.read' },
   { id: 'accounting', path: '/accounting', label: 'Accounting', icon: NAV_ICONS.accounting, permission: 'accounting.read' },
   { id: 'fxrates', path: '/fx-rates', label: 'FX Rates', icon: NAV_ICONS.fxrates, permission: 'fx.read' },
   { id: 'recycle', path: '/recycle', label: 'Draft Recycle Bin', icon: NAV_ICONS.recycle, phase: '5 years', permission: 'recycle.read' },
-  { id: 'system-reference', path: '/system-reference', label: 'System Reference Data', icon: NAV_ICONS.mdm, permission: 'accounts.manage' },
+  { id: 'system-reference', path: '/system-reference', label: 'System Reference Data', icon: NAV_ICONS.reference, permission: 'accounts.manage' },
   { id: 'audit', path: '/audit', label: 'Audit Log', icon: NAV_ICONS.audit, permission: 'audit.read' }
 ]
 
