@@ -82,7 +82,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
     - **部署前測試**的對象是**這次要部署的候選映像**＝以最新已部署版本為基礎＋本次修改建置的 `ri-backend`／`ri-frontend`。API 測試用 `QA_BACKEND_IMAGE=<候選後端映像> scripts/run_isolated_qa.sh …`；畫面測試必須用 `UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定同一組候選映像（不可用預設的正式映像）。部署時直接部署測過的那組映像，不重新建置；回報寫明測試用的映像名稱。
     - 候選映像若含其他 session 尚未完成的修改（`git status` 有不屬於本次的變更），先問業主是否一起部署，不要自行帶上線。
 - **Docker 映像保留（2026-11-06 業主決定）**：`ri-*` 自建映像一律保留——容器使用中（含已停止）、7 天內建立或 tag 日期在 7 天內、本文件／腳本／compose 有寫到（含「部署與回復紀錄」的回復映像）、每個功能最後一個 `before-*` 回滾點；其餘可刪。第三方映像（mysql、nginx、node、python…）不自動刪。清理用 `scripts/docker_cleanup.sh`（預設預覽，`--apply` 才刪；`KEEP_DAYS` 可調），同時清超過 7 天的建置快取與 dangling 映像。每週三 06:00（台灣時間）由 parkle 的 crontab 自動執行，紀錄在 `logs/docker-cleanup.log`。不要用 `docker system prune -a` 或 `docker rmi -f`。
-- **大型測試時段與記憶體（2026-11-10 業主決定）**：VM 只有 8 GB，測試與正式系統共用。壓測（`qa/stress/`）、全部 API／全部畫面測試等大型測試在下班後執行；跑完檢查 `free -m`，有 swap 時在空閒記憶體大於 swap 用量的前提下執行 `sudo swapoff -a && sudo swapon -a`，把正式系統搬回記憶體（約數分鐘，網站不停）。用不到的測試環境要停止（不刪除）。2026-11-10 已停止：`ri-legacy-preview`（`~/RI System/legacy-tab-work/qa/legacy-preview`）、`ri-legacy-release-pilot`（`~/RI System/legacy-tab-work/deployment/pilot`）、`ri-oversea-effective-ref-api-a`（`/tmp/ri-oversea-effective-ref-20261109/api-a/qa/isolated`）；資料 volume 保留，需要時 `docker start $(docker ps -aq --filter label=com.docker.compose.project=<名稱>)` 重新啟動（取代 11-09「兩組舊案環境保持執行」的決定）。
+- **大型測試時段與記憶體（2026-11-10 業主決定；2026-11-11 修訂）**：VM 只有 8 GB，測試與正式系統共用。同仁正式使用系統前，壓測（`qa/stress/`）、全部 API／全部畫面測試等大型測試不限時段；正式使用後改在下班後執行（開始正式使用時由業主告知，再更新本條）。跑完檢查 `free -m`，有 swap 時在空閒記憶體大於 swap 用量的前提下執行 `sudo swapoff -a && sudo swapon -a`，把正式系統搬回記憶體（約數分鐘，網站不停）。用不到的測試環境要停止（不刪除）。2026-11-10 已停止：`ri-legacy-preview`（`~/RI System/legacy-tab-work/qa/legacy-preview`）、`ri-legacy-release-pilot`（`~/RI System/legacy-tab-work/deployment/pilot`）、`ri-oversea-effective-ref-api-a`（`/tmp/ri-oversea-effective-ref-20261109/api-a/qa/isolated`）；資料 volume 保留，需要時 `docker start $(docker ps -aq --filter label=com.docker.compose.project=<名稱>)` 重新啟動（取代 11-09「兩組舊案環境保持執行」的決定）。
 - **開發工具舊版本清理（2026-11-07 業主決定）**：`scripts/tools_cleanup.sh`（預設預覽，`--apply` 才刪）每週三 06:00 接在 Docker 清理之後由 parkle 的 crontab 自動執行，紀錄在 `logs/tools-cleanup.log`。清 parkle 家目錄內 Codex、Claude Code、VS Code 伺服器與擴充套件的舊版本、VS Code 擴充安裝檔快取，以及 `/tmp/ri-*` 暫存；一律保留執行中、目前版本、最新版本與 7 天內的項目，工具正在更新時跳過。不處理其他帳號（如 olin1）。
 
 **開發注意**
@@ -650,6 +650,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - 2026-11-10：每週 Debug＋優化（業主確認部署）：舊案清單頁碼超大時回空白頁（原本伺服器錯誤）；已公告案件的 Great American 原稅率改依再保人名稱比對（調換／刪除其他再保人不再誤擋，新原單／續保仍固定 0%）；舊案網址寫法調整（網址不變）；Accounting 舊案歷史結果快取（逐位元組相同）；nginx 記錄回應時間；`run_ui_test.sh` 完整執行加入舊案 L 專項。
 
+- 2026-11-11：§3「大型測試時段與記憶體」修訂：同仁正式使用前大型測試不限時段，正式使用後才限下班後；swap 檢查與停止不用的測試環境照舊。
 - 2026-11-10：§3 新增「大型測試時段與記憶體」：大型測試下班後跑、跑完把 swap 搬回記憶體；停止 3 組已不使用的測試環境（不刪除）。
 
 - 2026-11-10：Accounting 載入失敗時常駐紅色提示與 Retry，保留上次清單並停用財務操作；不再顯示「0 筆」（業主確認部署）。
