@@ -563,6 +563,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-10 | Accounting 載入失敗時常駐錯誤＋Retry（只換前端）；畫面測試加 X 專項 | `backups/accounting_load_error_20261110_234645` | `ri-frontend:before-accounting-load-error-20261110_234645` | 前端建置、完整畫面 281 項（含 X 9 項）；後端與資料不變（業主決定不跑 API） |
 
+| 11-11 | 畫面文字：移除側欄左下角環境說明；Dashboard Total Gross Premium 固定顯示兩位小數；Top Reinsurers 標題改為 Top Reinsurers/RI Broker by Ceded Premium（只換前端） | `backups/sidebar_dashboard_text_20261111_134156` | `ri-frontend:before-sidebar-dashboard-text-20261111_134156` | 前端建置、畫面 A 56／56＋G 20／20（候選映像 `ri-frontend:sidebar-dashboard-text-candidate`）；正式檔案與候選映像逐檔一致；後端與資料不變 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 ## 近期變更

@@ -93,12 +93,6 @@ async function savePassword() {
           <span v-if="item.phase" class="nav-phase">{{ item.phase }}</span>
         </button>
       </nav>
-
-      <div class="sidebar-note">
-        <span class="environment-dot"></span>
-        Company VM · Test environment<br>
-        MySQL relational data
-      </div>
     </aside>
 
     <main class="main-area">

@@ -10,6 +10,9 @@ import { can } from '../auth'
 import { formatAmount } from '../alpha/format'
 import { shell } from '../alpha/shell'
 
+const twoDecimals = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatTwoDecimals = value => twoDecimals.format(Number(value) || 0)
+
 const router = useRouter()
 const dashboardLoading = ref(false)
 const selectedTrendYear = ref(null)
@@ -147,7 +150,7 @@ onMounted(() => loadDashboard())
       <div class="kpi"><div class="label">Active Endorsements</div><div class="val">{{ dashboard.metrics?.activeEndorsements || 0 }}</div></div>
       <div class="kpi"><div class="label">Open Quotes</div><div class="val">{{ dashboard.metrics?.openQuotes || 0 }}</div></div>
       <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val">{{ dashboard.metrics?.retentionRatio == null ? 'N/A' : formatAmount(dashboard.metrics.retentionRatio) }}<small v-if="dashboard.metrics?.retentionRatio != null">%</small></div></div>
-      <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
+      <div class="kpi"><div class="label">Total Gross Premium</div><div class="val">TWD {{ formatTwoDecimals(dashboard.metrics?.grossPremiumNtd || 0) }}</div></div>
       <div class="kpi"><div class="label">Accounting · Receivable / Payable</div><div class="val">TWD {{ formatAmount(dashboard.metrics?.outstandingLeg1Ntd || 0) }} / {{ formatAmount(dashboard.metrics?.outstandingLeg2Ntd || 0) }}</div><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — Past 5 years record only.</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small><small v-if="dashboard.metrics?.outstandingSince && !dashboard.metrics?.missingPostingRates?.length" data-testid="outstanding-since">Past 5 years record only.</small></div>
     </div>
   </section>
@@ -159,7 +162,7 @@ onMounted(() => loadDashboard())
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
     <section class="card">
-      <h3 style="margin-bottom:14px">Top Reinsurers by Ceded Premium</h3>
+      <h3 style="margin-bottom:14px">Top Reinsurers/RI Broker by Ceded Premium</h3>
       <div v-if="dashboard.reinsurers?.length" class="mix-list"><div v-for="row in dashboard.reinsurers" :key="'reinsurer-' + row.name" class="mix-row"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></div>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
