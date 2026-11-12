@@ -21,14 +21,20 @@ for role in ['sales','admin','accounting','accounting_manager','general_manager'
     p=Personnel.objects.create(name='Entry '+role,department='reinsurance',role_code=role,
         auth_user_id=str(u.pk),account_status='active',created_by='qa',updated_by='qa')
     c=Client(HTTP_HOST='localhost');c.force_login(u);clients[role]=c;people[role]=p
-source=LegacyTransaction.objects.create(number='F-TEST',reference='OLD-REF',historical=True,status='confirmed',currency='TWD',
-    data=dict(reference='OLD-REF',currency='TWD',insured='Test insured',cedant='Test cedant',party='Test reinsurer',ae='Entry sales',
-        effectiveDate='2020-01-01',expiryDate='2020-12-31',rule='ordinary',cedantDays=90,reinsurerDays=90,share=25,
-        amounts=dict(premium=100,commission=0,tax=0,brokerage=5,claim=0,cedantNet=100,reinsurerNet=95)))
+def make_source(reference,currency='TWD',**data):
+    """A confirmed historical premium row. Since 2026-11-12 Cedant, party, currency, Share and the
+    AE/Sub AE split follow the source, so scenarios needing other values use their own source."""
+    base=dict(reference=reference,currency=currency,insured='Test insured',insuredCn='',cedant='Test cedant',party='Test reinsurer',
+        ae='Entry sales',effectiveDate='2020-01-01',expiryDate='2020-12-31',rule='ordinary',cedantDays=90,reinsurerDays=90,share=25,
+        kind='premium',amounts=dict(premium=100,commission=0,tax=0,brokerage=5,claim=0,cedantNet=100,reinsurerNet=95))
+    base.update(data)
+    return LegacyTransaction.objects.create(number='F-'+reference,reference=reference,historical=True,status='confirmed',
+        currency=currency,data=base,first_confirmed_at=timezone.now())
+source=make_source('OLD-REF')
 history=json.dumps(source.data,sort_keys=True);cases=Case.objects.count()
 
-def create(kind='endorsement',role='sales'):
-    code,t=send(clients[role],dict(referenceTransaction=str(source.pk),kind=kind),method='POST')
+def create(kind='endorsement',role='sales',src=None):
+    code,t=send(clients[role],dict(referenceTransaction=str((src or source).pk),kind=kind),method='POST')
     check('create '+kind+' draft',code==201,t)
     check('draft has no final number',t['number'] is None)
     return t
@@ -51,24 +57,29 @@ for action in ('save','confirm','correct','void'):
 t=create();code,r=send(clients['admin'],dict(id=t['uid'],version=t['version'],action='save',data={'remark':'other owner'}))
 check('another business user cannot edit owner draft',code==403,r)
 confirm(t,400)
-t=save(t,{'reference':'ANOTHER-OLD-REF'})
-check('editable old reference retains source linkage',t['reference']=='ANOTHER-OLD-REF' and t['referenceTransaction']==str(source.pk) and t['referenceSource']['reference']=='OLD-REF',t)
-t=save(t,dict(gross=1000,commissionRate=15,taxRate=1,brokerage=10,revenueMonth='2026-11',endorsementNo='E01',effectiveDate='2020-06-01',oldReason='late_entry'))
+for locked in ({'reference':'ANOTHER-OLD-REF'},{'party':'Other reinsurer'},{'cedant':'Other cedant'},{'currency':'USD'},{'share':50},{'revenueMonth':'2026-11'},{'rule':'swiss'}):
+    code,r=send(clients['sales'],dict(id=t['uid'],version=t['version'],action='save',data=locked))
+    check('endorsement keeps source '+next(iter(locked)),code==400 and 'cannot be changed' in r.get('message',''),r)
+check('draft keeps source linkage',t['reference']=='OLD-REF' and t['referenceTransaction']==str(source.pk),t)
+t=save(t,dict(gross=1000,commissionRate=15,taxRate=1,brokerage=10,endorsementNo='E01',effectiveDate='2020-06-01',oldReason='late_entry'))
 code,r=send(clients['sales'],dict(id=t['uid'],version=t['version']-1,action='confirm'))
 check('stale version rejected',code==409,r)
 t=confirm(t);check('number uses confirmation year',t['number'].startswith('LTX-'+str(timezone.localdate().year)+'-'))
+check('Revenue Month is automatic (later of effective and confirmation month)',t['revenueMonth']==timezone.localdate().strftime('%Y-%m'),t['revenueMonth'])
 a=t['data']['amounts'];check('step-rounded endorsement amounts',a['premium']==250 and a['commission']==38 and a['tax']==3 and a['cedantNet']==209 and a['reinsurerNet']==199,a)
-for bad in (dict(effectiveDate='2021-01-01'),dict(endorsementNo=''),dict(claim=50),dict(expiryDate='2028-01-01')):
-    d=create();d=save(d,dict(gross=100,commissionRate=0,taxRate=0,brokerage=1,revenueMonth='2026-11',endorsementNo='E2',oldReason='late_entry'))
-    if 'expiryDate' in bad:
-        code,r=send(clients['sales'],dict(id=d['uid'],version=d['version'],action='save',data=bad));check('source expiry cannot be overwritten',code==400,r)
-    else:d=save(d,bad);confirm(d,400)
+for bad in (dict(effectiveDate='2021-01-01'),dict(endorsementNo=''),dict(endorsementNo='e01'),dict(claim=50),dict(expiryDate='2028-01-01'),
+            dict(gross=100.5),dict(gross=0,brokerage=0),dict(effectiveDate='2020-03-01')):
+    d=create();d=save(d,dict(gross=100,commissionRate=0,taxRate=0,brokerage=1,endorsementNo='E2',effectiveDate='2020-07-01',oldReason='late_entry'))
+    d=save(d,bad);confirm(d,400)
 for claim in (50000,-5000):
-    d=create('claim');d=save(d,dict(lossDate='2020-03-01',claim=claim,claimReason='Return overpayment' if claim<0 else ''))
+    d=create('claim');d=save(d,dict(lossDate='2020-03-01',lossNo='LOSS-1',claim=claim,claimReason='Return overpayment' if claim<0 else ''))
     d=confirm(d);check('claim has no performance',d['performance']=={} and d['revenueMonth']=='',d)
     check('equal signed claim obligations',d['data']['amounts']['cedantNet']==-claim and d['data']['amounts']['reinsurerNet']==-claim,d)
-for bad in (dict(lossDate=''),dict(lossDate='2019-12-31'),dict(lossDate='2021-01-01'),dict(claim=0),dict(claim=-1,claimReason=''),dict(revenueMonth='2026-11'),dict(brokerage=1)):
-    d=create('claim');d=save(d,dict(lossDate='2020-03-01',claim=100));d=save(d,bad);confirm(d,400)
+for bad in (dict(lossDate=''),dict(lossDate='2019-12-31'),dict(lossDate='2021-01-01'),dict(claim=0),dict(claim=-1,claimReason=''),dict(lossNo=''),dict(claim=100.5)):
+    d=create('claim');d=save(d,dict(lossDate='2020-03-01',lossNo='LOSS-1',claim=100));d=save(d,bad);confirm(d,400)
+for bad in (dict(revenueMonth='2026-11'),dict(brokerage=1),dict(insured='Renamed'),dict(effectiveDate='2020-02-01'),dict(currency='USD')):
+    d=create('claim');code,r=send(clients['sales'],dict(id=d['uid'],version=d['version'],action='save',data=bad))
+    check('claim keeps source '+next(iter(bad)),code==400 and 'cannot be changed' in r.get('message',''),r)
 source.refresh_from_db();check('history preserved',json.dumps(source.data,sort_keys=True)==history)
 check('standalone entries never create Cases',Case.objects.count()==cases)
 check('entry audit exists',LegacyAudit.objects.filter(action='transaction_confirmed').count()==3)

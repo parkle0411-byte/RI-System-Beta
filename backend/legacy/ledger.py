@@ -217,7 +217,7 @@ def _accounting_one(t):
     for row in transaction_rows([view],{view['caseUid']:Snapshot(p)}):
         # 2026-11-11 owner: same position/logic as native rows (premium Effective Date, claim DOL).
         row.update(origin='legacy',legacyTransactionId=str(t.uid),legacyHistorical=t.historical,
-            legacyImported=bool(t.batch_id),legacyInstallmentNo=t.data.get('installmentNo',''),
+            legacyImported=bool(t.batch_id),legacyInstallmentNo=t.data.get('installmentNo',''),legacyLossNo=t.data.get('lossNo','') if t.data.get('kind')=='claim' else '',
             accountDisplayDate=(t.data.get('lossDate') if t.data.get('kind')=='claim' else t.data.get('effectiveDate')) or '')
         if not t.historical and row.get('txNo') in imported:
             # Settled in the Register before import: reconciled before import, never re-reviewed.

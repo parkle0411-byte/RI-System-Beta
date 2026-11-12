@@ -22,6 +22,8 @@ class TransactionsView(NoStoreMixin,APIView):
             except (LegacyTransaction.DoesNotExist,ValueError,ValidationError):fail('Transaction not found.',404)
             value=representation(t,request.ri_principal)
             value['original']=t.original
+            if t.data.get('kind')=='claim' and str(t.data.get('lossNo') or '').strip():
+                value['lossGroup']=loss_group(t)
             value['audit']=[dict(action=e.action,actor=e.actor_name,at=e.occurred_at.isoformat(),reason=e.reason)
                 for e in LegacyAudit.objects.filter(entity=str(t.uid)).order_by('occurred_at')]
             return Response(value)
@@ -112,3 +114,23 @@ class OptionsView(NoStoreMixin,APIView):
             item,_=LegacyReason.objects.update_or_create(code=code,defaults={'label':label.strip(),'active':active})
             audit(request.ri_principal,'reason:'+code,'reason_saved',before,{'label':item.label,'active':item.active})
         return Response({'ok':True})
+
+
+def loss_group(t):
+    """All confirmed claims of the same Old Reference + Loss No. (display only; each is its own SoA)."""
+    from .ledger import payload_for,details
+    key=' '.join(str(t.data.get('lossNo')).split()).casefold()
+    rows=[];total=0
+    for x in LegacyTransaction.objects.filter(reference=t.reference,status='confirmed',data__kind='claim').order_by('first_confirmed_at','created_at'):
+        if ' '.join(str(x.data.get('lossNo') or '').split()).casefold()!=key:continue
+        try:
+            legs=[d for d in details(payload_for(x)).values() if d['cashTracking']=='cash']
+            settled=all(d['settlement']=='settled' for d in legs);partial=any(abs(d['paid'])>.004 for d in legs)
+            status='settled' if settled else 'partial' if partial else 'open'
+        except Exception:status='unknown'
+        amount=float((x.data.get('amounts') or {}).get('claim',x.data.get('claim') or 0));total+=amount
+        rows.append(dict(uid=str(x.uid),number=x.number,lossDate=x.data.get('lossDate',''),currency=x.currency,
+            confirmedAt=x.first_confirmed_at.isoformat() if x.first_confirmed_at else '',amount=amount,status=status,current=x.pk==t.pk))
+    currencies=sorted({r['currency'] for r in rows})
+    return dict(lossNo=t.data.get('lossNo'),reference=t.reference,currency=currencies[0] if len(currencies)==1 else '',
+                rows=rows,total=round(total,2) if len(currencies)==1 else None)

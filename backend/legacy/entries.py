@@ -1,4 +1,17 @@
-"""Owner-approved new endorsements/claims. Historical rows are never edited."""
+"""Owner-approved new endorsements/claims. Historical rows are never edited.
+
+2026-11-12 owner decisions (claims Q1–Q13, endorsements E1–E14, follow-ups):
+- Sources: a claim only from an original premium row; an endorsement from a premium row or an endorsement.
+- Locked to the source: Cedant, Settlement Party, Old Reference; claims also Insured (latest) and,
+  for Property, currency; endorsements also currency, Share and the AE/Sub AE split.
+- Payment rule is detected from the settlement party; ordinary-rule days stay editable.
+- "Same policy" = same Old Reference; latest period = earliest start + latest expiry.
+- Endorsements: effective date inside the latest period and not before the previous endorsement;
+  Expiry may change (start fixed, at most 18 months); Endorsement No. unique per Old Reference;
+  premium or brokerage must be non-zero; Revenue Month is automatic.
+- Claims: Loss No. required, Cause of Loss optional, DOL inside the latest period.
+- TWD amounts are whole numbers, others at most two decimals; never rounded silently.
+"""
 import copy
 from datetime import date
 from django.core.exceptions import ValidationError
@@ -6,15 +19,35 @@ from django.utils import timezone
 from .models import LegacyTransaction, NumberCounter, LegacyReason
 from .services import audit, state, fail
 from .money import calculate, split_performance
+from . import policy
 
 BUSINESS={'sales','general_manager','admin'}
 FIELDS={'reference','currency','revenueMonth','kind','insured','insuredCn','cedant','party','statementNo',
-    'reinsurerRef','effectiveDate','lossDate','claimNote','gross','share','commissionRate','taxRate','brokerage',
-    'claim','claimReason','brokerageNote','ae','subAe','aePct','rule','cedantDays','reinsurerDays',
-    'endorsementNo','installmentNo','newRenew','remark','oldReason','oldReasonText'}
-# 2026-11-11 owner: R/I Commission % and Tax % are pre-filled from the source (editable).
-EMPTY_ON_COPY={'revenueMonth','gross','brokerage','claim','claimReason','lossDate',
+    'reinsurerRef','effectiveDate','expiryDate','lossDate','lossNo','causeOfLoss','claimNote','gross','share',
+    'commissionRate','taxRate','brokerage','claim','claimReason','brokerageNote','ae','subAe','aePct','rule',
+    'cedantDays','reinsurerDays','endorsementNo','installmentNo','newRenew','remark','oldReason','oldReasonText'}
+# R/I Commission % and Tax % are pre-filled from the source (editable); Installment No. is shown and editable.
+EMPTY_ON_COPY={'revenueMonth','gross','brokerage','claim','claimReason','lossDate','lossNo','causeOfLoss',
     'claimNote','brokerageNote','endorsementNo','oldReason','oldReasonText','remark'}
+SOURCES={'claim':('premium',),'endorsement':('premium','endorsement')}
+LABELS={'reference':'Old Reference','cedant':'Cedant','party':'Settlement Party','currency':'Currency','insured':'Insured (English)',
+    'insuredCn':'Insured (Chinese)','share':'Share (%)','subAe':'Sub AE','aePct':'AE / Sub AE split','rule':'Payment rule',
+    'revenueMonth':'Revenue Month','effectiveDate':'Effective Date','expiryDate':'Expiry Date','cedantDays':'Cedant terms',
+    'reinsurerDays':'Reinsurer terms','kind':'Transaction type','gross':'100% Premium','commissionRate':'R/I Commission (%)',
+    'taxRate':'Tax (%)','brokerage':'Brokerage','newRenew':'New / Renew'}
+
+
+def locked_fields(data):
+    kind=data.get('kind')
+    common={'kind','reference','cedant','party','rule','revenueMonth','newRenew'}
+    if kind=='claim':
+        keys=common|{'insured','insuredCn','effectiveDate','expiryDate','share','gross','commissionRate','taxRate',
+                     'brokerage','subAe','aePct','cedantDays','reinsurerDays'}
+        if str(data.get('classOfBusiness') or 'Property')=='Property':keys|={'currency'}
+        return keys
+    keys=common|{'currency','share','subAe','aePct'}
+    if data.get('rule')!='ordinary':keys|={'cedantDays','reinsurerDays'}
+    return keys
 
 
 def business(person):
@@ -28,17 +61,29 @@ def dates(value,label):
 
 def create(person,body):
     business(person)
-    if body.get('kind') not in ('endorsement','claim'):fail('Select Endorsement or Claim.')
+    kind=body.get('kind')
+    if kind not in ('endorsement','claim'):fail('Select Endorsement or Claim.')
     try:source=LegacyTransaction.objects.select_for_update().get(pk=body.get('referenceTransaction'),status='confirmed')
     except (LegacyTransaction.DoesNotExist,ValueError,ValidationError):fail('Select a confirmed source transaction.')
+    if (source.data or {}).get('kind','premium') not in SOURCES[kind]:
+        fail('Claims can be added only to an original premium transaction.' if kind=='claim'
+             else 'Endorsements can be added only to a premium or endorsement transaction.')
     data={k:copy.deepcopy(v) for k,v in source.data.items() if k in FIELDS-EMPTY_ON_COPY}
-    data.update(kind=body['kind'],currency=source.currency,revenueMonth='',expiryDate=source.data.get('expiryDate',''),
-        sourceEffectiveDate=source.data.get('effectiveDate',''),sourceExpiryDate=source.data.get('expiryDate',''),
-        sourceAe=source.data.get('ae',''),sourceReference=source.reference)
-    # 2026-11-11: keep the source class (imported GL rows stay CGL); not an editable field.
+    start,end=policy.latest_period(source.reference)
+    data.update(kind=kind,currency=source.currency,revenueMonth='',
+        expiryDate=end.isoformat() if end else source.data.get('expiryDate',''),
+        sourceEffectiveDate=start.isoformat() if start else source.data.get('effectiveDate',''),
+        sourceExpiryDate=end.isoformat() if end else source.data.get('expiryDate',''),
+        sourceAe=source.data.get('ae',''),sourceSubAe=source.data.get('subAe',''),sourceReference=source.reference,
+        rule=policy.detected_rule(source.data.get('party','')))
     for key in ('classOfBusiness','classCode'):
         if source.data.get(key):data[key]=source.data[key]
-    if body['kind']=='claim':data.update(gross=0,commissionRate=0,taxRate=0,brokerage=0,subAe='',aePct=100)
+    if not data.get('subAe'):data['aePct']=100
+    elif data.get('aePct') not in (40,70):data['aePct']=source.data.get('aePct')
+    if kind=='claim':
+        data['insured'],data['insuredCn']=policy.latest_insured(source)
+        data.update(effectiveDate=data['sourceEffectiveDate'],gross=0,commissionRate=0,taxRate=0,brokerage=0,subAe='',aePct=100)
+    if data['rule']!='ordinary':data['cedantDays']=90
     t=LegacyTransaction.objects.create(reference=source.reference,currency=source.currency,
         owner_id=person.pk,created_by_id=person.pk,reference_transaction=source,data=data)
     audit(person,t.pk,'draft_created',after=state(t))
@@ -47,37 +92,65 @@ def create(person,body):
 
 def ready(t,stamp):
     from personnel.models import Personnel
-    from production.models import ProductionReport
-    from .ledger import RULE_NAMES,detect_rule
-    import re
+    from .ledger import RULE_NAMES
     d=t.data;kind=d.get('kind')
     if kind not in ('endorsement','claim'):fail('Select Endorsement or Claim.')
+    source=t.reference_transaction
+    if source is None or source.status!='confirmed' or (source.data or {}).get('kind','premium') not in SOURCES[kind]:
+        fail('The source transaction is no longer available for this transaction type.')
     for key,label in [('reference','Old reference'),('insured','Insured'),('cedant','Cedant'),('party','Settlement party'),('ae','AE')]:
         if not isinstance(d.get(key),str) or not d[key].strip():fail(label+' is required.')
         if len(d[key])>(192 if key=='reference' else 240):fail(label+' exceeds the supported length.')
     if t.currency not in ('TWD','USD','MYR','EUR','JPY','GBP','HKD'):fail('Select a supported currency.')
     start=dates(d.get('effectiveDate'),'Effective Date');end=dates(d.get('expiryDate'),'Expiry Date')
     if start>end:fail('Effective Date must not be later than Expiry Date.')
-    for name in filter(None,[d.get('ae'),d.get('subAe')]):
-        if not Personnel.objects.filter(name=name,is_active=True).exists():fail('Select employed AE / Sub AE personnel.')
-    if d.get('ae')==d.get('subAe'):fail('AE and Sub AE must be different people.')
-    if d.get('rule') not in RULE_NAMES:fail('Select a payment rule before confirmation.')
-    detected=detect_rule(d['party'])
-    if detected and detected!='ordinary' and detected!=d.get('rule'):fail('The payment rule must match the selected MDM settlement party.')
-    if kind=='endorsement' and d['rule']!='ordinary' and d.get('cedantDays')!=90:fail('Facility Cedant terms are fixed at 90 calendar days.')
+    if not Personnel.objects.filter(name=d.get('ae'),is_active=True).exists():fail('Select an employed AE.')
+    if d.get('subAe'):
+        # A Sub AE carried over from the source is kept even if no longer employed (native rule).
+        if d.get('subAe')!=d.get('sourceSubAe') and not Personnel.objects.filter(name=d['subAe'],is_active=True).exists():
+            fail('Select an employed Sub AE.')
+        if d.get('ae')==d.get('subAe'):fail('AE and Sub AE must be different people.')
+    d['rule']=policy.detected_rule(d.get('party',''))
+    if d['rule'] not in RULE_NAMES:fail('The payment rule could not be determined.')
+    if d['rule']!='ordinary':d['cedantDays']=90
     for key in ('cedantDays','reinsurerDays'):
         if type(d.get(key)) is not int or d[key]<15:fail('Payment terms must be whole calendar days of at least 15.')
+    lo,hi=policy.latest_period(t.reference,exclude=t.pk)
     if kind=='claim':
+        loss=str(d.get('lossNo') or '').strip()
+        if not loss:fail('Loss No. is required.')
+        if len(loss)>160 or len(str(d.get('causeOfLoss') or ''))>2000:fail('Loss No. or Cause of Loss exceeds the supported length.')
+        d['lossNo']=loss
+        error=policy.money_error(d.get('claim'),'Claim amount',t.currency)
+        if error:fail(error)
         dol=dates(d.get('lossDate'),'DOL')
-        lo=dates(d.get('sourceEffectiveDate'),'Source Effective Date')
-        hi=dates(d.get('sourceExpiryDate'),'Source Expiry Date')
-        if not lo<=dol<=hi:fail('DOL must fall within the selected source transaction period.')
+        if not lo or not hi or not lo<=dol<=hi:fail('DOL must fall within the policy period of this Old Reference.')
         if d.get('revenueMonth'):fail('Claims must not have a Revenue Month.')
     else:
-        if not str(d.get('endorsementNo') or '').strip():fail('Endorsement No. is required.')
-        month=d.get('revenueMonth','')
-        if not isinstance(month,str) or not re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])',month):fail('Select a Revenue Month.')
-        if ProductionReport.objects.filter(year_month=month,status='closed').exists():fail('Select an unclosed Revenue Month.',409)
+        no=str(d.get('endorsementNo') or '').strip()
+        if not no:fail('Endorsement No. is required.')
+        norm=' '.join(no.split()).casefold()
+        if any(' '.join(str((x or {}).get('endorsementNo') or '').split()).casefold()==norm for x in
+               LegacyTransaction.objects.filter(reference=t.reference,data__kind='endorsement',status='confirmed').exclude(pk=t.pk)
+               .values_list('data',flat=True)):
+            fail('This Endorsement No. already exists for this Old Reference.')
+        if lo and hi and not lo<=start<=hi:fail('The endorsement Effective Date must fall within the policy period.')
+        previous=policy.previous_endorsement_date(t.reference,exclude=t.pk)
+        if previous and start<previous:fail('The endorsement Effective Date must not be earlier than the previous endorsement.')
+        if lo:
+            from cases.endorsement_rules import add_months
+            try:limit=add_months(lo,18)
+            except ValueError:limit=date.max
+            if end>limit:fail('The complete insurance period must not exceed 18 calendar months.')
+        for key,label in (('gross','100% Premium'),('brokerage','Brokerage amount')):
+            error=policy.money_error(d.get(key),label,t.currency)
+            if error:fail(error)
+        try:
+            if float(d.get('gross') or 0)==0 and float(d.get('brokerage') or 0)==0:
+                fail('Enter a 100% Premium or a Brokerage amount; an endorsement cannot be zero.')
+        except (TypeError,ValueError):fail('Enter valid amounts.')
+        month=policy.revenue_month(d.get('effectiveDate'),stamp)
+        d['revenueMonth']=month;t.revenue_month=month
         try:limit=end.replace(year=end.year+5)
         except ValueError:limit=end.replace(year=end.year+5,day=28)
         if timezone.localtime(stamp).date()>limit:
@@ -105,17 +178,15 @@ def change(person,body):
         data=body.get('data')
         if not isinstance(data,dict) or set(data)-FIELDS:fail('The draft contains unsupported fields.')
         if any(isinstance(value,(dict,list)) for value in data.values()):fail('Draft fields must be scalar values.')
-        if data.get('kind',t.data['kind'])!=t.data['kind']:fail('The transaction type cannot be changed.')
-        if t.data['kind']=='claim' and 'effectiveDate' in data and data['effectiveDate']!=t.data.get('sourceEffectiveDate'):
-            fail('A claim retains the selected source Effective Date.')
-        t.data.update(copy.deepcopy(data))
-        ref=t.data.get('reference') or ''
-        if not isinstance(ref,str) or len(ref)>192:fail('Old Reference must be text of at most 192 characters.')
-        t.reference=ref
-        t.currency=str(t.data.get('currency') or '').strip().upper()
-        t.data['currency']=t.currency
-        t.revenue_month=t.data.get('revenueMonth','')
-        if not isinstance(t.revenue_month,str) or len(t.revenue_month)>7:fail('Invalid Revenue Month.')
+        locked=locked_fields(t.data)
+        for key in sorted(set(data)&locked):
+            if data[key]!=t.data.get(key) and not (data[key] in (None,'') and t.data.get(key) in (None,'')):
+                fail(LABELS.get(key,key)+' follows the source transaction and cannot be changed.')
+        t.data.update({k:copy.deepcopy(v) for k,v in data.items() if k not in locked})
+        if t.data.get('kind')=='claim' and str(t.data.get('classOfBusiness') or 'Property')!='Property':
+            currency=str(t.data.get('currency') or '').strip().upper()
+            if currency not in ('TWD','USD','MYR','EUR','JPY','GBP','HKD'):fail('Select a supported currency.')
+            t.currency=currency;t.data['currency']=currency
     elif action=='confirm':
         stamp=timezone.now();t.data['amounts']=ready(t,stamp)
         if not t.number:
@@ -127,12 +198,15 @@ def change(person,body):
         t.status='confirmed'
         if not t.first_confirmed_at:t.first_confirmed_at=stamp
         t.data['confirmedAt']=stamp.isoformat()
+        actor={'id':f'personnel:{person.pk}','name':person.name}
+        master=policy.link_insured(t.data.get('insuredCn'),actor,str(t.uid))
+        if master:t.data['insuredMasterId']=master
         # Zero cash legs settle automatically, including a zero Swiss Cedant leg.
         # No review identity or bank receipt is fabricated.
         from .ledger import payload_for
         from cases.property_original import persist_settlements
         payload=payload_for(t)
-        try:persist_settlements(payload,stamp.isoformat(),{'id':f'personnel:{person.pk}','name':person.name})
+        try:persist_settlements(payload,stamp.isoformat(),actor)
         except (ValueError,OverflowError):fail('The selected payment terms exceed the supported calendar range.')
         t.financial={key:copy.deepcopy(payload.get(key,{} if key=='swissAccounting' else []))
                      for key in ('paymentEntries','financeClaimTracking','swissAccounting','transactions')}

@@ -7,8 +7,10 @@ month='2035-02';admin=clients['admin']
 def prod(action=None,want=200,**body):
     r=admin.get('/api/production-report?month='+month) if action is None else admin.post('/api/production-report',json.dumps(dict(action=action,month=month,**body)),content_type='application/json')
     check('Production '+str(action)+' '+str(want),r.status_code==want,r.content[:1200]);return r.json()
-t=create();t=save(t,dict(currency='USD',gross=100.03,share=25,commissionRate=15,taxRate=1,brokerage=4.55,
-    subAe='Entry admin',aePct=40,revenueMonth=month,endorsementNo='E-FX',oldReason='late_entry'));t=confirm(t)
+# 2026-11-12: currency, Share and the AE/Sub AE split follow the source; Revenue Month is automatic.
+psrc=make_source('PROD-REF',currency='USD',share=25,subAe='Entry admin',aePct=40,effectiveDate='2035-01-01',expiryDate='2035-12-31')
+t=create(src=psrc);t=save(t,dict(gross=100.03,commissionRate=15,taxRate=1,brokerage=4.55,effectiveDate='2035-02-10',endorsementNo='E-FX'));t=confirm(t)
+check('automatic Revenue Month follows the later effective month',t['revenueMonth']==month,t['revenueMonth'])
 preview=prod();check('missing monthly FX is visible',preview['summary']['missingRateCurrencies']==['USD'],preview)
 prod('generate',400,sourceSignature=preview['sourceSignature'])
 rows=admin.get('/api/accounting?view=list').json()['transactionRows']
@@ -29,7 +31,8 @@ report.refresh_from_db();check('closed report never changes',json.dumps(report.r
 p=prod();check('closed legacy preview retains the recognized rate',all(r['rate']==33 for r in p['rows']),p)
 code,r=send(clients['sales'],dict(id=t['uid'],version=record.version,action='retract'))
 check('closed Production blocks retract',code==409,r)
-d=create();d=save(d,dict(gross=100,commissionRate=0,taxRate=0,brokerage=1,revenueMonth=month,endorsementNo='E-CLOSED',oldReason='late_entry'));confirm(d,409)
+d=create(src=psrc);d=save(d,dict(gross=100,commissionRate=0,taxRate=0,brokerage=1,effectiveDate='2035-02-15',endorsementNo='E-CLOSED'));d=confirm(d)
+check('a closed month rolls to the first open month',d['revenueMonth']=='2035-03',d['revenueMonth'])
 check('claim transactions never contribute to Production',not any(r.get('legacyTransactionId') in {str(x.uid) for x in LegacyTransaction.objects.filter(data__kind='claim')} for r in p['rows']))
 check('Production close creates no native cases',Case.objects.count()==cases)
 print(f'{len(checks)}/{len(checks)} passed')

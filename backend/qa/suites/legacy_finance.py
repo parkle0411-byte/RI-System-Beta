@@ -16,7 +16,7 @@ def reverse(t,bid,want=200):
     m=member(t,1)
     return finance(dict(action='reverse_batch_payment',batchId=bid,paymentDate='2026-11-09',note='QA correction',cases=[dict(caseUid=m['caseUid'],rowVersion=m['rowVersion'])]),want)
 def claim(value):
-    t=create('claim');t=save(t,dict(claim=value,lossDate='2020-04-01',claimReason='Overpayment refund' if value<0 else ''));return confirm(t)
+    t=create('claim');t=save(t,dict(claim=value,lossDate='2020-04-01',lossNo='LOSS-FIN',claimReason='Overpayment refund' if value<0 else ''));return confirm(t)
 t=claim(1000)
 pay(t,1,100,100,409)
 review(t,1);review(t,2)
@@ -34,7 +34,7 @@ pay(negative,1,200,-200)
 record=LegacyTransaction.objects.get(pk=negative['uid'])
 check('negative claim persists signed receipts/payments',all(e['amount']<0 for e in record.financial['paymentEntries']))
 # Refund/premium dependency and full-amount restrictions use the original-currency ledger.
-e=create();e=save(e,dict(gross=400,commissionRate=0,taxRate=0,brokerage=10,revenueMonth='2026-11',endorsementNo='E-FIN',oldReason='late_entry'));e=confirm(e)
+e=create();e=save(e,dict(gross=400,commissionRate=0,taxRate=0,brokerage=10,effectiveDate='2020-07-01',endorsementNo='E-FIN',oldReason='late_entry'));e=confirm(e)
 review(e,1);review(e,2)
 pay(e,2,90,-90,409)
 pay(e,1,50,50)
@@ -49,13 +49,16 @@ check('Finance adapter never creates dummy Cases',Case.objects.count()==cases)
 
 # A brokerage-only adjustment needs no fabricated zero-value cash receipt.
 zero=create();zero=save(zero,dict(gross=0,commissionRate=0,taxRate=0,brokerage=-10,brokerageNote='Commission expense',
-    revenueMonth='2026-11',endorsementNo='E-ZERO',oldReason='late_entry'));zero=confirm(zero)
+    effectiveDate='2020-07-01',endorsementNo='E-ZERO',oldReason='late_entry'));zero=confirm(zero)
 review(zero,2);pay(zero,2,10,-10)
 check('brokerage-only expense creates no Cedant bank receipt',len(LegacyTransaction.objects.get(pk=zero['uid']).financial['paymentEntries'])==1)
 # Swiss also needs its independent statement; its zero Cedant leg is automatically complete.
 swiss_name='Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)'
-sw=create();sw=save(sw,dict(party=swiss_name,rule='swiss',cedantDays=90,gross=0,commissionRate=0,taxRate=0,brokerage=-10,
-    brokerageNote='Swiss commission expense',revenueMonth='2026-11',endorsementNo='E-SW-ZERO',oldReason='late_entry'));sw=confirm(sw)
+# 2026-11-12: the settlement party and payment rule follow the source, so Swiss scenarios use a Swiss source.
+swsrc=make_source('SW-REF',party=swiss_name,rule='swiss')
+sw=create(src=swsrc);check('Swiss rule detected from the source party',sw['data']['rule']=='swiss' and sw['data']['cedantDays']==90,sw['data'])
+sw=save(sw,dict(gross=0,commissionRate=0,taxRate=0,brokerage=-10,
+    brokerageNote='Swiss commission expense',effectiveDate='2020-07-01',endorsementNo='E-SW-ZERO',oldReason='late_entry'));sw=confirm(sw)
 review(sw,2);pay(sw,2,10,-10,409)
 obj=LegacyTransaction.objects.get(pk=sw['uid'])
 finance(dict(action='mark_swiss_statement',caseUid=sw['uid'],rowVersion=obj.version,scheduleKey='single:r1',reference='SWRPA-QA-ZERO'))
@@ -113,7 +116,7 @@ from cases.calc.payment_terms import build_payment_schedule
 swr_native.refresh_from_db();native_ri_key=next(row['scheduleKey'] for row in build_payment_schedule(swr_native.payload)['items'] if row['partyType']=='reinsurer')
 finance(dict(action='mark_swiss_statement',**{k:v for k,v in swr_member(2).items() if k!='txNo'},scheduleKey=native_ri_key,reference='SWRPA-MIXED-NATIVE'))
 finance(dict(action='review_accounts',date='2026-11-09',members=[swr_member(2)]))
-swc=create('claim');swc=save(swc,dict(party=swiss_name,rule='swiss',claim=80,lossDate='2020-04-01',reinsurerRef='SWISS-CLAIM-REF'));swc=confirm(swc)
+swc=create('claim',src=swsrc);swc=save(swc,dict(claim=80,lossDate='2020-04-01',lossNo='LOSS-SW',reinsurerRef='SWISS-CLAIM-REF'));swc=confirm(swc)
 review(swc,1)
 finance(dict(action='record_transaction_payments',paymentDate='2026-11-09',reference='NATIVE-LEGACY-SWISS-OFFSET',amount=0,
     allocations=[dict(**swr_member(2),cashAmount=0,offsetAmount=80),dict(**member(swc,1),cashAmount=0,offsetAmount=80)]),400)
@@ -128,7 +131,10 @@ check('original MDM Facility name is retained',LegacyTransaction.objects.get(pk=
 # A broker in MDM may settle a Facility; its name does not imply ordinary terms.
 from masterdata.models import MasterRecord
 MasterRecord.objects.create(entity_type='foreign_broker',name='QA Facility Broker',created_by='qa',updated_by='qa')
-broker=create();broker=save(broker,dict(party='QA Facility Broker',rule='auw',cedantDays=90,gross=400,commissionRate=0,taxRate=0,
-    brokerage=10,revenueMonth='2026-11',endorsementNo='E-BROKER-FACILITY',oldReason='late_entry'));broker=confirm(broker)
-check('a known broker may use an explicitly selected Facility rule',broker['data']['rule']=='auw')
+bsrc=make_source('BROKER-REF',party='QA Facility Broker')
+broker=create(src=bsrc)
+code,r=send(clients['sales'],dict(id=broker['uid'],version=broker['version'],action='save',data={'rule':'auw'}))
+check('payment rule cannot be chosen by hand (2026-11-12)',code==400,r)
+broker=save(broker,dict(gross=400,commissionRate=0,taxRate=0,brokerage=10,effectiveDate='2020-07-01',endorsementNo='E-BROKER',oldReason='late_entry'));broker=confirm(broker)
+check('a broker name that is not a Facility uses the ordinary rule',broker['data']['rule']=='ordinary')
 print(f'{len(checks)}/{len(checks)} passed')

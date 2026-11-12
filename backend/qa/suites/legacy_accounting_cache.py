@@ -73,7 +73,7 @@ try:
         L._fingerprint(L.historical_queryset())[0]==H and 'original' in columns and len(columns)>10)
 
     # A new (non-historical) endorsement exists alongside the historical rows.
-    e=create();e=save(e,dict(gross=400,commissionRate=0,taxRate=0,brokerage=10,revenueMonth='2035-06',endorsementNo='E-CACHE',oldReason='late_entry'));e=confirm(e)
+    e=create();e=save(e,dict(gross=400,commissionRate=0,taxRate=0,brokerage=10,effectiveDate='2020-07-01',endorsementNo='E-CACHE',oldReason='late_entry'));e=confirm(e)
 
     for view in ('?view=list',''):
         L._CACHE.clear();n=calls[0];base=uncached(view);again=uncached(view)
@@ -103,7 +103,7 @@ try:
         allocations=[dict(cashItemId=str(uuid.uuid4()),caseUid=m['caseUid'],txNo=m['txNo'],cashAmount=100,rowVersion=m['rowVersion'])]))
     paid=get();row=[r for r in json.loads(paid)['transactionRows'] if r.get('txNo')==m['txNo']]
     check('cash on a new legacy endorsement is visible at once',paid==uncached() and row and row[0]['paid']==100,row)
-    e2=create();e2=save(e2,dict(gross=200,commissionRate=0,taxRate=0,brokerage=5,revenueMonth='2035-06',endorsementNo='E-CACHE-2',oldReason='late_entry'));e2=confirm(e2)
+    e2=create();e2=save(e2,dict(gross=200,commissionRate=0,taxRate=0,brokerage=5,effectiveDate='2020-07-01',endorsementNo='E-CACHE-2',oldReason='late_entry'));e2=confirm(e2)
     n=calls[0];added=get()
     check('a newly confirmed endorsement appears at once without recomputing history',
         e2['uid'] in legacy_ids(added) and added==uncached() and calls[0]==n+H)

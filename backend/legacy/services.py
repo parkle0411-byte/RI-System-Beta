@@ -41,6 +41,11 @@ def representation(t,person=None):
             result['permissions']['transfer']=can_transfer(person,t)
         result['readOnly'] = not allowed
         if t.status == 'draft':
+            from .entries import locked_fields
+            result['lockedFields'] = sorted(locked_fields(t.data))
+            if t.data.get('kind') == 'endorsement' and t.data.get('effectiveDate'):
+                from .policy import revenue_month
+                result['projectedRevenueMonth'] = revenue_month(t.data.get('effectiveDate'))
             from .money import calculate
             try: result['amountsPreview'] = calculate(t.data)
             except ValueError as exc: result['calculationError'] = str(exc)

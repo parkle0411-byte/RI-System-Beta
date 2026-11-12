@@ -10,16 +10,15 @@ def phase_l(page):
     page.locator('.entry-form').wait_for();wait_api_idle(page)
     dlg=page.locator('.el-dialog').filter(has=page.locator('.entry-form')).last
     check('endorsement form includes premium and percentages',item(dlg,page,'100% Premium (This Endorsement Adjustment)').count()==1 and item(dlg,page,'R/I Commission (%)').count()==1)
-    pick(dlg,page,'Settlement Party','UI Broker')
-    check('a broker name alone does not imply ordinary payment terms',selected_label(dlg,page,'Payment Rule')=='Awaiting Payment Rule')
-    pick(dlg,page,'Settlement Party','UI Re Alpha')
-    pick(dlg,page,'Currency','USD')
+    # 2026-11-12: Cedant, Settlement Party, currency follow the source; the payment rule is detected.
+    check('endorsement keeps the source Cedant, Settlement Party and currency',all(item(dlg,page,l).locator('input').first.is_disabled() for l in ('Cedant','Settlement Party'))
+          and item(dlg,page,'Currency').locator('.is-disabled').count()>0 and 'UI Re Alpha' in item(dlg,page,'Settlement Party').locator('input').first.input_value())
+    check('payment rule is detected, not chosen',item(dlg,page,'Payment Rule').locator('input').first.input_value()=='Ordinary legacy counterparty')
     fill(dlg,page,'100% Premium (This Endorsement Adjustment)',1000)
     fill(dlg,page,'R/I Commission (%)',15);fill(dlg,page,'Tax (%)',1)
     fill(dlg,page,'Brokerage Amount (Original Currency)',50)
     fill(dlg,page,'Endorsement No.','E-UI-01')
-    date(dlg,page,'Revenue Month','2035-06')
-    pick(dlg,page,'Endorsement Over 5 Years After Expiry — Reason','Historical endorsement entry')
+    check('Revenue Month is automatic',item(dlg,page,'Revenue Month (automatic)').count()==1)
     dlg.get_by_role('button',name='Save Draft',exact=True).click();wait_api_idle(page)
     check('saved draft has matching calculated amounts','840' in dlg.inner_text() and '790' in dlg.inner_text())
     dlg.get_by_role('button',name='Confirm Transaction',exact=True).click();wait_api_idle(page)
@@ -30,7 +29,9 @@ def phase_l(page):
     page.locator('.entry-form').wait_for();wait_api_idle(page)
     dlg=page.locator('.el-dialog').filter(has=page.locator('.entry-form')).last
     check('claim has no Revenue Month or brokerage input',item(dlg,page,'Revenue Month').count()==0 and item(dlg,page,'Brokerage Amount (Original Currency)').count()==0)
-    date(dlg,page,'DOL','2020-05-01');fill(dlg,page,'Claim Amount (Our Share)',-5000)
+    check('claim keeps the source Insured and Old Reference',item(dlg,page,'Old Reference').locator('input').first.is_disabled() and item(dlg,page,'Insured (English)').locator('input').first.is_disabled())
+    fill(dlg,page,'Loss No.','UI-LOSS-1');fill(dlg,page,'Cause of Loss','Fire')
+    date(dlg,page,'DOL','2035-05-01');fill(dlg,page,'Claim Amount (Our Share)',-5000)
     fill(dlg,page,'Negative Claim Reason','Return excess claim payment')
     fill(dlg,page,'Note for Claim','Claim handling note retained for follow-up')
     dlg.get_by_role('button',name='Confirm Transaction',exact=True).click();wait_api_idle(page)
@@ -38,7 +39,8 @@ def phase_l(page):
     check('both new transactions retain unique final LTX numbers',page.locator('.legacy-page .el-table__body-wrapper').first.inner_text().count('LTX-')==2)
     page.get_by_role('button',name=re.compile(r'^LTX-')).first.click()
     detail=page.locator('.el-dialog:visible').last
-    check('confirmed claim details retain DOL and return reason','2020-05-01' in detail.inner_text() and 'Return excess claim payment' in detail.inner_text() and 'Claim handling note retained for follow-up' in detail.inner_text())
+    check('confirmed claim details retain DOL and return reason','2035-05-01' in detail.inner_text() and 'Return excess claim payment' in detail.inner_text() and 'Claim handling note retained for follow-up' in detail.inner_text())
+    check('claim details show Loss No., Cause of Loss and the same-Loss No. list','UI-LOSS-1' in detail.inner_text() and 'Fire' in detail.inner_text() and page.get_by_test_id('legacy-loss-group').count()==1)
     detail.get_by_role('button',name='Close',exact=True).click()
     snap(page,'legacy-transactions-confirmed')
     logout(page);login(page,'ui.legacy.finance');goto(page,BASE+'/legacy')
@@ -50,6 +52,7 @@ def phase_l(page):
     claim_row=page.locator('.el-table__body-wrapper tr').filter(has_text=re.compile(r'LTX-.*-C1-T1')).first
     party_cell=claim_row.locator('.cell').filter(has_text='UI Re Alpha').first
     check('negative claim payables name the reinsurer correctly','UI Re Alpha' in party_cell.inner_text() and 'Payable' in party_cell.inner_text())
+    check('Accounting shows the claim Loss No.','Loss No. UI-LOSS-1' in page.locator('[data-testid="accounting-table"]').inner_text())
     snap(page,'legacy-accounting')
     logout(page);login(page,'ui.admin');goto(page,BASE+'/legacy')
     page.get_by_role('button',name='Endorsement Reasons',exact=True).click()

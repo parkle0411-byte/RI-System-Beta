@@ -82,6 +82,9 @@ def _rate(row,column,amount,premium,currency):
     return rate,source,abs(premium*rate/100-amount)<=tolerance+1e-9
 
 
+LOSS_NOTE=re.compile(r'^\s*(?:claim|loss)\s*no\.?\s*[:：]?\s*(\S.*)$',re.I)
+
+
 def _refs(v,side):
     return ' / '.join(x for x in (label(v.get(c)) for c in SETTLEMENT_COLUMNS[side]) if x and x.upper()!='N/A')
 
@@ -155,8 +158,19 @@ def converted(row, rule_cache):
         people.append(dict(name=data['subAe'],income=float(residual),premium=0,incomeOriginal=None,pct=None))
     snapshot=dict(rate=rate,incomeTwd=total,premiumTwd=premium_twd,awaitingFx=False,people=people,
         historicalPreserved=True,aeIncomeTwd=ae,subAeIncomeTwd=people[1]['income'] if data['subAe'] else 0)
-    for key in ('gross','share'):
-        if data.get(key) is None:notes.append('Missing '+key+'; stored historical amounts preserved.')
+    # Owner 2026-11-12: Share is required on premium/endorsement rows (endorsements lock the source Share).
+    if not claim and data.get('share') is None:raise ValueError('Share is required for premium and endorsement rows.')
+    if data.get('gross') is None:notes.append('Missing gross; stored historical amounts preserved.')
+    # AE / Sub AE split: imported amounts are converted to the 40/60 or 70/30 split (within 1%).
+    data['aePct']=100
+    if data['subAe']:
+        pct=float(Decimal(str(v['Re Dept. Bkg. (in TWD)']))/Decimal(str(v['Bkg. (in TWD)']))*100) if float(v.get('Bkg. (in TWD)') or 0) else None
+        match=next((p for p in (40,70) if pct is not None and abs(pct-p)<=1),None)
+        if match is None:notes.append('AE / Sub AE brokerage split is not 40/60 or 70/30.')
+        data['aePct']=match
+    # Loss No. from Note for Claim ("Claim No: x" / "Loss No: x"); the note itself is kept.
+    m=LOSS_NOTE.match(str(data.get('claimNote') or ''))
+    data['lossNo']=m.group(1).strip()[:160] if (claim and m) else ''
     if not data['rule']:notes.append('Payment rule awaiting confirmation for future entries.')
     # Cash legs (claims reverse the parties): settled when the Register number is filled.
     # Settlement dates: premium rows use Receive Date / Pay Date; claim rows (whose Register
@@ -292,6 +306,10 @@ def commit(person,batch_id,sha256):
                 original=row['values'],owner_id=person.pk,created_by_id=person.pk,first_confirmed_at=now)
             try:_settle_imported(t,stamp,actor,batch.pk)
             except (ValueError,OverflowError) as exc:fail(f'Row {row["row"]} ({t.number}): {exc}')
+            # Owner 2026-11-12: link the Chinese-name Insured master (same matching as Case); official.
+            from .policy import link_insured
+            master=link_insured(t.data.get('insuredCn'),actor,str(t.uid))
+            if master:t.data['insuredMasterId']=master
             records.append(t)
         LegacyTransaction.objects.bulk_create(records,batch_size=250)
         batch.status='imported';batch.imported_at=now
