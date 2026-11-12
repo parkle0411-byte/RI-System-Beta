@@ -58,7 +58,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 118 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 119 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有 Oversea Business 的 O 專項 29 項＋分期／批單 22 項、舊案 L 專項 15 項、Accounting 載入失敗 X 專項 9 項（2026-11-10 起完整執行時一併跑，L 會自動準備舊案測試資料），合計 281 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
@@ -441,6 +441,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - Treaty（2026-11-02）、PDF 產生與 Gotenberg（2026-10）、Alpha 差異測試與搬遷匯入工具、舊 Word 產生器、CaseWorkspace 產生器、PendingView、舊 AUW 說明檔。conversion app 的 models／migrations／資料表保留。
 - 已取消的舊規則：人工「Awaiting confirmation」才 Settled（改為全額自動銷帳）、Production 關帳才建帳（改為 Announce 建帳）、新增淨額抵銷／純抵銷、舊單獨保費抵銷入口、直接 Edit amount、Facility 專用理賠追蹤入口（統一至全部未結理賠）、Swiss 獨立專區與收妥勾選、固定提前 7 天首封提醒、Allianz 月底＋80 提醒。
+- **已退役 Accounting 動作的程式移除（2026-11-12）**：`record_payment`、`reverse_payment`、`edit_payment`、`record_premium_offset`、`record_swiss_offset`、`record_swiss_clearance`、`confirm_swiss_collection`、`unconfirm_swiss_collection`、`confirm_facility_settlement`、`unconfirm_facility_settlement`、`record_allianz_claim_followup`、`record_great_american_claim_followup`、`record_qbe_claim_followup` 共 13 個動作呼叫時仍回 410 `retired_accounting_action`（無 Finance 權限回 403），其處理程式已刪除：`cases/transaction_payments.py` 整檔、`AccountingView.record_payment／reverse_payment`、`facility_accounting.settlement_action`、`swiss_accounting._offset`、三家 `record_followup`。`mark_swiss_statement`（Swiss 結算清單參考號）與既有抵銷／結清紀錄的顯示、餘額計算保留。`/api/render-document-pdf` 整個移除（404）。前端 `AccountingEntryActions.vue` 只剩 Swiss 結算清單參考號。API 網址合併（帳號、文件、主檔）經評估不做：會把各網址的權限設定改成程式內分動作判斷（業主決定）。
 
 ---
 
@@ -628,6 +629,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-12 | 保費類金額上限 999,999,999,999、超限資料視為異常（Account List 不再整頁出錯）、非清單輸入回 400 | `backups/amount_limits_20261112_210454` | `ri-backend:before-amount-limits-20261112_210454`／`ri-frontend:before-amount-limits-20261112_210454` | 候選映像 118 組 API（含 `amount_limits` 85 項）、299 項畫面；無 migration、無資料寫入；正式資料巡檢一致 |
 
+| 11-12 | 移除已退役 Accounting 動作的舊程式（約 650 行、`transaction_payments.py`）、PDF 網址與無入口的抵銷對話框 | `backups/retired_cleanup_20261112_220859` | `ri-backend:before-retired-cleanup-20261112_220859`／`ri-frontend:before-retired-cleanup-20261112_220859` | 候選映像 119 組 API、299 項畫面；正式資料 485 個 GET 回應部署前後逐位元組相同；無 migration、無資料寫入 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -753,3 +756,5 @@ Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別�
 - 2026-11-12：一次性整理（業主決定）：刪除 4 組停用的測試環境；回滾點映像改為 7 天＋每庫最新 10 個（`scripts/docker_cleanup.sh`）；新增備份保留規則並整理 9 月備份；16 個已上線工作資料夾打包封存。正式程式與正式資料未變動。
 
 - 2026-11-12：每週 Debug（一次性整理）找到並修正：保費類金額沒有上限時，天文數字草稿會讓 Account List 與該案件無法開啟；新增金額上限 999,999,999,999 與異常資料防護（§4.6），並修正兩處非清單輸入造成的伺服器錯誤（業主確認部署）。
+
+- 2026-11-12：API 整理（業主確認部署）：刪除 13 個已退役 Accounting 動作的處理程式（仍回 410）、移除 PDF 網址與畫面上無入口的抵銷對話框；行為與資料不變（§16）。網址合併不做。

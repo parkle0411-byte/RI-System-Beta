@@ -8,7 +8,7 @@ from cases.claims_views import ClaimsView
 from production.views import ProductionReportView
 from reminders.views import CaseRemindersView
 from dashboard.views import DashboardTargetsView, DashboardView
-from cases.document_generation_views import DocumentGenerationLogView, RenderDocumentPdfView
+from cases.document_generation_views import DocumentGenerationLogView
 from cases.document_views import CaseDocumentsView
 from cases.generated_document_views import GeneratedCaseDocumentView
 from cases.placing_views import PlacingSlipView
@@ -53,7 +53,6 @@ urlpatterns = [
     path("api/case-workflow", WorkflowView.as_view(), name="case-workflow"),
     path("api/accounting", AccountingView.as_view(), name="accounting"),
     path("api/claims", ClaimsView.as_view(), name="claims"),
-    path("api/render-document-pdf", RenderDocumentPdfView.as_view(), name="render-document-pdf"),
     path("api/document-generation-log", DocumentGenerationLogView.as_view(), name="document-generation-log"),
     path("api/case-reminders", CaseRemindersView.as_view(), name="case-reminders"),
     path("api/production-report", ProductionReportView.as_view(), name="production-report"),

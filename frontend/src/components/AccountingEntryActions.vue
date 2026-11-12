@@ -1,28 +1,17 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+// 2026-11-12：只剩 Swiss 結算清單參考號；已退役且沒有入口的「保費抵銷」對話框程式已移除。
+import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiFetch } from '../api'
-import { formatMoney } from '../alpha/format'
 const props=defineProps({rows:{type:Array,default:()=>[]},canEdit:Boolean})
 const emit=defineEmits(['refresh'])
 const busy=ref(false),dialog=ref(''),active=ref(null)
-const form=reactive({date:'',note:'',reference:'',originalKey:''})
-const periodFor=row=>props.rows.find(item=>item.caseUid===row?.caseUid&&item.installmentId===row?.installmentId&&item.swissFacility)?.dueDate||''
-const originals=computed(()=>!active.value?[]:props.rows.filter(row=>row.caseUid===active.value.rootCaseUid&&row.amount>0&&row.outstanding>0&&row.currency===active.value.currency&&row.partyType===active.value.partyType&&row.partyName===active.value.partyName))
-const selectedOriginal=computed(()=>originals.value.find(row=>row.key===form.originalKey))
-const offsetValid=computed(()=>selectedOriginal.value&&Math.abs(selectedOriginal.value.outstanding)>=Math.abs(active.value?.outstanding||0)&&periodFor(selectedOriginal.value)===periodFor(active.value))
-function open(row,kind){if(!props.canEdit)return;active.value=row;Object.assign(form,{date:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),note:'',reference:row.statementReference||'',originalKey:''});dialog.value=kind}
+const form=reactive({reference:''})
+function open(row,kind){if(!props.canEdit||kind!=='statement')return;active.value=row;form.reference=row.statementReference||'';dialog.value=kind}
 async function save(){
  const row=active.value;if(!row||busy.value)return
- let body
- if(dialog.value==='statement'){
-  if(!form.reference.trim())return ElMessage.warning('Enter the Swiss settlement statement reference.')
-  body={action:'mark_swiss_statement',caseUid:row.caseUid,rowVersion:row.caseRowVersion,scheduleKey:row.scheduleKey,reference:form.reference}
- }else{
-  if(!offsetValid.value||!form.date)return ElMessage.warning('Select the matching original policy with sufficient balance. Swiss must use the same settlement period.')
-  const original=selectedOriginal.value
-  body={action:'record_premium_offset',originalCaseUid:original.caseUid,refundCaseUid:row.caseUid,originalRowVersion:original.caseRowVersion,refundRowVersion:row.caseRowVersion,originalKey:original.scheduleKey,refundKey:row.scheduleKey,amount:Math.abs(row.outstanding),paymentDate:form.date,note:form.note}
- }
+ if(!form.reference.trim())return ElMessage.warning('Enter the Swiss settlement statement reference.')
+ const body={action:'mark_swiss_statement',caseUid:row.caseUid,rowVersion:row.caseRowVersion,scheduleKey:row.scheduleKey,reference:form.reference}
  busy.value=true
  try{const response=await apiFetch('/api/accounting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw new Error(result.message||result.error);dialog.value='';ElMessage.success('Accounting updated');emit('refresh')}
  catch(error){ElMessage.error(error.message);emit('refresh')}finally{busy.value=false}

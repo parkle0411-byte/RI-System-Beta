@@ -71,20 +71,21 @@ try:
         archived = make_case(sales, "posted"); Case.objects.filter(pk=archived.pk).update(is_archived=True, archived_at=timezone.now(), archived_by="t")
 
         # ================= 權限 =================
-        check("anonymous PDF -> 401", call(new_client(), "post", "/api/render-document-pdf", {"markup": "<p>Retired</p>"}).status_code == 401)
+        # 2026-11-12：已退役的 PDF 網址整個移除（原本回 410）；任何人、任何方法都是 404，不產生 PDF 也不留紀錄。
+        check("removed PDF route -> 404 for anonymous", call(new_client(), "post", "/api/render-document-pdf", {"markup": "<p>Retired</p>"}).status_code == 404)
         for label, c in (("finance staff", fin), ("viewer", viewer)):
-            check(f"{label}: no documents.read -> PDF 403 and Word log 403",
-                  pdf(c, kind="cover", caseUid=str(posted.case_uid)).status_code == 403 and docx(c, kind="cover", caseUid=str(posted.case_uid)).status_code == 403)
-        check("GET is not allowed (403 before method dispatch)", call(sales, "get", "/api/render-document-pdf").status_code == 403)
+            check(f"{label}: no documents.read -> removed PDF route 404 and Word log 403",
+                  pdf(c, kind="cover", caseUid=str(posted.case_uid)).status_code == 404 and docx(c, kind="cover", caseUid=str(posted.case_uid)).status_code == 403)
+        check("removed PDF route -> 404 for GET", call(sales, "get", "/api/render-document-pdf").status_code == 404)
 
         check("anonymous Word -> 401", docx(new_client(), kind="cover", caseUid=str(posted.case_uid)).status_code == 401)
         for kind in ("cover", "debit", "endorsement"):
             before = gen_audit(posted.case_uid).count()
             r = pdf(sales, kind=kind, caseUid=str(posted.case_uid))
-            check(f"retired {kind} PDF -> 410, no audit, no PDF", r.status_code == 410 and code(r) == "pdf_generation_retired"
+            check(f"removed {kind} PDF route -> 404, no audit, no PDF", r.status_code == 404
                   and not r.content.startswith(b"%PDF-") and gen_audit(posted.case_uid).count() == before)
         r = call(sales, "post", "/api/render-document-pdf", {"markup": "<script>invalid</script>", "kind": "cover"})
-        check("retired endpoint cannot render supplied markup", r.status_code == 410 and code(r) == "pdf_generation_retired")
+        check("removed endpoint cannot render supplied markup", r.status_code == 404 and b"invalid" not in r.content)
 
         # ================= kind／caseUid =================
         r = docx(sales, kind="invoice", caseUid=str(posted.case_uid)); check("unknown kind -> 400", r.status_code == 400 and code(r) == "invalid_document_kind")

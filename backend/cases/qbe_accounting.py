@@ -190,35 +190,3 @@ def allocation_error(chosen, parsed, cases, details):
         if any(abs(selected.get(no, 0) - value) > .004 for no, value in expected.items()):
             return 'Record the entire Cedant return endorsement as one full refund; partial refunds are not allowed.'
     return ''
-
-
-def record_followup(view, request, body):
-    from .accounting_views import _can_edit, _error, _iso_now
-    from .calc.swiss_facility import case_payload
-    from .cash_ledger import transaction_details
-    from ri_system.authz import actor_from
-    if not _can_edit(request.ri_principal):
-        return _error(403, 'permission_denied', 'Accounting write access is required.')
-    case = view._load_case_for_update(str(body.get('caseUid') or ''))
-    if not case:
-        return _error(404, 'case_not_found', 'Case not found.')
-    if case.status not in ('posted', 'closed', 'reversed') or case.is_archived or case.recycled_at:
-        return _error(409, 'accounting_status_locked', 'Select an active announced claim obligation.')
-    if case.row_version != body.get('rowVersion'):
-        return _error(409, 'version_conflict', 'Refresh Accounting before recording follow-up.')
-    no = body.get('txNo')
-    if not isinstance(no, str):
-        return _error(400, 'invalid_transaction', 'Select one claim receivable.')
-    payload = case_payload(case)
-    detail = transaction_details(payload).get(no, {})
-    tx = next((t for t in objects(payload.get('transactions')) if t.get('txNo') == no), {})
-    if not detail.get('qbeClaim') or tx.get('reversed') or tx.get('isReversalEntry') or abs(detail.get('outstanding', 0)) < .005:
-        return _error(400, 'claim_followup_not_allowed', 'Select an outstanding QBE claim receivable.')
-    note = str(body.get('note') or '').strip()[:1000]
-    if not note:
-        return _error(400, 'followup_note_required', 'Enter the follow-up record.')
-    actor = actor_from(request.ri_principal)
-    payload.setdefault('qbeClaimTracking', []).append({'txNo': no, 'recordedAt': _iso_now(),
-        'recordedBy': actor['id'], 'recordedByName': actor['name'], 'note': note})
-    payload.setdefault('paymentEntries', [])
-    return view._save(request, body, case, payload, 'record_qbe_claim_followup', {'txNo': no})

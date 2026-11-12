@@ -6,7 +6,7 @@ from .cgl_risk_details import type_issues, underlying_issues, liability_limit_la
 
 Word files are assembled in the browser. This API validates access and the
 stored Case fields, then records generation metadata without document content.
-The retired PDF route returns 410 for previously opened clients.
+The retired PDF route (/api/render-document-pdf) was removed on 2026-11-12.
 """
 import re
 from .property_original import scope as property_scope, POSTCODE as property_postcode
@@ -339,15 +339,6 @@ def _audit(request, case, kind, fmt):
                      after={"kind": kind, "format": fmt, "twRef": case.tw_ref, "rowVersion": case.row_version},
                      actor=actor_from(request.ri_principal), request_id=request_id_from(request),
                      metadata={"kind": kind, "format": fmt})
-
-
-class RenderDocumentPdfView(NoStoreMixin, APIView):
-    """Retired compatibility endpoint; no markup is rendered or logged."""
-    permission_classes = [RIPermission]
-    permission_map = {"POST": "documents.read"}
-
-    def post(self, request):
-        return _error(410, "pdf_generation_retired", "PDF generation is no longer available. Download Word (.docx) and export it to PDF in Word.")
 
 
 class DocumentGenerationLogView(NoStoreMixin, APIView):

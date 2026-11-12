@@ -139,7 +139,6 @@ try:
         check('Django admin cannot expose Personnel or Audit', president.get('/admin/personnel/personnel/').status_code == 302)
 
         attempts = [('post', '/api/cases', {}), ('put', '/api/cases', {'caseUid': uid, 'rowVersion': 1}),
-                    ('post', '/api/render-document-pdf', {'caseUid': uid, 'kind': 'cover', 'markup': '<div>Denied</div>'}),
                     ('post', '/api/document-generation-log', {'caseUid': uid, 'kind': 'cover', 'format': 'docx'}),
                     ('post', '/api/case-announce', {'caseUid': uid, 'rowVersion': 1})]
         for action in ['create_endorsement', 'create_renewal', 'reverse_case', 'notify_accounting']:

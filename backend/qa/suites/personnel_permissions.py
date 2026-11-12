@@ -80,7 +80,7 @@ try:
             before = fingerprint()
             for method, path in [('post', '/api/cases'), ('put', '/api/cases'),
                                  ('post', '/api/case-announce'), ('post', '/api/case-workflow'),
-                                 ('post', '/api/claims'), ('post', '/api/render-document-pdf'),
+                                 ('post', '/api/claims'),
                                  ('post', '/api/document-generation-log'), ('post', '/api/case-documents')]:
                 check(role + ' denied ' + method + ' ' + path, call(c, method, path, {}).status_code == 403)
             check(role + ' cannot read or download case documents', c.get('/api/case-documents',
@@ -95,7 +95,7 @@ try:
         for path in ['/api/case-documents?caseUid=' + uid,
                      '/api/case-documents?caseUid=' + uid + '&fileId=00000000-0000-0000-0000-000000000001']:
             check('President denied document read/download ' + path, president.get(path).status_code == 403)
-        for method, path in [('post', '/api/render-document-pdf'), ('post', '/api/document-generation-log'),
+        for method, path in [('post', '/api/document-generation-log'),
                              ('post', '/api/case-documents'), ('put', '/api/case-documents'),
                              ('delete', '/api/case-documents')]:
             check('President denied ' + method + ' ' + path, call(president, method, path, {}).status_code == 403)

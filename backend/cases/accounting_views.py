@@ -36,7 +36,6 @@ from .models import Case
 from .transaction_ledger import transaction_rows
 from .reference_views import schedule_reference_metadata
 from .cash_ledger import payment_batches
-from .transaction_payments import record_transaction_payments, reverse_batch_payment, edit_payment
 from .calc.swiss_facility import applies as swiss_applies, DISPLAY_FIELDS, reset_after_changes, payment_error, case_payload
 from .swiss_accounting import swiss_action
 
@@ -214,21 +213,10 @@ class AccountingView(NoStoreMixin, APIView):
         if contains_legacy_reference(body):
             return _error(403,"legacy_read_only","Imported historical transactions are read-only.")
         action = _text(body.get("action"))
-        from .allianz_accounting import record_followup
-        from .great_american_accounting import record_followup as ga_followup
-        from .qbe_accounting import record_followup as qbe_followup
-        handlers = {"record_qbe_claim_followup": lambda req,data:qbe_followup(self,req,data), "record_great_american_claim_followup": lambda req,data:ga_followup(self,req,data), "record_allianz_claim_followup": lambda req,data:record_followup(self,req,data), "record_payment": self.record_payment, "reverse_payment": self.reverse_payment,
-                    "record_transaction_payments": lambda r, b: record_transaction_payments(self,r,b),
-                    "reverse_batch_payment": lambda r, b: reverse_batch_payment(self,r,b)}
-        for swiss_handler in ("confirm_swiss_collection", "unconfirm_swiss_collection", "record_swiss_clearance", "record_swiss_offset", "mark_swiss_statement"):
-            handlers[swiss_handler] = lambda r, b: swiss_action(self, r, b)
+        # 2026-11-12：已退役動作（見下方 retired）的舊處理程式已移除；呼叫時一律回 410。
+        handlers = {"mark_swiss_statement": lambda r, b: swiss_action(self, r, b)}
         from .payment_terms_editor import complete_payment_terms
         handlers["complete_payment_terms"] = lambda r, b: complete_payment_terms(self, r, b)
-        handlers["edit_payment"] = lambda r, b: edit_payment(self, r, b)
-        handlers["record_premium_offset"] = lambda r, b: swiss_action(self, r, b)
-        from .facility_accounting import settlement_action
-        for manual_action in ('confirm_facility_settlement', 'unconfirm_facility_settlement'):
-            handlers[manual_action] = lambda r, b: settlement_action(self, r, b)
         from . import finance_workflow as finance
         handlers.update({
             'review_accounts': lambda r,b: finance.reconcile(self,r,b),
@@ -316,92 +304,3 @@ class AccountingView(NoStoreMixin, APIView):
                      after={"rowVersion": case.row_version, "paymentEntries": payload["paymentEntries"]},
                      actor=actor_info, request_id=request_id_from(request), metadata=metadata)
         return Response({"ok": True, "rowVersion": case.row_version})
-
-    # ---- 記付款 ----
-    def record_payment(self, request, body):
-        person = request.ri_principal
-        if not _can_edit(person):
-            return _error(403, "permission_denied", "Accounting access is required to record payments.")
-        if not str(body.get('reference') or '').strip() and not str(body.get('note') or '').strip():
-            return _error(400,'payment_reference_required','Enter an external reference or registration explanation.')
-        case_uid = js_trim(_text(body.get("caseUid")))
-        schedule_key = js_trim(_text(body.get("scheduleKey")))
-        amount = js_to_number(body.get("amount"))
-        payment_date = _text(body.get("paymentDate"))
-        if not case_uid or not schedule_key or not js_is_finite(amount) or amount <= 0 or not _real_date(payment_date):
-            return _error(400, "invalid_payment", "Case, installment, party, payment date, and a positive amount are required.")
-        # Validate and compare the same rounded amount that will be stored.
-        amount = money(amount)
-        if not js_is_finite(amount) or amount <= 0:
-            return _error(400, "invalid_payment", "Payment amount must remain positive after rounding to two decimal places.")
-        case = self._load_case_for_update(case_uid)
-        if case is None:
-            return _error(404, "case_not_found", "Case not found.")
-        locked = self._status_error(case, "recorded")
-        if locked:
-            return locked
-        payload = json_roundtrip(case_payload(case))
-        item = next((i for i in build_payment_schedule(payload)["items"] if i["scheduleKey"] == schedule_key), None)
-        if item is None:
-            return _error(400, "schedule_not_found", "The selected installment and party no longer exist.")
-        from .cash_ledger import _matches
-        targets = [t for t in _objects(payload.get("transactions")) if t.get("source") != "claim" and not t.get("reversed") and not t.get("isReversalEntry") and _matches(item, t)]
-        if len(targets) != 1:
-            return _error(400, "individual_transaction_required", "Select each posted transaction and enter its amount; schedule payments cannot allocate automatically.")
-        return record_transaction_payments(self, request, {"paymentDate": payment_date, "amount": amount,
-            "reference": body.get("reference"), "note": body.get("note"), "allocations": [{"caseUid": case_uid,
-            "rowVersion": body.get("rowVersion"), "txNo": targets[0]["txNo"], "amount": amount}]})
-
-    def reverse_payment(self, request, body):
-        person = request.ri_principal
-        if not _can_edit(person):
-            return _error(403, "permission_denied", "Accounting access is required to reverse payments.")
-        case_uid = js_trim(_text(body.get("caseUid")))
-        entry_id = js_trim(_text(body.get("entryId")))
-        payment_date = _text(js_or(body.get("paymentDate"), taipei_date()))
-        if not _real_date(payment_date):
-            return _error(400, "invalid_payment_date", "The reversal date must be a valid date (YYYY-MM-DD).")
-        case = self._load_case_for_update(case_uid)
-        if case is None:
-            return _error(404, "case_not_found", "Case not found.")
-        locked = self._status_error(case, "reversed")
-        if locked:
-            return locked
-        payload = json_roundtrip(case_payload(case))
-        entries = payload.get("paymentEntries") if is_array(payload.get("paymentEntries")) else []
-        original = next((e for e in _objects(entries)
-                         if get(e, "id") == entry_id and get(e, "entryType") == "payment"), None)
-        if original is None:
-            return _error(400, "payment_not_found", "The original payment entry was not found.")
-        if original.get("batchId"):
-            return _error(400, "batch_reverse_required", "Reverse the entire remittance from Accounting history.")
-        if any(get(e, "entryType") == "reversal" and get(e, "reversalOf") == entry_id for e in _objects(entries)):
-            return _error(409, "already_reversed", "This payment has already been reversed.")
-        actor_info = actor_from(person)
-        reversal = {
-            "id": str(uuid.uuid4()), "entryType": "reversal", "reversalOf": entry_id,
-            "scheduleKey": get(original, "scheduleKey"), "installmentId": get(original, "installmentId"),
-            "installmentLabel": get(original, "installmentLabel"), "partyType": get(original, "partyType"),
-            "partyName": get(original, "partyName"), "amount": get(original, "amount"),
-            "paymentDate": payment_date,
-            "note": js_slice(js_trim(_text(body.get("note"))), 0, 1000),
-            "createdAt": _iso_now(), "createdBy": actor_info["id"], "createdByName": actor_info["name"],
-        }
-        for field in ("settlementDueDate", "nonCash", "entryKind"):
-            if field in original:
-                reversal[field] = original[field]
-        from .accounting_rules import entry_locked, claim_balance_error
-        if entry_locked(payload, original):
-            return _error(409, "settled_amount_locked", "Previously settled receipt/payment records cannot be reversed.")
-        if not str(body.get("note") or "").strip():
-            return _error(400, "correction_reason_required", "Enter the reversal reason.")
-        if original.get("offsetId"):
-            return _error(400, "linked_offset_locked", "Offset records must remain linked to both policies; review them with Accounting.")
-        payload["paymentEntries"] = json_roundtrip([*entries, reversal])
-        from .allianz_accounting import collection_change_error
-        blocked=collection_change_error(case_payload(case),payload)
-        if blocked:return _error(409,"allianz_collection_required",blocked)
-        return self._save(request, body, case, payload, "reverse_payment", json_roundtrip({
-            "paymentEntryId": reversal["id"], "reversalOf": entry_id,
-            "scheduleKey": get(original, "scheduleKey"), "amount": get(original, "amount"),
-        }))
