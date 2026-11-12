@@ -4,12 +4,15 @@
 #   scripts/docker_cleanup.sh --apply  實際刪除
 # 只處理 ri-* 自建映像；第三方映像（mysql、nginx、node、python…）不動。
 # 一律保留：容器使用中（含已停止）、7 天內建立或 tag 日期在 7 天內、
-#           VM-RULES／腳本／compose 有寫到、每個功能最後一個 before-* 回滾點。
+#           VM-RULES／腳本／compose 有寫到（before-* 回滾點除外）。
+# before-* 回滾點（2026-11-12 業主決定）：7 天內全部保留，另外每個映像庫不論多舊至少保留最新
+#           ROLLBACK_KEEP_MIN 個（預設 10）；超過的刪除，即使 VM-RULES 的部署紀錄有寫到。
 # 另清：超過 7 天的建置快取、沒有名字（dangling）的映像。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APPLY=0; [[ "${1:-}" == "--apply" ]] && APPLY=1
 KEEP_DAYS="${KEEP_DAYS:-7}"
+ROLLBACK_KEEP_MIN="${ROLLBACK_KEEP_MIN:-10}"
 [[ -f VM-RULES.md ]] || { echo "找不到 VM-RULES.md，中止"; exit 1; }
 
 echo "=== $(date -Is) docker_cleanup $([[ $APPLY == 1 ]] && echo APPLY || echo DRY-RUN) keep_days=$KEEP_DAYS"
@@ -22,20 +25,22 @@ grep -rhoE '[a-z0-9._/-]+(:[A-Za-z0-9._-]+|@sha256:[0-9a-f]{12})' \
   --include='*.md' --include='*.sh' --include='*.y*ml' --include='*.py' --include='Dockerfile*' \
   --exclude-dir=backups --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | sort -u > "$TMP/refs.txt" || true
 
-python3 -I - "$TMP" "$KEEP_DAYS" > "$TMP/delete.txt" <<'EOF'
+python3 -I - "$TMP" "$KEEP_DAYS" "$ROLLBACK_KEEP_MIN" > "$TMP/delete.txt" <<'EOF'
 import sys, re, datetime, collections
-tmp, days = sys.argv[1], int(sys.argv[2])
+tmp, days, rollback_min = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 cutoff = datetime.date.today() - datetime.timedelta(days=days)
 rows = [l.rstrip('\n').split('\t') for l in open(f'{tmp}/images.tsv') if l.strip()]
 in_use = {l.strip() for l in open(f'{tmp}/in_use.txt') if l.strip()}
 refs = {l.strip() for l in open(f'{tmp}/refs.txt')}
 ref_digests = {r.split('@sha256:')[1][:12] for r in refs if '@sha256:' in r}
 ref_tags = {r.split(':', 1)[1] for r in refs if ':' in r and '@' not in r}
-pat = re.compile(r'^before-(.+)-(\d{8}_\d{6})$')
-latest = {}
+pat = re.compile(r'^before-(.+)-(\d{8}(?:_\d{6})?)$')
+# 回滾點：每個映像庫依 tag 時間排序，最新的 rollback_min 個一定保留。
+stamps = collections.defaultdict(list)
 for repo, tag, iid, created, size in rows:
     m = pat.match(tag)
-    if m: latest[(repo, m[1])] = max(latest.get((repo, m[1]), ''), m[2])
+    if m: stamps[repo].append((m[2].ljust(15, '0'), tag))
+newest = {(repo, tag) for repo, items in stamps.items() for _, tag in sorted(items, reverse=True)[:rollback_min]}
 def recent(repo, tag, created):
     if datetime.date.fromisoformat(created[:10]) >= cutoff: return True
     return any(datetime.date(int(d[:4]), int(d[4:6]), int(d[6:])) >= cutoff
@@ -46,10 +51,14 @@ for repo, tag, iid, created, size in rows:
     full = f'{repo}:{tag}'; why = []
     if not repo.startswith('ri-'): why.append('third-party')
     if iid in in_use or iid in ref_digests: why.append('in-use')
-    if recent(repo, tag, created): why.append('recent')
-    if full in refs or tag in ref_tags: why.append('referenced')
     m = pat.match(tag)
-    if m and latest[(repo, m[1])] == m[2]: why.append('latest-rollback')
+    if m:
+        # 回滾點只看 tag 上的部署日期（映像本身的建立日期是「部署前那一版」的日期，不代表回滾點的新舊）。
+        if recent(repo, tag, '1970-01-01'): why.append('recent')
+        if (repo, tag) in newest: why.append('newest-rollbacks')
+    else:
+        if recent(repo, tag, created): why.append('recent')
+        if full in refs or tag in ref_tags: why.append('referenced')
     reasons[full] = (why, iid, size)
 by_id = collections.defaultdict(list)
 for f, (w, i, s) in reasons.items(): by_id[i].append(f)
