@@ -6,6 +6,9 @@ export const readableNumber = value => value == null || typeof value === 'string
   || (typeof value === 'number' && Number.isFinite(value))
   || (typeof value === 'string' && numberPattern.test(value.trim().replace(/,/g,'')) && Number.isFinite(Number(value.trim().replace(/,/g,''))))
 const fields = ['originalPremium','riCommPct','taxPct']
+// 2026-11-12：保費／經紀費類金額的絕對值上限，與後端 cases/data_integrity.py 的 AMOUNT_MAX 相同。
+export const AMOUNT_MAX = 999999999999
+const amounts = ['originalPremium','premium','premiumAdjustment','brokerageAmount']
 const rows = {reinsurers:['sharePct','premium','riCommPct','taxPct'],performanceInstallments:['premium','ratio']}
 export function financialIssues(payload) {
   if (payload == null) return []
@@ -15,6 +18,7 @@ export function financialIssues(payload) {
   const numbers=(row,keys,prefix='')=>keys.forEach(key=>{
     const value=row[key]
     if(!readableNumber(value))add(prefix+key)
+    else if(amounts.includes(key) && value!=null && String(value).trim() && Math.abs(Number(String(value).replace(/,/g,'')))>AMOUNT_MAX)issues.push({field:prefix+key,label:`${prefix+key}: the amount exceeds the supported limit of 999,999,999,999. Correct it before continuing.`})
     else if(['sharePct','riCommPct','taxPct','ratio'].includes(key) && value!=null && String(value).trim() && !(Number(String(value).replace(/,/g,''))>=0 && Number(String(value).replace(/,/g,''))<=100))add(prefix+key)
   })
   numbers(payload,fields)

@@ -10,6 +10,10 @@ from .calc.jsnum import js_trim
 NUMBER=re.compile(r'^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$')
 # Calendar/underwriting requirements retain their existing, field-specific gates.
 NUMBERS=('originalPremium','riCommPct','taxPct')
+# 2026-11-12（業主決定）：保費／經紀費類金額的絕對值上限。超過視為無法使用的金額資料（與無法讀取的數字同樣處理），
+# 不套用在保險金額、限額等欄位。前端 dataIntegrity.js 使用同一個數值。
+AMOUNT_MAX=999999999999
+AMOUNTS=frozenset(('originalPremium','premium','premiumAdjustment','brokerageAmount'))
 ROWS={'reinsurers':('sharePct','premium','riCommPct','taxPct'),
       'performanceInstallments':('premium','ratio')}
 
@@ -31,6 +35,7 @@ def financial_issues(payload):
         for key in keys:
             value=row.get(key)
             if not numeric(value):add(prefix+key)
+            elif key in AMOUNTS and value is not None and not (isinstance(value,str) and not js_trim(value)) and abs(float(js_trim(str(value)).replace(',','')))>AMOUNT_MAX:issues.append({'field':prefix+key,'label':prefix+key+': the amount exceeds the supported limit of 999,999,999,999. Correct it before continuing.'})
             elif key in ('sharePct','riCommPct','taxPct','ratio') and value is not None and not (isinstance(value,str) and not js_trim(value)):
                 if not 0<=float(js_trim(str(value)).replace(',',''))<=100:add(prefix+key)
     numbers(payload,NUMBERS)

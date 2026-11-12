@@ -62,6 +62,9 @@ def text(value, max_len=5000):
     return js_slice(js_trim(js_to_string(value)), 0, max_len)
 
 
+from .data_integrity import AMOUNT_MAX  # 保費／經紀費類金額的絕對值上限（999,999,999,999）
+
+
 def nullable_number(value, label, errors, min=None, max=None, integer=False):
     if value == "" and isinstance(value, str) or is_nullish(value):
         return None
@@ -191,7 +194,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         inp['typePrefix'] = ''
         inp['newOrRenew'] = 'New'
         if inp.get('installmentEnabled'):
-            inp['receiptPaymentDate']=next((r.get('paymentBaseDate') or '' for r in inp.get('performanceInstallments') or [] if isinstance(r,dict)), '')
+            # 2026-11-12：分期不是清單時不在這裡出錯，交給下方的格式檢查回 400。
+            inp['receiptPaymentDate']=next((r.get('paymentBaseDate') or '' for r in (inp.get('performanceInstallments') if isinstance(inp.get('performanceInstallments'),list) else []) if isinstance(r,dict)), '')
         else:inp['performanceInstallments']=[]
     inactive = {}
     if cgl_qs_scope(inp):
@@ -200,7 +204,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         inactive = {key: inp[key] for key in ('sumInsured',) if key in inp}
         inp = {**inp, 'sumInsured': []}
     errors.extend(issue["label"] for issue in facility_selection_issues(inp))
-    premium_minimum = None if allow_negative_premiums else 0
+    # 2026-11-12：保費／經紀費類金額上限（業主決定）；可為負數的欄位下限為 -AMOUNT_MAX。
+    premium_minimum = -AMOUNT_MAX if allow_negative_premiums else 0
 
     address_label = 'Principal Address' if is_standard_cgl(inp) else 'Situation'
     situations = []
@@ -219,7 +224,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         reinsurers.append({
             "name": name,
             "sharePct": nullable_number(get(row, "sharePct"), f"Reinsurer {n} Order hereon", errors, min=0, max=100),
-            "premium": nullable_number(get(row, "premium"), f"Reinsurer {n} Premium", errors, min=premium_minimum),
+            "premium": nullable_number(get(row, "premium"), f"Reinsurer {n} Premium", errors, min=premium_minimum, max=AMOUNT_MAX),
             "riCommPct": nullable_number(get(row, "riCommPct"), f"Reinsurer {n} Deductions", errors, min=0, max=100),
             "taxPct": 0 if auw else nullable_number(get(row, "taxPct"), f"Reinsurer {n} Tax", errors, min=0, max=100),
             "paymentTermsDays": AUW_PAYMENT_TERMS_DAYS if auw else 90 if allianz_target(inp, name) or (ga_target(inp, name) or qbe_target(inp,name)) else nullable_number(get(row, "paymentTermsDays"), f"Reinsurer {n} Payment terms", errors, min=15, integer=True),
@@ -228,7 +233,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         })
         from .oversea import enabled as oversea_enabled
         if oversea_enabled(inp):
-            reinsurers[-1]["brokerageAmount"] = nullable_number(get(row, "brokerageAmount"), f"Reinsurance Broker {n} Brokerage", errors)
+            reinsurers[-1]["brokerageAmount"] = nullable_number(get(row, "brokerageAmount"), f"Reinsurance Broker {n} Brokerage", errors, min=-AMOUNT_MAX, max=AMOUNT_MAX)
 
     sum_insured = []
     for index, row in enumerate(rows(get(inp, "sumInsured"), "Breakdown of Sum Insured", errors)):
@@ -252,7 +257,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "reinsurerPaymentTerms": compatible_json(get(row, "reinsurerPaymentTerms"), {}, f"Installment {n} Reinsurer Payment terms", errors),
             "paymentBaseDateManual": get(row, "paymentBaseDateManual") is True,
             "performanceMonthManual": get(row, "performanceMonthManual") is True,
-            "premium": nullable_number(get(row, "premium"), f"Installment {n} Premium", errors, min=premium_minimum),
+            "premium": nullable_number(get(row, "premium"), f"Installment {n} Premium", errors, min=premium_minimum, max=AMOUNT_MAX),
             "ratio": nullable_number(get(row, "ratio"), f"Installment {n} ratio", errors, min=0, max=100),
         })
 
@@ -376,9 +381,9 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["policyTo"] = expiration_date or ""
     value["policyToTime"] = policy_to_time if policy_to_time in ("00:00", "12:00") else "12:00"
     value["currency"] = currency
-    value["originalPremium"] = nullable_number(get(inp, "originalPremium"), "100% Premium", errors, min=premium_minimum)
+    value["originalPremium"] = nullable_number(get(inp, "originalPremium"), "100% Premium", errors, min=premium_minimum, max=AMOUNT_MAX)
     if oversea_enabled(inp) and inp.get('parentTwRef') and 'premiumAdjustment' in inp:
-        value['premiumAdjustment'] = nullable_number(inp.get('premiumAdjustment'), '100% Premium Adjustment', errors)
+        value['premiumAdjustment'] = nullable_number(inp.get('premiumAdjustment'), '100% Premium Adjustment', errors, min=-AMOUNT_MAX, max=AMOUNT_MAX)
     value["riCommPct"] = nullable_number(get(inp, "riCommPct"), "Ceding commission", errors, min=0, max=100)
     value["taxPct"] = nullable_number(get(inp, "taxPct"), "Cedant tax", errors, min=0, max=100)
     value["paymentTermsDays"] = nullable_number(get(inp, "paymentTermsDays"), "Payment terms", errors, min=15, integer=True)

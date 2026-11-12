@@ -31,7 +31,8 @@ def prepare_new_draft(payload, previous=None):
     for data in (result, raw):
         if not isinstance(data, dict):
             continue
-        for row in data.get('reinsurers') or []:
+        # 2026-11-12：reinsurers 不是清單時不在這裡出錯，交給之後的格式檢查回 400。
+        for row in (data.get('reinsurers') if isinstance(data.get('reinsurers'), list) else []):
             if isinstance(row, dict) and target(result, row.get('name')):
                 row['taxPct'] = 0
         if (property_qs_facility(result) and not property_qs_facility(previous)

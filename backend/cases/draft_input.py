@@ -84,6 +84,19 @@ def normalize(p, *, existing=None):
             return {'errors': [f'{key} entries must be objects.'], 'value': None}
     result = normalize_draft({**p, **raw}, allow_negative_premiums=bool((existing or p).get("parentTwRef")), existing_premiums=existing)
     value = result['value']
+    # 2026-11-12：未完成草稿保留使用者輸入的原文（draftInput），但超過金額上限的數字不放進計算用欄位
+    #（與無效數字相同，改為空值）；送審時由正式檢查提示「must not exceed」。
+    from .data_integrity import AMOUNT_MAX, AMOUNTS
+    def _cap(row):
+        for key in AMOUNTS:
+            number = row.get(key)
+            if isinstance(number, (int, float)) and not isinstance(number, bool) and abs(number) > AMOUNT_MAX:
+                row[key] = None
+    _cap(value)
+    for key in ('reinsurers', 'performanceInstallments'):
+        for row in value.get(key) or []:
+            if isinstance(row, dict):
+                _cap(row)
     from .construction import scope as construction_scope
     if construction_scope(value):
         # Keep server-preserved historical text in the raw Draft as well; callers

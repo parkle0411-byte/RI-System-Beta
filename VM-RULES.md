@@ -58,7 +58,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 113 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 118 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有 Oversea Business 的 O 專項 29 項＋分期／批單 22 項、舊案 L 專項 15 項、Accounting 載入失敗 X 專項 9 項（2026-11-10 起完整執行時一併跑，L 會自動準備舊案測試資料），合計 281 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
@@ -150,6 +150,8 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 再保人清單、分期清單或計算用數字無法解讀時，整案金額顯示 `Pending confirmation` 並列出異常；不修補、不以 0 代替、不丟棄原資料。
 - 修正前，後端擋下 Announce、文件、收付款、沖回、更正、續保／批單／Reverse 與理賠操作；Dashboard／Production 註明異常案件未計入。須技術人員查明原文後修復。
 - Accounting 逐案計算：單一案件無法解讀只略過並警告，其他照常。
+- **金額上限（2026-11-12 業主決定）**：保費類金額——100% Premium、各再保人 Premium、分期 Premium、Oversea 的 Brokerage 與 100% Premium 增減——絕對值上限 999,999,999,999（`AMOUNT_MAX`，前後端同值）；儲存時超過即拒絕並指出欄位，未完成草稿自動儲存時保留輸入原文但不放進計算用欄位（送審時提示）。已存資料若超過上限，視同無法解讀的金額依本節處理：Account List 只標示該案件 `dataError`，其餘案件照常，該案件可由表單改正。保險金額（Sum Insured）、各種限額與賠款金額不套用此上限。
+- `reinsurers`／`performanceInstallments` 不是清單時回 400 或以空白列取代，不產生伺服器錯誤。
 
 ### 4.7 條款（Clauses）
 - Case 的條款 Title **持續跟隨 MDM 最新 Title**（條款主檔 → 該 Class／Reinsurer 的固定條款 → Case 自訂 Title）；開啟時、切回視窗、前景每 30 秒更新，Review／儲存／生成文件前重讀，讀取失敗則擋下載。Word 只印 MDM Title 原文，不另補代碼。
@@ -624,6 +626,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-12 | 舊資料新增批單／理賠規則（§17.2）、Insured 主檔連結；清空舊資料 182 筆與未使用 Insured 1,729 筆 | `backups/legacy_entry_rules_20261112_123024` | `ri-backend:before-legacy-entry-rules-20261112_123024`／`ri-frontend:before-legacy-entry-rules-20261112_123024`（資料清理以備份 database.sql 還原） | 全部 API（含新 `legacy_entry_rules`）、完整畫面測試（L 更新）；正式資料副本演練：清理後非舊資料逐位元組相同、重跑自動停止、新版匯入 AGSC 181 筆與 Insured 建立 |
 
+| 11-12 | 保費類金額上限 999,999,999,999、超限資料視為異常（Account List 不再整頁出錯）、非清單輸入回 400 | `backups/amount_limits_20261112_210454` | `ri-backend:before-amount-limits-20261112_210454`／`ri-frontend:before-amount-limits-20261112_210454` | 候選映像 118 組 API（含 `amount_limits` 85 項）、299 項畫面；無 migration、無資料寫入；正式資料巡檢一致 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -747,3 +751,5 @@ Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別�
 - 2026-11-11：依業主指示完成 Oversea 批單 100% Premium 增減與分期 Production 認列的驗證、備份及部署。
 
 - 2026-11-12：一次性整理（業主決定）：刪除 4 組停用的測試環境；回滾點映像改為 7 天＋每庫最新 10 個（`scripts/docker_cleanup.sh`）；新增備份保留規則並整理 9 月備份；16 個已上線工作資料夾打包封存。正式程式與正式資料未變動。
+
+- 2026-11-12：每週 Debug（一次性整理）找到並修正：保費類金額沒有上限時，天文數字草稿會讓 Account List 與該案件無法開啟；新增金額上限 999,999,999,999 與異常資料防護（§4.6），並修正兩處非清單輸入造成的伺服器錯誤（業主確認部署）。

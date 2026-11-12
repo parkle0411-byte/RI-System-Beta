@@ -34,6 +34,9 @@ def issues(payload, ready=False):
     if payload.get('splitEnabled'):
         add('reinsuranceStructure', 'Oversea Business does not support staff splitting.')
     rows = payload.get('performanceInstallments') or []
+    if not isinstance(rows, list):   # 2026-11-12：不是清單時回格式錯誤，不讓下方逐筆檢查出錯
+        add('performanceInstallments', 'Installments must be a list.')
+        rows = []
     if payload.get('installmentEnabled'):
         ids = [str(r.get('id') or '') for r in rows if isinstance(r, dict)]
         if len(ids) != len(set(ids)):

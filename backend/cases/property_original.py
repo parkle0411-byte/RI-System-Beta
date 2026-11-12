@@ -6,7 +6,7 @@ recognized Production facts retain their original amounts and precision.
 """
 import copy
 import re
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from .calc.jsnum import js_trim as _js_trim
 
 VERSION = 'property-original-v1'
@@ -81,7 +81,12 @@ def num(value):
 
 def money(value, p):
     precision = Decimal('1') if p.get('currency') == 'TWD' and p.get('premiumRounding') != 'legacy-cents' else Decimal('.01')
-    return float(num(value).quantize(precision, rounding=ROUND_HALF_UP))
+    try:
+        return float(num(value).quantize(precision, rounding=ROUND_HALF_UP))
+    except InvalidOperation:
+        # 2026-11-12：位數超過 Decimal 精度（約 1e26 以上）的金額無法取位；這類資料已由 data_integrity 標為異常，
+        # 這裡回 0 讓列表與明細不會整頁出錯（與無法讀取的數字同樣處理）。
+        return 0.0
 
 
 def allocate(total, weights, p):
