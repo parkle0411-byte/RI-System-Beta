@@ -51,7 +51,8 @@ export function stripFacilityTag(value) {
 export function calcLegsForReinsurer(caseData, reinsurer) {
   if (overseaEnabled(caseData)) {
     const round = v => premiumMoney(v,caseData);
-    const cp = caseData.parentTwRef ? 0 : round(round(numberOrZero(caseData.originalPremium)) * numberOrZero(reinsurer.sharePct) / 100);
+    const premium = caseData.parentTwRef ? caseData.premiumAdjustment : caseData.originalPremium;
+    const cp = round(round(numberOrZero(premium)) * numberOrZero(reinsurer.sharePct) / 100);
     const brokerage = round(numberOrZero(reinsurer.brokerageAmount));
     return {cp, ri:0, tax:0, leg1:0, reinsurerCp:0, reinsurerRi:0, reinsurerTax:0, leg2:0, leg3:brokerage, brokerage};
   }

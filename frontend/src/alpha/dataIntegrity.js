@@ -18,6 +18,7 @@ export function financialIssues(payload) {
     else if(['sharePct','riCommPct','taxPct','ratio'].includes(key) && value!=null && String(value).trim() && !(Number(String(value).replace(/,/g,''))>=0 && Number(String(value).replace(/,/g,''))<=100))add(prefix+key)
   })
   numbers(payload,fields)
+  if (overseaEnabled(payload)) numbers(payload,['premiumAdjustment'])
   for(const [key,keys] of Object.entries(rows)) {
     const value=payload[key]
     if(value==null)continue

@@ -140,6 +140,7 @@ def build_endorsement_payload(source_payload, root_tw_ref, existing_count):
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(payload):
         payload.pop('announcedAt',None)
+        payload['premiumAdjustment']=0
         payload['receiptPaymentDate']=''
         payload['endoTypes']=['Brokerage']
         payload['reinsurers']=[{**r,'brokerageAmount':None} for r in payload.get('reinsurers') or []]

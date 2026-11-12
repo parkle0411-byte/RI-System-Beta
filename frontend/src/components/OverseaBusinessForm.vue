@@ -26,6 +26,7 @@ function togglePeriods(enabled) {
         <div><span>Expiration Date</span><div class="policy-date-time"><DraftDate v-model="payload.policyTo" :disabled="!!payload.parentTwRef" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" aria-label="Policy expiration date" /><el-select v-model="payload.policyToTime" :disabled="!!payload.parentTwRef" aria-label="Policy expiration time"><el-option label="12:00" value="12:00" /><el-option label="00:00" value="00:00" /></el-select></div></div>
       </div></el-form-item>
       <el-form-item label="100% Premium" required><div style="display:flex;gap:8px;width:100%"><el-select v-model="payload.currency" :disabled="!!payload.parentTwRef" style="width:100px" aria-label="Premium currency"><el-option v-for="c in ['USD','TWD','EUR','JPY','GBP','HKD','MYR']" :key="c" :label="c" :value="c" /></el-select><DraftNumber v-model="payload.originalPremium" :disabled="!!payload.parentTwRef" :min="0" :controls="false" style="flex:1" /></div></el-form-item>
+      <el-form-item v-if="payload.parentTwRef" label="100% Premium Adjustment" required><DraftNumber v-model="payload.premiumAdjustment" :controls="false" /></el-form-item>
       <el-form-item label="Share (%)" required><DraftNumber v-model="payload.reinsurers[0].sharePct" :disabled="!!payload.parentTwRef" :min="0" :max="100" :precision="8" :controls="false" /></el-form-item>
       <el-form-item :label="payload.parentTwRef ? 'Brokerage Adjustment' : 'Brokerage'" required><DraftNumber v-model="payload.reinsurers[0].brokerageAmount" :controls="false" /></el-form-item>
       <el-form-item label="Reinsurance Broker" required><el-select v-model="payload.reinsurers[0].name" :disabled="!!payload.parentTwRef" filterable clearable><el-option v-for="item in brokers" :key="item.id" :label="item.name" :value="item.name" /></el-select></el-form-item>
@@ -35,7 +36,7 @@ function togglePeriods(enabled) {
     <section v-if="payload.parentTwRef" data-testid="oversea-endorsement-fields">
       <h3>Endorsement to {{ payload.parentTwRef }}</h3>
       <div class="form-grid cols-2"><el-form-item label="Endorsement Effective Date" required><DraftDate v-model="payload.endoEffectiveDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" /></el-form-item><el-form-item label="Endorsement Description" required><el-input v-model="payload.endoText" type="textarea" maxlength="5000" /></el-form-item></div>
-      <p class="document-help">Enter this endorsement's Brokerage movement: positive for an additional receipt; negative for a refund.</p>
+      <p class="document-help">Enter this endorsement's premium and Brokerage adjustments: positive for an increase; negative for a return.</p>
     </section>
     <section data-testid="oversea-installments">
       <el-switch :model-value="payload.installmentEnabled" @update:model-value="togglePeriods" active-text="Brokerage Installments" />

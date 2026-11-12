@@ -34,6 +34,8 @@ def financial_issues(payload):
             elif key in ('sharePct','riCommPct','taxPct','ratio') and value is not None and not (isinstance(value,str) and not js_trim(value)):
                 if not 0<=float(js_trim(str(value)).replace(',',''))<=100:add(prefix+key)
     numbers(payload,NUMBERS)
+    from .oversea import enabled as oversea_enabled
+    if oversea_enabled(payload):numbers(payload,('premiumAdjustment',))
     for key,keys in ROWS.items():
         value=payload.get(key)
         if value is None:continue

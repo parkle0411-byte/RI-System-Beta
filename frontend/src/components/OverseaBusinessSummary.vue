@@ -11,6 +11,7 @@ defineProps({payload:{type:Object,required:true}})
 <dt>Policy Period</dt><dd>{{ formatPolicyPeriod(payload) }}</dd>
 <dt>Account Executive</dt><dd>{{ payload.ae || '—' }}</dd>
 <dt>100% Premium</dt><dd>{{ payload.currency }} {{ formatMoney(payload.originalPremium,payload.currency) }}</dd>
+<template v-if="payload.parentTwRef && payload.premiumAdjustment != null"><dt>100% Premium Adjustment</dt><dd>{{ payload.currency }} {{ formatMoney(payload.premiumAdjustment,payload.currency) }}</dd></template>
 <dt>Share (%)</dt><dd>{{ payload.reinsurers?.[0]?.sharePct ?? '—' }}</dd>
 <dt>Brokerage</dt><dd>{{ payload.reinsurers?.[0]?.brokerageAmount ?? '—' }}</dd>
 <dt>Reinsurance Broker</dt><dd>{{ payload.reinsurers?.[0]?.name || '—' }}</dd>

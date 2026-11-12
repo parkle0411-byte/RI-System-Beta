@@ -14,10 +14,10 @@ export function overseaIssues(p, ready = false) {
   if (!overseaEnabled(p)) return []
   const result = [], add = (field,label) => result.push({field,label})
   if (p.classOfBusiness && !overseaClasses.includes(p.classOfBusiness) || ready && !p.classOfBusiness) add('classOfBusiness','Oversea Business supports Fine Art and Terrorism only.')
-  const moneyFields = [['originalPremium',p.originalPremium],...(p.reinsurers || []).map((r,i)=>[`reinsurers.${i}.brokerageAmount`,r.brokerageAmount])]
+  const moneyFields = [['originalPremium',p.originalPremium],['premiumAdjustment',p.premiumAdjustment],...(p.reinsurers || []).map((r,i)=>[`reinsurers.${i}.brokerageAmount`,r.brokerageAmount])]
   for (const [field,value] of moneyFields) if (value != null && String(value).trim() !== '' && Number.isFinite(Number(value))) {
     const scale = p.currency === 'TWD' ? 1 : 100
-    if (Math.abs(Number(value)*scale - Math.round(Number(value)*scale)) > 1e-7) add(field,(field==='originalPremium'?'100% Premium':'Brokerage')+(scale===1?' must be a whole number for TWD.':' must have at most two decimal places.'))
+    if (Math.abs(Number(value)*scale - Math.round(Number(value)*scale)) > 1e-7) add(field,({originalPremium:'100% Premium',premiumAdjustment:'100% Premium Adjustment'}[field] || 'Brokerage')+(scale===1?' must be a whole number for TWD.':' must have at most two decimal places.'))
   }
   const periods=p.performanceInstallments || []
   if (p.installmentEnabled && new Set(periods.map(r=>r.id)).size!==periods.length) add('performanceInstallments','Installment IDs must be unique.')
@@ -32,6 +32,7 @@ export function overseaIssues(p, ready = false) {
     if (Math.abs(periods.reduce((sum,r)=>sum+Number(r.ratio || 0),0)-100)>0.000001) add('performanceInstallments','Installment ratios must total 100%.')
   }
   if (p.parentTwRef) for (const [key,label] of [['endoEffectiveDate','Endorsement Effective Date'],['endoText','Endorsement Description']]) if (!String(p[key] || '').trim()) add(key,label+' is required.')
+  if (p.parentTwRef && Object.hasOwn(p,'premiumAdjustment') && (p.premiumAdjustment == null || String(p.premiumAdjustment).trim() === '')) add('premiumAdjustment','100% Premium Adjustment is required; enter 0 if unchanged.')
   for (const [key,label] of [['originalInsured','Insured (EN)'],['originalInsuredCn','Insured (CN)'],['policyFrom','Effective Date'],['policyTo','Expiration Date'],['ae','Account Executive'],['reinsured','Cedant'],['currency','Currency'],['originalPremium','100% Premium'],['receiptPaymentDate','Receipt / Payment Date']]) {
     if (key==='receiptPaymentDate' && p.installmentEnabled) continue
     if (p[key] == null || String(p[key]).trim() === '') add(key,label+' is required.')

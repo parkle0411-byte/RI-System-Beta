@@ -147,7 +147,7 @@ def date_edit_error(candidate, stored, *, unlocked=False):
 
 def all_zero(p):
     from .oversea import enabled as oversea_enabled
-    if oversea_enabled(p):return bool(p.get('parentTwRef')) and all(r.get('brokerageAmount')==0 for r in p.get('reinsurers') or [])
+    if oversea_enabled(p):return bool(p.get('parentTwRef')) and (p.get('premiumAdjustment') in (None, 0)) and all(r.get('brokerageAmount')==0 for r in p.get('reinsurers') or [])
     rows = p.get('reinsurers')
     return (bool(p.get('parentTwRef')) and p.get('originalPremium') == 0
             and isinstance(rows, list) and bool(rows)

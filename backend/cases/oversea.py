@@ -18,14 +18,14 @@ def issues(payload, ready=False):
     if klass and klass not in CLASSES or ready and not klass:
         add('classOfBusiness', 'Oversea Business supports Fine Art and Terrorism only.')
     from decimal import Decimal, InvalidOperation
-    for field, raw in [('originalPremium', payload.get('originalPremium')), *[(f'reinsurers.{i}.brokerageAmount', r.get('brokerageAmount')) for i,r in enumerate(payload.get('reinsurers') or []) if isinstance(r,dict)]]:
+    for field, raw in [('originalPremium', payload.get('originalPremium')), ('premiumAdjustment', payload.get('premiumAdjustment')), *[(f'reinsurers.{i}.brokerageAmount', r.get('brokerageAmount')) for i,r in enumerate(payload.get('reinsurers') or []) if isinstance(r,dict)]]:
         if raw is None or str(raw).strip() == '':
             continue
         try:
             number = Decimal(str(raw))
             unit = Decimal('1') if payload.get('currency') == 'TWD' else Decimal('.01')
             if number.is_finite() and number != number.quantize(unit):
-                add(field, ('100% Premium' if field == 'originalPremium' else 'Brokerage') + (' must be a whole number for TWD.' if payload.get('currency') == 'TWD' else ' must have at most two decimal places.'))
+                add(field, ({'originalPremium':'100% Premium','premiumAdjustment':'100% Premium Adjustment'}.get(field,'Brokerage')) + (' must be a whole number for TWD.' if payload.get('currency') == 'TWD' else ' must have at most two decimal places.'))
         except (ValueError, InvalidOperation):
             pass
     rows = payload.get('reinsurers')
@@ -62,6 +62,8 @@ def issues(payload, ready=False):
     if payload.get('parentTwRef'):
         for key,label in [('endoEffectiveDate','Endorsement Effective Date'),('endoText','Endorsement Description')]:
             if not str(payload.get(key) or '').strip():add(key,label+' is required.')
+        if 'premiumAdjustment' in payload and (payload['premiumAdjustment'] is None or str(payload['premiumAdjustment']).strip() == ''):
+            add('premiumAdjustment', '100% Premium Adjustment is required; enter 0 if unchanged.')
     for key, label in [('originalInsured', 'Insured (EN)'), ('originalInsuredCn', 'Insured (CN)'), ('policyFrom', 'Effective Date'), ('policyTo', 'Expiration Date'), ('ae', 'Account Executive'), ('reinsured', 'Cedant'), ('currency', 'Currency'), ('originalPremium', '100% Premium'), ('receiptPaymentDate', 'Receipt / Payment Date')]:
         if key == 'receiptPaymentDate' and payload.get('installmentEnabled'):continue
         if payload.get(key) is None or str(payload.get(key)).strip() == '':
@@ -94,8 +96,8 @@ def legs(payload, reinsurer):
     from .calc.accounting import number_or_zero
     from .calc.premium_money import premium_money, premium_source
     round_money = lambda value: premium_money(value, payload)
-    premium = round_money(premium_source(number_or_zero(payload.get('originalPremium')), payload) * number_or_zero(reinsurer.get('sharePct')) / 100)
-    if payload.get('parentTwRef'):premium=0
+    premium_input = payload.get('premiumAdjustment') if payload.get('parentTwRef') else payload.get('originalPremium')
+    premium = round_money(premium_source(number_or_zero(premium_input), payload) * number_or_zero(reinsurer.get('sharePct')) / 100)
     brokerage = round_money(number_or_zero(reinsurer.get('brokerageAmount')))
     return dict(cp=premium, ri=0, tax=0, leg1=0, reinsurerCp=0, reinsurerRi=0, reinsurerTax=0, leg2=0, leg3=brokerage, brokerage=brokerage)
 
@@ -137,7 +139,7 @@ def edit_error(case, payload, body):
         return 'The Reinsurance Type is locked after Announce.'
     if not enabled(old):
         return ''
-    fields = ('currency','classOfBusiness','classCode','reinsured','originalPremium','reinsurers','receiptPaymentDate','ae','installmentEnabled','performanceInstallments')
+    fields = ('currency','classOfBusiness','classCode','reinsured','originalPremium','premiumAdjustment','reinsurers','receiptPaymentDate','ae','installmentEnabled','performanceInstallments')
     if not any(old.get(k) != payload.get(k) for k in fields):
         return ''
     if old.get('confirmedProductionKeys'):
@@ -164,6 +166,16 @@ def periods(payload):
     amounts=allocate(abs(total),weights,payload)
     if total<0:amounts=[-value if value else 0 for value in amounts]
     return [dict(id=r.get('id') or f'I{i+1}',number=i+1,label=f'Installment {i+1}',ratio=r.get('ratio'),amount=amounts[i],**dates(payload,{'installmentId':r.get('id')})) for i,r in enumerate(rows)]
+
+
+def premium_period_amounts(payload):
+    """Allocate this endorsement's shared premium adjustment, preserving sign and total."""
+    from .calc.payment_terms import allocate
+    from .calc.accounting import number_or_zero
+    total=sum(legs(payload, r)['cp'] for r in payload.get('reinsurers') or [])
+    rows=periods(payload)
+    amounts=allocate(abs(total),[dict(weight=number_or_zero(r['ratio'])) for r in rows],payload)
+    return [-x if x else 0 for x in amounts] if total < 0 else amounts
 
 
 def broker_note_kinds(payload):

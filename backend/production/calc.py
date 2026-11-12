@@ -137,9 +137,12 @@ def installment_allocations(case_data, periods_list=None):
                  "performanceMonth":r.get("performanceMonth", base_month(case_data)),
                  "ratio":number_or_zero(r.get("weight"))/total_premium if total_premium and get(case_data,"installmentEnabled") else 1,
                  "income":r["t3"]} for r in (property_periods(case_data) if periods_list is None else periods_list)]
-    from cases.oversea import enabled as oversea_enabled, periods as oversea_periods
+    from cases.oversea import enabled as oversea_enabled, periods as oversea_periods, premium_period_amounts
     if oversea_enabled(case_data):
-        return [dict(id=r['id'],performanceMonth=r['actualPaymentDate'][:7],ratio=number_or_zero(r['ratio'])/100,income=r['amount']) for r in oversea_periods(case_data)]
+        result=[dict(id=r['id'],performanceMonth=r['actualPaymentDate'][:7],ratio=number_or_zero(r['ratio'])/100,income=r['amount']) for r in oversea_periods(case_data)]
+        if case_data.get('parentTwRef') and 'premiumAdjustment' in case_data:
+            for row,amount in zip(result,premium_period_amounts(case_data)):row['premiumAdjustmentAmount']=amount
+        return result
     income = total_income(case_data)
     if not js_truthy(get(case_data, "installmentEnabled")):
         return [{"id": "FULL", "performanceMonth": base_month(case_data), "ratio": 1.0, "income": income}]
@@ -275,7 +278,7 @@ def production_key_groups_for_case(source):
         from cases.calc.accounting import calc_legs_for_reinsurer
         for index, reinsurer in enumerate(reinsurers):
             legs = calc_legs_for_reinsurer(case_data, reinsurer)
-            if property_enabled(case_data) or raw[index] + (tail if index == 0 else 0) != 0 or any(legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):
+            if property_enabled(case_data) or raw[index] + (tail if index == 0 else 0) != 0 or installment.get('premiumAdjustmentAmount',0) != 0 or any(legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):
                 keys.append(f"{key}:R{index}")
         groups.append({"id": installment["id"], "keys": keys})
     return groups
@@ -391,7 +394,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                     pending_values = False
                 exclusion = exclusion_for(exclusions, case_id, key, reinsurer_key, month)
                 legs = reinsurer_legs(case_data, reinsurer)
-                source_premium = property_premiums[reinsurer_index] if property_premiums is not None else legs["cedantPremium"] * installment["ratio"]
+                source_premium = property_premiums[reinsurer_index] if property_premiums is not None else installment.get('premiumAdjustmentAmount', legs["cedantPremium"] * installment["ratio"])
                 source_income = raw[reinsurer_index] + (tail if reinsurer_index == 0 else 0)
                 if source_income == 0 and property_enabled(case_data):
                     rate=rate_for(case_data,month,fx_rates)
@@ -403,7 +406,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                             'installmentId':installment['id'],'month':month,'currency':currency,'rate':rate,
                             'amounts':[period['t1shares'][reinsurer_index],period['t2s'][reinsurer_index]]})
                     continue
-                if source_income == 0 and not _return_premium_activity(case_data, reinsurer, installment):
+                if source_income == 0 and not _return_premium_activity(case_data, reinsurer, installment) and not installment.get('premiumAdjustmentAmount'):
                     from cases.calc.accounting import calc_legs_for_reinsurer
                     account_legs = calc_legs_for_reinsurer(case_data, reinsurer)
                     if not any(account_legs[k] * installment['ratio'] != 0 for k in ('leg1', 'leg2')):

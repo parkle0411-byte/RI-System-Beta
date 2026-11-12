@@ -26,6 +26,8 @@ with sync_playwright() as pw:
  page.goto('http://nginx/cases?case='+uid);page.get_by_role('tab',name='Endorsements',exact=True).click();page.get_by_role('button',name='Create endorsement',exact=True).click();page.locator('.el-message-box:visible').get_by_role('button',name='Create draft',exact=True).click();expect(page.get_by_test_id('oversea-endorsement-fields')).to_be_visible();check('Oversea exposes Create endorsement and dedicated fields')
  expect(field(page,'100% Premium').locator('input').last).to_be_disabled();expect(field(page,'Share (%)').locator('input').last).to_be_disabled();check('endorsement keeps original premium and share fixed')
  for index,(amount,date) in enumerate([(12.34,'2050-04-05'),(-5.67,'2050-05-05')]):
+  premium_adjustment=1000.01 if index==0 else -500.01
+  fill(page,'100% Premium Adjustment',premium_adjustment)
   fill(page,'Brokerage Adjustment',amount);field(page,'Endorsement Description').locator('textarea').fill('Additional Brokerage' if amount>0 else 'Brokerage refund')
   f=field(page,'Endorsement Effective Date').locator('input');f.fill('2049-06-01' if index==0 else '2049-07-01');f.press('Enter');page.keyboard.press('Escape')
   page.get_by_test_id('oversea-installments').locator('.el-switch').click();expect(page.get_by_test_id('oversea-installment-row')).to_have_count(2)
@@ -34,6 +36,7 @@ with sync_playwright() as pw:
   check('endorsement accepts installment dates '+str(amount))
   with page.expect_response(lambda r:r.url.endswith('/api/cases') and r.request.method=='PUT') as saved:page.get_by_role('button',name='Save changes',exact=True).last.click()
   check('signed endorsement saves '+str(amount),saved.value.status==200);child_uid=saved.value.json()['case']['caseUid'];page.goto('http://nginx/cases?case='+child_uid)
+  expect(page.get_by_test_id('oversea-business-summary')).to_contain_text('100% Premium Adjustment');check('signed premium adjustment saved '+str(premium_adjustment),request(page,'/api/cases?caseUid='+child_uid,None,'GET')['body']['case']['payload']['premiumAdjustment']==premium_adjustment)
   upload_broker_note(page, 'Credit Note' if index==0 else 'Debit Note', 'endorsement-note.pdf')
   page.get_by_role('button',name='Review & Announce',exact=True).click();dialog=page.locator('.announce-dialog');dialog.locator('.announce-attestation').click();dialog.get_by_role('button',name='Announce',exact=True).click();waitapi(page)
   child=request(page,'/api/cases?caseUid='+child_uid,None,'GET')['body']['case'];parts=child['payload']['transactions'];check('signed endorsement has independent E reference and T3 installments '+str(amount),child['twRef']==root+f'-E{index+1:02d}' and len(parts)==2 and round(sum(t['amount'] for t in parts),2)==amount and all((t['amount']>=0 if amount>0 else t['amount']<=0) for t in parts))
