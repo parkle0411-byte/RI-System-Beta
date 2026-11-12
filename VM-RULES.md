@@ -100,7 +100,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 
 - **Insurance Type（2026-11-05）**：Case key-in 最上方原 Class 標籤改為 Insurance Type，提示文字同步調整。只是畫面名稱；沿用 classOfBusiness 資料、既有選項與排序，Account List／其他頁面的 Class 名稱維持。
 
-- **Class 選單固定顯示順序（2026-11-05）**：Property → Personal Accident → Commercial General Liability → Products Recall → Marine Cargo → Stock Throughput → Electronic Equipment → Jewelers Block → Fine Art → Terrorism。僅顯示目前已開放及有效的選項；QS 顯示 Property／Commercial General Liability，Property 在前、CGL 在後；Oversea Business 顯示 Fine Art／Terrorism。未列入的新類別排在上述順序之後；不改主檔名稱、其他選單或後端規則。
+- **Class 選單固定顯示順序（2026-11-05）**：Property → Personal Accident → Commercial General Liability → Products Recall → Marine Cargo → Stock Throughput → Electronic Equipment → Jewelers Block → Fine Art → Terrorism。僅顯示目前已開放及有效的選項；QS 顯示 Property／Commercial General Liability／Stock Throughput，依上述順序排列；Oversea Business 顯示 Fine Art／Terrorism。未列入的新類別排在上述順序之後；不改主檔名稱、其他選單或後端規則。
 - **Case key-in 提供 Quota Share（QS）及 Oversea Business。** QS 的 Class 仍限 Property／Commercial General Liability；Oversea Business（儲存代碼 `OVERSEA`）的 Class 僅限 Fine Art／Terrorism。後端保留既有 QS／XOL 支援，歷史 FACULTATIVE 視為 QS；不清理主檔、不轉換案件。Oversea Business 的獨立規則見 §4.8。
 - **系統沒有 Treaty**（2026-11-02 完整移除；儲存 TREATY 被拒絕；資料庫 CHECK 只接受 FACULTATIVE／QS／XOL／OVERSEA）。
 - 新增／編輯表單最上方同一張卡片先選 **Structure 與 Class**（可任意順序）；兩項都選了才顯示其他區塊與儲存／Review。清除任一項只隱藏下方內容，已填資料保留。
@@ -130,6 +130,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 期間：Expiration 必須晚於 Effective（Property 與 CGL QS 不接受同日）；所有原單、續保與改期後的完整期間**最長 18 個曆月**（剛好上限可以；月底按曆月末日）。
 - 付款天數：有填或正式檢查時，必須是至少 15 的整數。每期 Cedant 及每期每家一般再保人天數各自獨立填寫（不繼承），缺漏列「待確認」且不能收付。
 - **Premium Installments**：啟用時至少兩期（儲存即檢查，零期／一期拒絕）；一般批單不能分期，Oversea 依 §4.8。CGL QS 另有：第一期 Payment Base Date／Performance Month 預帶 Effective Date，各期預帶 Case 與各再保人天數，每期保費合計須等於 100% Premium。
+- **Property QS 幣別**（含 Facility 與批單，2026-11-12）：只允許 TWD 或 USD；新 Draft 可留空，Review／Announce 必填。既有其他幣別須改為 TWD 或 USD 才能儲存（含自動儲存）；不自動換算金額或歷史交易。批單幣別繼續沿用來源及既有帳務鎖定規則。
 - **TWD 保費**（Case 100% Premium、每家再保人、每期）只准整數，前後端擋小數，不偷偷取整；USD 兩位小數。
 - **Order Hereon**：新填或修改時每家 > 0、≤ 100%、最多 8 位小數，合計 ≤ 100%；未修改的歷史比例保留。
 - **Loss Record**：一般保費 Case 儲存時（Oversea Business 依 §4.8）年數與 broker advised date 必填；New 可填 0 年（明細必須為空，文件顯示 Loss Clean since operation.）；Renew 至少 1 年（續保可帶入 0 但儲存前要改）；明細的日期、原因、金額都必填（CGL QS 金額 > 0）。Additional Loss Record Notes 輸入已隱藏（舊資料保留）。
@@ -158,7 +159,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 補充 Insured (EN)、Insured (CN)、Policy Period（日期及時間）與 Account Executive；AE 預帶登入者，可由主檔選擇調整。所有列出的輸入欄位均為 Announce 必填，包含中英文被保險人、保單起訖日期與 AE；Draft 可暫存未完成資料。中文被保險人沿用既有 Announce 建立正式主檔規則。Policy Period 與實際收付款日分別保存。
 - **Brokerage 直接是 T3 金額**，不乘保費或 Share、不從 T1−T2 推算。100% Premium × Share 僅作分攤保費資訊。TWD 為整數，其他貨幣最多兩位小數；正佣金為向所選 Broker 收款、負佣金為付款。不建 T1／T2、零額保費排程、分績或 Claim。原單與批單可各自選擇 Brokerage 分期，比例各期 >0 且總和 100%；依貨幣精度自動分攤，尾差優先調整第一期；若該期不足以吸收，依序調整後續期，避免反向金額。每期分別填實際收付款日，分別產生獨立 T3。
 - **Accounting Date＝實際收付款日期−10 個日曆天**，可跨月、跨年、閏年；實際日期原樣保留。原單 Announce 以 Policy Period 的 Effective Date 年月及 Class 代碼分配 TW Ref；實際收付款日及分期日期不影響取號；單筆 `...-R1-T3`，分期為 `...-R1-I1-T3`、`...-R1-I2-T3` 等。各期 Accounting Date 依各自實際日減 10 天，Production 依各期實際月份認列各期精確 Brokerage，關帳不重複建帳。
-- 批單沿用既有最新來源與原單鏈限制，編號接原單 `-E01`、`-E02`。100% Premium、Share、Currency、Broker、Cedant 與 Policy Period 沿用來源並鎖定；另填批單生效日、說明、本次 Brokerage 增減金額（加收正、退款負）及實際收付款日。每張批單可選擇單筆或分期，每期建立獨立 T3；不改寫原單分期、收付或已認列業績。Brokerage-only 批單的 Production 保費為 0，僅認列本次 Brokerage 增減，沿用的原單保費資訊不再計入保費統計。
+- 批單沿用既有最新來源與原單鏈限制，編號接原單 `-E01`、`-E02`。原單 100% Premium、Share、Currency、Broker、Cedant 與 Policy Period 沿用來源並鎖定；另填本次 100% Premium Adjustment 與 Brokerage 增減（加收正、退還負；無變動填 0）、批單生效日、說明及實際收付款日。批單保費差額乘 Share，依分期比例及貨幣精度分攤並依各期實際月份計入 Production；零 Brokerage 仍認列非零保費。每張批單可選擇單筆或分期，每期建立獨立 T3；不改寫原單分期、收付或已認列業績。未輸入保費差額的舊批單沿用零保費認列；原單保費資訊不重複計入批單保費統計。
 - 不生成任何文件（畫面隱藏，後端封鎖），Announce 前須上傳並選用國外 RI Broker 提供的 Note：Original 僅接受 Credit Note；批單可用 Debit Note 或 Credit Note，不依金額正負自動決定種類。每案／每張批單獨立附件，不能沿用原單附件；未選用、已刪或檔案本體遺失均不能 Announce。不要求一般 Offer Slip／Signed Slip。Draft 可先儲存，最終須確認 Note、Brokerage 及實際日期。
 - 更正 TW Ref. 後，既有提醒紀錄的主旨、內容及交易鍵原樣保留；系統依舊號與目前交易編號的對應延續提醒節奏，不重發或跳過既有週期。
 - T3 是獨立佣金現金帳款，不依賴不存在的 T1／T2。未結清時在 Accounting 未對帳／已對帳清單處理；部分收付仍為 Open，全額完成才移入 Brokerage，All Accounts 始終保留。每次財務登錄可用不同實際收付款日，案件／期別日期、Accounting Date 與 Production 認列月份維持原值；不因部分收付款改動。
@@ -462,6 +463,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 正式首次匯入採業主授權維護程序，核對來源 SHA256、排除清單及 3,693 筆原值。新增批單／理賠及收付流程依 §17.1；受保護交易金額更正留待下一階段。
 
 ### 17.1 批單與理賠（2026-11-10 業主確認部署）
+
+- 2026-11-12 起新增批單／理賠依 §17.2；與本節不同處以 §17.2 為準。
 - 分頁名稱及內容介面使用英文，主分頁固定 `Legacy Data (Old Register)`；原始中文資料不翻譯。
 - 從 confirmed 舊交易帶入資料；Old Reference 可修改，保留原來源交易關聯及案號快照。新交易只有 Endorsement／Claim；不建立 Case。草稿只由建立者編輯、確認；首次確認產生 `LTX-YYYY-000001`，確認年度採台灣年度。未對帳、無收付歷史且未進已關帳 Production 的交易，建立者可退回草稿；再次確認沿用原號。
 - Endorsement 與 Claim 分開登錄；批單 Effective Date 為本次批單生效日，Expiry Date 固定保留來源到期日，前者不得晚於後者。Endorsement No. 確認前必填。實際確認時已超過來源到期五年者須選原因；Only Other 另須補充說明；原因由管理員維護並留痕。
@@ -471,6 +474,19 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 批單 Revenue Month 手動選尚未關帳月份、不預設；使用該月共用匯率，不提供逐筆覆寫。缺匯率不擋確認及原幣 Accounting；未關帳隨月匯率更正重算，關帳需補齊匯率並凍結台幣快照；不從 Production 排除操作改變選定月份。
 - 本版新增號碼計數與原因表，調整新交易資料表寫入權限；獨立 Legacy Audit 保持 append-only。全域 Audit 暫停、SMTP 關閉、固定技術棧及無對外文件／交易附件維持。
 - 已完成同一組候選映像全部 105 組 API、268 項畫面測試後取得業主部署確認。已對帳或有收付歷史等受保護交易的業務金額更正留下一階段；本版只開新增與收付，以及符合條件者退回草稿。
+
+### 17.2 新增批單／理賠規則（2026-11-12 業主決定）
+
+- **同一張保單**＝同一個 Old Reference（TW Ref；每個 TW Ref 是一家再保人的分保）。**最新期間**＝同一 Old Reference 所有已確認保費列與批單列中最早起日＋最晚到期日。Payment Split（C／R）暫不使用。
+- **來源**：理賠只能從原始保費列新增；批單可從保費列或批單新增，不能從理賠。
+- **鎖定沿用來源**：Cedant、Settlement Party、Old Reference、New / Renew。批單另鎖幣別、Share、AE／Sub AE 分配（沿用的 Sub AE 不檢查在職；換 AE 須在職）；Insured EN／CN 可改。理賠另鎖 Insured（帶同一 Old Reference 最新已確認批單的名稱，無批單用原保單）；Property 理賠鎖幣別，其他險種可選。
+- **付款規則**依 Settlement Party 自動判斷（各 Facility 名稱，其餘一般），不能選；一般規則的付款天數帶入來源可改，Facility 的 Cedant 固定 90 天。
+- **批單**：生效日須在最新期間內（含頭尾），且不得早於同一 Old Reference 前一張已確認批單（可同日）；可改期但只能改到期日（起日固定，完整期間最長 18 個曆月，到期日不得早於生效日）；Endorsement No. 必填且同一 Old Reference 已確認批單（含匯入）不得重複；100% Premium 與 Brokerage 不得同時為 0；Share 鎖定，R/I Comm. %／Tax % 帶入可改；Brokerage 填金額；**Revenue Month 自動**＝批改生效月與確認月較晚者，已關帳順延第一個未關帳月（同新系統 §9），不能改；超過 5 年依最新到期日須選原因。
+- **理賠**：新增 **Loss No.（必填）**與 **Cause of Loss（選填）**，Note for Claim 保留；DOL 須在最新期間內；到期日＝確認日 +15 天（Swiss 季結）；AE 須在職；先收再付。每筆理賠是獨立 SoA；理賠明細列出同一 Old Reference＋同一 Loss No. 的所有理賠與累計（僅顯示）；Accounting 交易編號下顯示 Loss No.。
+- **金額**：TWD 只准整數、其他幣別最多兩位小數，不自動取整（100% Premium、Brokerage、理賠金額）。Installment No.、Statement No.、Reinsurer's Ref. No. 帶入來源可改。
+- **匯入配套**：Note for Claim 以「Claim No:」／「Loss No:」開頭者拆出 Loss No.（原文保留，沒有不擋）；Sub AE 依 Bkg. 金額換算為 40 或 70（±1%），否則預覽警告；保費／批單列缺 Share 為錯誤。
+- **Insured 主檔**：匯入與確認新交易時，依中文名以與 Case 相同規則比對（含 / 組合與曾用名），沒有才新建，並標為正式、連結到該交易（`insuredMasterId`）；中文名空白不建。
+- **資料清理（2026-11-12 業主要求）**：清空舊資料 182 筆（AGSC 181＋草稿 1；批次標記 withdrawn、稽核保留）；刪除未被任何 Case 使用的 MDM Insured 1,729 筆（保留 5 筆）。備份 `backups/legacy_entry_rules_20261112_123024`。
 
 ---
 
@@ -592,9 +608,41 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-11 | 舊資料匯入存 R/I Comm. %／Tax %（由 Register 公式讀取並核對），新增批單預帶來源比率 | `backups/legacy_rates_20261111_184913` | `ri-backend:before-legacy-rates-20261111_184913`／`ri-frontend:before-legacy-rates-20261111_184913` | Legacy API 6 組（legacy_import_web 53）、畫面 A＋L＋I；AGSC 演練 181 筆可匯入，540 條帳款與前一版逐欄相同；無 migration |
 
+| 11-11 | Oversea 批單 100% Premium 增減 | `backups/oversea_premium_adjustment_20261111_210514` | `ri-backend:before-oversea-premium-adjustment-20261111_210514`／`ri-frontend:before-oversea-premium-adjustment-20261111_210514` | 114 組 API、294 項畫面；正負保費差額及分期 Production；無 migration |
+
+| 11-12 | STP 一般 QS 建案與 Cover Note | `backups/stp_qs_20261112_091209` | `ri-backend:before-stp-qs-20261112_091209`／`ri-frontend:before-stp-qs-20261112_091209` | 115 組 API、294 項畫面及 STP 專項；無 migration |
+
+| 11-12 | 修正 STP Cover Note Information 前空白頁 | `backups/stp_pagination_20261112_094312` | `ri-frontend:before-stp-pagination-20261112_094312` | 115 組既有 API、完整畫面回歸、LibreOffice 多頁視覺檢查；無 migration |
+
+| 11-12 | 修復 STP 部署覆蓋之側邊欄圖示 | `backups/stp_nav_fix_20261112_095123` | `ri-frontend:before-stp-nav-fix-20261112_095123` | 基本畫面 56 項、11 個圖示載入與設計核對；無 migration |
+
+| 11-12 | STP 輸入及確認畫面標題改為 Information | `backups/stp_information_label_20261112_095907` | `ri-frontend:before-stp-information-label-20261112_095907` | 前端建置、基本畫面 56 項及 STP 輸入確認測試；無 migration |
+
+| 11-12 | Property QS 幣別限 TWD／USD | `backups/property_qs_currency_20261112_105646` | `ri-backend:before-property-qs-currency-20261112_105646`／`ri-frontend:before-property-qs-currency-20261112_105646` | 全部 API、完整畫面、幣別專項及前端建置；無 migration |
+
+| 11-12 | 舊資料新增批單／理賠規則（§17.2）、Insured 主檔連結；清空舊資料 182 筆與未使用 Insured 1,729 筆 | `backups/legacy_entry_rules_20261112_123024` | `ri-backend:before-legacy-entry-rules-20261112_123024`／`ri-frontend:before-legacy-entry-rules-20261112_123024`（資料清理以備份 database.sql 還原） | 全部 API（含新 `legacy_entry_rules`）、完整畫面測試（L 更新）；正式資料副本演練：清理後非舊資料逐位元組相同、重跑自動停止、新版匯入 AGSC 181 筆與 Insured 建立 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
+**STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
+
+STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination、Geographical Scope、Storage、Basis of Valuation、Premium Rate 為不預填選填多行文字。Storage 與附件、HUB 無連動。Interest、Original Deductibles、Original Conditions、Reinsured’s Retention 必填；Retentions 預填 waived。Express Warranties、Conditions Precedent、Subjectivities 使用範本預設且必填可修改。Sub-Limits、Reinstatement Provisions、Indemnity Period、Co-Reinsurance Warranty、Notices、Occupation、Special Agreement 及 Insured’s Website 選填；空白不在 Cover Note 顯示。所有多行文字文件保留換行。Original Conditions 按行編號並加上既有固定結尾。Original Insured Address 手動輸入，格式比照 Property。刪除 Vessels、Situation、Additional Coverages、Aggregate Limit、Underlying Limits、Excess、Loss Payee 及 Taxes Payable by Reinsured and Administered by Reinsurers。
+
+Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
+
 ## 近期變更
+
+- 2026-11-12：舊資料新增批單／理賠改依 §17.2（來源限制、鎖定沿用、自動付款規則與 Revenue Month、改期、Loss No.／Cause of Loss）；匯入與確認時連結 Insured 主檔；清空舊資料並刪除未使用的 Insured 主檔，準備依新規則重新匯入。
+
+- 2026-11-12：Property QS 幣別限定 TWD／USD，既有不符案件須修正幣別。
+
+- 2026-11-12：STP 案件輸入與確認畫面的資訊區標題統一為 Information。
+
+- 2026-11-12：修復 STP 部署時覆蓋的側邊欄圖示設定，恢復原圖示及缺少的圖示。
+
+- 2026-11-12：修正 STP Cover Note Information 前重複分頁造成空白頁。
+
+- 2026-11-12：部署 STP 一般 QS 建案與 Cover Note，沿用 Property QS 共通流程。
 
 - 2026-11-11：Legacy Data (Old Register) 改為系統管理員網頁匯入 Register（PD／GL、已收付與未收付皆可）；收付編號成為 Accounting Dept. Ref.；Accounting 日期改顯示 Effective Date／DOL；不進 Production。
 
@@ -693,3 +741,5 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 2026-11-10：Accounting 載入失敗時常駐紅色提示與 Retry，保留上次清單並停用財務操作；不再顯示「0 筆」（業主確認部署）。
 
 - 2026-11-11：Oversea 批單可自行選擇 Brokerage 分期；完成驗證、備份及部署。
+
+- 2026-11-11：依業主指示完成 Oversea 批單 100% Premium 增減與分期 Production 認列的驗證、備份及部署。
