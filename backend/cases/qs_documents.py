@@ -5,12 +5,13 @@ from .calc.jsnum import get, is_nullish, js_is_finite, js_to_number, js_to_strin
 from .calc.payment_terms import _resolved_terms
 from .property_original import POSTCODE, scope as property_scope, totals
 from .sum_insured import placement_issues
+from .stp import scope as stp_scope, issues as stp_issues
 
 GENERATED_KINDS = ("generated_cover", "generated_debit")
 
 
 def scope(payload, kind=None):
-    return property_scope(payload) and (kind is None or kind in ("cover", "debit"))
+    return (property_scope(payload) or stp_scope(payload) and not payload.get("parentTwRef") and payload.get("reinsuranceStructure") == "QS") and (kind is None or kind in ("cover", "debit"))
 
 
 def text(value):
@@ -103,19 +104,24 @@ def readiness_issues(payload, kind, ae_email):
                 add(f"situations.{i}.address", "situation_address_required", f"Complete Risk Address for Situation {i + 1}.")
             if not isinstance(row, dict) or not POSTCODE.fullmatch(text(get(row, "postcode"))):
                 add(f"situations.{i}.postcode", "situation_postcode_required", f"Complete a valid Postcode for Situation {i + 1}.")
-        sums = payload.get("sumInsured")
-        sums = sums if isinstance(sums, list) else []
-        if not sums:
-            add("sumInsured", "sum_insured_name_required", "Add at least one Sum Insured entry before generating a Cover Note.")
-        for i, row in enumerate(sums):
-            if not isinstance(row, dict) or not text(get(row, "category")):
-                add(f"sumInsured.{i}.category", "sum_insured_name_required", f"Complete Interest insured for Sum Insured entry {i + 1}.")
-            amount = js_to_number(get(row, "amount"))
-            if not js_is_finite(amount) or amount <= 0:
-                add(f"sumInsured.{i}.amount", "sum_insured_amount_required", f"Enter an Amount greater than 0 for Sum Insured entry {i + 1}.")
-        for issue in placement_issues(payload):
-            code = "sum_insured_locations_required" if issue["kind"] == "location" else "sum_insured_duplicate_names"
-            add(issue["field"], code, issue["label"])
+        if stp_scope(payload):
+            for problem in stp_issues(payload):
+                add(problem["field"], "stp_fields_required", problem["label"])
+            missing("originalConditions", "original_conditions_required", "Complete Original Conditions before generating a Cover Note.")
+        else:
+            sums = payload.get("sumInsured")
+            sums = sums if isinstance(sums, list) else []
+            if not sums:
+                add("sumInsured", "sum_insured_name_required", "Add at least one Sum Insured entry before generating a Cover Note.")
+            for i, row in enumerate(sums):
+                if not isinstance(row, dict) or not text(get(row, "category")):
+                    add(f"sumInsured.{i}.category", "sum_insured_name_required", f"Complete Interest insured for Sum Insured entry {i + 1}.")
+                amount = js_to_number(get(row, "amount"))
+                if not js_is_finite(amount) or amount <= 0:
+                    add(f"sumInsured.{i}.amount", "sum_insured_amount_required", f"Enter an Amount greater than 0 for Sum Insured entry {i + 1}.")
+            for issue in placement_issues(payload):
+                code = "sum_insured_locations_required" if issue["kind"] == "location" else "sum_insured_duplicate_names"
+                add(issue["field"], code, issue["label"])
         missing("lossAdvisedDate", "loss_advised_date_required", "Complete the Loss Record advised date in the case before generating a Cover Note.")
         missing("lossRecordYears", "loss_record_years_required", "Complete Past year(s) in the Loss Record section before generating a Cover Note.")
         losses = payload.get("lossRecord")

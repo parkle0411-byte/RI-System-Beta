@@ -112,6 +112,7 @@ export function currentMonth() {
 export function emptyDraft() {
   return {
     placingRulesVersion: 'placing-qs-20261028-v1', coReinsuranceWarranty: '',
+    conveyance: '', voyage: '', attachmentTermination: '', geographicalScope: '', storage: '', stpPremiumRate: '', stpWebsite: '', stpTurnoverMode: 'combined', stpTurnover: [{ company: '', currency: '', amount: null }], stpHubs: [{ name: '', address: '', currency: '', amount: null }],
     propertyOriginalRules: 'property-original-v1',
     ownerPersonnelId: null, ownerPersonnelName: '', parentTwRef: '', endorsementSeq: null, manualTwRef: '',
     renewedFromTwRef: '', endoEffectiveDate: '', endoTypes: [], endoText: '',

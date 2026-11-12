@@ -20,6 +20,7 @@ DESCRIPTION_FIELDS = frozenset(('occupation', 'construction', 'specialAgreement'
     'notices', 'coReinsuranceWarranty', 'selfInsuredRetention', 'lossPayee', 'remark', 'clauseDetails', 'clauses', 'autoClauses', 'manualClauses',
     'originalInsured', 'originalInsuredCn', 'newOrRenew', 'type', 'typePrefix', 'situations',
     'sumInsured', 'limitOfLiability', 'aggregateLimit', 'subLimits', 'lossAdvisedDate',
+    'conveyance', 'voyage', 'attachmentTermination', 'geographicalScope', 'storage', 'stpPremiumRate', 'stpWebsite', 'stpTurnoverMode', 'stpTurnover', 'stpHubs',
     'lossRecordYears', 'lossRecord', 'ownerPersonnelId', 'ownerPersonnelName'))
 SERVER_FIELDS = (VERSION_KEY, 'propertyEditHistory', 'productionHistory', 'productionReversals',
                  'propertyReversalHistory', 'propertyDateOverrides', 'financeCorrectionHistory', 'financeClaimTracking', 'financeWorkflowVersion', 'accountingRules', 'accountingLegacyMath', 'premiumLedgerLayout', 'accountingLayoutHistory')
@@ -295,7 +296,9 @@ def persist_settlements(p, now, actor=None):
 
 
 def field_issues(p):
-    if not scope(p):
+    from .stp import scope as stp_scope
+    is_stp_original = stp_scope(p) and str(p.get("reinsuranceStructure") or "").upper() == "QS" and not p.get("parentTwRef")
+    if not scope(p) and not is_stp_original:
         return []
     from .payment_policy import kind
     result=[]
@@ -399,7 +402,9 @@ def edit_guard(case, p, body, actor, now):
         'policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays',
         'splitParties','splitEnabled','endoEffectiveDate','reinsured','classOfBusiness','classCode',
         'reinsuranceStructure','parentTwRef'}
-    if not (scope(old) and ordinary(old)) and not changed & financial_fields:
+    from .stp import scope as stp_scope
+    stp_original = stp_scope(old) and old.get('reinsuranceStructure') == 'QS' and not old.get('parentTwRef')
+    if not ((scope(old) or stp_original) and ordinary(old)) and not changed & financial_fields:
         # Other classes keep their existing wording/coverage edit workflow.
         # Their ledger, cash and Production data were restored by the caller.
         return ''

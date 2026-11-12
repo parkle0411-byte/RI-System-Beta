@@ -162,8 +162,8 @@ class CaseDocumentsView(NoStoreMixin, APIView):
             document = _find_file(case, file_id, lock=True)
             if document is None:
                 return _error(404, "file_not_found", "File was not found for this case.")
-            from .property_original import scope as property_scope
-            if property_scope(_payload(case)) and (case.announced_at or case.tw_ref) and document.is_selected and not selected:
+            from .qs_documents import scope as qs_document_scope
+            if qs_document_scope(_payload(case)) and (case.announced_at or case.tw_ref) and document.is_selected and not selected:
                 return _error(409, "announced_document_locked", "Selected documents cannot be deselected after Announce.")
             if document.kind in GENERATED_KINDS:
                 return _error(409, "generated_document_evidence", "Generated Word documents are kept separately from placement evidence.")
@@ -221,8 +221,8 @@ class CaseDocumentsView(NoStoreMixin, APIView):
             return _error(400, "invalid_document_kind",
                           "Choose Endorsement, Reinsurer Signed Slip or Reinsurer Confirmation E-mail." if case.case_kind == 'endorsement' else "Choose Offer Slip, Reinsurer Signed Slip or Reinsurer Confirmation E-mail.")
         filename = docs.safe_filename(body.get("filename"))
-        from .property_original import scope as property_scope
-        decoded = docs.decode_and_validate(filename, body.get("base64"), MAX_DOCUMENT_BYTES if property_scope(_payload(case)) else 10*1024*1024)
+        from .qs_documents import scope as qs_document_scope
+        decoded = docs.decode_and_validate(filename, body.get("base64"), MAX_DOCUMENT_BYTES if qs_document_scope(_payload(case)) else 10*1024*1024)
         if "error" in decoded:
             return _error(decoded["error"][0], "invalid_file", decoded["error"][1])
         allowed = docs.required_reinsurers(_payload(case))

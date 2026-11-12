@@ -1,3 +1,4 @@
+import { isStp, stpIssues } from '../alpha/stp'
 import { overseaEnabled, overseaClasses, overseaIssues } from '../alpha/oversea.js'
 import { initializeConstruction, constructionText, constructionIssues, constructionScope } from '../alpha/construction'
 import { placingRulesEnabled, newCgl, adjustClientIssues, shareClientIssues } from '../alpha/placingRules'
@@ -5,6 +6,7 @@ import { fixedFacilityInterest, propertyQsFacility } from '../alpha/facilityRule
 import { usesStoredQsWord } from '../alpha/documents/qsWordWorkflow'
 import { facilitySelectionAllowed, facilitySelectionIssues, facilityStructureAllowed } from '../alpha/facilitySelection'
 import { propertyScope, propertyEnabled, propertyPostcode, propertyIssues, fixedCedant } from '../alpha/propertyOriginal'
+import { propertyQsCurrencyScope, propertyQsCurrencyIssues } from '../alpha/propertyQsCurrency'
 import { premiumInputErrors, premiumPeriodAmounts } from '../alpha/lib/accounting.js'
 // 案件工作區邏輯直接在此維護；現行規則以 VM-RULES.md 為準。
 // 模板直接維護於 CaseWorkspace.vue。
@@ -126,8 +128,8 @@ export function useCaseWorkspace() {
       draft.performanceInstallments.forEach(period=>{period.paymentTermsDays=90})
     }
   }
-  const keyInScope = p => propertyScope(p) || cglQsScope(p) && !p.parentTwRef
-  const ordinaryDraftScope = p => isStandardCgl(p) && p.reinsuranceStructure === 'XOL' || Boolean(p.parentTwRef && ['QS','XOL'].includes(p.reinsuranceStructure)) || p.reinsuranceStructure === 'QS' && ['Property','Commercial General Liability'].includes(p.classOfBusiness) && !p.parentTwRef && (swissCglScope(p) || !(p.reinsurers || []).some(r=>/facility|swiss re asia/i.test(r.name || '')))
+  const keyInScope = p => propertyScope(p) || cglQsScope(p) && !p.parentTwRef || isStp(p) && !p.parentTwRef
+  const ordinaryDraftScope = p => isStandardCgl(p) && p.reinsuranceStructure === 'XOL' || Boolean(p.parentTwRef && ['QS','XOL'].includes(p.reinsuranceStructure)) || p.reinsuranceStructure === 'QS' && ['Property','Commercial General Liability','Stock Throughput'].includes(p.classOfBusiness) && !p.parentTwRef && (swissCglScope(p) || !(p.reinsurers || []).some(r=>/facility|swiss re asia/i.test(r.name || '')))
   const draftFamily = ref('')
   const relaxedDraft = computed(() => activeView.value === 'case-create' && editingOriginalStatus.value === 'draft' && ordinaryDraftScope({...draft,
     classOfBusiness:draft.classOfBusiness || (editingCaseUid.value ? draftFamily.value : ''),
@@ -298,7 +300,7 @@ export function useCaseWorkspace() {
   }
   const hasNonFacilityReinsurer = computed(() => swissCglScope(draft) || selectedDraftReinsurers.value.some((row) => !isFacilityName(row.name)))
   const totalSumInsured = computed(() => RICaseCalculations.totalSumInsured(draft))
-  const draftSumInsuredWarning = computed(() => isStandardCgl(draft) ? null : sumInsuredLimitWarning(draft))
+  const draftSumInsuredWarning = computed(() => isStandardCgl(draft) || isStp(draft) ? null : sumInsuredLimitWarning(draft))
   const lossRecordSummary = computed(() => lossRecordSummaryFor(draft))
   const lossRecordYearsMin = computed(() => validLossRecordYears(0, draft) ? 0 : 1)
   const installmentAllocations = computed(() => installmentAllocationsFor(draft))
@@ -306,7 +308,7 @@ export function useCaseWorkspace() {
   const splitStatus = computed(() => splitValidationFor(draft))
 
   const isEditing = computed(() => Boolean(editingCaseUid.value))
-  const entryClasses = ['Property', 'Commercial General Liability']
+  const entryClasses = ['Property', 'Commercial General Liability', 'Stock Throughput']
   const classDisplayOrder = ["Property", "Personal Accident", "Commercial General Liability", "Products Recall", "Marine Cargo", "Stock Throughput", "Electronic Equipment", "Jewelers Block", "Fine Art", "Terrorism"]
 
   const caseEntryAllowed = value => overseaEnabled(value) ? overseaClasses.includes(value?.classOfBusiness) : ['QS', 'FACULTATIVE'].includes(String(value?.reinsuranceStructure || '').trim().toUpperCase()) && entryClasses.includes(value?.classOfBusiness)
@@ -329,8 +331,8 @@ export function useCaseWorkspace() {
   })
   const selectedMoney = (value,currency) => selectedDataIssues.value.length ? 'Pending confirmation' : formatMoney(value,currency)
   const draftClauseDetails = computed(() => resolveClauseTitles(draft.clauseDetails, mdmRecords.value, draft))
-  const selectedSumInsuredIssues = computed(() => sumInsuredPlacementIssues(selectedPayload.value))
-  const selectedSumInsuredWarning = computed(() => isStandardCgl(selectedPayload.value) ? null : sumInsuredLimitWarning(selectedPayload.value))
+  const selectedSumInsuredIssues = computed(() => isStp(selectedPayload.value) ? [] : sumInsuredPlacementIssues(selectedPayload.value))
+  const selectedSumInsuredWarning = computed(() => isStandardCgl(selectedPayload.value) || isStp(selectedPayload.value) ? null : sumInsuredLimitWarning(selectedPayload.value))
   const selectedOverview = computed(() => {
     const payload = selectedPayload.value
     const legs = selectedDataIssues.value.length ? pendingTotals() : RICaseCalculations.totals(payload)
@@ -889,13 +891,13 @@ export function useCaseWorkspace() {
     if (['cover', 'debit'].includes(kind) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.reinsurers) || !selectedPayload.value.reinsurers.length || selectedPayload.value.reinsurers.some(row => !String(row?.sharePct ?? '').trim()))) {
       return ElMessage.warning('Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.')
     }
-    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
+    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && !isStp(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !String(row?.category ?? '').trim()))) {
       return ElMessage.warning('Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.')
     }
-    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
+    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && !isStp(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim()) && (!Array.isArray(selectedPayload.value.sumInsured) || !selectedPayload.value.sumInsured.length || selectedPayload.value.sumInsured.some(row => !Number.isFinite(Number(row?.amount)) || Number(row?.amount) <= 0))) {
       return ElMessage.warning('Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.')
     }
-    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
+    if (kind === 'cover' && !isStandardCgl(selectedPayload.value) && !isStp(selectedPayload.value) && ['QS', 'XOL'].includes(String(selectedPayload.value.reinsuranceStructure || '').trim())) {
       const issues = sumInsuredPlacementIssues(selectedPayload.value)
       if (issues.some(issue => issue.kind === 'location')) return ElMessage.warning('Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.')
       if (issues.some(issue => issue.kind === 'duplicate')) return ElMessage.warning('Use unique Interest insured names within each Location or the Facility items before generating a Cover Note.')
@@ -1226,7 +1228,7 @@ export function useCaseWorkspace() {
   async function uploadCaseDocument() {
     const file = documentForm.file
     if (!file) return ElMessage.error('Select a document to upload.')
-    if (!file.size || file.size > (propertyScope(selectedPayload.value) || propertyScope(draft) ? MAX_DOCUMENT_BYTES : 10*1024*1024)) return ElMessage.error(overseaEnabled(selectedPayload.value) ? 'Each document must be nonempty and no larger than 10 MB.' : 'Each document must be nonempty and no larger than 30 MB.')
+    if (!file.size || file.size > (propertyScope(selectedPayload.value) || propertyScope(draft) || isStp(selectedPayload.value) && !selectedPayload.value?.parentTwRef || isStp(draft) && !draft.parentTwRef ? MAX_DOCUMENT_BYTES : 10*1024*1024)) return ElMessage.error(overseaEnabled(selectedPayload.value) ? 'Each document must be nonempty and no larger than 10 MB.' : 'Each document must be nonempty and no larger than 30 MB.')
     if (!['offer','broker_credit','broker_debit'].includes(documentForm.kind) && !documentForm.reinsurers.length) return ElMessage.error('Select the reinsurer(s) covered by this evidence.')
     documentsSaving.value = true
     try {
@@ -1439,6 +1441,10 @@ export function useCaseWorkspace() {
     draft.classOfBusiness = name || ''
     const record = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === name)
     if (record) draft.classCode = record.code || ''
+    if (name === 'Stock Throughput' && !isEditing.value) {
+      draft.classCode = 'ST'; draft.taxPct = 1; draft.interest = ''; draft.limitOfLiability = '';
+      draft.reinsuredRetention = 'Advice of Reinsured’s retention waived.';
+    }
     if (name === 'Property') {
       if (!isEditing.value && propertyScope(draft)) draft.reinsurers.forEach(row => {row.paymentTermsDays ??= 90;row.taxPct ??= 1})
     }
@@ -1709,7 +1715,7 @@ export function useCaseWorkspace() {
     }
     const storedValue = value
     value={...value,...(value?.draftInput || {})}
-    const issues = [...insuranceIssues(value),...facilitySelectionIssues(value),...cglQsIssues(value),...(ordinaryDraftScope(value) ? draftFormatIssues(value) : [])].map(issue => issue.label)
+    const issues = [...insuranceIssues(value),...facilitySelectionIssues(value),...cglQsIssues(value),...propertyQsCurrencyIssues(value),...stpIssues(value),...(ordinaryDraftScope(value) ? draftFormatIssues(value) : [])].map(issue => issue.label)
     if (ordinaryDraftScope(value)) issues.push(...premiumInputErrors(value, storedValue))
     const add = (label) => issues.push(label)
     if (!value.parentTwRef && requiresManualTwRef(value) && !filled(value?.manualTwRef)) add('TW Ref. (for AUW)')
@@ -1744,10 +1750,10 @@ export function useCaseWorkspace() {
         if (filled(row?.taxPct) && Number(row.taxPct) !== 0) add(`Reinsurer ${index + 1} Tax must be 0% for AUW`)
       }
     });
-    [['limitOfLiability', liabilityLimitLabel(value)], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ...(isStandardCgl(value) ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
+    [['limitOfLiability', liabilityLimitLabel(value)], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ...((isStandardCgl(value) || value?.classOfBusiness === 'Stock Throughput') ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
       .forEach(([field, label]) => { if (field === 'originalConditions' && allSumInsuredFacility(value)) return; if (!filled(value?.[field])) add(label) })
-    if (!isStandardCgl(value) && value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
-    if (!isStandardCgl(value)) {
+    if (!isStandardCgl(value) && value?.classOfBusiness !== 'Stock Throughput' && value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
+    if (!isStandardCgl(value) && value?.classOfBusiness !== 'Stock Throughput') {
     const sumInsured = Array.isArray(value?.sumInsured) ? value.sumInsured : []
     if (!sumInsured.length) add('Breakdown of Sum Insured')
     sumInsured.forEach((row, index) => {
@@ -1803,7 +1809,7 @@ export function useCaseWorkspace() {
     return adjustClientIssues(value, issues.concat(shareClientIssues(value, storedValue).map(i => i.label)), true)
   }
 
-  function validPostcode(value, caseData = draft) { if(cglQsScope(caseData) && !filled(value))return true; return propertyScope(caseData) ? propertyPostcode(value) : /^\d{3,6}$/.test(String(value || '').trim()) }
+  function validPostcode(value, caseData = draft) { if(cglQsScope(caseData) && !filled(value))return true; return (propertyScope(caseData) || caseData?.classOfBusiness === 'Stock Throughput') ? propertyPostcode(value) : /^\d{3,6}$/.test(String(value || '').trim()) }
   function validPositiveInteger(value) {
     const number = Number(value)
     return filled(value) && Number.isInteger(number) && number > 0
@@ -1824,7 +1830,7 @@ export function useCaseWorkspace() {
     if (placingRulesEnabled(draft) && key === "reinsuredRetention") return false
     if (newCgl(draft) && key === "interest") return false
     if (newCgl(draft) && key === "deductibles") return !filled(draft.deductibles) && !filled(draft.selfInsuredRetention)
-    if ([...insuranceIssues(draft),...propertyIssues(draft),...cglQsIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].some(issue => issue.field === key)) return true
+    if ([...insuranceIssues(draft),...propertyIssues(draft),...cglQsIssues(draft),...propertyQsCurrencyIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].some(issue => issue.field === key)) return true
     const value = draft[key]
     if (Array.isArray(value)) return value.length === 0
     if (validator === 'positiveInteger') return !validPositiveInteger(value)
@@ -1863,8 +1869,9 @@ export function useCaseWorkspace() {
     }
     insuranceIssues(draft).forEach(issue => add('risk', issue.label))
     facilitySelectionIssues(draft).forEach(issue => add('security', issue.label))
+    stpIssues(draft).forEach(issue => add(issue.field.startsWith('reinsurers') ? 'security' : 'information', issue.label))
     if (relaxedDraft.value) premiumInputErrors(draft, editingAccountingBaseline.value).forEach(label => add('cedantPremium', label))
-    ;[...cglQsIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].forEach(issue=>add(issue.field.startsWith('performanceInstallments') || ['originalPremium','riCommPct','taxPct','paymentTermsDays'].includes(issue.field) ? 'cedantPremium' : issue.field.startsWith('loss') ? 'information' : issue.field.startsWith('reinsurers') ? 'security' : issue.field==='splitParties' ? 'split' : 'risk',issue.label))
+    ;[...cglQsIssues(draft),...propertyQsCurrencyIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].forEach(issue=>add(issue.field.startsWith('performanceInstallments') || ['originalPremium','riCommPct','taxPct','paymentTermsDays'].includes(issue.field) ? 'cedantPremium' : issue.field.startsWith('loss') ? 'information' : issue.field.startsWith('reinsurers') ? 'security' : issue.field==='splitParties' ? 'split' : 'risk',issue.label))
     if (!draft.parentTwRef && hasManualTwRefReinsurer.value && !filled(draft.manualTwRef)) add('security', 'TW Ref. (for AUW)')
     ;[
       ['reinsuranceStructure', 'Reinsurance type'], ['ae', 'Account Executive'], ['currency', 'Currency'],
@@ -1892,8 +1899,8 @@ export function useCaseWorkspace() {
     if (!filled(draft.limitOfLiability)) add('terms', liabilityLimitLabel(draft))
     if (!filled(draft.deductibles)) add('terms', 'Deductibles')
     if (!allFacilityReinsurers.value && !filled(draft.originalConditions)) add('terms', 'Original Conditions')
-    if (!isCglInformation.value && draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
-    if (!isCglInformation.value) {
+    if (!isCglInformation.value && !isStp(draft) && draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
+    if (!isCglInformation.value && !isStp(draft)) {
     if (!filled(draft.occupation)) add('occupation', 'Occupation')
     if (!filled(draft.construction)) add('occupation', 'Construction')
 
@@ -2091,14 +2098,14 @@ export function useCaseWorkspace() {
       ElMessage.error(premiumError)
       return
     }
-    const installmentCountError = propertyScope(draft) || overseaEnabled(draft) ? '' : installmentCountErrorFor(draft)
+    const installmentCountError = propertyScope(draft) || isStp(draft) || overseaEnabled(draft) ? '' : installmentCountErrorFor(draft)
     if (installmentCountError) {
       openSections.value = [...new Set([...openSections.value, 'cedantPremium'])]
       ElMessage.error(installmentCountError)
       return
     }
-    lossSaveAttempted.value = !propertyScope(draft)
-    const lossError = overseaEnabled(draft) ? '' : propertyScope(draft) ? (filled(draft.lossRecordYears) && (!validLossRecordYears(draft.lossRecordYears, draft) || Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) ? 'Loss history years must be valid; Year 0 is only for a New case with no loss entries.' : '') : !filled(draft.lossAdvisedDate)
+    lossSaveAttempted.value = !(propertyScope(draft) || isStp(draft))
+    const lossError = overseaEnabled(draft) ? '' : (propertyScope(draft) || isStp(draft)) ? (filled(draft.lossRecordYears) && (!validLossRecordYears(draft.lossRecordYears, draft) || Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) ? 'Loss history years must be valid; Year 0 is only for a New case with no loss entries.' : '') : !filled(draft.lossAdvisedDate)
       ? 'Loss record advised by broker on is required before saving.'
       : !validLossRecordYears(draft.lossRecordYears, draft)
         ? 'Loss history years is required, and 0 is allowed only for a New case.'
@@ -2118,10 +2125,10 @@ export function useCaseWorkspace() {
     }
     const updating = isEditing.value
     let changeReason = ''
-    const accountingFields=['receiptPaymentDate','ae','originalPremium','riCommPct','taxPct','currency','reinsurers','policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays','splitParties','splitEnabled','endoEffectiveDate','reinsured','classOfBusiness','classCode','reinsuranceStructure']
+    const accountingFields=['receiptPaymentDate','ae','originalPremium','premiumAdjustment','riCommPct','taxPct','currency','reinsurers','policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays','splitParties','splitEnabled','endoEffectiveDate','reinsured','classOfBusiness','classCode','reinsuranceStructure']
     const accountingCandidate=JSON.parse(JSON.stringify(draft,(key,value)=>key==='clientKey'?undefined:value))
     const accountingChanged=accountingFields.some(key=>JSON.stringify(accountingCandidate[key]??null)!==JSON.stringify(editingAccountingBaseline.value[key]??null))
-    if (updating && (propertyEnabled(draft) || overseaEnabled(draft)) && ['posted','closed','reversed'].includes(editingOriginalStatus.value) && (Boolean(draft.parentTwRef)||editingOriginalStatus.value==='reversed'||propertyScope(draft)&&draft.propertyOriginalRules==='property-original-v1'||accountingChanged)) {
+    if (updating && (propertyEnabled(draft) || overseaEnabled(draft)) && ['posted','closed','reversed'].includes(editingOriginalStatus.value) && (Boolean(draft.parentTwRef)||editingOriginalStatus.value==='reversed'||propertyScope(draft)&&draft.propertyOriginalRules==='property-original-v1'||isStp(draft)&&!draft.parentTwRef||accountingChanged)) {
       try { const answer = await ElMessageBox.prompt('Enter the reason for these changes.', 'Case change reason', { inputValidator: value => Boolean(String(value || '').trim()) || 'Reason is required.' }); changeReason = answer.value } catch { return }
     }
     // Alpha #7：Reversed 案件存檔會直接回到 Announced，要先明確確認；後端也會獨立檢查
@@ -2253,6 +2260,6 @@ export function useCaseWorkspace() {
     splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
     formatAmount, formatMoney, selectedMoney, selectedDataIssues, formatCurrency, formatMoneyInput, parseMoneyInput, saveReviewedDraft,
     addLossRecord, removeLossRecord, lossRowInvalid,
-    statusLabel, loadData, saveDraft, cglQsScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected
+    statusLabel, loadData, saveDraft, cglQsScope, propertyQsCurrencyScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected
   }
 }

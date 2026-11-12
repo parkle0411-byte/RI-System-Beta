@@ -41,6 +41,7 @@ export function draftFormatIssues(p) {
   }
   for (const [k,l] of [['originalPremium','100% Premium'],['limitOfLiability','Limit'],['aggregateLimit','Aggregate Limit']]) {
     // Aggregate is editable for all CGL placements.
+    if (k === 'limitOfLiability' && p.classOfBusiness === 'Stock Throughput') continue
     numeric(k,p[k],l,k === 'originalPremium' && p.parentTwRef ? -Infinity : 0)
   }
   for (const key of ['riCommPct','taxPct']) numeric(key,p[key],key,0,100)

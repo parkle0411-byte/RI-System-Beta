@@ -13,6 +13,8 @@ JavaScript 與這裡的 Python 餵同一批輸入，要求輸出完全一致。�
 VM 2026-10-06：只有已驗證的批單編輯可透過 allow_negative_premiums 接受本次負保費差額；一般案件沿用非負限制。
 """
 from .facility_selection import selection_issues as facility_selection_issues
+from .property_qs_currency import invalid as invalid_property_qs_currency, scope as property_qs_currency_scope, MESSAGE as PROPERTY_QS_CURRENCY_MESSAGE
+from .stp import scope as stp_scope
 
 import re
 from .property_original import scope as property_scope, POSTCODE as PROPERTY_POSTCODE, field_issues as property_field_issues
@@ -184,7 +186,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     inp = input_
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(inp):
-        keep = {'installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
+        keep = {'premiumAdjustment','installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
         inp = {k:v for k,v in inp.items() if k in keep}
         inp['typePrefix'] = ''
         inp['newOrRenew'] = 'New'
@@ -204,8 +206,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     situations = []
     for index, row in enumerate(rows(get(inp, "situations"), address_label, errors)):
         address = text(get(row, "address"), 500)
-        postcode = text(get(row, "postcode"), 240 if property_scope(inp) or cgl_qs_scope(inp) else 6)
-        if postcode and not (PROPERTY_POSTCODE if property_scope(inp) else _POSTCODE_RE).match(postcode):
+        postcode = text(get(row, "postcode"), 240 if property_scope(inp) or cgl_qs_scope(inp) or str(inp.get("classCode") or "").upper() == "ST" else 6)
+        if postcode and not (PROPERTY_POSTCODE if property_scope(inp) or str(inp.get("classCode") or "").upper() == "ST" else _POSTCODE_RE).match(postcode):
             errors.append(f"{address_label} {index + 1} postcode must contain letters or numbers, with optional spaces and hyphens." if property_scope(inp) else f"{address_label} {index + 1} postcode must be 3–6 digits.")
         situations.append({"address": address, "postcode": postcode})
 
@@ -277,7 +279,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             "pct": nullable_number(get(row, "pct"), f"Performance Split person {n} percentage", errors, min=0, max=100),
         })
 
-    if (property_scope(inp) or cgl_qs_scope(inp)) and get(inp,"splitEnabled") is True:
+    if (property_scope(inp) or cgl_qs_scope(inp) or stp_scope(inp)) and get(inp,"splitEnabled") is True:
         for index,row in enumerate(split_parties):
             if row["pct"] is not None and row["pct"] not in ((40,70) if index==0 else (60,30)):
                 errors.append("Reinsurance Staff split must be 40% or 70%; Other Staff split must be 60% or 30%.")
@@ -300,7 +302,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         errors.append("Effective time must be 12:00 or 00:00.")
     if policy_to_time not in ("00:00", "12:00"):
         errors.append("Expiration time must be 12:00 or 00:00.")
-    if effective_date and expiration_date and (expiration_date < effective_date or (property_scope(inp) or cgl_qs_scope(inp)) and expiration_date == effective_date):
+    if effective_date and expiration_date and (expiration_date < effective_date or (property_scope(inp) or cgl_qs_scope(inp) or stp_scope(inp)) and expiration_date == effective_date):
         errors.append("Expiration date must be later than Effective date." if property_scope(inp) else "Expiration date cannot be earlier than Effective date.")
 
     from .oversea import issues as oversea_issues
@@ -326,10 +328,12 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         type_ = text(cgl_type({**inp, 'typePrefix': type_prefix, 'reinsuranceStructure': reinsurance_structure}), 200)
 
     currency = js_upper(text(get(inp, "currency"), 3))
+    if invalid_property_qs_currency(inp, existing_premiums):
+        errors.append(PROPERTY_QS_CURRENCY_MESSAGE)
     if currency and not _CURRENCY_RE.match(currency):
         errors.append("Currency must be a three-letter code.")
 
-    basis_of_valuation = text(get(inp, "basisOfValuation"), 100)
+    basis_of_valuation = text(get(inp, "basisOfValuation"), 3000 if stp_scope(inp) else 100)
     manual_clauses = clause_rows(get(inp, "manualClauses"), "Manual clauses", errors)
     supplied_details = clause_rows(get(inp, "clauseDetails"), "Clause details", errors)
     manual_codes = {row["code"] for row in manual_clauses}
@@ -362,7 +366,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["reinsured"] = text(get(inp, "reinsured"), 240)
     value["situations"] = situations if situations else [{"address": "", "postcode": ""}]
     value["classOfBusiness"] = text(get(inp, "classOfBusiness"), 160)
-    value["classCode"] = text(get(inp, "classCode"), 80)
+    value["classCode"] = "ST" if stp_scope(inp) else text(get(inp, "classCode"), 80)
     value["reinsuranceStructure"] = reinsurance_structure
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(inp):
@@ -373,6 +377,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["policyToTime"] = policy_to_time if policy_to_time in ("00:00", "12:00") else "12:00"
     value["currency"] = currency
     value["originalPremium"] = nullable_number(get(inp, "originalPremium"), "100% Premium", errors, min=premium_minimum)
+    if oversea_enabled(inp) and inp.get('parentTwRef') and 'premiumAdjustment' in inp:
+        value['premiumAdjustment'] = nullable_number(inp.get('premiumAdjustment'), '100% Premium Adjustment', errors)
     value["riCommPct"] = nullable_number(get(inp, "riCommPct"), "Ceding commission", errors, min=0, max=100)
     value["taxPct"] = nullable_number(get(inp, "taxPct"), "Cedant tax", errors, min=0, max=100)
     value["paymentTermsDays"] = nullable_number(get(inp, "paymentTermsDays"), "Payment terms", errors, min=15, integer=True)
@@ -380,7 +386,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         value["cedantTermsBasis"] = "case"
     value["installmentEnabled"] = get(inp, "installmentEnabled") is True
     value["performanceInstallments"] = performance_installments
-    if value["installmentEnabled"] and len(performance_installments) < 2 and not property_scope(inp) and not oversea_enabled(inp):
+    if value["installmentEnabled"] and len(performance_installments) < 2 and not property_scope(inp) and not stp_scope(inp) and not oversea_enabled(inp):
         errors.append(MINIMUM_INSTALLMENTS_MESSAGE)
     if allow_negative_premiums and not oversea_enabled(inp) and (value["installmentEnabled"] or performance_installments):
         errors.append("Endorsements must use a single premium settlement; installments are not allowed.")
@@ -405,7 +411,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["status"] = "draft"
     from .facility_rules import fixed_interest
     value["interest"] = fixed_interest(inp) or text(get(inp, "interest"), 3000)
-    value["limitOfLiability"] = nullable_number(get(inp, "limitOfLiability"), liability_limit_label(inp), errors, min=0)
+    value["limitOfLiability"] = (text(get(inp, "limitOfLiability"), 5000) if stp_scope(inp) else nullable_number(get(inp, "limitOfLiability"), liability_limit_label(inp), errors, min=0))
     value["aggregateLimit"] = nullable_number(get(inp, "aggregateLimit"), "Aggregate Limit", errors, min=0)
     value["underlyingLimits"] = "" if reinsurance_structure == "QS" else text(get(inp, "underlyingLimits"), 3000)
     value["subLimits"] = text(get(inp, "subLimits"), 3000)
@@ -430,6 +436,20 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             errors.append('Annual must be a boolean.')
         value['cglAnnual'] = annual is not False
     value["specialAgreement"] = text(get(inp, "specialAgreement"), 5000)
+    if stp_scope(inp):
+        for key in ('conveyance', 'voyage', 'attachmentTermination', 'geographicalScope', 'storage', 'stpPremiumRate', 'stpWebsite'):
+            value[key] = text(get(inp, key), 5000)
+        value['stpTurnoverMode'] = text(get(inp, 'stpTurnoverMode'), 20)
+        for key, label in (('stpTurnover', 'Estimated Turnover'), ('stpHubs', 'HUB List')):
+            result_rows = []
+            for i, row in enumerate(rows(get(inp, key), label, errors)):
+                item = {'currency': text(get(row, 'currency'), 3).upper(),
+                        'amount': nullable_number(get(row, 'amount'), f'{label} {i + 1} Amount', errors, min=0)}
+                for field in (('company',) if key == 'stpTurnover' else ('name', 'address')):
+                    item[field] = text(get(row, field), 500 if field == 'address' else 240)
+                result_rows.append(item)
+            value[key] = result_rows
+
     value["ae"] = text(get(inp, "ae"), 160)
     value["newOrRenew"] = text(get(inp, "newOrRenew"), 20)
     value["exchRate"] = nullable_number(get(inp, "exchRate"), "Exchange rate", errors, min=0)
@@ -482,7 +502,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         value["manualTwRef"], manual_errors = normalize_manual_tw_ref(inp.get("manualTwRef"))
         errors.extend(manual_errors)
 
-    if property_scope(value) or cgl_qs_scope(value):
+    if property_scope(value) or cgl_qs_scope(value) or stp_scope(value):
         for i, row in enumerate(performance_installments):
             mapping = row.get("reinsurerPaymentTerms") or {}
             if not isinstance(mapping, dict):
@@ -534,7 +554,8 @@ def loss_record_save_errors(payload, *, case_kind="original"):
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(payload):
         return []
-    if property_scope(payload):
+    from .stp import scope as stp_scope
+    if property_scope(payload) or stp_scope(payload):
         years = get(payload, "lossRecordYears")
         if _filled(years) and years == 0:
             if case_kind == "renewal" or get(payload, "newOrRenew") != "New":
@@ -578,6 +599,11 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         issues.append({"field": field, "label": label})
 
     value = payload if isinstance(payload, (dict, list)) else {}
+    if property_qs_currency_scope(value) and str(value.get("currency") or "").strip().upper() not in ("TWD", "USD"):
+        add("currency", PROPERTY_QS_CURRENCY_MESSAGE)
+    from .stp import scope as stp_scope, issues as stp_issues
+    if stp_scope(value):
+        issues.extend(stp_issues(value))
     if js_truthy(get(value, "parentTwRef")) and not oversea_enabled(value) and (get(value, "installmentEnabled") is True or get(value, "performanceInstallments")):
         add("installmentEnabled", "Endorsements must use a single premium settlement")
     if not _is_int_number(get(value, "ownerPersonnelId")) or js_to_number(get(value, "ownerPersonnelId")) < 1:
@@ -605,7 +631,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         if not _filled(get(value, "endoText")):
             add("endoText", "Endorsement wording")
 
-    address_label = 'Principal Address' if is_standard_cgl(value) else 'Situation'
+    address_label = 'Original Insured Address' if stp_scope(value) else 'Principal Address' if is_standard_cgl(value) else 'Situation'
     situations = get(value, "situations")
     situations = situations if is_array(situations) else []
     if not situations:
@@ -613,7 +639,7 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     for index, row in enumerate(situations):
         if not _filled(get(row, "address")):
             add(f"situations.{index}.address", f"Principal Address {index + 1}" if is_standard_cgl(value) else f"Situation {index + 1} Risk Address")
-        if not (cgl_qs_scope(value) and not _filled(get(row, "postcode"))) and not (PROPERTY_POSTCODE if property_scope(value) else _POSTCODE_RE).match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
+        if not (cgl_qs_scope(value) and not _filled(get(row, "postcode"))) and not (PROPERTY_POSTCODE if property_scope(value) or stp_scope(value) else _POSTCODE_RE).match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
             add(f"situations.{index}.postcode", f"{address_label} {index + 1} Postcode")
 
     reinsurers = get(value, "reinsurers")
@@ -648,9 +674,9 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     from .sum_insured import all_facility
     if not all_facility(value) and not _filled(get(value, "originalConditions")):
         add("originalConditions", "Original Conditions")
-    if not is_standard_cgl(value) and get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
+    if not is_standard_cgl(value) and not stp_scope(value) and get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
         add("basisOfValuationOther", "Basis of Valuation — Other")
-    if not is_standard_cgl(value):
+    if not is_standard_cgl(value) and not stp_scope(value):
         if not _filled(get(value, "occupation")):
             add("occupation", "Occupation")
         if not _filled(get(value, "construction")):

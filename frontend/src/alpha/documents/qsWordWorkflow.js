@@ -4,7 +4,7 @@ const pendingFiles = new Map()
 
 export function usesStoredQsWord(kind, c) {
   return ['cover', 'debit'].includes(kind) && c?.reinsuranceStructure === 'QS' && !c?.parentTwRef
-    && (c?.classCode === 'PD' || c?.classOfBusiness === 'Property')
+    && (['PD', 'ST'].includes(c?.classCode) || ['Property', 'Stock Throughput'].includes(c?.classOfBusiness))
 }
 
 export async function readDocumentError(response, fallback) {

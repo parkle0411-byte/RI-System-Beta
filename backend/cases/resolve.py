@@ -77,9 +77,10 @@ def resolve_personnel_splits(payload, allowed_historical_ids=()):
 
     from .property_original import scope as property_scope
     from .cgl_qs import scope as cgl_qs_scope
+    from .stp import scope as stp_scope
     for index, party in enumerate(parties):
         supplied = _supplied_id(party)
-        if (property_scope(payload) or cgl_qs_scope(payload)) and supplied is None and not _lower(get(party, "name")):
+        if (property_scope(payload) or cgl_qs_scope(payload) or stp_scope(payload) and not payload.get("parentTwRef")) and supplied is None and not _lower(get(party, "name")):
             continue
         if supplied is not None:
             person = by_id.get(supplied)
@@ -101,7 +102,7 @@ def resolve_personnel_splits(payload, allowed_historical_ids=()):
                 "error": "invalid_personnel_split",
                 "message": "New Performance Split selections must use active, split-eligible Personnel records.",
             }
-        if (property_scope(payload) or cgl_qs_scope(payload)) and ((index == 0) != (person.role_code == "sales")):
+        if (property_scope(payload) or cgl_qs_scope(payload) or stp_scope(payload) and not payload.get("parentTwRef")) and ((index == 0) != (person.role_code == "sales")):
             return {"error": "invalid_personnel_split", "message": "Select Reinsurance Staff for the first party and non-Reinsurance Staff for Other Staff."}
         party["personnelId"] = person.pk
         party["name"] = person.name

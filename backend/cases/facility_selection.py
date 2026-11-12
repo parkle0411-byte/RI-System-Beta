@@ -3,6 +3,7 @@
 Selection scope is independent of accounting scope. Existing cases are never
 rewritten; invalid combinations must be corrected before a new case write.
 """
+import re
 from .swiss_cgl import SWISS_NAME
 
 RULES = (("Lloyd's Underwriter Syndicate No. 0609 AUW (Facility)", 'AUW Facility', ('Property',)), ('Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)', 'Allianz Facility', ('Property',)), ('Great American Insurance Company, Singapore Branch (Facility)', 'Great American Facility', ('Property',)), ('QBE Hongkong & Shanghai Insurance Limited (Facility)', 'QBE Facility', ('Property',)), ('Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)', 'Swiss Re Asia Facility', ('Property', 'Commercial General Liability')))
@@ -21,6 +22,9 @@ def selection_issues(payload):
         if not isinstance(row, dict):
             continue
         name = " ".join(str(row.get("name") or "").split()).casefold()
+        if klass == 'stock throughput' and re.search(r'\bfacility\b', name) and not any(name == target.casefold() for target, _, _ in RULES):
+            issues.append({"field": f"reinsurers.{index}.name", "label": f"Reinsurer {index + 1}: Facility is not available for Stock Throughput."})
+            continue
         for target, label, allowed in RULES:
             if name == target.casefold() and klass not in [c.casefold() for c in allowed]:
                 issues.append({"field": f"reinsurers.{index}.name",

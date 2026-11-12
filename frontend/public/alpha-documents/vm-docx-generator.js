@@ -51,7 +51,7 @@
   function recipientLines(c) {
     const name = text(c && c.reinsured);
     const original = text(c && c.reinsuredAddress) || 'Taiwan (R.O.C.)';
-    if (!qsProperty(c)) return [name, original].filter(Boolean);
+    if (!qsProperty(c) && !isStp(c)) return [name, original].filter(Boolean);
     let address = original;
     if (name && address.toLowerCase().includes(name.toLowerCase())) {
       const at = address.toLowerCase().indexOf(name.toLowerCase());
@@ -72,7 +72,7 @@
   function coverPaymentTerms(c) {
     const suffix = ' Day Payment condition - LSW 3001 Premium Payment Clause';
     const valid = value => Number.isInteger(Number(value)) && Number(value) >= 15;
-    if (!qsProperty(c)) return (text(c && c.paymentTermsDays) || '0') + suffix;
+    if (!qsProperty(c) && !isStp(c)) return (text(c && c.paymentTermsDays) || '0') + suffix;
     if (c.installmentEnabled !== true) return valid(c.paymentTermsDays) ? Number(c.paymentTermsDays) + suffix : '';
     const rows = Array.isArray(c.performanceInstallments) ? c.performanceInstallments : [];
     const days = rows.map(row => text(row && row.paymentTermsDays) ? row.paymentTermsDays : c.paymentTermsDays);
@@ -110,20 +110,20 @@
 
   function securityDocumentRows(c) {
     const rows = Array.isArray(c && c.reinsurers) ? c.reinsurers : [];
-    return !qsProperty(c) ? rows : rows.map((row, index) => ({ row, index }))
+    return !qsProperty(c) && !isStp(c) ? rows : rows.map((row, index) => ({ row, index }))
       .sort((a, b) => number(b.row.sharePct) - number(a.row.sharePct) || a.index - b.index).map(item => item.row);
   }
 
   function generationDate(c) {
     const supplied = text(c && c.qsGenerationDate);
-    if (qsProperty(c) && /^\d{4}-\d{2}-\d{2}$/.test(supplied)) return supplied;
+    if ((qsProperty(c) || isStp(c)) && /^\d{4}-\d{2}-\d{2}$/.test(supplied)) return supplied;
     const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
     const value = type => parts.find(part => part.type === type).value;
     return value('year') + '-' + value('month') + '-' + value('day');
   }
 
   function generatedFilename(c, prefix) {
-    if (!qsProperty(c)) return prefix + '_' + safeRef(documentReference(c)) + '.docx';
+    if (!qsProperty(c) && !isStp(c)) return prefix + '_' + safeRef(documentReference(c)) + '.docx';
     const safe = value => text(value).replace(/[\u0000-\u001f\u007f\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
     let ref = safeRef(documentReference(c));
     let insured = safe(c.originalInsured) || 'Original Insured';
@@ -230,7 +230,7 @@
   }
 
   function documentDate(c) {
-    if (qsProperty(c) && text(c.qsGenerationDate)) return longDate(generationDate(c));
+    if ((qsProperty(c) || isStp(c)) && text(c.qsGenerationDate)) return longDate(c.qsGenerationDate);
     // Document issue dates follow Taiwan's calendar day, wherever Word is generated.
     return new Intl.DateTimeFormat('en-GB', {
       day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Taipei',
@@ -455,6 +455,8 @@
     return named.length > 0 && named.every(row => /\(Facility\)\s*$/i.test(text(row.name)));
   }
 
+  function isStp(c) { return text(c && c.classOfBusiness).toLowerCase() === 'stock throughput' || text(c && c.classCode).toUpperCase() === 'ST'; }
+
   function commonValues(c) {
     const fin = financials(c);
     const sums = sumInsuredRows(c);
@@ -468,6 +470,15 @@
     const originalConditions = originalClauseText(c, c && c.originalConditions);
     const reinsuranceConditions = [REINSURANCE_INTRO].concat(clauses.map(item => `•\u00a0${clauseLine(item)}`)).join('\n');
     return {
+      STP_ATTACHMENT: text(c && c.attachmentTermination),
+      STP_CONVEYANCE: text(c && c.conveyance),
+      STP_VOYAGE: text(c && c.voyage),
+      STP_LIMIT: text(c && c.limitOfLiability),
+      STP_STORAGE: text(c && c.storage),
+      STP_GEOGRAPHICAL: text(c && c.geographicalScope),
+      STP_WEBSITE: text(c && c.stpWebsite),
+      STP_PREMIUM_RATE: text(c && c.stpPremiumRate),
+      STP_CO_REINSURANCE: text(c && c.coReinsuranceWarranty),
       RECIPIENT_BLOCK: addressLines.join('\n'),
       CONTACT_BLOCK: contactBlock(c),
       TW_REF: documentReference(c),
@@ -490,7 +501,7 @@
       SITUATION: situations.map((item, index) => `${index + 1}. ${situationAddress(item)}`).join('\n'),
       TOTAL_SUM_INSURED: money(sums.reduce((total, row) => total + row.numericAmount, 0), c),
       POLICY_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
-      BASIS_OF_VALUATION: Array.isArray(c && c.cglInformationRows) ? '' : basisOfValuation(c),
+      BASIS_OF_VALUATION: isStp(c) ? text(c && c.basisOfValuation) : Array.isArray(c && c.cglInformationRows) ? '' : basisOfValuation(c),
       ORIGINAL_CONDITIONS: originalConditions,
       REINSURANCE_CONDITIONS: reinsuranceConditions,
       LOSS_PAYEE: Array.isArray(c && c.cglInformationRows) || (newQs(c) && !propertyExtras(c)) ? '' : text(c && c.lossPayee),
@@ -501,7 +512,7 @@
       PREMIUM: money(c && c.originalPremium, c) + (Array.isArray(c && c.cglInformationRows) && c.cglAnnual !== false ? ' (Annual)' : ''),
       ORDER_HEREON: `${percentTrim(fin.order, shareDecimals)} of 100%`,
       ORDER_HEREON_DEBIT: percentTrim(fin.order, shareDecimals),
-      CEDING_COMMISSION: displayedRate(c, c && c.riCommPct),
+      CEDING_COMMISSION: isStp(c) && Number(c?.riCommPct) === 0 ? '' : displayedRate(c, c && c.riCommPct),
       TAX: displayedRate(c, c && c.taxPct),
       PAYMENT_TERMS: coverPaymentTerms(c),
       DEBIT_PAYMENT_TERMS: debitDueDate(c) || '—',
@@ -590,7 +601,7 @@
     'REINSTATEMENT_PROVISIONS', 'INDEMNITY_PERIOD', 'BASIS_OF_VALUATION', 'LOSS_PAYEE', 'NOTICES',
     'EXPRESS_WARRANTIES', 'CONDITIONS_PRECEDENT', 'SUBJECTIVITIES',
     'OCCUPATION', 'CONSTRUCTION', 'CEDING_COMMISSION', 'TAX',
-    'SPECIAL_AGREEMENT',
+    'SPECIAL_AGREEMENT', 'STP_ATTACHMENT', 'STP_STORAGE', 'STP_GEOGRAPHICAL', 'STP_WEBSITE', 'STP_PREMIUM_RATE', 'STP_CO_REINSURANCE',
   ];
 
   // Parses a document.xml fragment into "table frames": one entry per
@@ -1479,6 +1490,41 @@
     }
     return xml;
   }
+  function expandStpRows(xml, c) {
+    const entries = Array.isArray(c?.stpTurnover) ? c.stpTurnover : [];
+    const parts = value => {
+      const n = Number(value);
+      const safe = Number.isFinite(n) && n >= 0 ? n : 0;
+      const match = String(safe).match(/^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i);
+      const fraction = match[2] || '', exponent = Number(match[3] || 0);
+      let digits = match[1] + fraction, scale = fraction.length - exponent;
+      if (scale < 0) { digits += '0'.repeat(-scale); scale = 0; }
+      return {digits, scale};
+    };
+    const formatDigits = (digits, scale) => {
+      const raw = String(digits).padStart(scale + 1, '0');
+      const integer = (scale ? raw.slice(0, -scale) : raw).replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      const fraction = scale ? raw.slice(-scale).replace(/0+$/, '') : '';
+      return integer + (fraction ? '.' + fraction : '');
+    };
+    const amounts = value => { const p = parts(value); return formatDigits(p.digits, p.scale); };
+    const addAmounts = values => {
+      const entries = values.map(parts), scale = Math.max(0, ...entries.map(v => v.scale));
+      const total = entries.reduce((sum, p) => sum + BigInt(p.digits) * 10n ** BigInt(scale - p.scale), 0n);
+      return formatDigits(total.toString(), scale);
+    };
+    const turnover = entries.map(row => ({ label: entries.length > 1 && c.stpTurnoverMode === 'companies' ? text(row.company) : '', amount: `${text(row.currency)} ${amounts(row.amount)}` }));
+    if (entries.length > 1) {
+      const totals = new Map();
+      entries.forEach(row => { const k = text(row.currency); if (!totals.has(k)) totals.set(k, []); totals.get(k).push(row.amount); });
+      totals.forEach((values, currency) => turnover.push({label: 'Total', amount: `${currency} ${addAmounts(values)}`}));
+    }
+    xml = expandRepeatingRows(xml, '{{STP_TURNOVER_LABEL}}', turnover, row => ({ '{{STP_TURNOVER_LABEL}}': row.label, '{{STP_TURNOVER_AMOUNT}}': row.amount }));
+    const hubs = (Array.isArray(c?.stpHubs) ? c.stpHubs : []).map((row, i) => ({...row, index: i + 1}));
+    xml = expandRepeatingRows(xml, '{{STP_HUB_NO}}', hubs, row => ({ '{{STP_HUB_NO}}': String(row.index), '{{STP_HUB_NAME}}': text(row.name), '{{STP_HUB_ADDRESS}}': text(row.address), '{{STP_HUB_AMOUNT}}': `${text(row.currency)} ${amounts(row.amount)}` }));
+    return xml;
+  }
+
   async function fillTemplate(base64, c, values, outputType, includeLossNotes = false, keepBankDetails = false) {
     const zip = await JSZip.loadAsync(base64, { base64: true });
     const names = Object.keys(zip.files).filter(name => /\.xml$/i.test(name));
@@ -1495,7 +1541,10 @@
         }
         // Correct the Cover template heading before inserting any Case text.
         if (includeLossNotes) {
-          const corrected = stripPropertyXolLocation(startCoverInformationPage(xml.replace('<w:t>BREAKFOWN OF SUM INSURED</w:t>', '<w:t>BREAKDOWN OF SUM INSURED</w:t>')), c);
+          const heading = xml.replace('<w:t>BREAKFOWN OF SUM INSURED</w:t>', '<w:t>BREAKDOWN OF SUM INSURED</w:t>');
+          // STP's chapter separator is normalized below; a second break inside
+          // its INFORMATION table creates a blank page in Word-compatible readers.
+          const corrected = stripPropertyXolLocation(isStp(c) ? heading : startCoverInformationPage(heading), c);
           if (corrected !== xml) {
             xml = corrected;
             changed = true;
@@ -1506,6 +1555,7 @@
         const riskDetails = applyCglRiskDetails(xml, c);
         if (riskDetails !== xml) { xml = riskDetails; changed = true; }
         xml = applyNewQsRows(xml,c);
+        if (isStp(c) && includeLossNotes) xml = expandStpRows(xml, c);
         const stripped = stripEmptyOptionalRows(xml, values);
         if (stripped !== xml) {
           xml = stripped;
@@ -1582,7 +1632,7 @@
         }
       }
       if (includeLossNotes && /^word\/document\.xml$/i.test(name)) {
-        const paginated = normalizeCoverPageBreaks(compactCoverCurrencyAmounts(xml, c));
+        const paginated = normalizeCoverPageBreaks(isStp(c) ? xml : compactCoverCurrencyAmounts(xml, c));
         if (paginated !== xml) {
           xml = paginated;
           changed = true;
@@ -1606,6 +1656,7 @@
   }
 
   function coverTemplateKey(c) {
+    if (isStp(c)) return 'stpCover';
     const structure = text(c && c.reinsuranceStructure).toUpperCase();
     return structure.includes('XOL') || structure.includes('EXCESS')
       ? 'propertyCoverXol'

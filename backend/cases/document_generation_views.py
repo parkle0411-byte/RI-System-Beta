@@ -26,6 +26,7 @@ from ri_system.authz import NoStoreMixin, RIPermission, actor_from
 from .calc.jsnum import get, is_nullish, js_to_string, js_trim, js_to_number, js_is_finite
 from .document_views import visible_cases
 from .sum_insured import placement_issues, all_facility
+from .stp import scope as stp_scope, issues as stp_issues
 
 
 KINDS = ("cover", "endorsement", "debit", "credit")
@@ -232,6 +233,10 @@ def _check_case_base(request, body):
         cgl_issues = information_issues(payload)
         if cgl_issues:
             return None, kind, _error(409, "cgl_information_required", "Complete Information before generating a Cover Note: " + "; ".join(row["label"] for row in cgl_issues))
+    if kind == "cover" and stp_scope(payload):
+        problems = stp_issues(payload)
+        if problems:
+            return None, kind, _error(409, "stp_fields_required", "; ".join(x["label"] for x in problems))
     from .facility_rules import fixed_interest
     if kind == "cover" and not fixed_interest(payload) and not _text(payload, "interest"):
         return None, kind, _error(409, "interest_required", "Complete Interest in the case before generating a Cover Note.")
@@ -247,7 +252,7 @@ def _check_case_base(request, body):
         situations = get(payload, "situations")
         if not isinstance(situations, list) or not situations or any(not isinstance(row, dict) or not _text(row, "address") for row in situations):
             return None, kind, _error(409, "situation_address_required", "Complete Principal Address in the case before generating a Cover Note." if is_standard_cgl(payload) else "Complete Risk Address for every Situation in the case before generating a Cover Note.")
-        if any(not (cgl_qs_scope(payload) and not _text(row,"postcode")) and not (property_postcode.fullmatch(_text(row,"postcode")) if property_scope(payload) else re.fullmatch(r"[0-9]{3,6}", _text(row, "postcode"))) for row in situations):
+        if any(not (cgl_qs_scope(payload) and not _text(row,"postcode")) and not (property_postcode.fullmatch(_text(row,"postcode")) if property_scope(payload) or stp_scope(payload) else re.fullmatch(r"[0-9]{3,6}", _text(row, "postcode"))) for row in situations):
             return None, kind, _error(409, "situation_postcode_required", "Complete a 3–6 digit Postcode for every Principal Address in the case before generating a Cover Note." if is_standard_cgl(payload) else "Complete a 3–6 digit Postcode for every Situation in the case before generating a Cover Note.")
     if kind in ("cover", "debit") and _text(payload, "reinsuranceStructure") in ("QS", "XOL") and not _text(payload, "originalPremium"):
         return None, kind, _error(409, "original_premium_required", "Complete 100% Premium in the case before generating a Cover Note or Debit Note.")
@@ -255,15 +260,15 @@ def _check_case_base(request, body):
         reinsurers = get(payload, "reinsurers")
         if not isinstance(reinsurers, list) or not reinsurers or any(not isinstance(row, dict) or not _text(row, "sharePct") for row in reinsurers):
             return None, kind, _error(409, "order_hereon_required", "Add at least one Reinsurer and complete Order hereon for every Reinsurer in the case before generating a Cover Note or Debit Note.")
-    if kind == "cover" and not is_standard_cgl(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+    if kind == "cover" and not is_standard_cgl(payload) and not stp_scope(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         sums = get(payload, "sumInsured")
         if not isinstance(sums, list) or not sums or any(not isinstance(row, dict) or not _text(row, "category") for row in sums):
             return None, kind, _error(409, "sum_insured_name_required", "Add at least one Sum Insured entry and complete Interest insured for every entry before generating a Cover Note.")
-    if kind == "cover" and not is_standard_cgl(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+    if kind == "cover" and not is_standard_cgl(payload) and not stp_scope(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         sums = get(payload, "sumInsured")
         if any(not js_is_finite(js_to_number(get(row, "amount"))) or js_to_number(get(row, "amount")) <= 0 for row in sums):
             return None, kind, _error(409, "sum_insured_amount_required", "Enter an Amount greater than 0 for every Sum Insured entry before generating a Cover Note.")
-    if kind == "cover" and not is_standard_cgl(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
+    if kind == "cover" and not is_standard_cgl(payload) and not stp_scope(payload) and _text(payload, "reinsuranceStructure") in ("QS", "XOL"):
         issues = placement_issues(payload)
         if any(issue["kind"] == "location" for issue in issues):
             return None, kind, _error(409, "sum_insured_locations_required", "Assign every Sum Insured entry to a valid Location and add at least one entry for every Location before generating a Cover Note.")

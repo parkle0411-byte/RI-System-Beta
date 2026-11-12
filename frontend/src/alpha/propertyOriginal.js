@@ -101,7 +101,8 @@ export function propertyLegs(p,r) {
     reinsurerCp:ri.premium,reinsurerRi:ri.deduction,reinsurerTax:ri.tax,leg2:ri.t2,leg3,brokerage:leg3}
 }
 export function propertyIssues(p) {
-  if (!propertyScope(p)) return []
+  const stpOriginal = p?.reinsuranceStructure === 'QS' && !p?.parentTwRef && (p?.classCode === 'ST' || p?.classOfBusiness === 'Stock Throughput')
+  if (!propertyScope(p) && !stpOriginal) return []
   const issues=[], add=(field,label) => issues.push({field,label})
   for (const [k,label] of [['originalInsuredCn','Original Insured (CN)'],['reinsuredRetention',"Reinsured's Retention"],['riCommPct','Cedant Commission'],['taxPct','Cedant Tax'],['paymentTermsDays','Cedant Payment Terms (Days)']]) if (!(k === 'reinsuredRetention' && allSumInsuredFacility(p)) && !filled(p[k])) add(k,label)
   if (p.policyFrom && p.policyTo && p.policyTo <= p.policyFrom) add('policyTo','Expiration date must be later than Effective date')

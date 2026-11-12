@@ -45,6 +45,7 @@ export function facilityStructureAllowed(payload, structure) {
     || String(structure || '').trim().toUpperCase() === 'QS'
 }
 export function facilitySelectionAllowed(payload, name) {
+  if (String(payload?.classOfBusiness || '').toLowerCase() === 'stock throughput' && /\bfacility\b/i.test(name || '')) return false
   const rule = rules.find(rule => normalizedName(rule.name) === normalizedName(name))
   return (!rule || rule.classes.some(klass => klass.toLowerCase() === String(payload?.classOfBusiness || '').trim().toLowerCase()))
     && (!swissCglSelection(payload, name) || String(payload?.reinsuranceStructure || '').trim().toUpperCase() === 'QS')
@@ -52,6 +53,7 @@ export function facilitySelectionAllowed(payload, name) {
 export function facilitySelectionIssues(payload) {
   return (Array.isArray(payload?.reinsurers) ? payload.reinsurers : []).flatMap((row, index) => {
     const rule = rules.find(rule => normalizedName(rule.name) === normalizedName(row?.name))
+    if (String(payload?.classOfBusiness || '').toLowerCase() === 'stock throughput' && /\bfacility\b/i.test(row?.name || '') && !rule) return [{field:`reinsurers.${index}.name`, label:`Reinsurer ${index + 1}: Facility is not available for Stock Throughput.`}]
     if (swissCglSelection(payload, row?.name) && String(payload?.reinsuranceStructure || '').trim().toUpperCase() !== 'QS') {
       return [{ field: 'reinsuranceStructure', label: `Reinsurer ${index + 1}: Swiss Re CGL Facility is available only for Quota Share (QS).` }]
     }

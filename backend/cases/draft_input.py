@@ -22,7 +22,7 @@ basisOfValuation basisOfValuationOther originalConditions expressWarranties
 conditionsPrecedent subjectivities occupation construction lossPayee notices
 specialAgreement ae newOrRenew exchRate remark statementNo coverages
 coveragesOther selfInsuredRetention cglInformation cglAnnual manualClauses
-clauseDetails clauses autoClauses endoEffectiveDate endoTypes endoText coReinsuranceWarranty constructionSelections constructionLegacyText constructionLegacyConfirmed constructionSelectionVersion'''.split())
+clauseDetails clauses autoClauses endoEffectiveDate endoTypes endoText coReinsuranceWarranty constructionSelections constructionLegacyText constructionLegacyConfirmed constructionSelectionVersion conveyance voyage attachmentTermination geographicalScope storage stpPremiumRate stpWebsite stpTurnoverMode stpTurnover stpHubs'''.split())
 
 
 def scope(p, existing=None):
@@ -37,7 +37,7 @@ def scope(p, existing=None):
     structure = str(p.get('reinsuranceStructure') or ('QS' if family else '')).upper()
     if structure != 'QS':
         return False
-    if str(p.get('classOfBusiness') or family or '').strip().casefold() not in ('property', 'commercial general liability'):
+    if str(p.get('classOfBusiness') or family or '').strip().casefold() not in ('property', 'commercial general liability', 'stock throughput'):
         return False
     entries = p.get('reinsurers') if isinstance(p.get('reinsurers'), list) else []
     from .swiss_cgl import target as swiss_cgl
@@ -56,7 +56,10 @@ def input_for(p):
 
 def normalize(p, *, existing=None):
     from .draft import normalize_draft
+    from .property_qs_currency import invalid as invalid_property_qs_currency, MESSAGE as PROPERTY_QS_CURRENCY_MESSAGE
     from .facility_selection import selection_issues
+    if invalid_property_qs_currency(p, existing):
+        return {'errors': [PROPERTY_QS_CURRENCY_MESSAGE], 'value': None}
     structure_issues = [i['label'] for i in selection_issues(p) if i['field'] == 'reinsuranceStructure']
     if structure_issues:
         return {'errors': structure_issues, 'value': None}
@@ -69,14 +72,14 @@ def normalize(p, *, existing=None):
         return {'errors': ['Draft must contain valid JSON.'], 'value': None}
     if len(encoded.encode('utf-16-le', errors='surrogatepass')) // 2 > 250000:
         return {'errors': ['Draft is too large.'], 'value': None}
-    for key in ('situations', 'reinsurers', 'sumInsured', 'lossRecord', 'performanceInstallments', 'splitParties'):
+    for key in ('situations', 'reinsurers', 'sumInsured', 'lossRecord', 'performanceInstallments', 'splitParties', 'stpTurnover', 'stpHubs'):
         if key in p and (not isinstance(p[key], list) or len(p[key]) > 500):
             return {'errors': [f'{key} must be a list of at most 500 entries.'], 'value': None}
     raw = {k: copy.deepcopy(v) for k, v in p.items() if k in EDITABLE}
     if 'endoTypes' in raw and (not isinstance(raw['endoTypes'], list) or len(raw['endoTypes']) > 20 or any(not isinstance(v, str) for v in raw['endoTypes'])):
         return {'errors': ['Endorsement types must be a list of at most 20 text entries.'], 'value': None}
     # Do not permit a malformed container to reach a calculator or resolver.
-    for key in ('situations', 'reinsurers', 'sumInsured', 'lossRecord', 'performanceInstallments', 'splitParties'):
+    for key in ('situations', 'reinsurers', 'sumInsured', 'lossRecord', 'performanceInstallments', 'splitParties', 'stpTurnover', 'stpHubs'):
         if any(not isinstance(r, dict) for r in raw.get(key, [])):
             return {'errors': [f'{key} entries must be objects.'], 'value': None}
     result = normalize_draft({**p, **raw}, allow_negative_premiums=bool((existing or p).get("parentTwRef")), existing_premiums=existing)

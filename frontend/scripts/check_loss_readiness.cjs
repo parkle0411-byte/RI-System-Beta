@@ -14,6 +14,7 @@ const context = {
   requiresManualTwRef: () => false, isAuwReinsurer: () => false,
 };
 vm.createContext(context);
+vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/stp.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{isStp,stpIssues});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/oversea.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext('(function(){'+fs.readFileSync(path.join(__dirname,'../src/alpha/construction.js'),'utf8').replace(/export /g,'')+'\nObject.assign(globalThis,{constructionIssues,constructionScope,constructionText,initializeConstruction});})()',context);
 vm.runInContext("(function(){" + fs.readFileSync(path.join(__dirname, "../src/alpha/placingRules.js"), "utf8").replace(/export /g, "") + "\nObject.assign(globalThis,{placingRulesEnabled,newCgl,adjustClientIssues,shareClientIssues,placingExtraIssues,businessText});})()", context);
@@ -26,6 +27,7 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/swissCgl.js')
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRetroactive.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglInformation.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/cglQs.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{cglQsScope,cglQsIssues,draftFormatIssues});})()', context);
+vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/propertyQsCurrency.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{propertyQsCurrencyScope,propertyQsCurrencyIssues});})()', context);
 vm.runInContext(extract('  const keyInScope =', '\n  const draftFamily =').replace('const ordinaryDraftScope =','globalThis.ordinaryDraftScope ='),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRiskDetails.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/sumInsured.js'), 'utf8').replace(/export /g, ''), context);
@@ -95,6 +97,13 @@ check('Allianz outside Property blocks readiness', {classOfBusiness: 'CGL', rein
 check('ordinary Allianz outside Property is unchanged', {reinsurers: [{...base.reinsurers[0], name: allianz.replace(' (Facility)', '')}]}, []);
 check('CGL USD precision blocks formal readiness', {...cgl, originalPremium: 1000.001}, ['100% Premium must have at most two decimal places for USD.']);
 check('CGL TWD precision blocks formal readiness', {...cgl, currency: 'TWD', originalPremium: 1000.5}, ['100% Premium must be a whole number for TWD; decimals are not allowed.']);
+// Property QS currency is limited to TWD or USD (2026-11-11); other classes keep their currencies.
+const pqcMsg = 'Property QS Currency must be TWD or USD.';
+const pqcIssues = changes => Array.from(context.collectPayloadAnnounceIssues({...base, classOfBusiness: 'Property', ...changes}));
+for (const currency of ['TWD', 'USD']) { assert(!pqcIssues({currency}).includes(pqcMsg), 'Property QS accepts ' + currency); count++; console.log('PASS Property QS accepts ' + currency); }
+for (const currency of ['EUR', 'JPY', 'GBP', 'HKD', 'MYR', '']) { assert(pqcIssues({currency}).includes(pqcMsg), 'Property QS refuses ' + (currency || 'blank')); count++; console.log('PASS Property QS refuses ' + (currency || 'blank')); }
+assert(pqcIssues({currency: 'EUR', parentTwRef: 'TW-1'}).includes(pqcMsg), 'Property QS endorsement refuses EUR'); count++; console.log('PASS Property QS endorsement refuses EUR');
+assert(!Array.from(context.collectPayloadAnnounceIssues({...base, currency: 'EUR'})).includes(pqcMsg), 'other classes keep EUR'); count++; console.log('PASS other classes keep EUR');
 console.log(`${count}/${count} total readiness checks passed`);
 
 require('./check_draft_autosave.cjs');
