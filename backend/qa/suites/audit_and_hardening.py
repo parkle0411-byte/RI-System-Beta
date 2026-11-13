@@ -84,9 +84,22 @@ with connection.cursor() as c:
     c.execute("SELECT CURRENT_USER()"); who = c.fetchone()[0]
 check("backend connects as ri_runtime", who.startswith("ri_runtime@"), who)
 for tbl in ("ri_audit_log", "ri_entity_snapshots"):
-    expect_db_error(f"runtime UPDATE {tbl} denied", f"UPDATE {tbl} SET entity_type = 'x'")
+    if tbl == "ri_audit_log":
+        expect_db_error(f"runtime UPDATE {tbl} denied", f"UPDATE {tbl} SET entity_type = 'x'")
     expect_db_error(f"runtime DELETE {tbl} denied", f"DELETE FROM {tbl}")
     expect_db_error(f"runtime TRUNCATE {tbl} denied", f"TRUNCATE TABLE {tbl}")
+# 2026-11-13：ri_entity_snapshots 有 UPDATE 權限，但 trigger 只放行「案件仍是 Draft 的 draft_updated 副本」
+#（完整情境見 draft_snapshot_replace）；其他副本的 UPDATE 仍被 trigger 拒絕。
+try:
+    with transaction.atomic():
+        with connection.cursor() as c:
+            c.execute("INSERT INTO ri_entity_snapshots (entity_type, entity_id, entity_version, snapshot_reason, snapshot_data, created_by, created_at) "
+                      "VALUES ('qa_hardening','1',1,'qa',JSON_OBJECT('a',1),'qa',NOW(6)), ('case','00000000-0000-0000-0000-000000000000',1,'draft_updated',JSON_OBJECT('a',1),'qa',NOW(6))")
+        expect_db_error("runtime UPDATE ri_entity_snapshots rejected by trigger (other entity)", "UPDATE ri_entity_snapshots SET created_by = 'x' WHERE entity_type = 'qa_hardening'")
+        expect_db_error("runtime UPDATE ri_entity_snapshots rejected by trigger (draft copy without a Draft case)", "UPDATE ri_entity_snapshots SET created_by = 'x' WHERE entity_type = 'case' AND entity_id = '00000000-0000-0000-0000-000000000000'")
+        transaction.set_rollback(True)
+except DatabaseError as e:
+    check("snapshot protection fixture", False, str(e)[:120])
 for tbl in ("ri_master_records", "ri_personnel", "ri_cases", "ri_fx_rates"):
     expect_db_error(f"runtime DELETE {tbl} denied (never physically deleted)", f"DELETE FROM {tbl}")
 expect_db_error("runtime ALTER TABLE denied", "ALTER TABLE ri_audit_log ADD COLUMN zz INT")

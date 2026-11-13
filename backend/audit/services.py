@@ -67,3 +67,30 @@ def record_snapshot(*, entity_type, entity_id, version, reason, data, created_by
         snapshot_data=data,
         created_by=str(created_by),
     )
+
+
+DRAFT_SNAPSHOT_REASON = "draft_updated"
+
+
+def record_draft_snapshot(*, entity_id, version, data, created_by):
+    """未 Announce 的草稿只保留一份最新副本（業主決定 2026-11-13：草稿不受 20 年保存限制）。
+
+    每次草稿儲存（含自動儲存）覆蓋該案件最新的一筆 draft_updated 副本；還沒有就新增。
+    這是 append-only 規則唯一的例外，三層防護同步放寬到最小範圍：
+      1. 應用層：只有這個函式會更新，且只更新 entity_type='case'、reason='draft_updated' 的那一筆。
+      2. 資料庫 trigger：只允許「案件目前仍是 Draft」的 draft_updated 副本被更新（scripts/db_harden.sh）；
+         案件 Announce 之後，它的所有副本（含草稿時期的）恢復不可修改。DELETE 仍一律禁止。
+      3. 資料庫權限：ri_runtime 對 ri_entity_snapshots 增加 UPDATE，沒有 DELETE。
+    2026-11-13 之前累積的舊草稿副本不刪除，只覆蓋最新的一筆。
+    """
+    _guard()
+    from django.db.models import QuerySet
+    from django.utils import timezone
+    rows = QuerySet(EntitySnapshot).filter(entity_type="case", entity_id=str(entity_id), snapshot_reason=DRAFT_SNAPSHOT_REASON)
+    latest = rows.order_by("-entity_version", "-pk").values_list("pk", flat=True).first()
+    if latest is None:
+        return record_snapshot(entity_type="case", entity_id=entity_id, version=version, reason=DRAFT_SNAPSHOT_REASON,
+                               data=data, created_by=created_by)
+    rows.filter(pk=latest).update(entity_version=int(version), snapshot_data=data, created_by=str(created_by),
+                                  created_at=timezone.now())
+    return EntitySnapshot.objects.get(pk=latest)

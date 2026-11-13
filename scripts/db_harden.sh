@@ -4,7 +4,9 @@
 # 為什麼需要：
 #   ri_app 對整個資料庫有全部權限（含建立／刪除 trigger、DROP、TRUNCATE），網站不該拿它跑日常請求。
 #   這支腳本讓網站改用 ri_runtime：
-#     - ri_audit_log、ri_entity_snapshots：只有 SELECT、INSERT（Audit 只能新增，至少保存二十年）
+#     - ri_audit_log：只有 SELECT、INSERT（Audit 只能新增，至少保存二十年）
+#     - ri_entity_snapshots：SELECT、INSERT，另加 UPDATE（2026-11-13 業主決定：未 Announce 的草稿只留一份最新副本）；
+#       trigger 只放行「案件仍是 Draft 的 draft_updated 副本」，其餘 UPDATE 與所有 DELETE 照舊拒絕
 #     - django_migrations、django_content_type、auth_permission：只讀
 #     - django_session、ri_case_documents：可 DELETE
 #     - ri_production_exclusions、ri_data_migration_items：只有 SELECT、INSERT（排除紀錄、轉換對照只新增，不修改也不刪除）
@@ -42,7 +44,8 @@ in_list() { [[ " $2 " == *" $1 "* ]]; }
   echo "DROP USER IF EXISTS 'ri_runtime'@'%';"
   echo "CREATE USER 'ri_runtime'@'%' IDENTIFIED BY '${RUNTIME_PW}';"
   for t in $TABLES; do
-    if   in_list "$t" "$APPEND_ONLY"; then privs="SELECT, INSERT"
+    if   [ "$t" = "ri_entity_snapshots" ]; then privs="SELECT, INSERT, UPDATE"   # UPDATE 由下方 trigger 限制在草稿副本
+    elif in_list "$t" "$APPEND_ONLY"; then privs="SELECT, INSERT"
     elif in_list "$t" "$INSERT_ONLY"; then privs="SELECT, INSERT"
     elif in_list "$t" "$READ_ONLY";   then privs="SELECT"
     elif in_list "$t" "$CAN_DELETE";  then privs="SELECT, INSERT, UPDATE, DELETE"
@@ -58,6 +61,13 @@ in_list() { [[ " $2 " == *" $1 "* ]]; }
     echo "DROP TRIGGER IF EXISTS \`${t}_no_delete\`;"
     echo "CREATE TRIGGER \`${t}_no_delete\` BEFORE DELETE ON \`${t}\` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '${t} is append-only: DELETE is not allowed';"
   done
+  # 2026-11-13 業主決定：未 Announce 的草稿只保留一份最新副本。把 ri_entity_snapshots 的「禁止 UPDATE」改成有條件放行：
+  # 只有 entity_type='case'、reason='draft_updated'、識別欄位不變，且該案件目前仍是 Draft 的那一筆可以被覆蓋。
+  # 案件 Announce 後（status 不再是 draft）其所有副本恢復不可修改；DELETE trigger 不變。
+  echo "DROP TRIGGER IF EXISTS \`ri_entity_snapshots_no_update\`;"
+  echo "DELIMITER \$\$"
+  echo "CREATE TRIGGER \`ri_entity_snapshots_no_update\` BEFORE UPDATE ON \`ri_entity_snapshots\` FOR EACH ROW BEGIN IF NOT (OLD.entity_type = 'case' AND OLD.snapshot_reason = 'draft_updated' AND NEW.id = OLD.id AND NEW.entity_type = OLD.entity_type AND NEW.entity_id = OLD.entity_id AND NEW.snapshot_reason = OLD.snapshot_reason AND EXISTS (SELECT 1 FROM \`ri_cases\` WHERE case_uid = REPLACE(OLD.entity_id, '-', '') AND status = 'draft')) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ri_entity_snapshots is append-only: only the draft snapshot of a case that is still a Draft may be replaced'; END IF; END\$\$"
+  echo "DELIMITER ;"
   # Audit 保存期至少 20 年（對應 Alpha 的 ri_audit_log_retention_minimum）
   echo "DROP TRIGGER IF EXISTS \`ri_audit_log_retention_min\`;"
   echo "DELIMITER \$\$"

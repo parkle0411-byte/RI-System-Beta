@@ -8,6 +8,8 @@ Audit Log 與 Entity Snapshot（對應 Alpha 的 ri_audit_log / ri_entity_snapsh
   1. 應用層（本檔）：model 與 QuerySet 拒絕 UPDATE / DELETE。
   2. 資料庫 trigger：BEFORE UPDATE / DELETE 一律拒絕（由 scripts/db_harden.sh 以 root 建立）。
   3. 資料庫權限：網站使用的 ri_runtime 帳號對這兩張表只有 SELECT、INSERT（同一支腳本設定）。
+例外（2026-11-13 業主決定）：未 Announce 的草稿只保留一份最新副本，由 audit.services.record_draft_snapshot 覆蓋；
+三層防護只對「案件仍是 Draft 的 draft_updated 副本」放寬 UPDATE，其餘照舊，DELETE 一律禁止。
 """
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models

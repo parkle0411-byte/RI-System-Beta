@@ -24,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from coordination.services import PRODUCTION_SOURCES, serialized
-from audit.services import record_audit, record_snapshot, request_id_from
+from audit.services import record_audit, record_draft_snapshot, record_snapshot, request_id_from
 from masterdata.models import MasterRecord
 from ri_system.authz import AuthError, NoStoreMixin, RIPermission, actor_from, has_permission
 
@@ -594,9 +594,14 @@ class CasesView(NoStoreMixin, APIView):
                 case_uid=current.case_uid, status=next_status, case_kind=current.case_kind,
                 row_version=current.row_version, columns=columns, master_references=masters, payload=payload,
             )
-            record_snapshot(entity_type="case", entity_id=current.case_uid, version=current.row_version,
-                            reason="draft_updated" if was_draft else "case_updated",
-                            data=after, created_by=actor_info["id"])
+            if was_draft and next_status == "draft":
+                # 2026-11-13：草稿只留一份最新副本（覆蓋），Announce 之後的修改才逐次保存。
+                record_draft_snapshot(entity_id=current.case_uid, version=current.row_version,
+                                      data=after, created_by=actor_info["id"])
+            else:
+                record_snapshot(entity_type="case", entity_id=current.case_uid, version=current.row_version,
+                                reason="draft_updated" if was_draft else "case_updated",
+                                data=after, created_by=actor_info["id"])
             record_audit(entity_type="case", entity_id=current.case_uid,
                          action="update_draft" if was_draft else "update_case",
                          before=before, after=after, actor=actor_info, request_id=request_id_from(request),

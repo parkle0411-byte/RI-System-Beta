@@ -267,9 +267,13 @@ try:
 
         # 版本一路遞增、每次都有稽核
         final = Case.objects.get(case_uid=uid)
-        check("every successful save bumped rowVersion once and left one snapshot + one audit each",
-              EntitySnapshot.objects.filter(entity_type="case", entity_id=uid).count() == final.row_version
-              and audit(uid).count() == final.row_version, (final.row_version, audit(uid).count()))
+        # 2026-11-13：草稿只保留一份最新副本（覆蓋），所以副本數不再等於版本數；Announce 之後的修改仍逐次保存。
+        case_snaps = list(EntitySnapshot.objects.filter(entity_type="case", entity_id=uid).values_list("entity_version", "snapshot_reason"))
+        check("every successful save bumped rowVersion once and left one audit each; snapshots keep creation, at most one Draft copy and the current version",
+              audit(uid).count() == final.row_version and (1, "draft_created") in case_snaps
+              and sum(1 for _, reason in case_snaps if reason == "draft_updated") <= 1
+              and max(v for v, _ in case_snaps) == final.row_version and len({v for v, _ in case_snaps}) == len(case_snaps),
+              (final.row_version, audit(uid).count(), case_snaps))
         raise Rollback()
 except Rollback:
     pass

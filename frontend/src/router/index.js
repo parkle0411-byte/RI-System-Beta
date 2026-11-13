@@ -4,21 +4,22 @@ import { auth, can, loadContext } from '../auth'
 import { NAV_ICONS } from '../alpha/constants'
 import { setHeader, shell } from '../alpha/shell'
 import Login from '../views/Login.vue'
-import ForgotPassword from '../views/ForgotPassword.vue'
-import ResetPassword from '../views/ResetPassword.vue'
-import CaseWorkspace from '../views/CaseWorkspace.vue'
-import RecycleBin from '../views/RecycleBin.vue'
-import FxRates from '../views/FxRates.vue'
-import MasterData from '../views/MasterData.vue'
-import Personnel from '../views/Personnel.vue'
-import AuditLog from '../views/AuditLog.vue'
-import Accounting from '../views/Accounting.vue'
-import Production from '../views/Production.vue'
-import Dashboard from '../views/Dashboard.vue'
-import SystemStatus from '../views/SystemStatus.vue'
-import NoAccess from '../views/NoAccess.vue'
-import SystemReference from '../views/SystemReference.vue'
-import LegacyTransactions from '../views/LegacyTransactions.vue'
+// 2026-11-13：各頁面改為進入時才載入（拆檔），部署後只需重新下載有變動的頁面；登入頁留在主檔。
+const ForgotPassword = () => import('../views/ForgotPassword.vue')
+const ResetPassword = () => import('../views/ResetPassword.vue')
+const CaseWorkspace = () => import('../views/CaseWorkspace.vue')
+const RecycleBin = () => import('../views/RecycleBin.vue')
+const FxRates = () => import('../views/FxRates.vue')
+const MasterData = () => import('../views/MasterData.vue')
+const Personnel = () => import('../views/Personnel.vue')
+const AuditLog = () => import('../views/AuditLog.vue')
+const Accounting = () => import('../views/Accounting.vue')
+const Production = () => import('../views/Production.vue')
+const Dashboard = () => import('../views/Dashboard.vue')
+const SystemStatus = () => import('../views/SystemStatus.vue')
+const NoAccess = () => import('../views/NoAccess.vue')
+const SystemReference = () => import('../views/SystemReference.vue')
+const LegacyTransactions = () => import('../views/LegacyTransactions.vue')
 
 // 左側選單與頁首文字：與 Alpha public/app.js 的 allNavigation／headers 相同（順序、名稱、權限、階段標籤）。
 // Alpha 用 activeView 切換畫面；VM 每一項是一個路由，方便重新整理與瀏覽器上一頁。
@@ -89,7 +90,18 @@ router.beforeEach(async (to) => {
   return true
 })
 
+// 部署新版後，舊分頁要載入的頁面檔已經換名：改用整頁重新載入到目的頁，取得新版程式（只重試一次，避免無限重載）。
+router.onError((error, to) => {
+  const stale = /dynamically imported module|Importing a module script failed|error loading dynamically imported|Unable to preload CSS/i.test(String(error && error.message))
+  if (!stale || !to || !to.fullPath) return
+  const key = 'ri-chunk-reload'
+  if (sessionStorage.getItem(key) === to.fullPath) return
+  sessionStorage.setItem(key, to.fullPath)
+  window.location.assign(to.fullPath)
+})
+
 router.afterEach((to) => {
+  try { sessionStorage.removeItem('ri-chunk-reload') } catch { /* ignore */ }
   shell.error = ''
   setHeader(headers[to.name] || headers.dashboard)
 })

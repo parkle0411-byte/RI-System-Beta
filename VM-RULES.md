@@ -32,10 +32,10 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | DBMS | MySQL 8.4.11 |
 | Host / Container Runtime | Debian GNU/Linux 13（trixie）+ Docker 29.8.2 + Docker Compose v5.6.0 |
 
-- **Frontend**：`package.json` 精確版本＋`package-lock.json`，`node:22-alpine` 以 `npm ci` 建置。Word 產生程式在 `frontend/public/alpha-documents/`（`docx-templates.js`、`vm-docx-generator.js`），不經 Vite 打包。
+- **Frontend**：`package.json` 精確版本＋`package-lock.json`，`node:22-alpine` 以 `npm ci` 建置。Word 產生程式在 `frontend/public/alpha-documents/`（`docx-templates.js`、`vm-docx-generator.js`），不經 Vite 打包。前端拆檔（2026-11-13）：第三方套件獨立成 `vendor-*` 檔（內容不變時檔名不變，部署後沿用瀏覽器快取），各頁面由 router 動態載入、各自成檔，登入頁留在主檔；部署後舊分頁載入已不存在的頁面檔時，自動整頁重新載入到目的頁（只重試一次）。
 - **Backend**：`requirements.txt` 精確版本，基底 `python:3.13-slim-bookworm`。gunicorn **4 個 worker**（= CPU 核心數；不可用 `--threads`，壓測時會撐爆記憶體）。Admin Panel 是唯讀 Django admin（`/admin/`，只有 System Administrator）。
-- **Nginx**：`nginx:1.28-alpine`（與前端靜態檔同映像）；JSON／JS／CSS 啟用 gzip；轉發逾時 60 秒；`/static`、`/assets` 帶 nosniff 與 X-Frame-Options；SPA HTML 用 no-store、no-referrer；access log 遮蔽密碼重設 token。
-- **MySQL**：`compose.yaml` 固定映像摘要（不用標籤）；`innodb_buffer_pool_size=512MB`。網站以最小權限的 `ri_runtime` 連線（多數表沒有 DELETE；Audit 表只有 SELECT／INSERT）；維護用 `ri_app`。
+- **Nginx**：`nginx:1.28-alpine`（與前端靜態檔同映像）；JSON／JS／CSS 啟用 gzip；轉發逾時 60 秒；`/static`、`/assets` 帶 nosniff 與 X-Frame-Options；SPA HTML 用 no-store、no-referrer；access log 遮蔽密碼重設 token。`/alpha-documents/`（Word 產生程式，不帶雜湊檔名）為 `Cache-Control: no-cache`：瀏覽器可保存但每次使用前以 ETag 確認，未更新回 304（2026-11-13）；SPA HTML 仍為 no-store、`/assets/` 仍為 immutable。
+- **MySQL**：`compose.yaml` 固定映像摘要（不用標籤）；`innodb_buffer_pool_size=512MB`。網站以最小權限的 `ri_runtime` 連線（多數表沒有 DELETE；Audit 表只有 SELECT／INSERT）；維護用 `ri_app`。例外（2026-11-13 業主決定，見 §4.5）：`ri_entity_snapshots` 另有 UPDATE 權限，由 trigger 限制只能覆蓋「案件仍是 Draft 的 draft_updated 副本」；DELETE 仍一律禁止，`ri_audit_log`／`ri_legacy_audit` 不變。
 - **主機**：時區 Asia/Taipei（提醒排程 cron 依賴它）。硬體：Xeon E5-2620 v3、VMware 4 vCPU／8 GB；單一請求吃單核，換新一代 CPU 才會明顯變快。
 - **PDF 已退役**：只產生 Word，PDF 由使用者在 Word 匯出；Gotenberg 已移除，`/api/render-document-pdf` 固定回 410。
 - 升級任何一項：先更新這張表與鎖定檔，再重跑全部測試。
@@ -51,6 +51,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | 建立／停用／重新啟用／重設帳號 | `docker exec ri-backend python manage.py create_ri_account\|disable_ri_account\|enable_ri_account\|reset_ri_password --personnel-id N …` |
 | 備份資料庫 | `docker exec ri-mysql sh -c 'mysqldump -uroot -p"$(cat /run/secrets/mysql_root_password)" --single-transaction --routines --triggers ri_system' > backups/…sql`（`chmod 600`；`backups/` 不進版控） |
 | 備份案件文件 | `docker exec ri-backend tar czf - -C /data/documents . > backups/case-documents-$(date +%Y%m%d-%H%M%S).tar.gz`（與資料庫同時備份） |
+| 清理過期登入紀錄 | `scripts/install_session_cleanup_cron.sh`（`--remove` 移除）：每天 05:40 執行 `manage.py clearsessions`，只刪已過期的 `django_session`，紀錄在 `logs/session-cleanup.log`（2026-11-13） |
 | 提醒排程 | `scripts/install_reminder_cron.sh`（`--remove` 移除）；手動：`manage.py run_signed_slip_reminders`／`run_payment_reminders [--today YYYY-MM-DD]`；紀錄在 `logs/reminders.log` |
 | 唯讀資料檢視 | `/admin/`（System Administrator）。新增 model 要在 `admin.py` 用 `ReadOnlyModelAdmin` 註冊 |
 | 補分期案件缺少的保費交易 | `manage.py backfill_installment_transactions [--apply]`（先 dry-run，備份後再 apply） |
@@ -58,9 +59,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 120 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 121 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 分段載入 Y 16 項（2026-11-13），合計 315 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 分段載入 Y 16 項、前端拆檔與快取 Z 14 項（2026-11-13），合計 329 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
@@ -146,6 +147,8 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 人工修改後離開欄位即自動儲存；缺漏、格式錯誤、未完成數字／日期、尚未加入的條款文字都保留原文（`draftInput`／`pendingClause`），重開或重新整理可還原。
 - Review／Announce 及文件仍執行完整檢查；Announce 成功後移除草稿原文。帶有草稿原文的修正案須重新 Announce 才能產生文件。
 - 新案首次儲存用可重試識別碼，避免重複建案；寫入依序送出並檢查 rowVersion。Announced／Confirmed／Reversed 不啟用自動儲存。
+
+- **草稿副本只留最新一份（2026-11-13 業主決定）**：未 Announce 的草稿不受 20 年保存限制。草稿每次儲存（含自動儲存）覆蓋該案件最新的一筆 `draft_updated` Entity Snapshot（`audit.services.record_draft_snapshot`），不再逐次累積；`draft_created` 與 Announce 之後的每次修改仍逐筆保存且不可變。三層防護同步放寬到最小：程式只有該函式會更新；資料庫 trigger 只放行「entity_type=case、reason=draft_updated、識別欄位不變、且該案件目前 status=draft」的 UPDATE，案件 Announce 後其所有副本恢復不可修改；`ri_runtime` 增加 UPDATE、沒有 DELETE。2026-11-13 之前累積的舊草稿副本保留不刪，只覆蓋最新的一筆。測試 `draft_snapshot_replace`。
 
 ### 4.6 資料異常保護
 - 再保人清單、分期清單或計算用數字無法解讀時，整案金額顯示 `Pending confirmation` 並列出異常；不修補、不以 0 代替、不丟棄原資料。
@@ -636,6 +639,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-13 | Accounting 分段載入（預設 Unreconciled、已結清舊資料歷史背景載入）；每週健檢報告工具；畫面測試 Y 專項 | `backups/accounting_segments_20261113_085128` | `ri-backend:before-accounting-segments-20261113_085128`／`ri-frontend:before-accounting-segments-20261113_085128` | 候選映像 120 組 API（含 `accounting_segments` 255 項）、315 項畫面（含 Y 16 項）；正式資料 485 個原有 GET 回應部署前後逐位元組相同；無 migration、無資料寫入 |
 
+| 11-13 | 草稿副本只留最新一份（`ri_entity_snapshots` 增加 UPDATE 權限與條件式 trigger）；每日清理過期登入紀錄；Word 產生程式可快取（每次確認）；前端拆檔 | `backups/draft_snapshot_frontend_split_20261113_125840`（含部署前 crontab） | `ri-backend:before-draft-snapshot-20261113_125840`／`ri-frontend:before-draft-snapshot-20261113_125840` | 候選映像 121 組 API（以新的 db_harden 設定執行，含 `draft_snapshot_replace` 26 項）、329 項畫面（含 Z 14 項）；正式資料 520 個 GET 回應部署前後逐位元組相同；無 migration；資料庫權限／trigger 變更已核對；既有 222 筆草稿副本未刪 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -765,3 +770,5 @@ Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別�
 - 2026-11-12：API 整理（業主確認部署）：刪除 13 個已退役 Accounting 動作的處理程式（仍回 410）、移除 PDF 網址與畫面上無入口的抵銷對話框；行為與資料不變（§16）。網址合併不做。
 
 - 2026-11-13：依業主確認部署 Accounting 分段載入：預設分頁改為 Unreconciled Accounts，已結清的舊資料歷史改在背景載入後併入（§8.7）；新增每週健檢報告 `scripts/weekly_health.sh`（§3）。一次性整理（11-12～11-13）完成：整理舊資料與映像規則、金額上限、移除退役程式、分段載入；網址合併與共用快取不做／暫緩。
+
+- 2026-11-13：依業主確認部署——草稿副本只留最新一份（未 Announce 不受 20 年限制；§4.5、§2 MySQL）、每日清理過期登入紀錄（§3）、Word 產生程式可快取、前端拆檔（§2）。回復：`~/RI System/perf-work/stage-e-20261113/rollback.sh 20261113_125840`（含還原資料庫權限與 trigger、移除排程）。
