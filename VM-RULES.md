@@ -461,6 +461,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
   - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（僅資料，**不進 Production 報表**）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
   - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
   - 匯入列不建立 Case、不進 Production／Dashboard、不能退回草稿或編輯業務資料。
+  - Accounting 對象名稱（2026-11-13 業主決定）：任何名稱結尾帶「(Facility)」者在 Accounting 一律顯示不含「(Facility)」的名稱（歷史列、未結清列與新案相同，同一公司只有一個對象名稱）；舊資料本身仍保留完整名稱與 Facility／一般付款規則的區分。
   - 從匯入列新增批單／理賠時沿用來源險種（GL 匯入列新增的仍為 CGL；2026-11-11 修正）。
   - R/I Comm. %／Tax %（2026-11-11）：匯入時由 Register 公式「Our Share Premium × 固定比率」讀出（只辨識公式文字，不執行）；直接填數值者以金額 ÷ 承接保費換算；比率 × 承接保費與金額不符或公式無法辨識時預覽警告、不能匯入。理賠不存比率。Legacy 明細顯示；從匯入列新增批單時預帶來源比率（可修改）。舊交易金額仍以 Excel 為準。
 - 以下為 2026-11-09 首次匯入（已於 2026-11-11 清空）的說明，保留供查。
@@ -640,6 +641,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | 11-13 | Accounting 分段載入（預設 Unreconciled、已結清舊資料歷史背景載入）；每週健檢報告工具；畫面測試 Y 專項 | `backups/accounting_segments_20261113_085128` | `ri-backend:before-accounting-segments-20261113_085128`／`ri-frontend:before-accounting-segments-20261113_085128` | 候選映像 120 組 API（含 `accounting_segments` 255 項）、315 項畫面（含 Y 16 項）；正式資料 485 個原有 GET 回應部署前後逐位元組相同；無 migration、無資料寫入 |
 
 | 11-13 | 草稿副本只留最新一份（`ri_entity_snapshots` 增加 UPDATE 權限與條件式 trigger）；每日清理過期登入紀錄；Word 產生程式可快取（每次確認）；前端拆檔 | `backups/draft_snapshot_frontend_split_20261113_125840`（含部署前 crontab） | `ri-backend:before-draft-snapshot-20261113_125840`／`ri-frontend:before-draft-snapshot-20261113_125840` | 候選映像 121 組 API（以新的 db_harden 設定執行，含 `draft_snapshot_replace` 26 項）、329 項畫面（含 Z 14 項）；正式資料 520 個 GET 回應部署前後逐位元組相同；無 migration；資料庫權限／trigger 變更已核對；既有 222 筆草稿副本未刪 |
+
+| 11-13 | Accounting 對象名稱一律拿掉「(Facility)」（舊資料歷史列也一致；只換後端，小改） | `backups/legacy_facility_name_20261113_131526` | `ri-backend:before-legacy-facility-name-20261113_131526` | Legacy API 7 組（legacy_import_web 55，新檢查以舊程式驗證會失敗）、畫面 A＋L＋I；無 migration、不改資料 |
 
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 

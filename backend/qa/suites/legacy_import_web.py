@@ -161,6 +161,14 @@ try:
               and [(e['reference'], e['paymentDate'], e['entryKind']) for e in a['entries']] == [('CR-9001', '2026-05-10', 'legacy-import')])
         check('settled side: payment dated Pay Date', [(e['reference'], e['paymentDate']) for e in legs['QA9001-T2']['entries']] == [('RP-9001', '2026-05-20')])
         check('display date is the Effective Date', a['accountDisplayDate'] == '2026-03-01' and a['reconciliationRef'] == 'SOA-QA9001')
+        name = 'Allianz Global Corporate & Specialty SE, Hong Kong Branch'
+        check('Accounting drops (Facility) for historical and open rows alike; the Legacy record keeps it (2026-11-13)',
+              legs['QA9001-T2']['partyName'] == name and legs['QA9002-T2']['partyName'] == name and t['QA9001'].data['party'] == FAC and t['QA9001'].data['rule'] == 'allianz',
+              (legs['QA9001-T2']['partyName'], legs['QA9002-T2']['partyName']))
+        from legacy.ledger import settlement_name
+        check('any name ending in (Facility) is shown without it in Accounting',
+              settlement_name(LegacyTransaction(data={'party': 'QA Other Re Ltd. (Facility)'})) == 'QA Other Re Ltd.'
+              and settlement_name(LegacyTransaction(data={'party': 'QA Plain Re Ltd.'})) == 'QA Plain Re Ltd.')
         c1, c2 = legs['QA9004-C1-T1'], legs['QA9004-C1-T2']
         check('claim settles on the last day of Closed Month; display date is DOL',
               [(e['reference'], e['paymentDate']) for e in c1['entries']] == [('RR-9004', '2026-07-31')]

@@ -41,15 +41,12 @@ def detect_rule(name):
 
 
 def settlement_name(t):
+    """Accounting counterparty name (owner 2026-11-13): any name ending in "(Facility)" is shown
+    without it, historical rows included, matching native Cases; the Legacy record keeps the full
+    name and its Facility payment rule."""
+    from cases.calc.accounting import strip_facility_tag
     raw=t.data.get('party','')
-    if t.historical:return raw
-    # Match the native ledger's legal settlement name, retaining the original
-    # MDM name and Facility rule in transaction data. Free-text brokers are kept.
-    normalized=lambda name:' '.join(str(name or '').split()).casefold()
-    if normalized(raw) in {normalized(v) for k,v in RULE_NAMES.items() if k!='ordinary'}:
-        from cases.calc.accounting import strip_facility_tag
-        return strip_facility_tag(raw)
-    return raw
+    return strip_facility_tag(raw) or raw
 
 
 def payload_for(t):
