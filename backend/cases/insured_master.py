@@ -42,16 +42,22 @@ def combination_key(name):
     return tuple(sorted(set(part.casefold() for part in parts)))
 
 
-def equivalent(name, exclude_id=None):
-    key = combination_key(name)
-    records = list(MasterRecord.objects.filter(entity_type='insured').exclude(pk=exclude_id).order_by('id'))
+def equivalent(name, exclude_id=None, records=None, key_of=None):
+    """records／key_of（2026-11-13，匯入加速）：整批匯入時由呼叫端提供「已依 id 排序的全部 Insured 主檔」與有記憶的
+    combination_key，避免每一筆都重新讀取全部主檔；比對的順序與規則完全相同。不提供時與原本相同。"""
+    combination_key_ = key_of or combination_key
+    key = combination_key_(name)
+    if records is None:
+        records = list(MasterRecord.objects.filter(entity_type='insured').exclude(pk=exclude_id).order_by('id'))
+    elif exclude_id is not None:
+        records = [r for r in records if r.pk != exclude_id]
     # Prefer current membership to former names; never match a subset of members.
     active = [r for r in records if r.is_active and not (r.payload or {}).get('mergedInto')]
     for record in active:
-        if combination_key(record.name) == key:
+        if combination_key_(record.name) == key:
             return record
     for record in active:
-        if any(combination_key(alias) == key and len(key) == len(combination_key(record.name)) for alias in (record.payload or {}).get('announcedAliases', [])):
+        if any(combination_key_(alias) == key and len(key) == len(combination_key_(record.name)) for alias in (record.payload or {}).get('announcedAliases', [])):
             return record
     exact = next((r for r in records if r.name == name), None)
     return canonical(exact)

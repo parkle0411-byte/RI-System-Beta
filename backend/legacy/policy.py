@@ -87,15 +87,26 @@ def money_error(value, label, currency):
     return ''
 
 
-def link_insured(name, actor, transaction_uid):
-    """Find (same rules as Case) or create the Insured master for a Chinese name; mark it official."""
+def insured_lookup():
+    """2026-11-13：整批匯入用。全部 Insured 主檔只讀一次（依 id 排序），並記住每個名稱的比對鍵。"""
+    from functools import lru_cache
+    from cases import insured_master as im
+    from masterdata.models import MasterRecord
+    records = list(MasterRecord.objects.filter(entity_type='insured').order_by('id'))
+    return {'records': records, 'by_pk': {r.pk: r for r in records}, 'key_of': lru_cache(maxsize=None)(im.combination_key)}
+
+
+def link_insured(name, actor, transaction_uid, lookup=None):
+    """Find (same rules as Case) or create the Insured master for a Chinese name; mark it official.
+
+    lookup（insured_lookup()）：同一批匯入共用的主檔清單；新建的主檔會加進清單，比對結果與逐筆查詢相同。"""
     from cases import insured_master as im
     from masterdata.models import MasterRecord
     name = str(name or '').strip()[:240]
     if not name:
         return None
     try:
-        record = im.equivalent(name)
+        record = im.equivalent(name, records=lookup['records'], key_of=lookup['key_of']) if lookup else im.equivalent(name)
     except Exception:  # an unusual combination never blocks the transaction
         return None
     if record is None:
@@ -103,6 +114,11 @@ def link_insured(name, actor, transaction_uid):
             payload={'aliases': [], 'history': [dict(at=timezone.now().isoformat(), by=actor['id'], byName=actor.get('name'),
                      action='created', name=name, legacyTransaction=transaction_uid)]},
             created_by=actor['id'], updated_by=actor['id'])
+        if lookup:
+            lookup['records'].append(record); lookup['by_pk'][record.pk] = record   # 新主檔的 id 最大，接在清單最後即維持 id 順序
+    elif lookup:
+        # 合併鏈（mergedInto）會另外從資料庫讀到目標主檔；改用清單裡的同一個物件，後續的修改才會被同批其他列看到。
+        record = lookup['by_pk'].get(record.pk, record)
     if not (record.payload or {}).get(im.OFFICIAL_KEY):
         data = copy.deepcopy(record.payload or {})
         data.setdefault('history', []).append(dict(at=timezone.now().isoformat(), by=actor['id'], byName=actor.get('name'),

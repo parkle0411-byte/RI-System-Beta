@@ -178,12 +178,11 @@ class AccountingView(NoStoreMixin, APIView):
             warnings.extend(case_warnings)
             transactions.extend(case_transactions)
             swiss_rows.extend(case_swiss)
-        from legacy.ledger import accounting_data,accounting_schedules
-        legacy_views,legacy_rows=accounting_data(legacy_scope or 'all')
+        from legacy.ledger import accounting_bundle   # 2026-11-13：未結清的舊資料每筆只算一次（帳款與付款排程共用）
+        legacy_views,legacy_rows,legacy_schedules=accounting_bundle(legacy_scope or 'all')
         case_views.extend(legacy_views)
         transactions.extend(legacy_rows)
-        if legacy_scope != "history":
-            swiss_rows.extend(accounting_schedules())
+        swiss_rows.extend(legacy_schedules)
         # 與 ledger_rows 相同的排序（twRef，再依到期日；穩定排序）
         rows.sort(key=lambda r: (js_locale_key_cached(r["twRef"]), js_locale_key_cached(_text(r.get("dueDate")))))
         currencies = []

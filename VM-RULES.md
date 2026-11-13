@@ -59,7 +59,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 121 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 122 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 分段載入 Y 16 項、前端拆檔與快取 Z 14 項（2026-11-13），合計 329 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
@@ -441,6 +441,11 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 業主決定不做：Production 連結表只讀 3 個欄位、跨 worker 共用快取、每件案件整列結果快取、伺服器分頁。
 - Accounting 舊案歷史結果快取（2026-11-10）：只快取匯入的歷史交易（唯讀、已結清），以「歷史資料指紋（除 original 外全部欄位）＋台北日期」為鑰匙，每 worker 一份；新增的舊案批單／理賠每次重算。回應逐位元組相同；正式 Accounting 第二次打開約 4 秒 → 1.6 秒（每天或歷史資料變動後第一次仍需重算）。`RI_LEGACY_RESULT_CACHE=false` 可關閉。測試 `legacy_accounting_cache`。
 - Accounting 分段載入（2026-11-13，§8.7）：打開時不等已結清的舊資料歷史；歷史由伺服器快取（上一條）在背景提供。
+- 舊資料量優化（2026-11-13，1 萬筆舊資料實測後；回應內容不變）：
+  - **匯入**：Insured 主檔整批只讀一次（`legacy.policy.insured_lookup`，比對規則與逐筆查詢相同）。確認匯入 2,500 筆約 5 分鐘 → 約 10 秒；1 萬筆約 1 分鐘。單一請求上限 60 秒，**每個 Register 檔案建議不超過 5,000 筆**。
+  - **未結清舊資料**：帳款與付款排程同一次計算共用（`legacy.ledger.accounting_bundle`），並逐筆快取，鑰匙為「該列內容 MD5＋台北日期」（比照每件案件結果快取）；對帳狀態即時套用、不進快取；每 worker 最多 `RI_LEGACY_OPEN_CACHE_SIZE` 筆（預設 20,000），`RI_LEGACY_OPEN_CACHE=false` 關閉。2,000 筆未結清時 Accounting 打開的請求約 9 秒 → 首次約 7 秒、之後約 1.3 秒。測試 `legacy_open_cache`。
+  - **Accounting 畫面**：清單改為整份替換（不逐欄追蹤）、排序比較值每列只算一次；清單超過 2,000 列時文字篩選等 0.3 秒沒有再輸入才套用（列數少時立即）。2 萬列時切換分頁約 20 秒 → 約 2 秒。
+  - 1 萬筆（8,000 已結清＋2,000 未結清）實測：打開到可操作約 38 秒 → 約 5 秒；剩餘時間主要是資料量（6,000 列約 21 MB）。已結清歷史約 79 MB、背景載入；舊資料持續增加時的長期做法是歷史改為伺服器查詢／分頁（尚未做，需業主決定畫面規則）。
 - nginx 日誌行尾記錄回應時間：`rt`＝整個請求、`urt`＝後端處理（秒）；例：`docker logs ri-nginx 2>/dev/null | grep -o 'urt=[0-9.]*'`（容器重建時清空）。
 
 ## 16. 已退役／已移除
@@ -644,6 +649,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-13 | Accounting 對象名稱一律拿掉「(Facility)」（舊資料歷史列也一致；只換後端，小改） | `backups/legacy_facility_name_20261113_131526` | `ri-backend:before-legacy-facility-name-20261113_131526` | Legacy API 7 組（legacy_import_web 55，新檢查以舊程式驗證會失敗）、畫面 A＋L＋I；無 migration、不改資料 |
 
+| 11-13 | 舊資料量優化：匯入加速、未結清舊資料每筆只算一次＋逐筆快取、Accounting 畫面處理大量資料 | `backups/legacy_scale_20261113_144820` | `ri-backend:before-legacy-scale-20261113_144820`／`ri-frontend:before-legacy-scale-20261113_144820` | 候選映像 122 組 API（含 `legacy_open_cache` 192 項）、329 項畫面；正式資料 520 個 GET 回應部署前後逐位元組相同；1 萬筆舊資料上正式版與候選版回應逐位元組相同；無 migration、無資料寫入 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -775,3 +782,5 @@ Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別�
 - 2026-11-13：依業主確認部署 Accounting 分段載入：預設分頁改為 Unreconciled Accounts，已結清的舊資料歷史改在背景載入後併入（§8.7）；新增每週健檢報告 `scripts/weekly_health.sh`（§3）。一次性整理（11-12～11-13）完成：整理舊資料與映像規則、金額上限、移除退役程式、分段載入；網址合併與共用快取不做／暫緩。
 
 - 2026-11-13：依業主確認部署——草稿副本只留最新一份（未 Announce 不受 20 年限制；§4.5、§2 MySQL）、每日清理過期登入紀錄（§3）、Word 產生程式可快取、前端拆檔（§2）。回復：`~/RI System/perf-work/stage-e-20261113/rollback.sh 20261113_125840`（含還原資料庫權限與 trigger、移除排程）。
+
+- 2026-11-13：依業主確認部署舊資料量優化（§15）：匯入加速、未結清舊資料只算一次並逐筆快取、Accounting 畫面處理大量資料；顯示內容與規則不變。前端拆檔的實際效果更正：`vendor` 檔可跨部署沿用快取，各頁面檔在任何修改後都會換名（進入該頁時重新下載）。

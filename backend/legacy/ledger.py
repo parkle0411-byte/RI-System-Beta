@@ -6,6 +6,7 @@ Case-shaped DTO keys remain solely for backward-compatible Accounting clients.
 import copy
 import os
 import threading
+from collections import OrderedDict
 from datetime import date
 from django.db import models
 from django.db.models.expressions import RawSQL
@@ -144,10 +145,10 @@ def schedule(p, now=None):
     return dict(items=rows,issues=[],reviewRequired=False,totals={})
 
 
-def details(p, now=None):
+def details(p, now=None, schedules=None):
     from cases.cash_ledger import cents, amount, family, direction, party, group, proportions
     from cases.calc.payment_terms import taipei_date, _status_for
-    today=taipei_date(now); result={}; schedules=schedule(p,now)['items']
+    today=taipei_date(now); result={}; schedules=schedule(p,now)['items'] if schedules is None else schedules
     reversed_ids={e.get('reversalOf') for e in p.get('paymentEntries',[]) if e.get('entryType')=='reversal'}
     for tx in p['transactions']:
         no=tx['txNo']; src,leg,suffix=family(tx); typ,name=party(p,tx)
@@ -200,13 +201,17 @@ def claim_error(p):
     return 'Claim payments must not exceed recovered funds including valid offsets.' if paid>received+.004 else ''
 
 
-def _accounting_one(t):
-    """One confirmed transaction's Accounting view and rows (reads only this row)."""
+def _accounting_full(t):
+    """One confirmed transaction's Accounting view, rows and (non-historical premium) payment-schedule rows.
+
+    2026-11-13：未結清的交易原本在 accounting_data 與 accounting_schedules 各算一次付款排程；改為同一次計算共用
+    （排程在任何明細計算之前由同一份 payload 取得，與原本兩處的結果相同）。"""
     from cases.transaction_ledger import transaction_rows
     class Snapshot:
         def __init__(self,payload):self.payload=payload
-        def details(self,mode):return details(self.payload)
+        def details(self,mode):return details(self.payload,schedules=shared)
     p=payload_for(t)
+    shared=None if t.historical else schedule(p)['items']
     view=dict(caseUid=str(t.uid),rootCaseUid=str(t.uid),rowVersion=t.version,twRef=t.reference,
         status='closed' if t.historical else 'posted',announcedAt=t.first_confirmed_at,reinsured=t.data.get('cedant',''),currency=t.currency,payload=p)
     rows=[]
@@ -226,7 +231,19 @@ def _accounting_one(t):
                 reviewNote='Historical reconciliation completed before import.',historicalTermsMissing=False,
                 canRecord=False,canConfirmSettlement=False,canCancelSettlement=False,manualSettlementRequired=False)
         rows.append(row)
-    return view,rows
+    schedule_rows=[]
+    if shared is not None and p['legacyData'].get('kind')!='claim':
+        schedule_rows=[{**row,'key':str(t.uid)+':'+row['scheduleKey'],
+            'caseUid':str(t.uid),'rootCaseUid':str(t.uid),'caseRowVersion':t.version,
+            'rowVersion':t.version,'caseStatus':'posted','twRef':t.reference,'source':'premium',
+            'origin':'legacy','legacyTransactionId':str(t.uid),'legacyHistorical':False,
+            'entries':[e for e in p['paymentEntries'] if e.get('scheduleKey')==row['scheduleKey']]} for row in shared]
+    return view,rows,schedule_rows
+
+
+def _accounting_one(t):
+    """One confirmed transaction's Accounting view and rows (reads only this row)."""
+    return _accounting_full(t)[:2]
 
 
 def accounting_queryset():
@@ -296,17 +313,90 @@ def _historical_results():
     return hit
 
 
-def accounting_data(scope='all'):
+# ---- 2026-11-13 效能：未結清舊資料（historical=False）的每筆結果快取（業主同意；回應內容不變） ----
+# 做法比照新系統案件的 cases/case_result_cache.py：計算結果只取決於「這一列的內容」與「台北日期」，
+# 所以用「該列內容指紋（除 original 外全部欄位的 MD5，由 MySQL 計算）＋台北日期」當鑰匙：
+# 對帳、收付、修改或直接改資料庫都會改變指紋；過了台北午夜鑰匙也不同，會重新計算。
+# - 對帳狀態（review_fields）由 Accounting 在取得結果後即時套用，不在快取內。
+# - 每個 gunicorn worker 各自一份，最多 RI_LEGACY_OPEN_CACHE_SIZE 筆（預設 20,000），超過丟掉最久沒用的。
+# - RI_LEGACY_OPEN_CACHE=false 可整個關掉（每次直接計算）。回傳每列的淺層複本，呼叫端改不到記住的內容。
+_OPEN_LOCK=threading.Lock()
+_OPEN=OrderedDict()
+
+
+def _open_cache_enabled():
+    return os.environ.get('RI_LEGACY_OPEN_CACHE','true').strip().lower()!='false'
+
+
+def _open_cache_limit():
+    try:return max(0,int(os.environ.get('RI_LEGACY_OPEN_CACHE_SIZE','20000')))
+    except ValueError:return 20000
+
+
+def _row_digest():
+    table=LegacyTransaction._meta.db_table
+    columns=[f.column for f in LegacyTransaction._meta.concrete_fields if f.name!='original']
+    return RawSQL('MD5(JSON_ARRAY('+','.join(f'`{table}`.`{c}`' for c in columns)+'))',[])
+
+
+def _open_results():
+    """未結清舊資料每筆的 (uid, view, rows, schedule_rows)，依 reference、uid 排序。"""
+    qs=accounting_queryset().filter(historical=False)
+    if not _open_cache_enabled():
+        return [(t.uid,*_accounting_full(t)) for t in qs.order_by('reference','uid')]
+    today=_today()
+    order=list(qs.order_by('reference','uid').annotate(row_digest=_row_digest()).values_list('uid','row_digest'))
+    found={}
+    with _OPEN_LOCK:
+        for uid,digest in order:
+            hit=_OPEN.get((uid,digest,today))
+            if hit is not None:
+                _OPEN.move_to_end((uid,digest,today));found[uid]=hit
+    missing=[uid for uid,_ in order if uid not in found]
+    fresh={}
+    for start in range(0,len(missing),500):
+        # 指紋與資料在同一個查詢取得：存進快取的結果一定對應它自己的內容指紋。
+        for t in qs.filter(pk__in=missing[start:start+500]).annotate(row_digest=_row_digest()):
+            fresh[t.uid]=(t.row_digest,_accounting_full(t))
+    limit=_open_cache_limit()
+    if fresh and limit:
+        with _OPEN_LOCK:
+            for uid,(digest,value) in fresh.items():
+                _OPEN[(uid,digest,today)]=value;_OPEN.move_to_end((uid,digest,today))
+            while len(_OPEN)>limit:_OPEN.popitem(last=False)
+    result=[]
+    for uid,_ in order:
+        value=found.get(uid) or (fresh[uid][1] if uid in fresh else None)
+        if value is None:continue   # 查詢之間被撤回或刪除的列：下一次請求就不會再列出
+        view,rows,schedule_rows=value
+        result.append((uid,dict(view),[dict(r) for r in rows],[dict(r) for r in schedule_rows]))
+    return result
+
+
+def accounting_bundle(scope='all'):
+    """Accounting 一次取得舊資料的 views、transaction rows 與 payment-schedule rows（未結清的每筆只算一次）。
+
+    scope：'all'／'open'／'history'，意義同 accounting_data。schedule rows 只來自未結清的保費交易，
+    依 uid 排序（與原本的 accounting_schedules() 相同）。"""
+    if scope=='history':
+        views,rows=accounting_data('history')
+        return views,rows,[]
+    opened=_open_results()
+    schedule_rows=[r for _,_,_,srows in sorted(opened,key=lambda item:item[0].hex) for r in srows]
+    if scope=='open':
+        return [v for _,v,_,_ in opened],[r for _,_,rows,_ in opened for r in rows],schedule_rows
+    views,rows=accounting_data('all',_opened=opened)
+    return views,rows,schedule_rows
+
+
+def accounting_data(scope='all',_opened=None):
     """Read imported balances through the existing row renderer, never Case rows.
 
     scope（2026-11-13，Accounting 分段載入）：'all' 與原本完全相同；'open' 只含非歷史交易（新增的批單／理賠與
     匯入時尚未收付完的資料）；'history' 只含匯入時已全部結清的歷史交易。'open' 與 'history' 合起來等於 'all'。"""
     if scope == 'open':
-        views=[];rows=[]
-        for t in accounting_queryset().filter(historical=False).order_by('reference','uid'):
-            view,items=_accounting_one(t)
-            views.append(view);rows.extend(items)
-        return views,rows
+        opened=_open_results() if _opened is None else _opened
+        return [v for _,v,_,_ in opened],[r for _,_,rows,_ in opened for r in rows]
     if scope == 'history':
         if _cache_enabled():
             history=_historical_results()
@@ -325,7 +415,8 @@ def accounting_data(scope='all'):
     if not _cache_enabled():
         return _compute_accounting_data()
     history=_historical_results()
-    fresh={str(t.uid):_accounting_one(t) for t in accounting_queryset().filter(historical=False).order_by('reference','uid')}
+    opened=_open_results() if _opened is None else _opened
+    fresh={str(uid):(view,rows) for uid,view,rows,_ in opened}
     order=[(str(uid),historical) for uid,historical in accounting_queryset().order_by('reference','uid').values_list('uid','historical')]
     if ({uid for uid,h in order if h}!=set(history) or {uid for uid,h in order if not h}!=set(fresh)):
         return _compute_accounting_data()
@@ -362,14 +453,5 @@ def all_payment_payloads():
 
 
 def accounting_schedules():
-    result=[]
-    for t in LegacyTransaction.objects.filter(status='confirmed',historical=False).order_by('uid'):
-        p=payload_for(t)
-        if p['legacyData'].get('kind')=='claim':continue
-        for row in schedule(p)['items']:
-            result.append({**row,'key':str(t.uid)+':'+row['scheduleKey'],
-                'caseUid':str(t.uid),'rootCaseUid':str(t.uid),'caseRowVersion':t.version,
-                'rowVersion':t.version,'caseStatus':'posted','twRef':t.reference,'source':'premium',
-                'origin':'legacy','legacyTransactionId':str(t.uid),'legacyHistorical':False,
-                'entries':[e for e in p['paymentEntries'] if e.get('scheduleKey')==row['scheduleKey']]})
-    return result
+    """Payment-schedule rows of unsettled legacy premium transactions (same rows and order as before 2026-11-13)."""
+    return accounting_bundle('open')[2]

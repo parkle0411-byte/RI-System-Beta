@@ -1,7 +1,7 @@
 <script setup>
 import vAccountingScroll from '../directives/accountingScroll'
 import { partyKey, isOverseaCash, isDerivedBrokerage, activeAccount, isCedantAccount, accountSource, visibleAccount, cashTotals, cashUuid } from './accountingCash'
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { apiFetch } from '../api'
@@ -21,7 +21,8 @@ const wideScreen=ref(window.innerWidth>760), resize=()=>{wideScreen.value=window
 const router=useRouter(), tab=ref('unreconciled'), loading=ref(false), refreshing=ref(false), shownAt=ref(''), saving=ref(false), loadError=ref('')
 const historyState=ref('none'), historyCount=ref(0), historyError=ref(''), historyTabs=['all','settled','brokerage']
 let loadSeq=0, historyBody=null
-const rows=ref([]), batches=ref([]), reviewBatches=ref([]), currencies=ref([]), warnings=ref([]), canEdit=ref(false), selected=ref([]), caseHistories=ref({})
+// 2026-11-13：帳款與登錄清單可達數萬列，整份替換、不逐欄追蹤（shallowRef）；列物件本身不會被就地修改。
+const rows=shallowRef([]), batches=shallowRef([]), reviewBatches=ref([]), currencies=ref([]), warnings=ref([]), canEdit=ref(false), selected=ref([]), caseHistories=ref({})
 const filters=reactive({reference:'',insured:'',cedant:'',reinsurer:'',currency:'',direction:'',settlement:['open'],source:'',origin:'',due:''})
 const page=ref(1), pageSize=ref(100)
 const entryActions=ref(null),referenceEditor=ref(null),historyRow=ref(null),activeBatch=ref(null),reviewVisible=ref(false),reviewTargets=ref([]),paymentVisible=ref(false),termsVisible=ref(false),termsTarget=ref(null)
@@ -47,16 +48,35 @@ const cedantOptions=computed(()=>[...new Set(rows.value.filter(r=>isCedantAccoun
 const reinsurerOptions=computed(()=>[...new Set(rows.value.filter(r=>!isCedantAccount(r)&&!isDerivedBrokerage(r)).map(row=>transactionParty(row)).filter(Boolean))].sort())
 watch(()=>filters.cedant,value=>{if(value)filters.reinsurer=''})
 watch(()=>filters.reinsurer,value=>{if(value)filters.cedant=''})
-const filtered=computed(()=>rows.value.filter(r=>{
+// 2026-11-13（大量資料）：文字篩選在清單超過 2,000 列時等 0.3 秒沒有再輸入才套用（列數少時立即套用，與原本相同）；
+// 排序用的比較值每列只算一次，結果與原本的排序完全相同（Intl.Collator 與 localeCompare 的預設比較相同）。
+const textFilter=reactive({reference:'',insured:''})
+let textFilterTimer=null
+watch(()=>[filters.reference,filters.insured],([reference,insured])=>{
+ clearTimeout(textFilterTimer)
+ const apply=()=>{textFilter.reference=reference;textFilter.insured=insured}
+ if(rows.value.length>2000)textFilterTimer=setTimeout(apply,300);else apply()
+},{flush:'sync'})
+const collator=new Intl.Collator()
+const filtered=computed(()=>{
+ const now=today(),brokerage=isBrokerage.value
+ const list=rows.value.filter(r=>{
  if(!visibleAccount(r,tab.value))return false
  if(filters.settlement.length&&(r.reversed||r.isReversalEntry||!filters.settlement.includes(normalizedSettlement(r))))return false
- return matches([r.twRef,r.manualTwRef,displayTwRef(r)],filters.reference)&&matches([r.originalInsured,r.originalInsuredCn],filters.insured)&&(!filters.cedant||isCedantAccount(r)&&transactionParty(r)===filters.cedant)&&(!filters.reinsurer||!isCedantAccount(r)&&transactionParty(r)===filters.reinsurer)&&(!filters.currency||filters.currency===r.currency)&&(!filters.direction||r.paymentDirection===filters.direction)&&(!filters.source||accountSource(r)===filters.source)&&(!filters.origin||(r.origin||'native')===filters.origin)&&(!filters.due||!!actualDue(r)&&actualDue(r)<=filters.due)
-}).sort((a,b)=>{
- if(isBrokerage.value)return Number(a.settlement==='settled')-Number(b.settlement==='settled')||displayTwRef(a).localeCompare(displayTwRef(b))
- const reminder=r=>r.dueDate||r.schedules?.find(x=>x.dueDate)?.dueDate||actualDue(r)||'9999-12-31'
- const overdue=r=>r.settlement!=='settled'&&actualDue(r)&&actualDue(r)<today()
- return Number(!!overdue(b))-Number(!!overdue(a))||(overdue(a)?actualDue(a):reminder(a)).localeCompare(overdue(b)?actualDue(b):reminder(b))||displayTwRef(a).localeCompare(displayTwRef(b))||rowTitle(a).localeCompare(rowTitle(b))
-}))
+ return matches([r.twRef,r.manualTwRef,displayTwRef(r)],textFilter.reference)&&matches([r.originalInsured,r.originalInsuredCn],textFilter.insured)&&(!filters.cedant||isCedantAccount(r)&&transactionParty(r)===filters.cedant)&&(!filters.reinsurer||!isCedantAccount(r)&&transactionParty(r)===filters.reinsurer)&&(!filters.currency||filters.currency===r.currency)&&(!filters.direction||r.paymentDirection===filters.direction)&&(!filters.source||accountSource(r)===filters.source)&&(!filters.origin||(r.origin||'native')===filters.origin)&&(!filters.due||!!actualDue(r)&&actualDue(r)<=filters.due)
+})
+ if(brokerage){
+  const keyed=list.map(r=>({r,settled:Number(r.settlement==='settled'),tw:displayTwRef(r)}))
+  keyed.sort((a,b)=>a.settled-b.settled||collator.compare(a.tw,b.tw))
+  return keyed.map(x=>x.r)
+ }
+ const keyed=list.map(r=>{
+  const due=actualDue(r),overdue=r.settlement!=='settled'&&due&&due<now
+  return {r,overdue:Number(!!overdue),date:overdue?due:(r.dueDate||r.schedules?.find(x=>x.dueDate)?.dueDate||due||'9999-12-31'),tw:displayTwRef(r),title:rowTitle(r)}
+ })
+ keyed.sort((a,b)=>b.overdue-a.overdue||collator.compare(a.date,b.date)||collator.compare(a.tw,b.tw)||collator.compare(a.title,b.title))
+ return keyed.map(x=>x.r)
+})
 const pagedRows=computed(()=>filtered.value.slice((page.value-1)*pageSize.value,page.value*pageSize.value))
 const selectedGroup=computed(()=>selected.value.length?transactionParty(selected.value[0])+' · '+[...new Set(selected.value.map(r=>r.currency))].join(', '):'')
 const selectionAvailable=computed(()=>filtered.value.some(eligible)&&(selected.value.length>0||new Set(filtered.value.filter(selectable).map(group)).size===1))

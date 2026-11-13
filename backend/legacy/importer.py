@@ -300,6 +300,8 @@ def commit(person,batch_id,sha256):
         now=timezone.now();stamp=now.isoformat()
         actor={'id':f'personnel:{person.pk}' if person.pk is not None else 'system','name':person.name}
         records=[]
+        from .policy import insured_lookup
+        lookup=insured_lookup()   # 2026-11-13：Insured 主檔整批只讀一次（原本每一筆都重讀全部主檔）
         for row,item in items:
             item=copy.deepcopy(item);item['data']['confirmedAt']=stamp
             t=LegacyTransaction(uid=uuid.uuid4(),**item,status='confirmed',batch=batch,
@@ -308,7 +310,7 @@ def commit(person,batch_id,sha256):
             except (ValueError,OverflowError) as exc:fail(f'Row {row["row"]} ({t.number}): {exc}')
             # Owner 2026-11-12: link the Chinese-name Insured master (same matching as Case); official.
             from .policy import link_insured
-            master=link_insured(t.data.get('insuredCn'),actor,str(t.uid))
+            master=link_insured(t.data.get('insuredCn'),actor,str(t.uid),lookup)
             if master:t.data['insuredMasterId']=master
             records.append(t)
         LegacyTransaction.objects.bulk_create(records,batch_size=250)
