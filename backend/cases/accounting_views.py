@@ -104,6 +104,14 @@ class AccountingView(NoStoreMixin, APIView):
         # ?view=list（Accounting 畫面用）：付款排程列（rows）只有 Swiss Facility 案件會顯示，其他案件不產生這些列
         # （約 1.5 萬列、17 MB），但 warnings 與 currencies 照常計算；不帶參數時輸出與以前完全相同。2026-10-16
         lean = request.query_params.get("view") == "list"
+        # 2026-11-13 分段載入（只在 ?view=list 時有效；不帶 legacy 參數時輸出與以前完全相同）：
+        #   legacy=open     不含「匯入時已全部結清」的舊資料歷史，其餘全部照常；另回 legacyHistory.pendingTransactions。
+        #   legacy=history  只回舊資料歷史的 transactionRows／cashBatches／caseHistories／currencies，供畫面在背景合併。
+        legacy_scope = request.query_params.get("legacy") if lean else None
+        if legacy_scope not in ("open", "history"):
+            legacy_scope = None
+        if legacy_scope == "history":
+            cases = cases.none()
         extra_currencies = []
         from fxrates.models import FxRate
         from .accounting_policy import fx_for_transaction, stored_all_settled, settled_flag_mismatch, SETTLED_FLAG_WARNING
@@ -171,10 +179,11 @@ class AccountingView(NoStoreMixin, APIView):
             transactions.extend(case_transactions)
             swiss_rows.extend(case_swiss)
         from legacy.ledger import accounting_data,accounting_schedules
-        legacy_views,legacy_rows=accounting_data()
+        legacy_views,legacy_rows=accounting_data(legacy_scope or 'all')
         case_views.extend(legacy_views)
         transactions.extend(legacy_rows)
-        swiss_rows.extend(accounting_schedules())
+        if legacy_scope != "history":
+            swiss_rows.extend(accounting_schedules())
         # 與 ledger_rows 相同的排序（twRef，再依到期日；穩定排序）
         rows.sort(key=lambda r: (js_locale_key_cached(r["twRef"]), js_locale_key_cached(_text(r.get("dueDate")))))
         currencies = []
@@ -201,7 +210,19 @@ class AccountingView(NoStoreMixin, APIView):
             'cancelledAt': b.cancelled_at.isoformat() if b.cancelled_at else '', 'cancelReason': b.cancel_reason,
             'members': [{**m, 'rowVersion': versions.get(m['caseUid'])} for m in b.members],
         } for b in grouped_review_batches()]
+        if legacy_scope == "history":
+            return Response(json_roundtrip({
+                "ok": True, "transactionRows": transactions, "currencies": currencies,
+                "caseHistories": {uid: p.get("financeCorrectionHistory", []) for uid,p in payload_by_uid.items() if p.get("financeCorrectionHistory")},
+                "cashBatches": payment_batches(case_views),
+                "legacyHistory": {"scope": "history", "transactions": len(legacy_views)},
+            }))
+        segment = {}
+        if legacy_scope == "open":
+            from legacy.ledger import historical_queryset
+            segment = {"legacyHistory": {"scope": "open", "pendingTransactions": historical_queryset().count()}}
         return Response(json_roundtrip({
+            **segment,
             "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,
             "scope": {"canEdit": _can_edit(request.ri_principal)},
             "caseHistories": {uid: p.get("financeCorrectionHistory", []) for uid,p in payload_by_uid.items() if p.get("financeCorrectionHistory")}, "reviewBatches": review_batches, "cashBatches": payment_batches(case_views), "swissRows": swiss_rows, "scheduleRows": schedule_rows,

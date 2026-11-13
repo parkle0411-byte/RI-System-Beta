@@ -69,8 +69,9 @@ with sync_playwright() as p:
     page.get_by_text("UI9002").first.wait_for()
     body = page.inner_text(".legacy-page")
     check("Legacy list shows settled and open imported rows", "Historically Reconciled / Settled" in body and "Imported · Open in Accounting" in body)
-    page.goto(BASE + "/accounting"); page.wait_for_selector("[data-testid=accounting-table] .el-table__body tr")
-    page.wait_for_timeout(1500)
+    # 2026-11-13：Accounting 預設開在 Unreconciled；已結清的舊資料歷史在背景載入後出現在 All Accounts。
+    page.goto(BASE + "/accounting"); page.get_by_role("tab", name="All Accounts", exact=True).click()
+    page.wait_for_selector("[data-testid=accounting-table] .el-table__body tr")
     page.get_by_text("Historically settled").first.wait_for()
     acc = page.inner_text("[data-testid=accounting-table]")
     check("Accounting shows the settled amount with Historically settled", "TWD 8,400" in acc and "Historically settled" in acc)

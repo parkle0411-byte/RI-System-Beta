@@ -299,8 +299,32 @@ def _historical_results():
     return hit
 
 
-def accounting_data():
-    """Read imported balances through the existing row renderer, never Case rows."""
+def accounting_data(scope='all'):
+    """Read imported balances through the existing row renderer, never Case rows.
+
+    scope（2026-11-13，Accounting 分段載入）：'all' 與原本完全相同；'open' 只含非歷史交易（新增的批單／理賠與
+    匯入時尚未收付完的資料）；'history' 只含匯入時已全部結清的歷史交易。'open' 與 'history' 合起來等於 'all'。"""
+    if scope == 'open':
+        views=[];rows=[]
+        for t in accounting_queryset().filter(historical=False).order_by('reference','uid'):
+            view,items=_accounting_one(t)
+            views.append(view);rows.extend(items)
+        return views,rows
+    if scope == 'history':
+        if _cache_enabled():
+            history=_historical_results()
+            order=[str(uid) for uid in historical_queryset().order_by('reference','uid').values_list('uid',flat=True)]
+            if set(order)==set(history):
+                views=[];rows=[]
+                for uid in order:
+                    view,items=history[uid]
+                    views.append(dict(view));rows.extend(dict(row) for row in items)
+                return views,rows
+        views=[];rows=[]
+        for t in historical_queryset().order_by('reference','uid'):
+            view,items=_accounting_one(t)
+            views.append(view);rows.extend(items)
+        return views,rows
     if not _cache_enabled():
         return _compute_accounting_data()
     history=_historical_results()

@@ -183,7 +183,7 @@ def phase_a(page):
     check("sidebar shows unified Master Data Management for an admin", labels == ["Dashboard", "Account List", "Legacy Data (Old Register)", "Master Data Management", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
     for label, marker in [("Account List", "All cases"), ("Master Data Management", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
-                          ("Production Report", "Versioned monthly close"), ("Accounting", "All Accounts (")]:
+                          ("Production Report", "Versioned monthly close"), ("Accounting", "Unreconciled Accounts (")]:   # 2026-11-13：Accounting 預設開在 Unreconciled
         nav(page, label)
         check(f"{label} page loads", page.get_by_text(marker).first.is_visible())
     logout(page)
@@ -689,11 +689,11 @@ def phase_d(page):
     page.get_by_role('tab',name='Brokerage',exact=True).click()
     check('Brokerage has independent dependency details',page.get_by_role('button',name='Brokerage settlement details',exact=True).count()>0)
     snap(page,'accounting-brokerage')
-    nav(page,'Dashboard');held=[];page.route('**/api/accounting?view=list',lambda route:held.append(route));nav(page,'Accounting')
+    nav(page,'Dashboard');held=[];page.route('**/api/accounting?view=list*',lambda route:held.append(route));nav(page,'Accounting')
     banner=page.get_by_test_id('accounting-refreshing');banner.wait_for(timeout=8000)
     check('cached list remains read-only during background update',banner.is_visible() and page.get_by_role('button',name='Mark reviewed',exact=True).count()==0)
     for route in held:route.continue_()
-    page.unroute('**/api/accounting?view=list');banner.wait_for(state='hidden',timeout=15000)
+    page.unroute('**/api/accounting?view=list*');banner.wait_for(state='hidden',timeout=15000)
     logout(page);login(page,'ui.admin');nav(page,'Accounting')
     acc_row(page,'TWPAR2603001-R2-T1').locator('.table-action').first.click();page.locator('.case-detail-tabs').wait_for();page.wait_for_timeout(400)
     check('account identifier opens case SoA', '/cases' in page.url and 'soa' in page.locator('.case-detail-tabs .el-tabs__item.is-active').inner_text().lower())
