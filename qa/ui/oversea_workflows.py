@@ -9,12 +9,12 @@ with sync_playwright() as pw:
  page.get_by_test_id('oversea-installments').locator('.el-switch').click();expect(page.get_by_test_id('oversea-installment-row')).to_have_count(2);check('toggle creates two ratio periods')
  page.get_by_role('button',name='Add installment',exact=True).click();expect(page.get_by_test_id('oversea-installment-row')).to_have_count(3)
  for i,(ratio,stamp) in enumerate([(33.33,'2050-01-05'),(33.33,'2050-02-05'),(33.34,'2050-03-05')]):
-  fill(page,f'Installment {i+1} Ratio (%)',ratio);f=field(page,f'Installment {i+1} Receipt / Payment Date').locator('input');f.fill(stamp);f.press('Enter');page.keyboard.press('Escape')
+  fill(page,f'Installment {i+1} Ratio (%)',ratio);f=field(page,f'Installment {i+1} Performance Month').locator('input');f.fill('Dec 2049' if i == 0 else __import__('datetime').datetime.strptime(stamp, '%Y-%m-%d').strftime('%b %Y'));f.press('Enter');page.keyboard.press('Escape');f=field(page,f'Installment {i+1} Receipt / Payment Date').locator('input');f.fill(stamp);f.press('Enter');page.keyboard.press('Escape')
  expect(page.get_by_test_id('oversea-installment-row').nth(0)).to_contain_text('33.34');expect(page.get_by_test_id('oversea-installment-row').nth(1)).to_contain_text('33.33');check('Brokerage automatically allocated with exact tail')
  expect(page.get_by_test_id('oversea-installment-row').nth(0)).to_contain_text('2049-12-26');expect(page.get_by_test_id('oversea-installment-row').nth(1)).to_contain_text('2050-01-26');check('each row displays independent Accounting Date')
  page.screenshot(path='out/oversea-installment-input.png',full_page=True)
  with page.expect_response(lambda r:r.url.endswith('/api/cases') and r.request.method=='POST') as saved:page.get_by_role('button',name='Save draft',exact=True).last.click()
- check('ratio case saves',saved.value.status==201);uid=saved.value.json()['case']['caseUid'];page.goto('http://nginx/cases?case='+uid);expect(page.get_by_test_id('oversea-installment-summary').first).to_contain_text('Installment 3');check('saved summary restores all periods')
+ check('ratio case saves',saved.value.status==201);uid=saved.value.json()['case']['caseUid'];saved_payload=request(page,'/api/cases?caseUid='+uid,None,'GET')['body']['case']['payload'];check('performance month is independent from actual date',saved_payload['performanceInstallments'][0]['performanceMonth']=='2049-12' and saved_payload['performanceInstallments'][0]['paymentBaseDate']=='2050-01-05');page.goto('http://nginx/cases?case='+uid);expect(page.get_by_test_id('oversea-installment-summary').first).to_contain_text('Installment 3');check('saved summary restores all periods')
  upload_broker_note(page)
  page.get_by_role('button',name='Review & Announce',exact=True).click();dialog=page.locator('.announce-dialog');expect(dialog.get_by_test_id('oversea-installment-summary')).to_be_visible();dialog.locator('.announce-attestation').click();dialog.get_by_role('button',name='Announce',exact=True).click();waitapi(page)
  result=request(page,'/api/cases?caseUid='+uid,None,'GET')['body']['case'];root=result['twRef'];txs=result['payload']['transactions'];check('Announce creates exactly three T3s',len(txs)==3 and [t['amount'] for t in txs]==[33.34,33.33,33.34])
@@ -32,6 +32,7 @@ with sync_playwright() as pw:
   f=field(page,'Endorsement Effective Date').locator('input');f.fill('2049-06-01' if index==0 else '2049-07-01');f.press('Enter');page.keyboard.press('Escape')
   page.get_by_test_id('oversea-installments').locator('.el-switch').click();expect(page.get_by_test_id('oversea-installment-row')).to_have_count(2)
   for n,stamp in enumerate([date,'2050-06-05'],1):
+   f=field(page,f'Installment {n} Performance Month').locator('input');f.fill(__import__('datetime').datetime.strptime(stamp, '%Y-%m-%d').strftime('%b %Y'));f.press('Enter');page.keyboard.press('Escape')
    f=field(page,f'Installment {n} Receipt / Payment Date').locator('input');f.fill(stamp);f.press('Enter');page.keyboard.press('Escape')
   check('endorsement accepts installment dates '+str(amount))
   with page.expect_response(lambda r:r.url.endswith('/api/cases') and r.request.method=='PUT') as saved:page.get_by_role('button',name='Save changes',exact=True).last.click()

@@ -139,7 +139,8 @@ def installment_allocations(case_data, periods_list=None):
                  "income":r["t3"]} for r in (property_periods(case_data) if periods_list is None else periods_list)]
     from cases.oversea import enabled as oversea_enabled, periods as oversea_periods, premium_period_amounts
     if oversea_enabled(case_data):
-        result=[dict(id=r['id'],performanceMonth=r['actualPaymentDate'][:7],ratio=number_or_zero(r['ratio'])/100,income=r['amount']) for r in oversea_periods(case_data)]
+        source_rows = {r.get('id'): r for r in case_data.get('performanceInstallments') or [] if isinstance(r, dict)}
+        result=[dict(id=r['id'],performanceMonth=(source_rows.get(r['id'], {}).get('performanceMonth', r['actualPaymentDate'][:7]) if case_data.get('installmentEnabled') else case_data.get('performanceMonth', r['actualPaymentDate'][:7])),ratio=number_or_zero(r['ratio'])/100,income=r['amount']) for r in oversea_periods(case_data)]
         if case_data.get('parentTwRef') and 'premiumAdjustment' in case_data:
             for row,amount in zip(result,premium_period_amounts(case_data)):row['premiumAdjustmentAmount']=amount
         return result

@@ -32,7 +32,7 @@ def account(tag,role):
  p=Personnel.objects.create(name='Oversea QA '+tag,department='finance' if role.startswith('accounting') else 'admin' if role=='admin' else 'reinsurance',role_code=role,auth_user_id=str(u.pk),account_status='active',created_by='qa',updated_by='qa')
  c=Client(HTTP_HOST='localhost');c.force_login(u);return c,p
 def fixture(**kw):
- p=dict(originalInsured='Oversea QA Insured',originalInsuredCn='海外測試被保險人',policyFrom='2049-01-01',policyTo='2050-01-01',ae='Oversea QA sales',reinsuranceStructure='OVERSEA',classOfBusiness='Fine Art',classCode='FA',currency='TWD',originalPremium=100000,reinsured='Oversea QA Cedant',receiptPaymentDate='2050-01-05',reinsurers=[dict(name='Oversea QA Broker',sharePct=25,brokerageAmount=2500)])
+ p=dict(originalInsured='Oversea QA Insured',originalInsuredCn='海外測試被保險人',policyFrom='2049-01-01',policyTo='2050-01-01',ae='Oversea QA sales',reinsuranceStructure='OVERSEA',classOfBusiness='Fine Art',classCode='FA',currency='TWD',originalPremium=100000,reinsured='Oversea QA Cedant',receiptPaymentDate='2050-01-05',performanceMonth='2050-01',reinsurers=[dict(name='Oversea QA Broker',sharePct=25,brokerageAmount=2500)])
  p.update(kw);return p
 def member(case,no):
  case.refresh_from_db();return dict(caseUid=str(case.case_uid),txNo=no,rowVersion=case.row_version)

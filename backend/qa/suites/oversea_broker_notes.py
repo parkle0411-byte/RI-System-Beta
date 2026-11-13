@@ -47,7 +47,7 @@ try:
   source=case
   for index,(kind,amount) in enumerate([('broker_credit',12.34),('broker_debit',-5.67)]):
    created=call(sales,'/api/case-workflow',dict(action='create_endorsement',caseUid=str(source.case_uid),rowVersion=source.row_version));check('create endorsement '+kind,created.status_code==201,created.content[:1000]);child=get_case(created.json()['case']['caseUid']);draft=child.payload
-   draft.update(endoEffectiveDate='2049-06-01',endoText='Foreign Broker Note QA',receiptPaymentDate='2050-02-05');draft['reinsurers'][0]['brokerageAmount']=amount
+   draft.update(endoEffectiveDate='2049-06-01',endoText='Foreign Broker Note QA',receiptPaymentDate='2050-02-05',performanceMonth='2050-02');draft['reinsurers'][0]['brokerageAmount']=amount
    saved=call(sales,'/api/cases',dict(caseUid=str(child.case_uid),rowVersion=child.row_version,case=draft),method='put');check('endorsement Draft saves without its own note '+kind,saved.status_code==200,saved.content[:1000]);child.refresh_from_db()
    response=announce(sales,child,ids);check('source Credit Note cannot satisfy endorsement '+kind,response.status_code==400 and response.json()['error']=='documents_not_ready')
    check('endorsement has independent empty attachment list '+kind,not CaseDocument.objects.filter(case=child).exists())

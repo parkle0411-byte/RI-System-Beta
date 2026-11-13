@@ -26,11 +26,13 @@ export function overseaIssues(p, ready = false) {
     if (periods.length<2) add('performanceInstallments','Use at least two installments.')
     for (const [i,row] of periods.entries()) {
       if (!(Number(row.ratio)>0 && Number(row.ratio)<=100)) add(`performanceInstallments.${i}.ratio`,'Enter an installment ratio greater than 0 and at most 100%.')
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(row.performanceMonth ?? (row.paymentBaseDate || '').slice(0,7)))) add(`performanceInstallments.${i}.performanceMonth`,'Each installment requires a Performance Month.')
       const date=String(row.paymentBaseDate || ''), parsed=new Date(date+'T00:00:00Z')
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0,10)!==date) add(`performanceInstallments.${i}.paymentBaseDate`,'Each installment requires an actual Receipt / Payment Date.')
     }
     if (Math.abs(periods.reduce((sum,r)=>sum+Number(r.ratio || 0),0)-100)>0.000001) add('performanceInstallments','Installment ratios must total 100%.')
   }
+  if (!p.installmentEnabled && !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p.performanceMonth ?? (p.receiptPaymentDate || '').slice(0,7)))) add('performanceMonth','Performance Month is required.')
   if (p.parentTwRef) for (const [key,label] of [['endoEffectiveDate','Endorsement Effective Date'],['endoText','Endorsement Description']]) if (!String(p[key] || '').trim()) add(key,label+' is required.')
   if (p.parentTwRef && Object.hasOwn(p,'premiumAdjustment') && (p.premiumAdjustment == null || String(p.premiumAdjustment).trim() === '')) add('premiumAdjustment','100% Premium Adjustment is required; enter 0 if unchanged.')
   for (const [key,label] of [['originalInsured','Insured (EN)'],['originalInsuredCn','Insured (CN)'],['policyFrom','Effective Date'],['policyTo','Expiration Date'],['ae','Account Executive'],['reinsured','Cedant'],['currency','Currency'],['originalPremium','100% Premium'],['receiptPaymentDate','Receipt / Payment Date']]) {

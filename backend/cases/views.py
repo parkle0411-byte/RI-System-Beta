@@ -382,6 +382,14 @@ class CasesView(NoStoreMixin, APIView):
             if current.status == 'draft' and not current.tw_ref and current.case_kind != 'endorsement':
                 from .facility_rules import prepare_new_draft
                 candidate = prepare_new_draft(candidate, previous=current.payload)
+            from .oversea import enabled as oversea_enabled
+            if oversea_enabled(current.payload) and not (current.payload or {}).get("installmentEnabled") and "performanceMonth" not in (current.payload or {}) and "performanceMonth" not in candidate:
+                candidate["performanceMonth"] = str((current.payload or {}).get("receiptPaymentDate") or "")[:7]
+            if oversea_enabled(current.payload) and candidate.get("installmentEnabled"):
+                previous_rows = {r.get("id"): r for r in (current.payload or {}).get("performanceInstallments", []) if isinstance(r, dict)}
+                for row in candidate.get("performanceInstallments") or []:
+                    if isinstance(row, dict) and row.get("id") in previous_rows and "performanceMonth" not in row and "performanceMonth" not in previous_rows[row.get("id")]:
+                        row["performanceMonth"] = str(previous_rows[row.get("id")].get("paymentBaseDate") or "")[:7]
             endorsement_context = None
             if current.case_kind == "endorsement" and current.parent_case_id:
                 from .endorsement_rules import context_for, apply_fixed, date_edit_error

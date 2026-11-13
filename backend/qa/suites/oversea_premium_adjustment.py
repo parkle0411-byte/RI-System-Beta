@@ -18,7 +18,7 @@ try:
    response=call(sales,'/api/case-workflow',dict(action='create_endorsement',caseUid=str(previous.case_uid),rowVersion=previous.row_version))
    check('create independent endorsement '+str(ordinal),response.status_code==201,response.content[:1000]);case=get_case(response.json()['case']['caseUid']);draft=case.payload
    check('premium adjustment starts at zero '+str(ordinal),draft['premiumAdjustment']==0)
-   draft.update(endoEffectiveDate='2049-06-01',endoText='Premium change',premiumAdjustment=adjustment,installmentEnabled=True,performanceInstallments=[dict(id='I1',ratio=33.33,paymentBaseDate='2050-01-05'),dict(id='I2',ratio=33.33,paymentBaseDate='2050-02-05'),dict(id='I3',ratio=33.34,paymentBaseDate='2050-03-05')]);draft['reinsurers'][0]['brokerageAmount']=0
+   draft.update(endoEffectiveDate='2049-06-01',endoText='Premium change',premiumAdjustment=adjustment,installmentEnabled=True,performanceInstallments=[dict(id='I1',ratio=33.33,paymentBaseDate='2050-01-05',performanceMonth='2050-01'),dict(id='I2',ratio=33.33,paymentBaseDate='2050-02-05',performanceMonth='2050-02'),dict(id='I3',ratio=33.34,paymentBaseDate='2050-03-05',performanceMonth='2050-03')]);draft['reinsurers'][0]['brokerageAmount']=0
    response=call(sales,'/api/cases',dict(caseUid=str(case.case_uid),rowVersion=case.row_version,case=draft),method='put')
    check('save signed adjustment '+str(ordinal),response.status_code==200,response.content[:1500]);case.refresh_from_db()
    check('adjustment and original premium are separate '+str(ordinal),case.payload['premiumAdjustment']==adjustment and case.payload['originalPremium']==root_payload['originalPremium'])

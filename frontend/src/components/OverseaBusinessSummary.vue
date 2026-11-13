@@ -16,10 +16,11 @@ defineProps({payload:{type:Object,required:true}})
 <dt>Brokerage</dt><dd>{{ payload.reinsurers?.[0]?.brokerageAmount ?? '—' }}</dd>
 <dt>Reinsurance Broker</dt><dd>{{ payload.reinsurers?.[0]?.name || '—' }}</dd>
 <dt>Cedant</dt><dd>{{ payload.reinsured || '—' }}</dd>
+<dt v-if="!payload.installmentEnabled">Performance Month</dt><dd v-if="!payload.installmentEnabled">{{ payload.performanceMonth ?? (payload.receiptPaymentDate || '').slice(0,7) }}</dd>
 <dt v-if="!payload.installmentEnabled">Receipt / Payment Date</dt><dd v-if="!payload.installmentEnabled">{{ payload.receiptPaymentDate || '—' }}</dd>
 <dt v-if="!payload.installmentEnabled">Accounting Date</dt><dd v-if="!payload.installmentEnabled">{{ overseaDates(payload).accountingDate || '—' }}</dd>
 <dt>T3 Brokerage</dt><dd>{{ payload.currency }} {{ formatMoney(RICaseCalculations.totals(payload).brokerage,payload.currency) }}</dd>
 </dl>
 <div v-if="payload.parentTwRef"><p>Endorsement to {{ payload.parentTwRef }} · {{ payload.endoEffectiveDate }}</p><p>{{ payload.endoText }}</p></div>
-<div v-if="payload.installmentEnabled" class="overview-table-wrap"><table class="overview-table" data-testid="oversea-installment-summary"><thead><tr><th>Installment</th><th>Ratio (%)</th><th>Brokerage</th><th>Receipt / Payment Date</th><th>Accounting Date</th></tr></thead><tbody><tr v-for="row in overseaPeriods(payload)" :key="row.id"><td>{{ row.label }}</td><td>{{ row.ratio }}</td><td>{{ formatMoney(row.amount,payload.currency) }}</td><td>{{ row.actualPaymentDate }}</td><td>{{ row.accountingDate }}</td></tr></tbody></table></div>
+<div v-if="payload.installmentEnabled" class="overview-table-wrap"><table class="overview-table" data-testid="oversea-installment-summary"><thead><tr><th>Installment</th><th>Ratio (%)</th><th>Performance Month</th><th>Brokerage</th><th>Receipt / Payment Date</th><th>Accounting Date</th></tr></thead><tbody><tr v-for="row in overseaPeriods(payload)" :key="row.id"><td>{{ row.label }}</td><td>{{ row.ratio }}</td><td>{{ payload.performanceInstallments?.find(p => p.id === row.id)?.performanceMonth || '—' }}</td><td>{{ formatMoney(row.amount,payload.currency) }}</td><td>{{ row.actualPaymentDate }}</td><td>{{ row.accountingDate }}</td></tr></tbody></table></div>
 </section></template>

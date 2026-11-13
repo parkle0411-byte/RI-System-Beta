@@ -1583,6 +1583,7 @@ export function useCaseWorkspace() {
     const source=initializeConstruction({...payload,...(payload?.draftInput || {})})
     const fresh = emptyDraft()
     Object.assign(fresh, source)
+    if (overseaEnabled(source) && !Object.hasOwn(source, 'performanceMonth')) fresh.performanceMonth = String(source.receiptPaymentDate || '').slice(0, 7)
     delete fresh.draftInput
     Object.assign(caseClauseDraft,{code:payload?.pendingClause?.code || '',title:payload?.pendingClause?.title || ''})
     fresh.propertyOriginalRules = payload?.propertyOriginalRules || ''
@@ -1619,7 +1620,7 @@ export function useCaseWorkspace() {
       .map(row => ({ ...row, clientKey: clientKey() }))
     if (!source?.cglInformation && fresh.specialAgreement) fresh.cglInformation.specialAgreementApplies = 'applicable'
     fresh.performanceInstallments = (Array.isArray(source?.performanceInstallments) ? source.performanceInstallments : [])
-      .map((row) => ({ ...row, paymentBaseDate: row?.paymentBaseDate || '', paymentTermsDays: row?.paymentTermsDays ?? null, reinsurerPaymentTerms: row?.reinsurerPaymentTerms && typeof row.reinsurerPaymentTerms === 'object' ? row.reinsurerPaymentTerms : {}, clientKey: clientKey() }))
+      .map((row) => ({ ...row, ...(overseaEnabled(source) && !Object.hasOwn(row, 'performanceMonth') ? {performanceMonth: String(row?.paymentBaseDate || '').slice(0, 7)} : {}), paymentBaseDate: row?.paymentBaseDate || '', paymentTermsDays: row?.paymentTermsDays ?? null, reinsurerPaymentTerms: row?.reinsurerPaymentTerms && typeof row.reinsurerPaymentTerms === 'object' ? row.reinsurerPaymentTerms : {}, clientKey: clientKey() }))
     fresh.lossRecord = (Array.isArray(source?.lossRecord) ? source.lossRecord : [])
       .map((row) => ({ ...row, clientKey: clientKey() }))
     fresh.splitParties = (Array.isArray(source?.splitParties) && source.splitParties.length ? source.splitParties : fresh.splitParties)
@@ -2125,7 +2126,7 @@ export function useCaseWorkspace() {
     }
     const updating = isEditing.value
     let changeReason = ''
-    const accountingFields=['receiptPaymentDate','ae','originalPremium','premiumAdjustment','riCommPct','taxPct','currency','reinsurers','policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays','splitParties','splitEnabled','endoEffectiveDate','reinsured','classOfBusiness','classCode','reinsuranceStructure']
+    const accountingFields=['receiptPaymentDate','performanceMonth','ae','originalPremium','premiumAdjustment','riCommPct','taxPct','currency','reinsurers','policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays','splitParties','splitEnabled','endoEffectiveDate','reinsured','classOfBusiness','classCode','reinsuranceStructure']
     const accountingCandidate=JSON.parse(JSON.stringify(draft,(key,value)=>key==='clientKey'?undefined:value))
     const accountingChanged=accountingFields.some(key=>JSON.stringify(accountingCandidate[key]??null)!==JSON.stringify(editingAccountingBaseline.value[key]??null))
     if (updating && (propertyEnabled(draft) || overseaEnabled(draft)) && ['posted','closed','reversed'].includes(editingOriginalStatus.value) && (Boolean(draft.parentTwRef)||editingOriginalStatus.value==='reversed'||propertyScope(draft)&&draft.propertyOriginalRules==='property-original-v1'||isStp(draft)&&!draft.parentTwRef||accountingChanged)) {

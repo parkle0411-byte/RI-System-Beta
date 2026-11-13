@@ -189,7 +189,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     inp = input_
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(inp):
-        keep = {'premiumAdjustment','installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
+        keep = {'premiumAdjustment','installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','performanceMonth','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
         inp = {k:v for k,v in inp.items() if k in keep}
         inp['typePrefix'] = ''
         inp['newOrRenew'] = 'New'
@@ -264,7 +264,6 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if oversea_enabled(inp):
         for row in performance_installments:
             row['premium']=None
-            row['performanceMonth']=row['paymentBaseDate'][:7]
     for installment in performance_installments:
         for index, reinsurer in enumerate(reinsurers):
             if allianz_target(inp, reinsurer.get("name")) or (ga_target(inp, reinsurer.get("name")) or qbe_target(inp,reinsurer.get("name"))):
@@ -376,6 +375,9 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(inp):
         value["receiptPaymentDate"] = nullable_date(get(inp, "receiptPaymentDate"), "Receipt / Payment Date", errors) or ""
+        value["performanceMonth"] = text(get(inp, "performanceMonth"), 7)
+        if value["performanceMonth"] and not _MONTH_RE.match(value["performanceMonth"]):
+            errors.append("Performance Month must use YYYY-MM.")
     value["policyFrom"] = effective_date or ""
     value["policyFromTime"] = policy_from_time if policy_from_time in ("00:00", "12:00") else "12:00"
     value["policyTo"] = expiration_date or ""

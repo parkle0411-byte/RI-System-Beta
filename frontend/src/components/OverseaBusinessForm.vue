@@ -31,6 +31,7 @@ function togglePeriods(enabled) {
       <el-form-item :label="payload.parentTwRef ? 'Brokerage Adjustment' : 'Brokerage'" required><DraftNumber v-model="payload.reinsurers[0].brokerageAmount" :controls="false" /></el-form-item>
       <el-form-item label="Reinsurance Broker" required><el-select v-model="payload.reinsurers[0].name" :disabled="!!payload.parentTwRef" filterable clearable><el-option v-for="item in brokers" :key="item.id" :label="item.name" :value="item.name" /></el-select></el-form-item>
       <el-form-item label="Cedant" required><el-select v-model="payload.reinsured" :disabled="!!payload.parentTwRef" filterable clearable><el-option v-for="item in cedants" :key="item.id" :label="item.name" :value="item.name" /></el-select></el-form-item>
+      <el-form-item v-if="!payload.installmentEnabled" label="Performance Month" required><DraftDate v-model="payload.performanceMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" /></el-form-item>
       <el-form-item v-if="!payload.installmentEnabled" label="Receipt / Payment Date" required><DraftDate v-model="payload.receiptPaymentDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" /></el-form-item>
     </div>
     <section v-if="payload.parentTwRef" data-testid="oversea-endorsement-fields">
@@ -44,6 +45,7 @@ function togglePeriods(enabled) {
         <p>Enter ratios totaling 100%. Each installment has its own actual receipt / payment date. Rounding differences are adjusted in the first installment.</p>
         <div v-for="(row,index) in payload.performanceInstallments" :key="row.id" class="form-grid cols-3" data-testid="oversea-installment-row">
           <el-form-item :label="`Installment ${index+1} Ratio (%)`" required><DraftNumber v-model="row.ratio" :min="0" :max="100" :precision="6" :controls="false" /></el-form-item>
+          <el-form-item :label="`Installment ${index+1} Performance Month`" required><DraftDate v-model="row.performanceMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" /></el-form-item>
           <el-form-item :label="`Installment ${index+1} Receipt / Payment Date`" required><DraftDate v-model="row.paymentBaseDate" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" /></el-form-item>
           <div><p>Brokerage: {{ formatMoney(periods[index]?.amount,payload.currency) }}</p><p>Accounting Date: {{ periods[index]?.accountingDate || '—' }}</p><el-button @click="payload.performanceInstallments.splice(index,1)">Remove installment {{ index+1 }}</el-button></div>
         </div>

@@ -11,6 +11,7 @@ def issues(payload, ready=False):
         return []
     from .data_integrity import financial_issues
     from datetime import date
+    import re
     result = financial_issues(payload)
     def add(field, label):
         result.append({'field': field, 'label': label})
@@ -50,6 +51,8 @@ def issues(payload, ready=False):
         for i, row in enumerate(rows):
             if not isinstance(row,dict):
                 add('performanceInstallments', 'Invalid installment.');continue
+            if not re.fullmatch(r'[0-9]{4}-(0[1-9]|1[0-2])', str(row.get('performanceMonth', str(row.get('paymentBaseDate') or '')[:7]) or '')):
+                add(f'performanceInstallments.{i}.performanceMonth', 'Each installment requires a Performance Month.')
             raw = row.get('ratio')
             try:
                 ratio = float(raw)
@@ -62,6 +65,8 @@ def issues(payload, ready=False):
             except (TypeError,ValueError):add(f'performanceInstallments.{i}.paymentBaseDate', 'Each installment requires an actual Receipt / Payment Date.')
         if len(ratios)==len(rows) and abs(sum(ratios)-100)>0.000001:
             add('performanceInstallments', 'Installment ratios must total 100%.')
+    if not payload.get('installmentEnabled') and not re.fullmatch(r'[0-9]{4}-(0[1-9]|1[0-2])', str(payload.get('performanceMonth', str(payload.get('receiptPaymentDate') or '')[:7]) or '')):
+        add('performanceMonth', 'Performance Month is required.')
     if payload.get('parentTwRef'):
         for key,label in [('endoEffectiveDate','Endorsement Effective Date'),('endoText','Endorsement Description')]:
             if not str(payload.get(key) or '').strip():add(key,label+' is required.')
@@ -142,8 +147,35 @@ def edit_error(case, payload, body):
         return 'The Reinsurance Type is locked after Announce.'
     if not enabled(old):
         return ''
+    # Production attribution is independent of cash review and settlement.
+    def months(p):
+        if p.get('installmentEnabled'):
+            return {str(r.get('id')): r.get('performanceMonth', str(r.get('paymentBaseDate') or '')[:7]) for r in p.get('performanceInstallments') or [] if isinstance(r, dict)}
+        return {'FULL': p.get('performanceMonth', str(p.get('receiptPaymentDate') or '')[:7])}
+    before, after = months(old), months(payload)
+    changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+    if changed:
+        if old.get('confirmedProductionKeys'):
+            return 'Recognized Oversea Business performance months are locked.'
+        from production.models import ProductionExclusion, ProductionReport
+        if ProductionExclusion.objects.filter(case=case).exists():
+            return 'Resolve existing Production exclusions before changing Performance Month.'
+        destinations = {after[k] for k in changed if after.get(k)}
+        if ProductionReport.objects.filter(status='closed', year_month__in=destinations).exists():
+            return 'A selected Performance Month is already closed.'
+        if not str(body.get('reason') or '').strip():
+            return 'Enter a reason for changing Performance Month.'
+    def without_months(p):
+        import copy
+        p = copy.deepcopy(p)
+        p.pop('performanceMonth', None)
+        for row in p.get('performanceInstallments') or []:
+            if isinstance(row, dict):
+                row.pop('performanceMonth', None)
+        return p
+    old_facts, new_facts = without_months(old), without_months(payload)
     fields = ('currency','classOfBusiness','classCode','reinsured','originalPremium','premiumAdjustment','reinsurers','receiptPaymentDate','ae','installmentEnabled','performanceInstallments')
-    if not any(old.get(k) != payload.get(k) for k in fields):
+    if not any(old_facts.get(k) != new_facts.get(k) for k in fields):
         return ''
     if old.get('confirmedProductionKeys'):
         return 'Recognized Oversea Business facts are locked.'

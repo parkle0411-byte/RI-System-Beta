@@ -120,7 +120,7 @@ export function emptyDraft() {
     situations: [{ clientKey: clientKey(), address: '', postcode: '' }],
     classOfBusiness: '', classCode: '', reinsuranceStructure: '', policyFrom: '', policyFromTime: '12:00', policyTo: '', policyToTime: '12:00', currency: '',
     originalPremium: null, riCommPct: null, taxPct: null, paymentTermsDays: null,
-    installmentEnabled: false, performanceInstallments: [], paymentScheduleReviewRequired: false, paymentEntries: [],
+    installmentEnabled: false, performanceMonth: '', performanceInstallments: [], paymentScheduleReviewRequired: false, paymentEntries: [],
     splitEnabled: false,
     splitParties: [
       { clientKey: clientKey(), personnelId: null, name: '', pct: null },

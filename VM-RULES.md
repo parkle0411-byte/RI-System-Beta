@@ -651,6 +651,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-13 | 舊資料量優化：匯入加速、未結清舊資料每筆只算一次＋逐筆快取、Accounting 畫面處理大量資料 | `backups/legacy_scale_20261113_144820` | `ri-backend:before-legacy-scale-20261113_144820`／`ri-frontend:before-legacy-scale-20261113_144820` | 候選映像 122 組 API（含 `legacy_open_cache` 192 項）、329 項畫面；正式資料 520 個 GET 回應部署前後逐位元組相同；1 萬筆舊資料上正式版與候選版回應逐位元組相同；無 migration、無資料寫入 |
 
+| 11-13 | Oversea Performance Month 獨立設定；新案必填，既有月份保留 | `backups/oversea_performance_20261113_163724` | `ri-backend:before-oversea-performance-20261113_163724`／`ri-frontend:before-oversea-performance-20261113_163724` | 候選映像完整 API 與畫面回歸；無 migration、無正式資料修改 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
