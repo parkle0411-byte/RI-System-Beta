@@ -135,8 +135,7 @@ class AccountingView(NoStoreMixin, APIView):
                     case_rows = []
                     case_warnings = [{"caseUid": c["caseUid"], "twRef": c["twRef"], "issues": schedule["issues"]}] if schedule["reviewRequired"] else []
                     extra_currencies.extend(item["currency"] for item in schedule["items"])
-                    if any(t.get("source") == "claim" for t in _objects(c["payload"].get("transactions"))):
-                        extra_currencies.append(c["currency"])
+                    extra_currencies.extend(t.get('currency') or c['currency'] for t in _objects(c['payload'].get('transactions')) if t.get('source') == 'claim')
                 else:
                     case_rows, case_warnings = ledger_rows([c], now, shared) if c["status"] in LEDGER_STATUSES else ([], [])
                 for item in case_rows:
@@ -157,8 +156,13 @@ class AccountingView(NoStoreMixin, APIView):
                 if stored_all_settled(c["payload"]) and settled_flag_mismatch(c["payload"], shared[c["caseUid"]].details("override")):
                     case_warnings = [*case_warnings, {"caseUid": c["caseUid"], "twRef": c["twRef"], "issues": [SETTLED_FLAG_WARNING]}]
                 stored={t.get('txNo'):t for t in _objects(c['payload'].get('transactions'))}
+                from .claim_currency import original_currency_claim
                 for item in case_transactions:
-                    rate,month,estimated=fx_for_transaction(c['payload'],stored.get(item.get('txNo'),{}),rates,latest)
+                    tx = stored.get(item.get('txNo'), {})
+                    if original_currency_claim(c['payload'], tx):
+                        item.update(fxRate=None, fxMonth='', fxEstimated=False, amountNtd=None, outstandingNtd=None, fxNotApplicable=True)
+                        continue
+                    rate,month,estimated=fx_for_transaction(c['payload'],tx,rates,latest)
                     item.update(fxRate=rate,fxMonth=month,fxEstimated=estimated,
                         amountNtd=None if rate is None else round(float(item['amount'])*rate,2),
                         outstandingNtd=None if rate is None else round(float(item['outstanding'])*rate,2))

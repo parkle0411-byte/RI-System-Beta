@@ -129,6 +129,7 @@ try:
         j = get(fin, M1).json(); rows = mine(j["rows"], c1, c2, c3, c4, c6)
         r1 = by(c1)
         check("c1: one row per reinsurer (single A/E)", [r["id"].split(":", 1)[1] for r in r1] == ["FULL:R0:P0", "FULL:R1:P0"], [r["id"] for r in r1])
+        check('Production rows retain Personnel ID and the case historical AE name', bool(r1) and all(r.get('aePersonnelId') == sales_p.pk and r.get('ae') == c1.payload.get('ae') for r in r1), r1)
         check("c1 figures in NTD at 31.5 (premium 600/400 -> 18900/12600; income 198/208 -> 6237/6552)",
               [(r["premium"], r["income"]) for r in r1] == [(18900, 6237), (12600, 6552)], [(r["premium"], r["income"]) for r in r1])
         check("c1 row fields: rate, currency, comm, policyNo, remark, tranxDate, type", r1[0]["rate"] == 31.5 and r1[0]["currency"] == "USD"

@@ -7,9 +7,9 @@ User = get_user_model()
 PASSWORD = "Ui-Test-Pass-1"
 
 
-def person(name, dept, role, username=None, must_change=False):
+def person(name, dept, role, username=None, must_change=False, **kwargs):
     p = Personnel.objects.create(name=name, department=dept, role_code=role, created_by="seed", updated_by="seed",
-                                 is_split_eligible=dept not in ("finance", "admin"))
+                                 is_split_eligible=dept not in ("finance", "admin"), **kwargs)
     if username:
         u = User.objects.create_user(username=username, password=PASSWORD)
         p.auth_user_id = str(u.pk)
@@ -19,8 +19,10 @@ def person(name, dept, role, username=None, must_change=False):
     return p
 
 
-person("UI Admin", "admin", "admin", "ui.admin")
+person("UI Admin", "admin", "admin", "ui.admin", email="ui.admin@tw-insure.com")
 sales = person("UI Sales", "reinsurance", "sales", "ui.sales")
+person("UI AE One", "reinsurance", "sales", email="ui.ae@tw-insure.com", supervisor_name="UI Boss", supervisor_email="ui.boss@tw-insure.com")
+person("UI Boss", "reinsurance", "general_manager", email="ui.boss@tw-insure.com")
 person("UI Partner", "reinsurance", "sales")
 person("UI Viewer", "business_1", "viewer", "ui.viewer")
 person("UI Finance", "finance", "accounting", "ui.finance")

@@ -30,7 +30,7 @@ def payload(**over):
              originalPremium=1000, riCommPct=0, taxPct=1, paymentTermsDays=90,
              reinsurers=[{'name': 'QA Snapshot Re', 'sharePct': 20, 'premium': 1000, 'riCommPct': 10, 'taxPct': 0, 'paymentTermsDays': 90}],
              deductibles='TWD 1,000', originalConditions='A', reinsuredRetention='Waived', lossAdvisedDate='2026-01-01', lossRecordYears=5,
-             ae=person.name, ownerPersonnelId=person.pk, ownerPersonnelName=person.name)
+             ae=person.name, aePersonnelId=person.pk, ownerPersonnelId=person.pk, ownerPersonnelName=person.name)
     p.update(over); return p
 def snaps(uid, reason=None):
     q = EntitySnapshot.objects.filter(entity_type='case', entity_id=str(uid))

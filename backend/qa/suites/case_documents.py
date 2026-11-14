@@ -60,7 +60,7 @@ real_before = count_files(REAL_ROOT)
 
 try:
     with override_settings(CASE_DOCUMENT_ROOT=ROOT), transaction.atomic():
-        sales_p, gm_p, view_p, acct_p = person("sales", "reinsurance"), person("general_manager", "reinsurance"), person("viewer", "business_1"), person("accounting", "finance")
+        sales_p, gm_p, view_p, acct_p = person("sales", "reinsurance", email="qa-case-documents@example.test"), person("general_manager", "reinsurance"), person("viewer", "business_1"), person("accounting", "finance")
         sales, gm, viewer, acct = account(sales_p, "sales"), account(gm_p, "gm"), account(view_p, "view"), account(acct_p, "acct")
         r = call(sales, "post", "/api/cases", {"case": ready()}); assert r.status_code == 201, r.content
         case = Case.objects.get(case_uid=r.json()["case"]["caseUid"]); uid = str(case.case_uid)

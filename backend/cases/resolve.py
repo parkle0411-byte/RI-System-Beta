@@ -126,8 +126,9 @@ def resolve_case_owner(payload, allowed_historical_id=None):
     owner = Personnel.objects.filter(pk=int(number)).first()
     if owner is None:
         return {"error": "invalid_case_owner", "message": "Case owner must reference an existing Personnel record."}
-    if not owner.is_active and allowed_historical_id != owner.pk:
-        return {"error": "invalid_case_owner", "message": "New case-owner selections must use active Personnel."}
+    from .personnel_identity import eligible
+    if not eligible(owner) and allowed_historical_id != owner.pk:
+        return {"error": "invalid_case_owner", "message": "Select active Reinsurance Staff, General Manager or System Administrator as Case Owner."}
     payload["ownerPersonnelId"] = owner.pk
     payload["ownerPersonnelName"] = owner.name
     return {"id": owner.pk}
@@ -195,6 +196,14 @@ def same_content(a, b):
 
 def resolve_clause_titles(payload):
     """Use the latest MDM Title verbatim; keep selected membership and custom titles."""
+    from .product_recall import scope as recall_scope
+    if recall_scope(payload):
+        from .draft import UNIVERSAL_CLAUSES
+        payload['clauses'] = [row['code'] for row in UNIVERSAL_CLAUSES]
+        payload['clauseDetails'] = [dict(row) for row in UNIVERSAL_CLAUSES]
+        payload['autoClauses'] = []
+        payload['manualClauses'] = []
+        return payload
     from .draft import clause_code
     masters=MasterRecord.objects.filter(entity_type="clause").order_by("-is_active","display_order","id")
     titles={}

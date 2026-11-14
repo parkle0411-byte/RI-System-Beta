@@ -39,7 +39,7 @@ def prop(**over):
              originalPremium=1000, riCommPct=0, taxPct=1, paymentTermsDays=90,
              reinsurers=[{'name': 'QA Amount Re', 'sharePct': 20, 'premium': 1000, 'riCommPct': 10, 'taxPct': 0, 'paymentTermsDays': 90}],
              deductibles='TWD 1,000', originalConditions='A', reinsuredRetention='Waived', lossAdvisedDate='2026-01-01', lossRecordYears=5,
-             ae=person.name, ownerPersonnelId=person.pk, ownerPersonnelName=person.name)
+             ae=person.name, aePersonnelId=person.pk, ownerPersonnelId=person.pk, ownerPersonnelName=person.name)
     p.update(over); return p
 def with_reinsurer(**row):
     p = prop(); p['reinsurers'][0].update(row); return p
@@ -124,7 +124,7 @@ for value in (5, 10 ** 30, 1.5, True, 'abc'):
         check(f'reinsurers={value!r} never causes a server error or a malformed stored list (incomplete={incomplete})',
               r.status_code == 400 or (stored is not None and isinstance(stored.get('reinsurers'), list) and all(isinstance(x, dict) for x in stored['reinsurers']) and not financial_issues(stored)), (r.status_code, r.content[:200]))
 OVERSEA = dict(reinsuranceStructure='OVERSEA', classOfBusiness='Fine Art', classCode='FA', currency='USD', reinsured='QA Amount Cedant',
-               originalPremium=1000, receiptPaymentDate='2026-06-01', ae=person.name, ownerPersonnelId=person.pk, ownerPersonnelName=person.name,
+               originalPremium=1000, receiptPaymentDate='2026-06-01', ae=person.name, aePersonnelId=person.pk, ownerPersonnelId=person.pk, ownerPersonnelName=person.name,
                originalInsured='QA Oversea', originalInsuredCn='海外', policyFrom='2026-01-01', policyTo='2027-01-01',
                reinsurers=[{'name': 'QA Oversea Broker', 'sharePct': 25, 'brokerageAmount': 100}])
 for value in (-1, 1e25, 7, 2.5, 'abc', True):

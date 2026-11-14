@@ -22,7 +22,7 @@ def check(label, condition):
     print('PASS '+label, flush=True)
 
 user=get_user_model().objects.create_user(username='qa.endorsement28',password='Synthetic-Flow-47!')
-person=Personnel.objects.create(name='QA Endorsement Staff',department='reinsurance',role_code='sales',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
+person=Personnel.objects.create(name='QA Endorsement Staff',department='reinsurance',role_code='sales',email='qa-endorsement@example.test',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
 client=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False)
 def call(method,url,body=None):
     client.get('/api/auth/csrf')

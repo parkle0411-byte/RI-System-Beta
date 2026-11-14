@@ -118,6 +118,10 @@ class Case(models.Model):
         related_name="+",
     )
     ae_name_snapshot = models.CharField(max_length=240, null=True, blank=True)
+    ae_personnel = models.ForeignKey(
+        "personnel.Personnel", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="+",
+    )
     owner_personnel = models.ForeignKey(
         "personnel.Personnel",
         null=True,

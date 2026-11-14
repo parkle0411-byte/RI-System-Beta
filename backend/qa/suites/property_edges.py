@@ -132,7 +132,7 @@ with transaction.atomic():
     if response.status_code==200:
         check('updated terms retained in history',e.payload['reinsurers'][0]['paymentTermsDays']==100 and bool(e.payload.get('paymentTermsHistory')))
     # Account Executive and Split may change only before any Production / affected T3 lock.
-    response=update(sales,e,{'ae':owner.name});check('AE change allowed before Production / T3 lock',response.status_code==200,response.content[:700])
+    response=update(sales,e,{'ae':owner.name,'aePersonnelId':owner.pk});check('AE change allowed before Production / T3 lock',response.status_code==200,response.content[:700])
     check('un-split report moves premium and T3 to new AE',all(r['ae']==owner.name for r in preview(e)['rows']))
     check('Split can be enabled after Announce with reason',update(sales,e,{'splitEnabled':True,'splitParties':split}).status_code==200)
     changed=[{**split[0],'pct':70},{**split[1],'pct':30}]

@@ -40,7 +40,7 @@ try:
     client=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False);client.force_login(user)
     def call(method,path,body):
         client.get('/api/auth/csrf');return getattr(client,method)(path,data=json.dumps(body),content_type='application/json',HTTP_X_CSRFTOKEN=client.cookies['csrftoken'].value)
-    base=ready();base['ownerPersonnelId']=person.pk
+    base=ready();base.update(ownerPersonnelId=person.pk,aePersonnelId=person.pk,ae=person.name)
     for structure in ['QS','XOL']:
         for annual in ['missing',None,True,False]:
             p={**base,'reinsuranceStructure':structure}

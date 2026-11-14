@@ -34,7 +34,7 @@ def transaction_rows(cases, shared=None):
                 "originalInsured": original_insured,
                 "originalInsuredCn": original_insured_cn,
                 "reinsured": case["reinsured"],
-                "currency": case["currency"],
+                "currency": tx.get("currency") if tx.get("source") == "claim" and tx.get("currency") else case["currency"],
                 "source": "claim" if tx.get("source") == "claim" else "premium",
                 "reconciliationRef": reconciliation_ref_for(payload, tx),
                 "accountDisplayDate": (loss_dates.get(str(tx.get("claimId")), "")

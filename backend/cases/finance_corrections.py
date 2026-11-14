@@ -12,7 +12,7 @@ def base_no(tx):
 def material(old, new, old_currency, new_currency):
     return (new is None or cents(old.get('amount', 0)) != cents(new.get('amount', 0)) or
             old.get('reinsurer') != new.get('reinsurer') or old.get('reinsurerName') != new.get('reinsurerName') or
-            old_currency != new_currency)
+            (old.get('currency') or old_currency) != (new.get('currency') or new_currency))
 
 
 def review_change_error(case, old, proposed):
@@ -30,7 +30,7 @@ def review_change_error(case, old, proposed):
 def correct_accounts(case, p, old, old_live, expected, old_details, changed, actor, now, reason):
     from .property_original import totals, report_amounts, persist_settlements
     from production.models import ProductionReport
-    if changed & {'ae', 'splitParties', 'splitEnabled', 'installmentEnabled'} and (old.get('confirmedProductionKeys') or any(
+    if changed & {'ae', 'aePersonnelId', 'splitParties', 'splitEnabled', 'installmentEnabled'} and (old.get('confirmedProductionKeys') or any(
             d.get('cashTracking') == 'derived' and d.get('settlement') == 'settled' for d in old_details.values())):
         return 'Account Executive, staff split and installment layout are locked after Production recognition or completed brokerage; use an endorsement.'
     by_base = {base_no(t): t for t in old_live}
@@ -86,7 +86,7 @@ def correct_accounts(case, p, old, old_live, expected, old_details, changed, act
                 period = t.get('installmentId') if old.get('installmentEnabled') else 'FULL'
                 pairs.update((period, i) for i in range(len(objects(old.get('reinsurers')))))
         # Staff/period reshaping is never used to rewrite a recognized distribution.
-        if changed & {'ae', 'splitParties', 'splitEnabled', 'installmentEnabled'} and old.get('confirmedProductionKeys'):
+        if changed & {'ae', 'aePersonnelId', 'splitParties', 'splitEnabled', 'installmentEnabled'} and old.get('confirmedProductionKeys'):
             return 'Keep recognized staff and installment allocations unchanged; use an endorsement.'
         closed_months = set(ProductionReport.objects.filter(status='closed').values_list('year_month', flat=True))
         histories = [h for h in objects(old.get('productionHistory')) if h.get('cycle', 0) == int(old.get('reversalCycle') or 0) and not h.get('isReversal')]

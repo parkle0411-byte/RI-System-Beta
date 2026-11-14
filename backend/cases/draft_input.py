@@ -23,6 +23,7 @@ conditionsPrecedent subjectivities occupation construction lossPayee notices
 specialAgreement ae newOrRenew exchRate remark statementNo coverages
 coveragesOther selfInsuredRetention cglInformation cglAnnual manualClauses
 clauseDetails clauses autoClauses endoEffectiveDate endoTypes endoText coReinsuranceWarranty constructionSelections constructionLegacyText constructionLegacyConfirmed constructionSelectionVersion conveyance voyage attachmentTermination geographicalScope storage stpPremiumRate stpWebsite stpTurnoverMode stpTurnover stpHubs'''.split())
+EDITABLE = EDITABLE | frozenset(('productRecall', 'aePersonnelId', 'aeEmail'))
 
 
 def scope(p, existing=None):
@@ -37,7 +38,7 @@ def scope(p, existing=None):
     structure = str(p.get('reinsuranceStructure') or ('QS' if family else '')).upper()
     if structure != 'QS':
         return False
-    if str(p.get('classOfBusiness') or family or '').strip().casefold() not in ('property', 'commercial general liability', 'stock throughput'):
+    if str(p.get('classOfBusiness') or family or '').strip().casefold() not in ('property', 'commercial general liability', 'stock throughput', 'product recall'):
         return False
     entries = p.get('reinsurers') if isinstance(p.get('reinsurers'), list) else []
     from .swiss_cgl import target as swiss_cgl
@@ -76,14 +77,51 @@ def normalize(p, *, existing=None):
         if key in p and (not isinstance(p[key], list) or len(p[key]) > 500):
             return {'errors': [f'{key} must be a list of at most 500 entries.'], 'value': None}
     raw = {k: copy.deepcopy(v) for k, v in p.items() if k in EDITABLE}
+    from .product_recall import scope as recall_scope, issues as recall_issues
+    if recall_scope(p):
+        problems = recall_issues(p, ready=False)
+        if problems:
+            return {'errors': [issue['label'] for issue in problems], 'value': None}
     if 'endoTypes' in raw and (not isinstance(raw['endoTypes'], list) or len(raw['endoTypes']) > 20 or any(not isinstance(v, str) for v in raw['endoTypes'])):
         return {'errors': ['Endorsement types must be a list of at most 20 text entries.'], 'value': None}
     # Do not permit a malformed container to reach a calculator or resolver.
     for key in ('situations', 'reinsurers', 'sumInsured', 'lossRecord', 'performanceInstallments', 'splitParties', 'stpTurnover', 'stpHubs'):
         if any(not isinstance(r, dict) for r in raw.get(key, [])):
             return {'errors': [f'{key} entries must be objects.'], 'value': None}
+    # Missing history is allowed in a draft, but entered values must be valid.
+    from .cgl_qs import scope as cgl_qs_scope
+    if cgl_qs_scope(p) or recall_scope(p):
+        from .draft import nullable_number
+        from .calc.jsnum import js_to_number
+        history_errors = []
+        years = p.get('lossRecordYears')
+        if years not in (None, ''):
+            nullable_number(years, 'Loss history years', history_errors, min=0, integer=True)
+        dates = [('Loss record advised date', p.get('lossAdvisedDate'))]
+        for i, row in enumerate(p.get('lossRecord') or []):
+            dates.append((f'Loss {i + 1} Date of Loss', row.get('date')))
+            amount = row.get('lossPaid')
+            if amount not in (None, ''):
+                before = len(history_errors)
+                nullable_number(amount, f'Loss {i + 1} Loss Amount', history_errors)
+                if len(history_errors) == before and js_to_number(amount) <= 0:
+                    history_errors.append(f'Loss {i + 1} Loss Amount must be greater than 0.')
+        for label, value in dates:
+            if value in (None, ''):
+                continue
+            try:
+                valid = isinstance(value, str) and bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', value)) and date.fromisoformat(value).year >= 100
+            except ValueError:
+                valid = False
+            if not valid:
+                history_errors.append(f'{label} must use YYYY-MM-DD.')
+        if history_errors:
+            return {'errors': history_errors, 'value': None}
     result = normalize_draft({**p, **raw}, allow_negative_premiums=bool((existing or p).get("parentTwRef")), existing_premiums=existing)
     value = result['value']
+    if recall_scope(value):
+        for key in ('clauses', 'clauseDetails', 'autoClauses', 'manualClauses'):
+            raw[key] = copy.deepcopy(value[key])
     # 2026-11-12：未完成草稿保留使用者輸入的原文（draftInput），但超過金額上限的數字不放進計算用欄位
     #（與無效數字相同，改為空值）；送審時由正式檢查提示「must not exceed」。
     from .data_integrity import AMOUNT_MAX, AMOUNTS

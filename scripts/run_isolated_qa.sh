@@ -65,10 +65,13 @@ for name in "${SUITES[@]}"; do
   [ -s "$f" ] || { printf "  %s%-32s 找不到%s\n" "$RED" "$name" "$OFF"; FAILED=1; continue; }
   fresh_db || { FAILED=1; break; }
   envs=(); [ "$name" = auth_permissions ] && envs=(-e RI_LOGIN_THROTTLE=10/min)   # 這組要驗證預設的登入限流
-  out=$(docker exec -i "${envs[@]}" ri-isoqa-backend python manage.py shell < "$f" 2>&1 | grep -v -i "warn\|imported auto")
+  # Preserve all test output: a failing check may itself contain the word
+  # "warning", and filtering that line would incorrectly report a pass.
+  out=$(docker exec -i "${envs[@]}" ri-isoqa-backend python manage.py shell < "$f" 2>&1)
+  test_status=$?
   [ -n "${QA_BACKEND_IMAGE:-}" ] && rm -f "$f"
   line=$(grep -E "passed" <<<"$out" | head -1)
-  if [ -n "$line" ] && ! grep -q "^FAIL" <<<"$out"; then printf "  %s%-32s %s%s\n" "$GREEN" "$name" "$line" "$OFF"
+  if [ "$test_status" -eq 0 ] && [ -n "$line" ] && ! grep -q "^FAIL" <<<"$out"; then printf "  %s%-32s %s%s\n" "$GREEN" "$name" "$line" "$OFF"
   else printf "  %s%-32s 失敗%s\n" "$RED" "$name" "$OFF"; grep -E "^FAIL|Error|assert" <<<"$out" | tail -6 | cut -c1-240 | sed 's/^/      /'; FAILED=1; fi
 done
 echo

@@ -5,7 +5,7 @@ import { RICaseCalculations } from '../alpha/caseCalculations'
 import { formatMoney } from '../alpha/format'
 import DraftNumber from './DraftNumber.vue'
 import DraftDate from './DraftDate.vue'
-const emit = defineEmits(['policy-from-time-change'])
+const emit = defineEmits(['policy-from-time-change', 'ae-change', 'owner-change'])
 const props = defineProps({payload:{type:Object,required:true},brokers:{type:Array,default:()=>[]},cedants:{type:Array,default:()=>[]},aes:{type:Array,default:()=>[]}})
 const periods=computed(()=>overseaPeriods(props.payload))
 const addPeriod=()=>{props.payload.performanceInstallments ||= [];props.payload.performanceInstallments.push({id:'I'+Date.now()+'-'+Math.random().toString(36).slice(2,8),ratio:null,premium:null,paymentBaseDate:'',performanceMonth:''})}
@@ -18,9 +18,10 @@ function togglePeriods(enabled) {
 <template>
   <section class="overview-card" data-testid="oversea-business-form">
     <div class="form-grid cols-3">
+      <el-form-item label="Case Owner" required><el-select v-model="payload.ownerPersonnelId" filterable clearable @change="emit('owner-change',$event)"><el-option v-if="payload.ownerPersonnelId &amp;&amp; !aes.some(item => item.id === payload.ownerPersonnelId)" :label="payload.ownerPersonnelName + ' (historical)'" :value="payload.ownerPersonnelId" disabled /><el-option v-for="item in aes" :key="item.id" :label="item.name + ' — ' + item.department" :value="item.id" /></el-select></el-form-item>
       <el-form-item label="Insured (EN)" required><el-input v-model="payload.originalInsured" maxlength="240" /></el-form-item>
       <el-form-item label="Insured (CN)" required><el-input v-model="payload.originalInsuredCn" maxlength="240" /></el-form-item>
-      <el-form-item label="Account Executive" required><el-select v-model="payload.ae" filterable clearable><el-option v-for="item in aes" :key="item.id" :label="item.name" :value="item.name" /></el-select></el-form-item>
+      <el-form-item label="Account Executive" required><el-select v-model="payload.aePersonnelId" :placeholder="payload.ae ? payload.ae + ' (historical)' : 'Select Account Executive'" filterable clearable @change="emit('ae-change',$event)"><el-option v-if="payload.aePersonnelId &amp;&amp; !aes.some(item => item.id === payload.aePersonnelId)" :label="payload.ae + ' (historical)'" :value="payload.aePersonnelId" disabled /><el-option v-for="item in aes" :key="item.id" :label="item.name + ' — ' + item.department" :value="item.id" /></el-select></el-form-item>
       <el-form-item label="Policy Period" required style="grid-column:1 / -1"><div class="form-grid cols-2" style="width:100%">
         <div><span>Effective Date</span><div class="policy-date-time"><DraftDate v-model="payload.policyFrom" :disabled="!!payload.parentTwRef" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" aria-label="Policy effective date" /><el-select v-model="payload.policyFromTime" :disabled="!!payload.parentTwRef" @change="emit('policy-from-time-change',$event)" aria-label="Policy effective time"><el-option label="12:00" value="12:00" /><el-option label="00:00" value="00:00" /></el-select></div></div>
         <div><span>Expiration Date</span><div class="policy-date-time"><DraftDate v-model="payload.policyTo" :disabled="!!payload.parentTwRef" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" aria-label="Policy expiration date" /><el-select v-model="payload.policyToTime" :disabled="!!payload.parentTwRef" aria-label="Policy expiration time"><el-option label="12:00" value="12:00" /><el-option label="00:00" value="00:00" /></el-select></div></div>

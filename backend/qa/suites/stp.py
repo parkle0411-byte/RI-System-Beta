@@ -25,7 +25,7 @@ p={'classCode':'ST','classOfBusiness':'Stock Throughput','reinsuranceStructure':
 class Rollback(Exception): pass
 try:
  with transaction.atomic():
-  person=Personnel.objects.create(name='STP QA',department='reinsurance',role_code='sales',created_by='qa',updated_by='qa')
+  person=Personnel.objects.create(name='STP QA',email='stp-qa@example.test',department='reinsurance',role_code='sales',created_by='qa',updated_by='qa')
   Personnel.objects.create(name='STP AE',department='reinsurance',role_code='sales',email='stp-ae@example.test',created_by='qa',updated_by='qa')
   user=get_user_model().objects.create_user(username='stp.qa',password='Case-Test-Pass-1')
   person.auth_user_id=str(user.pk);person.account_status='active';person.save();p['ownerPersonnelId']=person.pk;p['ownerPersonnelName']=person.name

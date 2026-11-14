@@ -34,9 +34,9 @@ from .calc.jsnum import (
 )
 from .models import Case
 
-ACTIONS = ("create_claim", "update_reserve", "record_payment", "correct_payment")
-AUDIT_ACTIONS = {"create_claim": "create_claim", "update_reserve": "update_claim_reserve", "record_payment": "record_claim_payment", "correct_payment": "correct_claim_payment"}
-SNAPSHOT_REASONS = {"create_claim": "claim_created", "update_reserve": "claim_reserve_updated", "record_payment": "claim_payment_recorded", "correct_payment": "claim_payment_corrected"}
+ACTIONS = ("create_claim", "update_reserve", "update_loss_date", "update_cause", "update_currency", "record_payment", "correct_payment")
+AUDIT_ACTIONS = {"create_claim": "create_claim", "update_reserve": "update_claim_reserve", "update_loss_date": "update_claim_loss_date", "update_cause": "update_claim_cause", "update_currency": "update_claim_currency", "record_payment": "record_claim_payment", "correct_payment": "correct_claim_payment"}
+SNAPSHOT_REASONS = {"create_claim": "claim_created", "update_reserve": "claim_reserve_updated", "update_loss_date": "claim_loss_date_updated", "update_cause": "claim_cause_updated", "update_currency": "claim_currency_updated", "record_payment": "claim_payment_recorded", "correct_payment": "claim_payment_corrected"}
 _DATE_SHAPE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
 
@@ -117,6 +117,7 @@ def _split_source(root, chain, loss_date=None):
 
 def claims_view(root, chain):
     payload = _payload(root)
+    from .claim_loss_record import claim_loss_rows
     split = _split_source(root, chain)
     split_reinsurers = _payload(split).get("reinsurers")
     from .accounting_rules import objects, settled_once
@@ -136,6 +137,7 @@ def claims_view(root, chain):
         "rootRowVersion": root.row_version,
         "currency": js_or(payload.get("currency"), ""),
         "claims": display_claims,
+        "claimLossRecord": claim_loss_rows(payload, root.tw_ref, root.case_uid),
         "correctionHistory": payload.get("claimCorrectionHistory") or [],
         "splitSource": {
             "caseUid": str(split.case_uid), "twRef": split.tw_ref or "", "status": split.status,
@@ -218,15 +220,21 @@ class ClaimsView(NoStoreMixin, APIView):
 
         if action == "create_claim":
             data = body.get("claim")
+            from .claim_currency import CURRENCIES, multi_currency_scope, valid_amount
+            chosen_currency = str(get(data, 'currency') if not is_nullish(get(data, 'currency')) else '').strip().upper()
+            if not chosen_currency:
+                chosen_currency = str(payload.get('currency') or '').strip().upper()
+            if multi_currency_scope(payload) and chosen_currency not in CURRENCIES:
+                return _error(400, 'invalid_claim_currency', 'Select an available Claim currency.')
             date_of_loss = clean_text(get(data, "dateOfLoss"), 20)
             if not _real_date(date_of_loss):
                 return _error(400, "invalid_date_of_loss", "Enter the Date of Loss as a valid date (YYYY-MM-DD).")
             reserve = _parse_amount(get(data, "outstandingReserve"))
-            if reserve is None or reserve < 0:
-                return _error(400, "invalid_claim_reserve", "Outstanding Reserve must be a number of zero or more.")
+            if reserve is None or reserve <= 0:
+                return _error(400, "invalid_claim_reserve", "Enter an Outstanding Reserve greater than zero.")
             reserve = money(reserve)
-            if not js_is_finite(reserve):
-                return _error(400, "invalid_claim_reserve", "Outstanding Reserve must remain finite after rounding.")
+            if not js_is_finite(reserve) or reserve <= 0:
+                return _error(400, "invalid_claim_reserve", "Outstanding Reserve must be greater than zero after rounding.")
             claim = {
                 "id": _id_out(_next_id(payload["claims"])),
                 "lossNo": clean_text(get(data, "lossNo"), 160),
@@ -235,24 +243,100 @@ class ClaimsView(NoStoreMixin, APIView):
                 "outstandingReserve": reserve,
                 "payments": [],
             }
+            if multi_currency_scope(payload):
+                if not valid_amount(get(data, 'outstandingReserve'), chosen_currency):
+                    return _error(400, 'invalid_claim_precision', 'The reserve has too many decimal places for the Claim currency.')
+                claim['currency'] = chosen_currency
             payload["claims"].append(claim)
         else:
             claim_id = js_to_number(body.get("claimId", UNDEFINED))
             claim = next((c for c in payload["claims"] if js_to_number(get(c, "id")) == claim_id), None)
             if claim is None:
                 return _error(404, "claim_not_found", "Claim was not found.")
-            if action == "update_reserve":
+            if action == "update_currency":
+                from .claim_currency import CURRENCIES, claim_currency, multi_currency_scope, valid_amount
+                from .accounting_rules import objects, settled_once
+                from .finance_workflow import active_reviews
+                new_currency = clean_text(body.get('currency'), 3).upper()
+                if not multi_currency_scope(payload) or new_currency not in CURRENCIES:
+                    return _error(400, 'invalid_claim_currency', 'Select an available Claim currency.')
+                old_currency = claim_currency(payload, claim)
+                payments = objects(claim.get('payments'))
+                reason = clean_text(body.get('reason'), 1000)
+                if payments and not reason:
+                    return _error(400, 'correction_reason_required', 'Enter the reason for changing the Claim currency.')
+                if not valid_amount(claim.get('outstandingReserve'), new_currency) or any(not valid_amount(p.get('amount'), new_currency) for p in payments):
+                    return _error(400, 'invalid_claim_precision', 'The reserve or an obligation has too many decimal places for the new Claim currency.')
+                affected = [t for t in objects(payload.get('transactions')) if t.get('source') == 'claim' and t.get('claimId') == claim.get('id')]
+                numbers = {t.get('txNo') for t in affected}
+                if any(e.get('transactionNo') in numbers for e in objects(payload.get('paymentEntries'))) or any(settled_once(payload, no) for no in numbers) or any(t.get('reversed') or t.get('isReversalEntry') for t in affected):
+                    return _error(409, 'claim_currency_locked', 'Claim currency is locked because the Claim has receipt, payment, offset, settlement or reversal history.')
+                reviews = active_reviews({str(root.case_uid)})
+                if any((str(root.case_uid), no) in reviews for no in numbers):
+                    return _error(409, 'review_batch_locked', 'Cancel the related Finance review batch before changing the Claim currency.')
+                before = json_roundtrip(affected)
+                claim['currency'] = new_currency
+                rebuilt = {}
+                for payment in payments:
+                    source = payment.get('splitSource')
+                    if not isinstance(source, dict) or not isinstance(source.get('reinsurers'), list):
+                        return _error(409, 'claim_split_missing', 'The saved obligation split is unavailable. Correct the saved Claim data before changing currency.')
+                    for tx in build_claim_payment_transactions({**payload, 'twRef': root.tw_ref}, source, claim, payment):
+                        rebuilt[tx['txNo']] = tx
+                if payments and (not affected or set(rebuilt) != numbers):
+                    return _error(409, 'claim_transactions_incomplete', 'The Claim transactions do not match its saved obligations.')
+                for tx in affected:
+                    tx['amount'] = rebuilt[tx['txNo']]['amount']
+                    tx['currency'] = new_currency
+                actor = actor_from(request.ri_principal)
+                claim.setdefault('currencyHistory', []).append({'before': old_currency, 'after': new_currency,
+                    'reason': reason, 'changedAt': timezone.now().isoformat(), 'changedBy': actor['id'], 'changedByName': actor.get('name', ''),
+                    'transactionsBefore': before, 'transactionsAfter': json_roundtrip(affected)})
+            elif action == "update_loss_date":
+                new_date = clean_text(body.get("dateOfLoss"), 20)
+                reason = clean_text(body.get("reason"), 1000)
+                if not _real_date(new_date):
+                    return _error(400, "invalid_date_of_loss", "Enter the Date of Loss as a valid date (YYYY-MM-DD).")
+                if not reason:
+                    return _error(400, "correction_reason_required", "Enter the reason for changing the Date of Loss.")
+                if new_date != claim.get("dateOfLoss"):
+                    actor = actor_from(request.ri_principal)
+                    claim.setdefault("lossDateHistory", []).append({
+                        "before": claim.get("dateOfLoss") or "", "after": new_date,
+                        "reason": reason, "changedAt": timezone.now().isoformat(),
+                        "changedBy": actor["id"], "changedByName": actor.get('name', ''),
+                    })
+                    claim["dateOfLoss"] = new_date
+            elif action == "update_cause":
+                if not isinstance(body.get("causeOfLoss"), str) or len(body["causeOfLoss"]) > 2000:
+                    return _error(400, "invalid_cause", "Enter a valid Cause of Loss.")
+                cause = clean_text(body["causeOfLoss"], 2000)
+                if cause != (claim.get("causeOfLoss") or ""):
+                    actor = actor_from(request.ri_principal)
+                    claim.setdefault("causeHistory", []).append({
+                        "before": claim.get("causeOfLoss") or "", "after": cause,
+                        "changedAt": timezone.now().isoformat(),
+                        "changedBy": actor["id"], "changedByName": actor.get("name", ""),
+                    })
+                    claim["causeOfLoss"] = cause
+            elif action == "update_reserve":
                 reserve = _parse_amount(body.get("outstandingReserve"))
                 if reserve is None or reserve < 0:
                     return _error(400, "invalid_claim_reserve", "Outstanding Reserve must be a number of zero or more.")
                 reserve = money(reserve)
                 if not js_is_finite(reserve):
                     return _error(400, "invalid_claim_reserve", "Outstanding Reserve must remain finite after rounding.")
+                from .claim_currency import valid_amount
+                if claim.get('currency') and not valid_amount(body.get('outstandingReserve'), claim['currency']):
+                    return _error(400, 'invalid_claim_precision', 'The reserve has too many decimal places for the Claim currency.')
                 claim["outstandingReserve"] = reserve
             else:
                 data = body.get("payment")
                 # 理賠付款可以是負數（追償、自負額沖抵等，2026-09-25 確認），只拒絕 0 與看不懂的輸入
                 amount = _parse_amount(get(data, "amount"))
+                from .claim_currency import valid_amount
+                if claim.get('currency') and not valid_amount(get(data, 'amount'), claim['currency']):
+                    return _error(400, 'invalid_claim_precision', 'The obligation has too many decimal places for the Claim currency.')
                 amount = money(amount) if amount is not None else 0
                 if not amount or not js_is_finite(amount):
                     return _error(400, "payment_amount_required", "Enter a non-zero payment amount.")

@@ -279,6 +279,9 @@ class MasterDataView(NoStoreMixin, APIView):
         code = clean_text(body.get("code"), 80).upper()
         name = clean_text(body.get("name"), 240)
 
+        if entity_type == 'ae':
+            return Response({'error':'ae_master_read_only', 'message':'Account Executive master data is historical. Select Personnel in the Case instead.'}, status=409)
+
         if entity_type not in ALLOWED_TYPES:
             return Response(
                 {"error": "invalid_entity_type", "message": "Select AE, Reinsurer, Reinsured, Class, Foreign RI Broker, or Clause."},
@@ -380,6 +383,8 @@ class MasterDataView(NoStoreMixin, APIView):
 
             if current.entity_type != entity_type:
                 return Response({"error": "type_immutable", "message": "Master-data type cannot be changed."}, status=400)
+            if current.entity_type == 'ae':
+                return Response({'error':'ae_master_read_only', 'message':'Account Executive master data is historical. Select Personnel in the Case instead.'}, status=409)
 
             current_code_upper = (current.code or "").upper()
             if entity_type == "clause" and current_code_upper in UNIVERSAL_CLAUSE_CODES:

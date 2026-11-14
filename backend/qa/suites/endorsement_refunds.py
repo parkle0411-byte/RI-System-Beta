@@ -21,7 +21,7 @@ def check(name,condition):
     assert condition,name
     checks.append(name); print('PASS '+name,flush=True)
 user=get_user_model().objects.create_user(username='zz.refunds.api',password='Refund-API-Password-9!')
-person=Personnel.objects.create(name='QA Refund AE',department='admin',role_code='admin',auth_user_id=str(user.pk),
+person=Personnel.objects.create(name='QA Refund AE',department='admin',role_code='admin',email='qa-refund@example.test',auth_user_id=str(user.pk),
     account_status='active',created_by='qa',updated_by='qa')
 c=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False)
 def call(method,url,body=None):

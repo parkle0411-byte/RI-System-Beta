@@ -7,7 +7,7 @@
 // 與 Alpha 不同的地方（都記在 VM-RULES.md）：
 //   - fetch() → apiFetch()（補上 CSRF 與同源 cookie）
 //   - 預設月份是「台北時間的上個月」（Alpha 用 UTC）
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import JSZip from 'jszip'
 import '../alpha/production-xlsx.js'
@@ -25,11 +25,20 @@ function previousMonth() {
 const productionLoading = ref(false)
 const productionSaving = ref('')
 const productionMonth = ref(previousMonth())
+const aeFilter = ref(null)
 const productionPreview = ref({
   headers: [], rows: [], excluded: [], versions: [], sourceSignature: '',
   summary: { rowCount: 0, excludedRowCount: 0, premiumNtd: 0, incomeNtd: 0, missingRateCurrencies: [] },
   scope: { readOnly: false, canOperate: false, canClose: false, monthClosed: false, fxLocked: false, canGenerate: false, canCloseLatest: false }
 })
+const aeOptions = computed(() => {
+  const people = new Map()
+  for (const row of productionPreview.value.rows || []) {
+    if (row.aePersonnelId && !people.has(row.aePersonnelId)) people.set(row.aePersonnelId, row.ae || 'Unnamed')
+  }
+  return [...people].map(([id, name]) => ({id, label: `${name} · Personnel ${id}`}))
+})
+const displayedRows = computed(() => aeFilter.value == null || aeFilter.value === '' ? productionPreview.value.rows || [] : (productionPreview.value.rows || []).filter(row => row.aePersonnelId === aeFilter.value))
 
 async function loadProductionPreview() {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(productionMonth.value || ''))) {
@@ -136,7 +145,9 @@ onMounted(loadProductionPreview)
         <article><span>Income (NTD)</span><strong>{{ formatCurrency(productionPreview.summary?.incomeNtd, 'TWD') }}</strong></article>
       </div>
       <div class="production-table-wrap">
-        <el-table :data="productionPreview.rows || []" class="production-table" row-key="id" empty-text="No eligible Production Report rows for this month.">
+        <el-select v-model="aeFilter" clearable filterable placeholder="Filter by Account Executive" aria-label="Filter by Account Executive" style="max-width: 300px; margin-bottom: 10px"><el-option v-for="person in aeOptions" :key="person.id" :label="person.label" :value="person.id" /></el-select>
+        <span v-if="aeFilter != null &amp;&amp; aeFilter !== ''" class="document-help">Filter applies to the preview; report totals and Excel include all rows.</span>
+        <el-table :data="displayedRows" class="production-table" row-key="id" empty-text="No eligible Production Report rows for this month.">
           <el-table-column prop="originalInsured" label="Original Insured" width="210"></el-table-column>
           <el-table-column prop="reinsured" label="Reinsured" width="190"></el-table-column>
           <el-table-column prop="reinsurer" label="Reinsurer / RI Broker" width="210"></el-table-column>

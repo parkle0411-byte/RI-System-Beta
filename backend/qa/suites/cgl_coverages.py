@@ -55,7 +55,7 @@ try:
 
         response = call('post', '/api/auth/login', dict(username=user.username, password='CGL-QA-only-9!'))
         assert response.status_code == 200, response.content
-        base = ready(); base['ownerPersonnelId'] = person.pk
+        base = ready(); base.update(ownerPersonnelId=person.pk, aePersonnelId=person.pk, ae=person.name)
         for structure in ['QS', 'XOL']:
             p = {**base, 'reinsuranceStructure': structure, 'underlyingLimits': 'USD500,000'}
             value = normalize_draft(p)['value']

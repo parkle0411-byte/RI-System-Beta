@@ -175,7 +175,14 @@ class AnnounceView(NoStoreMixin, APIView):
             return Response(personnel_error,status=400)
         if "error" in owner_error:
             return Response(owner_error,status=400)
+        from .personnel_identity import resolve_ae
+        ae_result = resolve_ae(payload, current=current)
+        if 'error' in ae_result:
+            return Response(ae_result, status=400)
         issues = validate_announce_ready(payload, allow_zero_loss_years=True, case_kind=current.case_kind)
+        from .personnel_identity import ae_email
+        if not ae_email(payload):
+            issues.append({'field': 'aeEmail', 'label': 'Account Executive must have a valid Email.'})
         if current.case_kind == "renewal":
             issues.extend(renewal_installment_issues(payload))
         if issues:
@@ -290,6 +297,7 @@ class AnnounceView(NoStoreMixin, APIView):
         current.announced_by = actor_info["id"]
         current.announced_at = now
         payload["financeWorkflowVersion"] = 1
+        current.ae_name_snapshot = payload.get('ae') or None
         current.payload = payload
         current.updated_by = actor_info["id"]
         current.save()
@@ -431,6 +439,11 @@ class WorkflowView(NoStoreMixin, APIView):
             return _error(409, "manual_reference_conflict", ref_error)
         if errors:
             return _error(400, "validation_failed", errors[0], errors=errors)
+        from .personnel_identity import assign_creator
+        try:
+            assign_creator(payload, request.ri_principal)
+        except ValueError as exc:
+            return _error(403, 'draft_creator_ineligible', str(exc))
         case_uid = uuid.uuid4()
         created = self._insert_child(source, case_uid, "endorsement", root.pk, payload, actor_info,
                                      source.effective_date, source.expiration_date)
@@ -471,6 +484,11 @@ class WorkflowView(NoStoreMixin, APIView):
             return _error(409, "renewal_already_exists",
                           "A renewal already exists for this case, or the source case changed. Reload and try again.")
         payload = wf.build_renewal_payload(_payload(source), source.tw_ref)
+        from .claim_loss_record import renewal_claim_snapshots
+        inherited = payload.get('claimLossSnapshots') if isinstance(payload.get('claimLossSnapshots'), list) else []
+        seen_claims = {(str(row.get('sourceCaseUid')), str(row.get('claimId'))) for row in inherited if isinstance(row, dict)}
+        snapshots = renewal_claim_snapshots(_payload(root), root.tw_ref, root.case_uid)
+        payload['claimLossSnapshots'] = inherited + [row for row in snapshots if (str(row.get('sourceCaseUid')), str(row.get('claimId'))) not in seen_claims]
         from .facility_rules import prepare_new_draft
         payload = prepare_new_draft(payload)
         from .renewal_premiums import seed_renewal_premiums
@@ -484,6 +502,11 @@ class WorkflowView(NoStoreMixin, APIView):
             return _error(409, "manual_reference_conflict", ref_error)
         if errors:
             return _error(400, "validation_failed", errors[0], errors=errors)
+        from .personnel_identity import assign_creator
+        try:
+            assign_creator(payload, request.ri_principal)
+        except ValueError as exc:
+            return _error(403, 'draft_creator_ineligible', str(exc))
         case_uid = uuid.uuid4()
         created = self._insert_child(source, case_uid, "renewal", None, payload, actor_info,
                                      payload["policyFrom"] or None, payload["policyTo"] or None)
@@ -518,9 +541,9 @@ class WorkflowView(NoStoreMixin, APIView):
             class_master_id=source.class_master_id, class_code_snapshot=source.class_code_snapshot,
             class_name_snapshot=source.class_name_snapshot,
             reinsured_master_id=source.reinsured_master_id, reinsured_name_snapshot=source.reinsured_name_snapshot,
-            ae_master_id=source.ae_master_id, ae_name_snapshot=source.ae_name_snapshot,
+            ae_master_id=None, ae_personnel_id=payload['aePersonnelId'], ae_name_snapshot=payload.get('ae') or None,
             currency=source.currency, effective_date=effective_date, expiration_date=expiration_date,
-            payload=payload, owner_personnel_id=source.owner_personnel_id,
+            payload=payload, owner_personnel_id=payload['ownerPersonnelId'],
             created_by=actor_info["id"], updated_by=actor_info["id"],
         )
 

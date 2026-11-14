@@ -28,7 +28,7 @@ try:
   users={}
   for role,dept in [('sales','reinsurance'),('accounting_manager','finance')]:
    u=get_user_model().objects.create_user(username='qa.effective.'+role,password='Synthetic-Only-9!')
-   p=Personnel.objects.create(name='QA Effective '+role,department=dept,role_code=role,auth_user_id=str(u.pk),account_status='active',is_split_eligible=True,created_by='qa',updated_by='qa')
+   p=Personnel.objects.create(name='QA Effective '+role,email='qa-effective-'+role+'@example.test',department=dept,role_code=role,auth_user_id=str(u.pk),account_status='active',is_split_eligible=True,created_by='qa',updated_by='qa')
    users[role]=(u,p)
   factory=APIRequestFactory()
   def api(view,method,body,role='sales'):

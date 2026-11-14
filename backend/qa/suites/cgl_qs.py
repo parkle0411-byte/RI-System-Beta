@@ -15,7 +15,7 @@ def check(name,ok,detail=''):
     assert ok,(name,detail)
     checks.append(name)
 def ready(person):
-    return dict(ownerPersonnelId=person.pk,ae=person.name,classOfBusiness='Commercial General Liability',classCode='GL',reinsuranceStructure='QS',
+    return dict(ownerPersonnelId=person.pk,aePersonnelId=person.pk,ae=person.name,classOfBusiness='Commercial General Liability',classCode='GL',reinsuranceStructure='QS',
         typePrefix='Commercial General Liability',currency='USD',newOrRenew='New',reinsured='QA Cedant',originalInsured='QA Insured',originalInsuredCn='測試被保險人',
         policyFrom='2026-01-01',policyTo='2027-01-01',situations=[dict(address='Synthetic test road',postcode='')],interest='Reinsurance of original liability.',
         limitOfLiability=1000000,aggregateLimit=5000000,deductibles='As original',originalConditions='As original',reinsuredRetention='Advice waived',originalExclusions='',
@@ -53,6 +53,8 @@ try:
         'transactions':[{'txNo':'FORGED'}],'claims':[{'id':'FORGED'}],'paymentEntries':[{'amount':999}],
         'reinsurers':[dict(name='Berkley Insurance Company',sharePct='120',premium='-',paymentTermsDays='1.5')],
         'installmentEnabled':True,'performanceInstallments':[dict(id='I1',paymentBaseDate='unfinished',performanceMonth='20',premium='-',paymentTermsDays='0',reinsurerPaymentTerms={'r1':'ten'})]}
+    r=update(case,bad);check('invalid loss history is rejected on save',r.status_code==400,r.content[:700])
+    bad['lossRecordYears']=''
     r=update(case,bad);check('invalid and unfinished fields save',r.status_code==200,r.content[:700]);case.refresh_from_db()
     saved=case.payload['draftInput']
     for key in ['originalPremium','policyFrom','lossRecordYears','situations','reinsurers','performanceInstallments']:
@@ -105,10 +107,13 @@ try:
         check('old reference does not bypass revised draft validation '+kind,r.status_code==409 and r.json()['error']=='draft_announcement_required',r.content[:500])
     Case.objects.filter(pk=case.pk).update(tw_ref=None)
     ids=docs(case)
-    r=call('post','/api/case-announce',dict(caseUid=str(case.case_uid),rowVersion=case.row_version,confirmed=True,documentIds=ids));check('Announce accepts no AE Email',r.status_code==200,r.content[:700]);case.refresh_from_db()
+    r=call('post','/api/case-announce',dict(caseUid=str(case.case_uid),rowVersion=case.row_version,confirmed=True,documentIds=ids));check('Announce requires AE Email',r.status_code==400 and any(i['field']=='aeEmail' for i in r.json().get('issues',[])),r.content[:700])
+    person.email='qa@example.invalid';person.save()
+    r=call('post','/api/case-announce',dict(caseUid=str(case.case_uid),rowVersion=case.row_version,confirmed=True,documentIds=ids));check('Announce accepts valid AE Email',r.status_code==200,r.content[:700]);case.refresh_from_db()
     check('Announce creates current accounting T1/T2/T3',len(case.payload.get('transactions') or [])==3)
     check('formal case has no draft input metadata','draftInput' not in case.payload and 'pendingClause' not in case.payload)
-    r=call('post','/api/document-generation-log',dict(caseUid=str(case.case_uid),kind='cover',format='docx'));check('AE Email required only at document stage',r.status_code==409 and r.json()['error']=='ae_email_required',r.content[:500])
+    person.email='';person.save()
+    r=call('post','/api/document-generation-log',dict(caseUid=str(case.case_uid),kind='cover',format='docx'));check('Document requires the current Personnel Email',r.status_code==409 and r.json()['error']=='ae_email_required',r.content[:500])
     person.email='qa@example.invalid';person.save()
     for kind in ['cover','debit']:
         r=call('post','/api/document-generation-log',dict(caseUid=str(case.case_uid),kind=kind,format='docx'));check('document accepted '+kind,r.status_code==204,r.content[:700])

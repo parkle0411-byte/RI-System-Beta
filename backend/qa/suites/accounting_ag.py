@@ -49,6 +49,7 @@ with transaction.atomic():
  try:
   serial=0;month=timezone.localtime().strftime('%Y-%m')
   staff=person('sales','reinsurance',name='AG Executive',email='ae@ag.test',supervisor_email='supervisor@ag.test',is_split_eligible=True)
+  supervisor=person('general_manager','reinsurance',name='AG Supervisor',email='supervisor@ag.test')
   accountant=person('accounting','finance',name='AG Accountant',email='finance@ag.test')
   manager=person('accounting_manager','finance',name='AG Manager',email='manager@ag.test')
   viewer=person('viewer','business_1',name='AG Viewer')
@@ -182,7 +183,7 @@ with transaction.atomic():
     check(name+' reminder weekly overdue',run_payment(add_calendar_days(due,7))['sent']>=1)
     check(name+' duplicate reminder blocked',run_payment(add_calendar_days(due,7))['sent']==0)
    # Partial recipient delivery is visible in the reminder page even if Audit is paused.
-  missing=resolve_recipients({'ae':staff.name},[{'name':staff.name,'email':staff.email,'supervisor_email':''}],[accountant.email])
+  missing=resolve_recipients({'aePersonnelId':staff.pk},[{'id':staff.pk,'name':staff.name,'email':staff.email,'supervisor_email':''}],[accountant.email])
   check('Valid recipients retained when supervisor email missing',set(missing['recipients'])=={staff.email,accountant.email} and bool(missing['missing']) and 'error' not in missing)
   check('Finance managers excluded from reminder recipient role',finance_emails([{'role_code':'accounting','email':accountant.email},{'role_code':'accounting_manager','email':manager.email}])==[accountant.email])
   raise Rollback()

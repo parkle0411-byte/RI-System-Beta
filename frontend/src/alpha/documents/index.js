@@ -5,8 +5,9 @@ import { premiumPeriodAmounts } from '../lib/accounting.js'
 import JSZip from 'jszip'
 import { propertyEnabled, propertyTotals, propertyMoney, propertyPeriodAllocate, perReinsurer } from '../propertyOriginal.js'
 import { apiFetch } from '../../api'
-import { isStandardCgl, cglInformationRows } from '../cglInformation'
+import { isStandardCgl, cglInformationRows, cglTurnoverDocumentText } from '../cglInformation'
 import { CGL_TYPE_PREFIXES, cglTypePrefix, cglType, cglCoveragesText } from '../cglRiskDetails'
+import { recallScope } from '../productRecall'
 
 // Load shared templates before the current VM Word generator.
 const SCRIPTS = ['docx-templates.js', 'vm-docx-generator.js']
@@ -14,7 +15,7 @@ const SCRIPTS = ['docx-templates.js', 'vm-docx-generator.js']
 function addScript(name) {
   return new Promise((resolve, reject) => {
     const el = document.createElement('script')
-    el.src = `${import.meta.env.BASE_URL}alpha-documents/${name}?v=cgl-aggregate-retroactive-20261029`
+    el.src = `${import.meta.env.BASE_URL}alpha-documents/${name}?v=product-recall-20261113`
     el.async = false
     el.onload = resolve
     el.onerror = () => { el.remove(); reject(new Error('Document generator could not be loaded.')) }
@@ -65,8 +66,9 @@ export async function generateDocx(kind, documentCase) {
     documentCase={...documentCase,propertyInstallmentNet:perReinsurer(documentCase) ? premiumPeriodAmounts(documentCase).map(r=>r.leg1) : propertyPeriodAllocate(exact.leg1,installmentWeights,documentCase),propertyFinancials:{order:exact.order,originalPremium:propertyMoney(documentCase.originalPremium,documentCase),
       cededPremium:exact.cedantPremium,commission:exact.cedantCommission,tax:exact.cedantTax,netDue:exact.leg1,t1s:[exact.leg1]}}
   }
-  const renderCase = kind === 'cover' && isStandardCgl(documentCase)
-    ? { ...documentCase, cglInformationRows: cglInformationRows(documentCase), cglCoveragesText: cglCoveragesText(documentCase) } : documentCase
+  const qsCover = ['QS', 'FACULTATIVE'].includes(String(documentCase?.reinsuranceStructure || '').toUpperCase())
+  const renderCase = kind === 'cover' && (isStandardCgl(documentCase) || recallScope(documentCase))
+    ? { ...documentCase, cglInformationRows: cglInformationRows(documentCase).map(row => qsCover && row.label === 'Estimated Turnover' ? { ...row, value: cglTurnoverDocumentText(documentCase) } : row), cglCoveragesText: recallScope(documentCase) ? '' : cglCoveragesText(documentCase) } : documentCase
   if (storedQs) {
     return saveAndDownloadQsWord(kind, documentCase, () => window.RIDocx[generator[0]](renderCase, window.RI_DOCX_TEMPLATES))
   }

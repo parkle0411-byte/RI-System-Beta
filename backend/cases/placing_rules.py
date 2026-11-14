@@ -16,7 +16,7 @@ NONE = 'None - other than as may exist in this document or in the wording that f
 RETENTION = 'Advice of Reinsured’s retention waived'
 
 def enabled(p):
-    return isinstance(p, dict) and p.get(KEY) == VERSION and str(p.get('reinsuranceStructure') or '').upper() == 'QS' and p.get('classOfBusiness') in ('Property', 'Commercial General Liability')
+    return isinstance(p, dict) and p.get(KEY) == VERSION and str(p.get('reinsuranceStructure') or '').upper() == 'QS' and p.get('classOfBusiness') in ('Property', 'Commercial General Liability', 'Product Recall')
 
 def cgl(p):
     return enabled(p) and p.get('classOfBusiness') == 'Commercial General Liability'
@@ -144,7 +144,7 @@ def adjust_issues(p, issues):
     def keep(x):
         f = x.get('field', '')
         if f == 'aggregateLimit' and p.get('aggregateLimit') == 0 and not cgl(p): return False
-        if f == 'reinsuredRetention': return False
+        if f == 'reinsuredRetention' and p.get('classOfBusiness') != 'Product Recall': return False
         if cgl(p) and (f in ('interest', 'deductibles', 'situations') or f.startswith('situations.')):
             # An optional address still validates its postcode when supplied.
             if f.endswith('.postcode'):
@@ -179,7 +179,8 @@ def underwriting_issues(p):
 
 def adj_rate(p):
     """Period turnover converted through TWD using the policy inception month."""
-    if not cgl(p): return None
+    from .product_recall import scope as recall_scope
+    if not cgl(p) and not recall_scope(p): return None
     from fxrates.models import FxRate
     month = str(p.get('policyFrom') or '')[:7]
     rates = {r.currency: r.rate for r in FxRate.objects.filter(year_month=month)}

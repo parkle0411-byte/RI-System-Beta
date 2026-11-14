@@ -104,11 +104,11 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 
 - **Insurance Type（2026-11-05）**：Case key-in 最上方原 Class 標籤改為 Insurance Type，提示文字同步調整。只是畫面名稱；沿用 classOfBusiness 資料、既有選項與排序，Account List／其他頁面的 Class 名稱維持。
 
-- **Class 選單固定顯示順序（2026-11-05）**：Property → Personal Accident → Commercial General Liability → Products Recall → Marine Cargo → Stock Throughput → Electronic Equipment → Jewelers Block → Fine Art → Terrorism。僅顯示目前已開放及有效的選項；QS 顯示 Property／Commercial General Liability／Stock Throughput，依上述順序排列；Oversea Business 顯示 Fine Art／Terrorism。未列入的新類別排在上述順序之後；不改主檔名稱、其他選單或後端規則。
-- **Case key-in 提供 Quota Share（QS）及 Oversea Business。** QS 的 Class 仍限 Property／Commercial General Liability；Oversea Business（儲存代碼 `OVERSEA`）的 Class 僅限 Fine Art／Terrorism。後端保留既有 QS／XOL 支援，歷史 FACULTATIVE 視為 QS；不清理主檔、不轉換案件。Oversea Business 的獨立規則見 §4.8。
+- **Class 選單固定顯示順序（2026-11-05）**：Property → Personal Accident → Commercial General Liability → Product Recall → Marine Cargo → Stock Throughput → Electronic Equipment → Jewelers Block → Fine Art → Terrorism。僅顯示目前已開放及有效的選項；QS 顯示 Property／Commercial General Liability／Product Recall／Stock Throughput，依上述順序排列；Oversea Business 顯示 Fine Art／Terrorism。未列入的新類別排在上述順序之後；Product Recall 沿用原未被案件引用的 Products Recall／PR 主檔身分並更名。
+- **Case key-in 提供 Quota Share（QS）及 Oversea Business。** QS 提供 Property／Commercial General Liability／Product Recall／Stock Throughput；Oversea Business（儲存代碼 `OVERSEA`）的 Class 僅限 Fine Art／Terrorism。後端保留既有 QS／XOL 支援，歷史 FACULTATIVE 視為 QS；不清理主檔、不轉換案件。Oversea Business 的獨立規則見 §4.8。
 - **系統沒有 Treaty**（2026-11-02 完整移除；儲存 TREATY 被拒絕；資料庫 CHECK 只接受 FACULTATIVE／QS／XOL／OVERSEA）。
 - 新增／編輯表單最上方同一張卡片先選 **Structure 與 Class**（可任意順序）；兩項都選了才顯示其他區塊與儲存／Review。清除任一項只隱藏下方內容，已填資料保留。
-- Type 由「自填前綴＋結構後綴」組成：QS = Facultative Reinsurance，XOL = Excess of Loss Facultative Reinsurance（後綴鎖定，改結構才會變）。
+- Type 一般由「自填前綴＋結構後綴」組成：QS = Facultative Reinsurance，XOL = Excess of Loss Facultative Reinsurance（後綴鎖定，改結構才會變）；Product Recall 固定為 Product Recall Facultative Reinsurance。
 
 ### 4.2 Facility 再保人的可選險種
 | Facility（精確名稱，大小寫與空白正規化） | 可選險種 | 結構 |
@@ -124,20 +124,23 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 一般再保人（名稱不含 Facility）與一般 Allianz／QBE 沿用一般規則。
 
 ### 4.3 新案預設值
-- Currency TWD（CGL QS 與 Swiss CGL QS：只提供 TWD／USD，預設 USD）；New／Renew 預設 New。
-- Cedant 與再保人 Tax 預設 1%（AUW Tax 固定 0%）；AE 預設登入者姓名。
+- Currency TWD（CGL QS、Swiss CGL QS 與 Product Recall QS：只提供 TWD／USD，預設 USD）；New／Renew 預設 New。
+- Cedant 與再保人 Tax 預設 1%（AUW Tax 固定 0%）；Case Owner 與 AE 預設建立草稿的登入者，且可依權限各自改選；續保、批單及 Oversea 也相同。
 - Effective Date 選定後帶入一年後的 Expiration Date（閏日帶翌年 2/28）；手動改過或既有非空值不覆寫。時間選項 12:00／00:00，預設 12:00；**手動改 Effective 時間會同步帶入 Expiration 時間**（Expiration 仍可另選；讀取舊案不強制）。
-- Cedant Collection Days 預設 90（可改）；Property 與 CGL QS 新增一般再保人時付款天數預設 90（可改）。Facility 的 Cedant 天數固定 90（原單／續保；批單沿用來源）。
+- Cedant Collection Days 預設 90（可改）；Property、CGL QS 與 Product Recall QS 新增一般再保人時付款天數預設 90（可改）。Facility 的 Cedant 天數固定 90（原單／續保；批單沿用來源）。
 - 新案以 Cedant 自己的天數算 Cedant 帳款（`cedantTermsBasis=case`，由伺服器保留）。
 
+- **Case Owner／AE（2026-11-14）**：所有險種及 Oversea 的新案、續保、批單草稿均由建立者預帶兩欄，可獨立改選在職 General Manager／Reinsurance Staff／System Administrator 的 Personnel；新選不檢查帳號狀態，但建立者仍須符合資格與原有建案權限。General Manager 及 System Administrator 可依權限修改 Owner。Review／Announce 前 AE 須有有效 Email；已關聯者使用 Personnel Email，未關聯歷史值使用案件原有效 Email 並提示。草稿顯示現名，公告後保留案件歷史姓名，Production 歸屬依 Personnel ID。
+- **歷史人員與提醒**：既有名稱保留；唯一名稱可建立歷史關聯，重名或無對應不猜測。符合權限者可手動確認或更正，姓名不同或更正既有關聯須填原因，保留前後、人員與時間。離職或停用帳號者不接收自動提醒，其他有效收件人仍可收到。Account Executive MDM 入口及新增／修改 API 停用，歷史主檔保留。2026-11-14 唯一對應的 12 筆既有案件 AE 已回填、留存快照。
+
 ### 4.4 共通驗證
-- 期間：Expiration 必須晚於 Effective（Property 與 CGL QS 不接受同日）；所有原單、續保與改期後的完整期間**最長 18 個曆月**（剛好上限可以；月底按曆月末日）。
+- 期間：Expiration 必須晚於 Effective（Property、CGL QS 與 Product Recall QS 不接受同日）；所有原單、續保與改期後的完整期間**最長 18 個曆月**（剛好上限可以；月底按曆月末日）。
 - 付款天數：有填或正式檢查時，必須是至少 15 的整數。每期 Cedant 及每期每家一般再保人天數各自獨立填寫（不繼承），缺漏列「待確認」且不能收付。
 - **Premium Installments**：啟用時至少兩期（儲存即檢查，零期／一期拒絕）；一般批單不能分期，Oversea 依 §4.8。CGL QS 另有：第一期 Payment Base Date／Performance Month 預帶 Effective Date，各期預帶 Case 與各再保人天數，每期保費合計須等於 100% Premium。
 - **Property QS 幣別**（含 Facility 與批單，2026-11-12）：只允許 TWD 或 USD；新 Draft 可留空，Review／Announce 必填。既有其他幣別須改為 TWD 或 USD 才能儲存（含自動儲存）；不自動換算金額或歷史交易。批單幣別繼續沿用來源及既有帳務鎖定規則。
 - **TWD 保費**（Case 100% Premium、每家再保人、每期）只准整數，前後端擋小數，不偷偷取整；USD 兩位小數。
 - **Order Hereon**：新填或修改時每家 > 0、≤ 100%、最多 8 位小數，合計 ≤ 100%；未修改的歷史比例保留。
-- **Loss Record**：一般保費 Case 儲存時（Oversea Business 依 §4.8）年數與 broker advised date 必填；New 可填 0 年（明細必須為空，文件顯示 Loss Clean since operation.）；Renew 至少 1 年（續保可帶入 0 但儲存前要改）；明細的日期、原因、金額都必填（CGL QS 金額 > 0）。Additional Loss Record Notes 輸入已隱藏（舊資料保留）。
+- **Loss Record**：一般及 Swiss CGL QS、Product Recall 的年數、Broker Advised Date 與明細日期／原因／金額缺漏可暫存草稿，於 Review／Announce 檢查；已輸入的無效值仍於儲存時擋下。New 可填 0 年、投保時手動明細須為空；Renew 至少 1 年。其他一般保費 Case 沿用儲存時檢查，Oversea 依 §4.8。Product Recall 手動明細金額須大於 0，Claim 自動明細與續保快照例外見 §7；Additional Loss Record Notes 輸入已隱藏（舊資料保留）。
 - **Performance Split**：兩方合計 100% 時 b 方 = Leg 總額 − a 方，交易合計與排程分毫不差。CGL QS：預設關閉，啟用後一位 Reinsurance Staff、一位 Other Staff，只允許 40/60 或 70/30。
 - **案件附件上限**：Property 案件 30 MiB，其他險種 10 MiB；自動生成的 Word 與 Placing Slip 上傳 30 MiB。手動附件每案最多 50 份（自動生成文件另計）。可上傳格式含 .xlsx／.xls。
 - **案件文件只有 Draft 能刪**；Announce 後刪除回 409。案件與主檔永不實體刪除（回收桶 5 年內可還原）。
@@ -164,7 +167,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 
 ### 4.8 Oversea Business（國外業務特殊案件，2026-11-05）
 - 結構 `OVERSEA`，Class 只能 Fine Art／Terrorism；獨立簡化表單的財務必填項目為 **100% Premium、Share (%)、Brokerage 金額、Reinsurance Broker、Cedant、實際收付款日期**。Currency 隨 Premium 選定，新案預設 USD；負責人與 AE 預帶登入者。不要求一般案件的承保條件、Loss Record、條款。
-- 補充 Insured (EN)、Insured (CN)、Policy Period（日期及時間）與 Account Executive；AE 預帶登入者，可由主檔選擇調整。所有列出的輸入欄位均為 Announce 必填，包含中英文被保險人、保單起訖日期與 AE；Draft 可暫存未完成資料。中文被保險人沿用既有 Announce 建立正式主檔規則。Policy Period 與實際收付款日分別保存。
+- 補充 Insured (EN)、Insured (CN)、Policy Period（日期及時間）與 Account Executive；AE 預帶登入者，可由合格 Personnel 選擇調整。所有列出的輸入欄位均為 Announce 必填，包含中英文被保險人、保單起訖日期與 AE；Draft 可暫存未完成資料。中文被保險人沿用既有 Announce 建立正式主檔規則。Policy Period 與實際收付款日分別保存。
 - **Brokerage 直接是 T3 金額**，不乘保費或 Share、不從 T1−T2 推算。100% Premium × Share 僅作分攤保費資訊。TWD 為整數，其他貨幣最多兩位小數；正佣金為向所選 Broker 收款、負佣金為付款。不建 T1／T2、零額保費排程、分績或 Claim。原單與批單可各自選擇 Brokerage 分期，比例各期 >0 且總和 100%；依貨幣精度自動分攤，尾差優先調整第一期；若該期不足以吸收，依序調整後續期，避免反向金額。每期分別填實際收付款日，分別產生獨立 T3。
 - **Accounting Date＝實際收付款日期−10 個日曆天**，可跨月、跨年、閏年；實際日期原樣保留。原單 Announce 以 Policy Period 的 Effective Date 年月及 Class 代碼分配 TW Ref；實際收付款日及分期日期不影響取號；單筆 `...-R1-T3`，分期為 `...-R1-I1-T3`、`...-R1-I2-T3` 等。各期 Accounting Date 依各自實際日減 10 天，Production 依各期實際月份認列各期精確 Brokerage，關帳不重複建帳。
 - 批單沿用既有最新來源與原單鏈限制，編號接原單 `-E01`、`-E02`。原單 100% Premium、Share、Currency、Broker、Cedant 與 Policy Period 沿用來源並鎖定；另填本次 100% Premium Adjustment 與 Brokerage 增減（加收正、退還負；無變動填 0）、批單生效日、說明及實際收付款日。批單保費差額乘 Share，依分期比例及貨幣精度分攤並依各期實際月份計入 Production；零 Brokerage 仍認列非零保費。每張批單可選擇單筆或分期，每期建立獨立 T3；不改寫原單分期、收付或已認列業績。未輸入保費差額的舊批單沿用零保費認列；原單保費資訊不重複計入批單保費統計。
@@ -204,8 +207,16 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **Annual** 勾選預設勾，Cover Note 加印 (Annual)；只是文件標示，不影響任何計算。
 - Reinsurance Conditions 提供 LMA3100、LMA5396、Excluding Ex-Gratia and without prejudice payment 三項人工勾選，預設不勾。
 - 期間標題在 Overview／Review／Cover Note 顯示為 Period。
-- CGL QS 的 Review／Announce 必填：Original Insured (CN)、Reinsured’s Retention、Cedant Commission／Tax／Collection Days、一般再保人 Payment Terms Days（佣金與稅可為 0）；Case Owner 在 Announce 必填；AE Email 只在產生文件前要求；Original Exclusions 選填。
+- CGL QS 的 Review／Announce 必填：Original Insured (CN)、Reinsured’s Retention、Cedant Commission／Tax／Collection Days、一般再保人 Payment Terms Days（佣金與稅可為 0）；Case Owner 在 Announce 必填；AE Email 在 Review／Announce 前要求；Original Exclusions 選填。
 - 一般再保人搭配 PWS Foreign RI Broker 仍用一般 CGL 表單。
+
+### 5.2a Product Recall QS（2026-11-14）
+- 獨立 Product Recall 險種，僅一般 Facultative QS，支援原單、續保與批單；流程、權限、分期、佣金、稅與帳務以一般 CGL QS 為基礎。TWD／USD，預設 USD；Cedant／再保人 Tax 預設 1%，Cedant／一般再保人付款天數預設 90。TW Ref 為 TWPR＋保單生效年兩碼＋月兩碼＋每月流水號（至少三碼），Announce 取號；批單、分期及理賠沿用既有後綴。
+- Covered Events 預設 Defect、Malicious Product Tampering、Product Extortion、Government Recall；Covered Loss 預設 First Party Recall Costs、Third Party Recall Costs、Consultant and Advisor Costs、Extortion Costs。可取消、增加單行項目與排序；每類至少一項，空白列須補齊或刪除。清單內名稱去前後空白、忽略大小寫不得重複；固定項目不可更名。
+- Limit of Indemnity 為案件幣別正數，文件接 each occurrence and in the aggregate。每個已選 Covered Loss 對應必填正數 Sub-limit，可另加項目；取消選擇保留金額但不檢查或輸出。所有輸出 Sub-limit 均不得超過 Limit；額外項目不可與 Covered Loss 同名。TWD 整數、USD 最多兩位小數。Deductibles 與自由文字 Self-Insured Retention 至少一項；Deductibles 有填時大於 0 且不超過 Limit，文件接 each and every Insured Event。
+- Principal Address 選填；Interest 固定原單責任再保句。Retention、Original Exclusions／Conditions 與可修改的 warranties、conditions precedent、subjectivities、法律管轄依已確認預設與必填規則。Reinsurance Conditions 固定範本文字、LMA3333 與 Intermediary Clause，文件最後附兩項完整條文；Premium Payment Terms 使用 Cedant Collection Days 及 LSW3001 名稱，不附完整 LSW3001。
+- Information 使用 CGL Policy Form、Retroactive Date、Extended Reporting Period、Territorial Limits 及 Insured Business 規則；Claims-Made 預設，切換 Occurrence 隱藏且保留從屬資料。Products 必填、Website 選填。Turnover 明細按幣別加總且文件保留原幣；單筆只顯示一行，各幣別 Case 幣別優先後按字母排序。CGL QS／Swiss CGL QS 文件也採同一原幣顯示規則；Overview Adj. Rate 仍依生效月匯率計算，缺匯率顯示 N/A。
+- Loss Record 明細可用 TWD、USD、EUR、JPY、GBP、HKD、MYR，各筆保留原幣；New 的 0 年無損失句為 No previous recalls or product withdrawals since start selling.，後接 Broker Advised Date。Cover Note 依 CGL 版面與已確認的 Product Recall 順序；Placing Slip 為獨立生成程式，使用相同 Product Recall 業務資料。
 
 ### 5.3 純 Facility 案件
 - 判斷：有具名再保人且全部以 (Facility) 結尾。
@@ -249,6 +260,12 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - AUW 續保／批單不沿用來源手動 Ref.；被保險人主檔沿用來源。
 
 ---
+
+### 7.1 新系統臨分 Claim 與 Loss Record（2026-11-14）
+- Product Recall、一般／Swiss CGL QS 及 STP 每筆 Claim 可選 TWD、USD、EUR、JPY、GBP、HKD、MYR，Reserve 與所有 obligations 同幣別；Case、Accounting、Dashboard／報表依原幣分開顯示及加總，不做跨幣別換算。其他險種仍用案件幣別。
+- 無付款時可改 Claim 幣別，數字不換算；已有付款且沒有收付、抵銷、結清或其歷史時，可整筆更正並填原因、留前後紀錄，須先取消相關對帳審核批次，所有付款及交易一併更新並依新幣別精度重算分配；已有收付／抵銷／結清歷史即使沖回仍永久鎖定。新幣別不允許原金額精度時阻擋，不自動取整。
+- 所有新系統臨分 Claim 的 Date of Loss 可改，原因必填並保留前後日期、操作人與時間；既有付款分配及帳務不因改日期自動改動，新增或依原流程更正付款時依當時 Date of Loss 選適用版本。Product Recall Claim 不選 Covered Event／Loss，不依其狀態阻擋付款。
+- 新建 Claim 的 Outstanding Reserve 須大於 0，Cause of Loss 可留空。原保期另顯示 Claim 自動明細、來源 TW Ref／Claim ID；金額為 Reserve 加 obligations 正負合計，最低 0，使用 Claim 幣別。原保期 Cover Note 保留投保時 Loss Record。續保建立時取快照，之後來源變更不覆寫；續保快照修改日期／原因同步來源 Claim，金額／幣別不回寫。同步失敗保留續保並標待同步，允許 Review／Announce，衝突逐欄由使用者決定並留紀錄；日期更正須原因，既有帳務不變。
 
 ## 8. 會計
 
@@ -384,9 +401,10 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ## 12. 主檔（MDM）
 
+- **Account Executive**：MDM 入口及新增／修改 API 停用，歷史主檔與案件關聯保留；案件 AE 改用 Personnel。
 - **Reinsurers**：最上方 **Lloyd's Market** 收合區（名稱以 Lloyd's Underwriter Syndicate No. 開頭者自動列入，含 Inactive）。分類內全部共用 Lloyd's of London 信評（`ri_market_rating_profiles`，有 Edit，需 `mdm.write`；個別成員不能覆寫）。
 - **信評欄位**：Rating agency（只能選 S&P Global、A.M. Best、Moody's、Fitch）、Grade、As-of date 必填；Rating type 固定 Financial Strength；Checked at 選填。一般再保人可無信評，Lloyd's 共用至少一筆，最多 50 筆。舊資料不補造日期，但編輯時要補。
-- **Insured**：整合於 **Master Data Management**（`/mdm?tab=insured`），位於 Account Executive 後、Classes 前。分頁顯示 `Insured (N)`，僅計正式主檔，搜尋不改總筆數；待確認另列。舊 `/insured` 及 id 連結保留。Finance 唯讀、僅看到 Insured；Case Viewer 不能進入。New insured 與 Rename insured 移除，直接主檔寫入 API 亦禁止。
+- **Insured**：整合於 **Master Data Management**（`/mdm?tab=insured`），依現有 MDM 分頁排列。分頁顯示 `Insured (N)`，僅計正式主檔，搜尋不改總筆數；待確認另列。舊 `/insured` 及 id 連結保留。Finance 唯讀、僅看到 Insured；Case Viewer 不能進入。New insured 與 Rename insured 移除，直接主檔寫入 API 亦禁止。
 - **組合身分**：完整中文名稱為 key，`/` 分隔成員、忽略排列及成員前後空白與重複；A/B 與 B/A 共用主檔，A 單獨是另一組合。各保單保留自己的名稱／排列；公告前舊別名不作正式身分或正式更名依據。
 - **Draft／Announce**：原單、續保及批單的 Draft 名稱僅存 Case，不新增／連結主檔，不計正式筆數、不產生 Renamed。Announce 成功後才以最後名稱新增或連結；不相容的舊單獨名稱別名不會吸收聯名組合。公告驗證失敗、取消或版本衝突不可先寫入主檔。
 - **公告後變動**：Announced 且沒有任何 Confirmed 部分時，變更名稱先詢問名稱更正或變更承保組合。更正沿用同一主檔並記 Renamed，其他保單保留歷史名稱；變更組合只改該 Case 連結，不更名原組合，缺少新主檔可在確認儲存後自動建立。相同成員僅排列不同不產生 Renamed；增加／移除成員不能偽裝為名稱更正。
@@ -511,6 +529,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-14 21:29 | Product Recall QS、Personnel、Claim／Loss Record 共通變更；12 筆唯一 AE 歷史關聯回填 | `backups/product-recall-20261114_212639/`（含部署前 DB、文件及回填前 DB） | `ri-backend:before-product-recall-20261114_212639`／`ri-frontend:before-product-recall-20261114_212639` | 候選後端 128 組 API 全通過；全部瀏覽器階段及修正後重跑通過；正式 migration、主檔、回填快照及首頁驗證 |
 | 10-05 | Audit 暫停、清除 264 筆 | `backups/ri_system_before_audit_clear_20261005_142025.sql` | | |
 | 10-14 | 全面除錯修正 | `backups/ri_system_before_debug_round2_20261014_132129.sql` | `before-debug-round2-20261014_132129` | 49 組測試 |
 | 10-15 | gunicorn 4 worker、MySQL 512MB | 有 | `before-workers4-20261015_180259` | 壓測、各表筆數相同 |
@@ -662,6 +681,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-14：依業主同意部署 Product Recall QS 及 Case Owner／AE、Claim、Loss Record、CGL Turnover 共通變更；正式回填 12 筆唯一 AE Personnel 關聯，保留快照。
 
 - 2026-11-12：舊資料新增批單／理賠改依 §17.2（來源限制、鎖定沿用、自動付款規則與 Revenue Month、改期、Loss No.／Cause of Loss）；匯入與確認時連結 Insured 主檔；清空舊資料並刪除未使用的 Insured 主檔，準備依新規則重新匯入。
 

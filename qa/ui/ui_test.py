@@ -219,7 +219,7 @@ def phase_a(page):
           and not any(t in titles for t in ("Occupation & Construction", "Breakdown of Sum Insured", "Loss Record", "Special Agreement"))
           and not any(t.startswith("Reinsurer Premium") for t in titles), titles)
     owner = selected_label(page, page, "Case Owner")
-    check("case owner defaults to the signed-in person", owner == "UI Sales", owner)
+    check("case owner defaults to the signed-in person", owner.startswith("UI Sales"), owner)
     fill(page, page, "Original Insured (EN)", "UI Test Insured Ltd")
     # 2026-10-10 起存檔就要有 Loss Record 的 advised date 與 Past year(s)（2026-10-16 起在 Information 卡片內）
     loss = info(page, "loss")
@@ -470,7 +470,7 @@ def phase_b(page):
     page.locator(".page-header button", has_text="Cancel").click()
     page.locator(".case-table").wait_for()
     page.wait_for_timeout(500)
-    check("list shows the Confirmed case and the renewal Draft", page.locator(".case-table .el-table__row").count() == 2)
+    check("list shows the Confirmed case and the renewal Draft", page.locator(".case-table .el-table__row").filter(has_text="UI Test Insured Ltd").count() == 2)
 
     open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
     page.locator(".page-header button", has_text="Reverse case").click()
@@ -711,8 +711,8 @@ def phase_e(page):
           and "effective on the Date of Loss" in kv and "source is retained with each obligation" in kv, kv)
     check("no claims yet", page.get_by_text("No claims recorded").is_visible())
     add = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Add claim"))
-    check("VM: Date of Loss marked required, help text updated", item(add, page, "Date of Loss").locator(".is-required, .el-form-item__label").count() >= 1
-          and add.get_by_text("Date of Loss is required").is_visible())
+    check("Claim requires Date of Loss and an initial Outstanding Reserve", item(add, page, "Date of Loss").locator(".is-required, .el-form-item__label").count() >= 1
+          and add.get_by_text("Enter the Date of Loss and initial Outstanding Reserve.", exact=False).is_visible())
     fill(add, page, "Claim / Loss No.", "UI-LOSS-01")
     add.get_by_role("button", name="Add claim").click()
     check("Date of Loss missing -> error from the server", message(page, "Enter the Date of Loss"))
@@ -1003,6 +1003,26 @@ def phase_h(page):
     logout(page)
 
 
+def phase_cl(page):
+    login(page, 'ui.sales')
+    open_case(page, 'UI Test Insured Ltd', ref='TWPAR2603001')
+    page.locator('.case-detail-tabs .el-tabs__item', has_text='Claim').click()
+    form = page.locator('.overview-card').filter(has=page.locator('h2', has_text='Add claim'))
+    fill(form, page, 'Date of Loss', '2026-04-01')
+    fill(form, page, 'Outstanding Reserve', '100')
+    form.get_by_role('button', name='Add claim', exact=True).click()
+    check('Claim can be created with an empty cause', message(page, 'Claim added'))
+    card = page.locator('.overview-card').filter(has=page.get_by_role('button', name='Change Cause of Loss')).first
+    card.get_by_role('button', name='Change Cause of Loss').click()
+    dialog = page.locator('.el-message-box')
+    dialog.locator('textarea').fill('Corrected cause')
+    dialog.get_by_role('button', name='OK', exact=True).click()
+    check('Claim cause can be updated', message(page, 'Cause of Loss updated'))
+    card = page.locator('.overview-card').filter(has=page.get_by_role('button', name='Change Cause of Loss')).first
+    check('Claim displays updated cause and its history', 'Corrected cause' in card.inner_text() and 'Cause of Loss history' in card.inner_text())
+    logout(page)
+
+
 def phase_r(page):
     login(page, "ui.sales")
     open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
@@ -1016,8 +1036,9 @@ def phase_r(page):
           rows.count() == 1 and "Suppressed (not sent)" in rows.first.inner_text() and "UI Re Beta (Facility)" in rows.first.inner_text()
           and "ui.ae@tw-insure.com" in rows.first.inner_text() and "ui.boss@tw-insure.com" in rows.first.inner_text(), rows.first.inner_text() if rows.count() else "")
     errors = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Configuration errors")).locator(".el-table__row")
-    check("Configuration errors: the first run (AE had no Personnel record) is listed",
-          errors.count() >= 1 and "Account Executive does not match one active Personnel record." in errors.first.inner_text(), errors.count())
+    check("Configuration errors: the linked AE has no missing-Personnel error",
+          all("Account Executive does not match one active Personnel record." not in errors.nth(i).inner_text()
+              for i in range(errors.count())), errors.count())
     # 2026-10-16 92 項會計規則：財務提醒改用「正式帳款」的實際到期日，帳款要到 Production 關帳（階段 F）才建立；
     # 此時案件還沒有正式帳款，所以不會有付款提醒（原本依付款排程提醒、檢查 Finance 收件人的項目改為此檢查）
     pay_card = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Payment reminders"))
@@ -1168,6 +1189,38 @@ def phase_k(page):
     logout(page)
 
 
+def phase_pr(page):
+    login(page, 'ui.sales')
+    nav(page, 'Account List')
+    page.get_by_role('button', name='+ New case').click()
+    page.locator('.case-form').wait_for()
+    pick(structure_card(page), page, 'Reinsurance Type', 'Quota Share')
+    pick(structure_card(page), page, 'Insurance Type', 'Product Recall')
+    risk = section(page, 'Risk Details')
+    editor = page.get_by_test_id('product-recall-risk')
+    editor.wait_for()
+    check('Product Recall is selectable with USD as the default', selected_label(risk, page, 'Currency') == 'USD')
+    events, losses = editor.locator('section').nth(0), editor.locator('section').nth(1)
+    check('four template Covered Events and Covered Losses default to selected', events.locator('.repeat-row').count() == 4 and losses.locator('.repeat-row').count() == 4
+          and events.locator('input[type=checkbox]:checked').count() == 4 and losses.locator('input[type=checkbox]:checked').count() == 4)
+    first = losses.locator('.repeat-row').filter(has_text='First Party Recall Costs').first
+    amount = first.locator('input:not([type=checkbox])').first
+    amount.fill('123'); amount.press('Tab')
+    first.locator('.el-checkbox').click()
+    check('unselected Covered Loss hides its Sub-limit amount', first.locator('input:not([type=checkbox])').count() == 0)
+    first.locator('.el-checkbox').click()
+    check('reselecting Covered Loss restores its entered amount', first.locator('input:not([type=checkbox])').first.input_value() == '123')
+    security = section(page, 'Schedule of Security')
+    pick(security.locator('.repeat-card').first, page, 'Reinsurer', 'UI Re Alpha')
+    clauses = section(page, 'Reinsurance Conditions')
+    check('Product Recall does not offer or inherit extra reinsurance clauses', clauses.get_by_text('Add case-specific clause').count() == 0 and 'LMA5390' not in clauses.inner_text())
+    fill(risk, page, 'Original Insured (EN)', 'UI Product Recall Draft')
+    page.get_by_text('Draft saved automatically').first.wait_for(timeout=15000)
+    check('incomplete Product Recall can be saved as a draft', True)
+    snap(page, 'product-recall-draft')
+    logout(page)
+
+
 exec(open('legacy_entry_ui.py').read())
 
 with sync_playwright() as p:
@@ -1178,7 +1231,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"L": phase_l, "A": phase_a, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"L": phase_l, "A": phase_a, "PR": phase_pr, "CL": phase_cl, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

@@ -40,7 +40,7 @@ try:
     client=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False);client.force_login(user)
     def call(method,path,body):
         client.get('/api/auth/csrf');return getattr(client,method)(path,data=json.dumps(body),content_type='application/json',HTTP_X_CSRFTOKEN=client.cookies['csrftoken'].value)
-    base=ready();base['ownerPersonnelId']=person.pk
+    base=ready();base.update(ownerPersonnelId=person.pk,aePersonnelId=person.pk,ae=person.name)
     for aggregate in [None,'',0,1234567.89]:
         for sub in ['', '  \n\t ', 'Medical USD25,000\n附加 & wording']:
             result=normalize_draft({**base,'aggregateLimit':aggregate,'subLimits':sub})

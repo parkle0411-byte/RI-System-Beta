@@ -8,6 +8,8 @@ import { facilitySelectionAllowed, facilitySelectionIssues, facilityStructureAll
 import { propertyScope, propertyEnabled, propertyPostcode, propertyIssues, fixedCedant } from '../alpha/propertyOriginal'
 import { propertyQsCurrencyScope, propertyQsCurrencyIssues } from '../alpha/propertyQsCurrency'
 import { premiumInputErrors, premiumPeriodAmounts } from '../alpha/lib/accounting.js'
+import { recallScope, initialRecall, productRecallIssues } from '../alpha/productRecall'
+import { claimLossSnapshotIssues } from '../alpha/claimLossSnapshots'
 // 案件工作區邏輯直接在此維護；現行規則以 VM-RULES.md 為準。
 // 模板直接維護於 CaseWorkspace.vue。
 //
@@ -128,8 +130,8 @@ export function useCaseWorkspace() {
       draft.performanceInstallments.forEach(period=>{period.paymentTermsDays=90})
     }
   }
-  const keyInScope = p => propertyScope(p) || cglQsScope(p) && !p.parentTwRef || isStp(p) && !p.parentTwRef
-  const ordinaryDraftScope = p => isStandardCgl(p) && p.reinsuranceStructure === 'XOL' || Boolean(p.parentTwRef && ['QS','XOL'].includes(p.reinsuranceStructure)) || p.reinsuranceStructure === 'QS' && ['Property','Commercial General Liability','Stock Throughput'].includes(p.classOfBusiness) && !p.parentTwRef && (swissCglScope(p) || !(p.reinsurers || []).some(r=>/facility|swiss re asia/i.test(r.name || '')))
+  const keyInScope = p => propertyScope(p) || (cglQsScope(p) || recallScope(p)) && !p.parentTwRef || isStp(p) && !p.parentTwRef
+  const ordinaryDraftScope = p => isStandardCgl(p) && p.reinsuranceStructure === 'XOL' || Boolean(p.parentTwRef && ['QS','XOL'].includes(p.reinsuranceStructure)) || p.reinsuranceStructure === 'QS' && ['Property','Commercial General Liability','Stock Throughput','Product Recall'].includes(p.classOfBusiness) && !p.parentTwRef && (swissCglScope(p) || !(p.reinsurers || []).some(r=>/facility|swiss re asia/i.test(r.name || '')))
   const draftFamily = ref('')
   const relaxedDraft = computed(() => activeView.value === 'case-create' && editingOriginalStatus.value === 'draft' && ordinaryDraftScope({...draft,
     classOfBusiness:draft.classOfBusiness || (editingCaseUid.value ? draftFamily.value : ''),
@@ -308,8 +310,8 @@ export function useCaseWorkspace() {
   const splitStatus = computed(() => splitValidationFor(draft))
 
   const isEditing = computed(() => Boolean(editingCaseUid.value))
-  const entryClasses = ['Property', 'Commercial General Liability', 'Stock Throughput']
-  const classDisplayOrder = ["Property", "Personal Accident", "Commercial General Liability", "Products Recall", "Marine Cargo", "Stock Throughput", "Electronic Equipment", "Jewelers Block", "Fine Art", "Terrorism"]
+  const entryClasses = ['Property', 'Commercial General Liability', 'Stock Throughput', 'Product Recall']
+  const classDisplayOrder = ["Property", "Personal Accident", "Commercial General Liability", "Product Recall", "Products Recall", "Marine Cargo", "Stock Throughput", "Electronic Equipment", "Jewelers Block", "Fine Art", "Terrorism"]
 
   const caseEntryAllowed = value => overseaEnabled(value) ? overseaClasses.includes(value?.classOfBusiness) : ['QS', 'FACULTATIVE'].includes(String(value?.reinsuranceStructure || '').trim().toUpperCase()) && entryClasses.includes(value?.classOfBusiness)
 
@@ -330,7 +332,7 @@ export function useCaseWorkspace() {
     return fixed ? { ...payload, interest: fixed } : payload
   })
   const selectedMoney = (value,currency) => selectedDataIssues.value.length ? 'Pending confirmation' : formatMoney(value,currency)
-  const draftClauseDetails = computed(() => resolveClauseTitles(draft.clauseDetails, mdmRecords.value, draft))
+  const draftClauseDetails = computed(() => recallScope(draft) ? UNIVERSAL_CLAUSES.map(row => ({...row})) : resolveClauseTitles(draft.clauseDetails, mdmRecords.value, draft))
   const selectedSumInsuredIssues = computed(() => isStp(selectedPayload.value) ? [] : sumInsuredPlacementIssues(selectedPayload.value))
   const selectedSumInsuredWarning = computed(() => isStandardCgl(selectedPayload.value) || isStp(selectedPayload.value) ? null : sumInsuredLimitWarning(selectedPayload.value))
   const selectedOverview = computed(() => {
@@ -340,7 +342,7 @@ export function useCaseWorkspace() {
     return {
       totalOrderHereon: RICaseCalculations.totalOrderHereon(payload),
       totalSumInsured: RICaseCalculations.totalSumInsured(payload),
-      avgRate: newCgl(payload) ? (selectedCase.value?.adjRate || 'N/A') : RICaseCalculations.avgRateText(payload),
+      avgRate: (newCgl(payload) || recallScope(payload)) ? (selectedCase.value?.adjRate || 'N/A') : RICaseCalculations.avgRateText(payload),
       legs,
       legLabels: flipped
         ? { leg1: 'Net Premium to Cedant', leg2: 'Net Premium from Reinsurer' }
@@ -352,7 +354,7 @@ export function useCaseWorkspace() {
       },
       installments: installmentAllocationsFor(payload),
       lossRecordSummary: lossRecordSummaryFor(payload),
-      clauseDetails: resolveClauseTitles(payload.clauseDetails?.length ? payload.clauseDetails : UNIVERSAL_CLAUSES, mdmRecords.value, payload).sort(compareClauses)
+      clauseDetails: recallScope(payload) ? UNIVERSAL_CLAUSES.map(row => ({...row})) : resolveClauseTitles(payload.clauseDetails?.length ? payload.clauseDetails : UNIVERSAL_CLAUSES, mdmRecords.value, payload).sort(compareClauses)
     }
   })
   const isQsWordCase = computed(() => usesStoredQsWord('cover', selectedPayload.value))
@@ -364,7 +366,7 @@ export function useCaseWorkspace() {
       row.entityType === 'reinsured' && String(row.name || '').trim().toLowerCase() === normalizedReinsured
     )
     const aeName = String(payload.ae || '').trim()
-    const aePerson = personnelRecords.value.find((row) => String(row.name || '').trim().toLowerCase() === aeName.toLowerCase())
+    const aePerson = personnelRecords.value.find((row) => Number(row.id) === Number(payload.aePersonnelId))
     return {
       ...payload,
       caseUid: selectedCase.value?.caseUid || '',
@@ -373,7 +375,7 @@ export function useCaseWorkspace() {
       status: selectedCase.value?.status || payload.status || 'draft',
       reinsuredAddress: payload.reinsuredAddress || reinsuredMaster?.payload?.address || '',
       aeName,
-      aeEmail: String(payload.aeEmail || '').trim() || String(aePerson?.email || '').trim(),
+      aeEmail: payload.aePersonnelId ? String(aePerson ? aePerson.email || '' : payload.aeResolvedEmail || '').trim() : String(payload.aeEmail || '').trim(),
       clauseDetails: selectedOverview.value.clauseDetails
     }
   })
@@ -456,7 +458,12 @@ export function useCaseWorkspace() {
     if (!coverage.required?.length) needs.push('at least one named reinsurer in Schedule of Security')
     return `Not ready to Announce. Missing ${needs.join('; ')}.`
   })
-  const selectedAnnounceIssues = computed(() => selectedDataIssues.value.length ? selectedDataIssues.value.map(i=>i.label) : collectPayloadAnnounceIssues(selectedPayload.value))
+  const selectedAnnounceIssues = computed(() => {
+    if (selectedDataIssues.value.length) return selectedDataIssues.value.map(i => i.label)
+    const issues = collectPayloadAnnounceIssues(selectedPayload.value)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(generatedDocumentCase.value.aeEmail || '')) issues.push('Account Executive must have a valid Email.')
+    return issues
+  })
   const caseDetailTabLabel = computed(() => ({ documents: 'Documentation', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders' }[caseDetailTab.value] || 'Case detail'))
   function reconciliationRefFor(caseData, transaction) {
     const leg = String(transaction?.legType || '')
@@ -673,7 +680,7 @@ export function useCaseWorkspace() {
   }
   function addLossRecord() {
     if (Number(draft.lossRecordYears) === 0 && filled(draft.lossRecordYears)) return
-    draft.lossRecord.push({ clientKey: clientKey(), date: '', cause: '', lossPaid: null })
+    draft.lossRecord.push({ clientKey: clientKey(), date: '', cause: '', lossPaid: null, ...(recallScope(draft) ? { currency: draft.currency || '' } : {}) })
   }
   function removeLossRecord(index) { draft.lossRecord.splice(index, 1) }
   function lossRowInvalid(index, key) {
@@ -717,6 +724,7 @@ export function useCaseWorkspace() {
     draft.cedantTermsBasis = 'case'
     draft.taxPct = 1
     draft.ae = auth.principal?.name || ''
+    draft.aePersonnelId = auth.principal?.personnelId || auth.principal?.id || null
     draft.reinsurers.forEach((row) => { row.taxPct = 1 })
     activeView.value = 'case-create'
     if (!mdmRecords.value.length) loadMasterData()
@@ -1131,8 +1139,11 @@ export function useCaseWorkspace() {
   const claimsLoading = ref(false)
   const claimsSaving = ref(false)
   const claimsState = ref({ rootCaseUid: '', rootTwRef: '', rootStatus: '', rootRowVersion: null, currency: '', claims: [], splitSource: { reinsurers: [] }, actions: { canWrite: false } })
-  const claimForm = reactive({ lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '' })
+  const claimForm = reactive({ lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '', currency: '' })
   const paymentDialogVisible = ref(false)
+  const claimCurrencyDialogVisible = ref(false)
+  const claimCurrencyForm = reactive({ claimId: null, currency: '', reason: '', hasPayments: false })
+  const claimSnapshotSaving = ref(false)
   const activeClaimId = ref(null)
   const paymentForm = reactive({ date: '', amount: null, note: '' })
 
@@ -1144,6 +1155,7 @@ export function useCaseWorkspace() {
       const body = await response.json()
       if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
       claimsState.value = body.claimsState
+      claimForm.currency = body.claimsState.currency || ''
     } catch (err) {
       ElMessage.error(err instanceof Error ? err.message : String(err))
     } finally { claimsLoading.value = false }
@@ -1180,13 +1192,54 @@ export function useCaseWorkspace() {
   async function createClaim() {
     const saved = await submitClaimAction('create_claim', { claim: { ...claimForm } })
     if (!saved) return
-    Object.assign(claimForm, { lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '' })
+    Object.assign(claimForm, { lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '', currency: claimsState.value.currency || '' })
     ElMessage.success('Claim added')
   }
 
   async function updateClaimReserve(claim) {
     const saved = await submitClaimAction('update_reserve', { claimId: claim.id, outstandingReserve: claim.outstandingReserve })
     if (saved) ElMessage.success('Outstanding reserve updated')
+  }
+
+  async function updateClaimLossDate(claim) {
+    try {
+      const date = await ElMessageBox.prompt('Enter the Date of Loss (YYYY-MM-DD).', 'Change Date of Loss', {
+        inputValue: claim.dateOfLoss || '',
+        inputValidator: value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) || 'Enter a date in YYYY-MM-DD format.'
+      })
+      if (date.value === claim.dateOfLoss) return
+      const reason = await ElMessageBox.prompt('Enter the reason for changing the Date of Loss.', 'Change Date of Loss', {
+        inputType: 'textarea', inputValidator: value => !!String(value || '').trim() || 'Enter the reason.'
+      })
+      const saved = await submitClaimAction('update_loss_date', { claimId: claim.id, dateOfLoss: date.value, reason: reason.value })
+      if (saved) ElMessage.success('Date of Loss updated')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') throw error
+    }
+  }
+
+  async function updateClaimCause(claim) {
+    try {
+      const result = await ElMessageBox.prompt('Enter the Cause of Loss (optional).', 'Change Cause of Loss', {
+        inputType: 'textarea', inputValue: claim.causeOfLoss || '', inputAttributes: { maxlength: 2000 }
+      })
+      const cause = String(result.value || '').trim()
+      if (cause === (claim.causeOfLoss || '')) return
+      if (await submitClaimAction('update_cause', { claimId: claim.id, causeOfLoss: cause })) ElMessage.success('Cause of Loss updated')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') throw error
+    }
+  }
+
+  function openClaimCurrency(claim) {
+    Object.assign(claimCurrencyForm, { claimId: claim.id, currency: claim.currency || claimsState.value.currency || '', reason: '', hasPayments: Boolean(claim.payments?.length) })
+    claimCurrencyDialogVisible.value = true
+  }
+
+  async function saveClaimCurrency() {
+    if (claimCurrencyForm.hasPayments && !claimCurrencyForm.reason.trim()) return ElMessage.error('Enter the reason for changing the Claim currency.')
+    const saved = await submitClaimAction('update_currency', { claimId: claimCurrencyForm.claimId, currency: claimCurrencyForm.currency, reason: claimCurrencyForm.reason })
+    if (saved) { claimCurrencyDialogVisible.value = false; ElMessage.success('Claim currency updated') }
   }
 
   function openClaimPayment(claim, payment = null) {
@@ -1207,6 +1260,58 @@ export function useCaseWorkspace() {
 
   function claimTotalPaid(claim) {
     return (Array.isArray(claim?.payments) ? claim.payments : []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+  }
+
+  const claimCurrencyTotals = computed(() => {
+    const totals = new Map()
+    for (const claim of claimsState.value.claims || []) {
+      const currency = String(claim.currency || claimsState.value.currency || '').toUpperCase()
+      const row = totals.get(currency) || { currency, reserve:0, obligations:0 }
+      row.reserve += Number(claim.outstandingReserve || 0)
+      row.obligations += claimTotalPaid(claim)
+      totals.set(currency, row)
+    }
+    return [...totals.values()].sort((a,b) => a.currency.localeCompare(b.currency))
+  })
+
+  async function claimSnapshotRequest(index, action, updates = {}, decisions = {}, detail = false) {
+    const inForm = !detail && activeView.value === 'case-create'
+    if (inForm && !await draftAutosave.flush(true)) return false
+    const caseUid = inForm ? editingCaseUid.value : selectedCase.value?.caseUid
+    const rowVersion = inForm ? editingRowVersion.value : selectedCase.value?.rowVersion
+    const rows = inForm ? draft.claimLossSnapshots : selectedCase.value?.payload?.claimLossSnapshots
+    if (!caseUid || !Array.isArray(rows) || !rows[index]) return false
+    let reason = ''
+    if (action === 'edit' && Object.prototype.hasOwnProperty.call(updates, 'date') && updates.date !== rows[index].date) {
+      try {
+        const response = await ElMessageBox.prompt('Enter the reason for changing the Date of Loss.', 'Change Date of Loss', {
+          inputType: 'textarea', inputValidator: value => !!String(value || '').trim() || 'Enter the reason.'
+        })
+        reason = response.value
+      } catch { return false }
+    }
+    claimSnapshotSaving.value = true
+    try {
+      const body = await jsonOrThrow(await apiFetch('/api/claim-loss-snapshot', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ caseUid, rowVersion, index, action, updates, decisions, reason })
+      }))
+      rows[index] = body.snapshot
+      if (inForm) editingRowVersion.value = Number(body.rowVersion)
+      else selectedCase.value.rowVersion = Number(body.rowVersion)
+      ElMessage.success('Claim loss detail saved')
+      return true
+    } catch (error) {
+      reportWriteError(error, inForm ? () => startEditCase({ caseUid, status: 'draft' }) : () => startViewCase({ caseUid }))
+      return false
+    } finally { claimSnapshotSaving.value = false }
+  }
+
+  async function saveClaimSnapshot(index, updates, done) {
+    if (await claimSnapshotRequest(index, 'edit', updates)) done?.()
+  }
+  function retryClaimSnapshot(index, decisions, detail = false) {
+    return claimSnapshotRequest(index, 'retry', {}, decisions, detail)
   }
 
   function onCaseDetailTabChange(name) {
@@ -1441,6 +1546,21 @@ export function useCaseWorkspace() {
     draft.classOfBusiness = name || ''
     const record = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === name)
     if (record) draft.classCode = record.code || ''
+    if (name === 'Product Recall') {
+      draft.classCode = 'PR'
+      if (!draft.productRecall) {
+        draft.productRecall = initialRecall()
+        draft.currency = currencyEdited ? draft.currency : 'USD'
+        draft.newOrRenew ||= 'New'
+        draft.cglInformation.policyForm ||= 'Claims-Made Form'
+        draft.cglInformation.territorialLimits ||= 'Worldwide including USA/Canada'
+        draft.reinsuredRetention = 'Advice of Reinsured’s retention waived'
+        draft.reinsurers.forEach(row => { row.paymentTermsDays ??= 90; row.taxPct ??= 1 })
+      }
+      draft.typePrefix = 'Product Recall'
+      draft.type = 'Product Recall Facultative Reinsurance'
+      draft.interest = 'Reinsurance of the Reinsured’s liability under the original policy.'
+    }
     if (name === 'Stock Throughput' && !isEditing.value) {
       draft.classCode = 'ST'; draft.taxPct = 1; draft.interest = ''; draft.limitOfLiability = '';
       draft.reinsuredRetention = 'Advice of Reinsured’s retention waived.';
@@ -1454,6 +1574,12 @@ export function useCaseWorkspace() {
 
   function syncCaseClauses() {
     const details = UNIVERSAL_CLAUSES.map((row) => ({ ...row }))
+    if (recallScope(draft)) {
+      draft.clauseDetails = details
+      draft.clauses = details.map(row => row.code)
+      draft.autoClauses = []
+      return
+    }
     // VM 才有（2026-09-29 決定）：Class 自己的 Fixed Clause，以及再保人條款的適用 Class（沒有 classIds = All classes）
     const classRecord = mdmRecords.value.find((row) => row.entityType === 'class' && row.name === draft.classOfBusiness)
     const classId = classRecord ? Number(classRecord.id) : null
@@ -1533,6 +1659,7 @@ export function useCaseWorkspace() {
   }
 
   function recomputeType() {
+    if (recallScope(draft)) { draft.type = 'Product Recall Facultative Reinsurance'; return }
     if (isStandardCgl(draft)) {
       draft.type = cglType({ ...draft, type: '' })
       return
@@ -1684,6 +1811,7 @@ export function useCaseWorkspace() {
       const body = await response.json()
       if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
       selectedCase.value = body.case
+      claimsState.value = { rootCaseUid: '', rootTwRef: '', rootStatus: '', rootRowVersion: null, currency: '', claims: [], claimLossRecord: [], actions: { canWrite: false } }
       await loadMasterData({ required: true })
       caseDetailTab.value = 'overview'
       caseDocuments.value = []
@@ -1693,7 +1821,7 @@ export function useCaseWorkspace() {
       caseWorkflow.value = null
       activeView.value = 'case-detail'
       // Word 文件的 AE Email 要靠人員清單補；重新登入／F5／直接連結時清單尚未載入，文件會被擋
-      await Promise.all([loadCaseWorkflow(), loadCaseDocuments(), can('cases.write') ? loadPersonnelOptions() : null])
+      await Promise.all([loadCaseWorkflow(), loadCaseDocuments(), can('cases.write') ? loadPersonnelOptions() : null, can('cases.read.all') && !overseaEnabled(selectedPayload.value) ? loadClaims() : null])
       window.scrollTo({ top: 0 })
     } catch (err) {
       shell.error = err instanceof Error ? err.message : String(err)
@@ -1716,7 +1844,7 @@ export function useCaseWorkspace() {
     }
     const storedValue = value
     value={...value,...(value?.draftInput || {})}
-    const issues = [...insuranceIssues(value),...facilitySelectionIssues(value),...cglQsIssues(value),...propertyQsCurrencyIssues(value),...stpIssues(value),...(ordinaryDraftScope(value) ? draftFormatIssues(value) : [])].map(issue => issue.label)
+    const issues = [...insuranceIssues(value),...facilitySelectionIssues(value),...cglQsIssues(value),...productRecallIssues(value),...propertyQsCurrencyIssues(value),...stpIssues(value),...(ordinaryDraftScope(value) ? draftFormatIssues(value) : [])].map(issue => issue.label)
     if (ordinaryDraftScope(value)) issues.push(...premiumInputErrors(value, storedValue))
     const add = (label) => issues.push(label)
     if (!value.parentTwRef && requiresManualTwRef(value) && !filled(value?.manualTwRef)) add('TW Ref. (for AUW)')
@@ -1733,8 +1861,9 @@ export function useCaseWorkspace() {
       if (!filled(value?.endoText)) add('Endorsement wording')
     }
     const situations = Array.isArray(value?.situations) ? value.situations : []
-    if (!situations.length) add(isStandardCgl(value) ? 'Principal Address' : 'Situation')
+    if (!situations.length && !recallScope(value)) add(isStandardCgl(value) ? 'Principal Address' : 'Situation')
     situations.forEach((row, index) => {
+      if (recallScope(value) && !filled(row?.address) && !filled(row?.postcode)) return
       if (!filled(row?.address)) add(isStandardCgl(value) ? `Principal Address ${index + 1}` : `Situation ${index + 1} Risk Address`)
       if (!validPostcode(row?.postcode, value)) add(`${isStandardCgl(value) ? 'Principal Address' : 'Situation'} ${index + 1} Postcode`)
     })
@@ -1751,10 +1880,10 @@ export function useCaseWorkspace() {
         if (filled(row?.taxPct) && Number(row.taxPct) !== 0) add(`Reinsurer ${index + 1} Tax must be 0% for AUW`)
       }
     });
-    [['limitOfLiability', liabilityLimitLabel(value)], ['deductibles', 'Deductibles'], ['originalConditions', 'Original Conditions'], ...((isStandardCgl(value) || value?.classOfBusiness === 'Stock Throughput') ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
+    [['limitOfLiability', liabilityLimitLabel(value)], ...(!recallScope(value) ? [['deductibles', 'Deductibles']] : []), ['originalConditions', 'Original Conditions'], ...((isStandardCgl(value) || recallScope(value) || value?.classOfBusiness === 'Stock Throughput') ? [] : [['occupation', 'Occupation'], ['construction', 'Construction']])]
       .forEach(([field, label]) => { if (field === 'originalConditions' && allSumInsuredFacility(value)) return; if (!filled(value?.[field])) add(label) })
-    if (!isStandardCgl(value) && value?.classOfBusiness !== 'Stock Throughput' && value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
-    if (!isStandardCgl(value) && value?.classOfBusiness !== 'Stock Throughput') {
+    if (!isStandardCgl(value) && !recallScope(value) && value?.classOfBusiness !== 'Stock Throughput' && value?.basisOfValuation === 'Other' && !filled(value?.basisOfValuationOther)) add('Basis of Valuation — Other')
+    if (!isStandardCgl(value) && !recallScope(value) && value?.classOfBusiness !== 'Stock Throughput') {
     const sumInsured = Array.isArray(value?.sumInsured) ? value.sumInsured : []
     if (!sumInsured.length) add('Breakdown of Sum Insured')
     sumInsured.forEach((row, index) => {
@@ -1777,6 +1906,7 @@ export function useCaseWorkspace() {
       if (!filled(row?.cause)) add(`Loss ${index + 1} Cause`)
       if (!filled(row?.lossPaid)) add(`Loss ${index + 1} Loss Amount`)
     });
+    claimLossSnapshotIssues(value).forEach(add);
     [['originalPremium', '100% Premium']]
       .forEach(([field, label]) => { if (!filled(value?.[field])) add(label) })
     if (value?.installmentEnabled) {
@@ -1810,7 +1940,7 @@ export function useCaseWorkspace() {
     return adjustClientIssues(value, issues.concat(shareClientIssues(value, storedValue).map(i => i.label)), true)
   }
 
-  function validPostcode(value, caseData = draft) { if(cglQsScope(caseData) && !filled(value))return true; return (propertyScope(caseData) || caseData?.classOfBusiness === 'Stock Throughput') ? propertyPostcode(value) : /^\d{3,6}$/.test(String(value || '').trim()) }
+  function validPostcode(value, caseData = draft) { if((cglQsScope(caseData) || recallScope(caseData)) && !filled(value))return true; return (propertyScope(caseData) || caseData?.classOfBusiness === 'Stock Throughput') ? propertyPostcode(value) : /^\d{3,6}$/.test(String(value || '').trim()) }
   function validPositiveInteger(value) {
     const number = Number(value)
     return filled(value) && Number.isInteger(number) && number > 0
@@ -1831,7 +1961,7 @@ export function useCaseWorkspace() {
     if (placingRulesEnabled(draft) && key === "reinsuredRetention") return false
     if (newCgl(draft) && key === "interest") return false
     if (newCgl(draft) && key === "deductibles") return !filled(draft.deductibles) && !filled(draft.selfInsuredRetention)
-    if ([...insuranceIssues(draft),...propertyIssues(draft),...cglQsIssues(draft),...propertyQsCurrencyIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].some(issue => issue.field === key)) return true
+    if ([...insuranceIssues(draft),...propertyIssues(draft),...cglQsIssues(draft),...productRecallIssues(draft),...propertyQsCurrencyIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].some(issue => issue.field === key)) return true
     const value = draft[key]
     if (Array.isArray(value)) return value.length === 0
     if (validator === 'positiveInteger') return !validPositiveInteger(value)
@@ -1843,7 +1973,7 @@ export function useCaseWorkspace() {
     if (!reviewAttempted.value) return false
     const row = draft[listName] && draft[listName][index]
     const value = row && row[key]
-    if (newCgl(draft) && listName === 'situations' && key === 'address') return false
+    if (listName === 'situations' && key === 'address' && (newCgl(draft) || recallScope(draft) && !filled(row?.postcode))) return false
     if (validator === 'postcode') return !validPostcode(value)
     if (listName === 'sumInsured' && key === 'category' && sumInsuredPlacementIssues(draft).some(issue => issue.kind === 'duplicate' && issue.field === `sumInsured.${index}.category`)) return true
     if (validator === 'sumInsuredLocation') return sumLocationIndex(row, draft.situations.length) === null
@@ -1856,7 +1986,10 @@ export function useCaseWorkspace() {
   }
 
   function collectRequiredIssues() {
-    if (overseaEnabled(draft)) return collectOverseaIssues(draft)
+    const person = personnelRecords.value.find(row => Number(row.id) === Number(draft.aePersonnelId))
+    const email = draft.aePersonnelId ? String(person ? person.email || '' : draft.aeResolvedEmail || '').trim() : String(draft.aeEmail || '').trim()
+    const emailMissing = !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    if (overseaEnabled(draft)) return [...collectOverseaIssues(draft), ...(!Number.isInteger(Number(draft.ownerPersonnelId)) || Number(draft.ownerPersonnelId) < 1 ? [{section:'oversea', label:'Case Owner'}] : []), ...(emailMissing ? [{section:'oversea', label:'Account Executive must have a valid Email.'}] : [])]
     const integrity=financialIssues(draft)
     if(integrity.length)return integrity.map(issue=>({section:'security',label:issue.label}))
     const issues = []
@@ -1868,8 +2001,10 @@ export function useCaseWorkspace() {
         : isCglInformation.value && ['loss', 'specialAgreement'].includes(section)
       issues.push({ section: combined ? 'information' : section, label })
     }
+    if (emailMissing) add('personnel', 'Account Executive must have a valid Email.')
     insuranceIssues(draft).forEach(issue => add('risk', issue.label))
     facilitySelectionIssues(draft).forEach(issue => add('security', issue.label))
+    productRecallIssues(draft).forEach(issue => add(issue.field.startsWith('productRecall') ? 'risk' : 'terms', issue.label))
     stpIssues(draft).forEach(issue => add(issue.field.startsWith('reinsurers') ? 'security' : 'information', issue.label))
     if (relaxedDraft.value) premiumInputErrors(draft, editingAccountingBaseline.value).forEach(label => add('cedantPremium', label))
     ;[...cglQsIssues(draft),...propertyQsCurrencyIssues(draft),...(relaxedDraft.value ? draftFormatIssues(draft) : [])].forEach(issue=>add(issue.field.startsWith('performanceInstallments') || ['originalPremium','riCommPct','taxPct','paymentTermsDays'].includes(issue.field) ? 'cedantPremium' : issue.field.startsWith('loss') ? 'information' : issue.field.startsWith('reinsurers') ? 'security' : issue.field==='splitParties' ? 'split' : 'risk',issue.label))
@@ -1885,8 +2020,9 @@ export function useCaseWorkspace() {
       if (!Array.isArray(draft.endoTypes) || !draft.endoTypes.length) add('risk', 'At least one endorsement type')
       if (!filled(draft.endoText)) add('risk', 'Endorsement wording')
     }
-    if (!draft.situations.length) add('risk', isCglInformation.value ? 'Principal Address' : 'Situation')
+    if (!draft.situations.length && !recallScope(draft)) add('risk', isCglInformation.value ? 'Principal Address' : 'Situation')
     draft.situations.forEach((row, index) => {
+      if (recallScope(draft) && !filled(row.address) && !filled(row.postcode)) return
       if (!filled(row.address)) add('risk', isCglInformation.value ? `Principal Address ${index + 1}` : `Situation ${index + 1} Risk Address`)
       if (!validPostcode(row.postcode)) add('risk', `${isCglInformation.value ? 'Principal Address' : 'Situation'} ${index + 1} Postcode`)
     })
@@ -1898,10 +2034,10 @@ export function useCaseWorkspace() {
     })
 
     if (!filled(draft.limitOfLiability)) add('terms', liabilityLimitLabel(draft))
-    if (!filled(draft.deductibles)) add('terms', 'Deductibles')
+    if (!recallScope(draft) && !filled(draft.deductibles)) add('terms', 'Deductibles')
     if (!allFacilityReinsurers.value && !filled(draft.originalConditions)) add('terms', 'Original Conditions')
-    if (!isCglInformation.value && !isStp(draft) && draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
-    if (!isCglInformation.value && !isStp(draft)) {
+    if (!isCglInformation.value && !recallScope(draft) && !isStp(draft) && draft.basisOfValuation === 'Other' && !filled(draft.basisOfValuationOther)) add('terms', 'Basis of Valuation — Other')
+    if (!isCglInformation.value && !recallScope(draft) && !isStp(draft)) {
     if (!filled(draft.occupation)) add('occupation', 'Occupation')
     if (!filled(draft.construction)) add('occupation', 'Construction')
 
@@ -1925,8 +2061,9 @@ export function useCaseWorkspace() {
       if (!filled(row.cause)) add('loss', `Loss ${index + 1} Cause`)
       if (!filled(row.lossPaid)) add('loss', `Loss ${index + 1} Loss Amount`)
     });
+    claimLossSnapshotIssues(draft).forEach(label => add('loss', label))
 
-    [
+    ;[
       ['originalPremium', '100% Premium'],
     ].forEach(([key, label]) => { if (!filled(draft[key])) add('cedantPremium', label) })
     if (draft.installmentEnabled) {
@@ -2070,6 +2207,13 @@ export function useCaseWorkspace() {
     draft.ownerPersonnelName = person?.name || ''
   }
 
+  function onAeSelected(personnelId) {
+    const person = personnelRecords.value.find(row => Number(row.id) === Number(personnelId))
+    draft.ae = person?.name || ''
+  }
+
+  const eligiblePersonnel = computed(() => personnelRecords.value.filter(row => row.isActive && ['sales', 'general_manager', 'admin'].includes(row.roleCode)))
+
   async function loadPersonnelOptions() {
     try {
       const response = await apiFetch('/api/personnel-options', { headers: { Accept: 'application/json' } })
@@ -2079,6 +2223,10 @@ export function useCaseWorkspace() {
       if (activeView.value === 'case-create' && !isEditing.value && !draft.ownerPersonnelId && body.defaultOwnerId) {
         draft.ownerPersonnelId = Number(body.defaultOwnerId)
         onOwnerSelected(draft.ownerPersonnelId)
+      }
+      if (activeView.value === 'case-create' && !isEditing.value && body.defaultOwnerId) {
+        draft.aePersonnelId = Number(body.defaultOwnerId)
+        onAeSelected(draft.aePersonnelId)
       }
     } catch (err) {
       shell.error = err instanceof Error ? err.message : String(err)
@@ -2105,8 +2253,9 @@ export function useCaseWorkspace() {
       ElMessage.error(installmentCountError)
       return
     }
-    lossSaveAttempted.value = !(propertyScope(draft) || isStp(draft))
-    const lossError = overseaEnabled(draft) ? '' : (propertyScope(draft) || isStp(draft)) ? (filled(draft.lossRecordYears) && (!validLossRecordYears(draft.lossRecordYears, draft) || Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) ? 'Loss history years must be valid; Year 0 is only for a New case with no loss entries.' : '') : !filled(draft.lossAdvisedDate)
+    const deferredLossRequirements = cglQsScope(draft) || recallScope(draft)
+    lossSaveAttempted.value = !(propertyScope(draft) || isStp(draft) || deferredLossRequirements)
+    const lossError = overseaEnabled(draft) || deferredLossRequirements ? '' : (propertyScope(draft) || isStp(draft)) ? (filled(draft.lossRecordYears) && (!validLossRecordYears(draft.lossRecordYears, draft) || Number(draft.lossRecordYears) === 0 && draft.lossRecord.length) ? 'Loss history years must be valid; Year 0 is only for a New case with no loss entries.' : '') : !filled(draft.lossAdvisedDate)
       ? 'Loss record advised by broker on is required before saving.'
       : !validLossRecordYears(draft.lossRecordYears, draft)
         ? 'Loss history years is required, and 0 is allowed only for a New case.'
@@ -2244,14 +2393,14 @@ export function useCaseWorkspace() {
     refreshSelectedCase, selectedCase, selectedPayload, selectedSumInsuredIssues, selectedSumInsuredWarning, selectedOverview, selectedCaseTransactions, caseDetailLoading, caseDetailTab, caseDetailTabLabel, backToCases, editSelectedCase,
     caseWorkflow, workflowLoading, workflowSaving, loadCaseWorkflow, createEndorsement, createRenewal, reverseSelectedCase, viewWorkflowCase,
     accountingDialogVisible, accountingForm, openAccountingNotification, saveAccountingNotification,
-    claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, openClaimPayment, recordClaimPayment, claimTotalPaid, loadClaims,
+    claimsLoading, claimsSaving, claimsState, claimForm, paymentDialogVisible, paymentForm, createClaim, updateClaimReserve, updateClaimLossDate, updateClaimCause, openClaimPayment, recordClaimPayment, claimTotalPaid, claimCurrencyTotals, loadClaims, claimCurrencyDialogVisible, claimCurrencyForm, openClaimCurrency, saveClaimCurrency, claimSnapshotSaving, saveClaimSnapshot, retryClaimSnapshot,
     generatedWordFiles, generatedWordHistory, generatedWordIssues, isQsWordCase,
     documentsLoading, documentsSaving, documentGenerating, generatedDocumentCase, endorsementNoteKind, endorsementNoteIssue, unsupportedDebitBankCurrency, missingDebitPaymentTerms, missingDebitInstallmentBaseDates, missingDebitInstallmentPaymentTerms, missingDebitInstallmentAllocation, invalidDebitInstallmentAllocation, caseDocuments, documentCoverage, signedSlipReminder, documentForm, documentFileList, selectedReinsurers, documentReadinessText, selectedAnnounceIssues,
     caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel,
     downloadGeneratedDocument, loadCaseDocuments, onCaseDetailTabChange, onDocumentKindChange, onDocumentFileChange, onDocumentFileRemove, uploadCaseDocument,
     toggleDocumentSelection, downloadCaseDocument, deleteCaseDocument, documentKindLabel, displayReinsurerName, formatFileSize, formatDateTime,
     announceDialogVisible, announceConfirmed, announcing, openAnnounceReview, announceSelectedCase,
-    personnelRecords, onOwnerSelected, departmentLabel,
+    personnelRecords, eligiblePersonnel, onOwnerSelected, onAeSelected, departmentLabel,
     overseaEnabled, RICaseCalculations, masterOptions, caseEntryAllowed, onClassSelected, structureLabel, recomputeType, onStructureSelected, onReinsurerSelected, facilityStructureAllowed,
     draftClauseDetails, caseClauseDraft, addCaseClause, removeCaseClause, isManualClause, clauseSourceLabel, CGL_CLAUSE_PRESETS, toggleCglTemplateClause, cglAnnual,
     reviewPreparing, reviewDraftCase, reviewAttempted, reviewReady, validationMessage, fieldInvalid, rowInvalid, reviewAndConfirm,

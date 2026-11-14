@@ -1,7 +1,7 @@
 export const PLACING_RULES_VERSION = 'placing-qs-20261028-v1'
 export const BUSINESS_OPTIONS = ['Manufacturer', 'Distributor', 'Importer', 'Exporter', 'Other']
 export const REGION_OPTIONS = ['USA/Canada', 'Rest of World', 'Other']
-export const placingRulesEnabled = p => p?.placingRulesVersion === PLACING_RULES_VERSION && p?.reinsuranceStructure === 'QS' && ['Property', 'Commercial General Liability'].includes(p?.classOfBusiness)
+export const placingRulesEnabled = p => p?.placingRulesVersion === PLACING_RULES_VERSION && p?.reinsuranceStructure === 'QS' && ['Property', 'Commercial General Liability', 'Product Recall'].includes(p?.classOfBusiness)
 export const newCgl = p => placingRulesEnabled(p) && p.classOfBusiness === 'Commercial General Liability'
 export const ordinaryPlacement = p => !(p?.reinsurers || []).some(r => r?.name) || (p?.reinsurers || []).some(r => r?.name && !/\(Facility\)\s*$/i.test(r.name))
 export const propertyExtraFields = p => placingRulesEnabled(p) && p.classOfBusiness === 'Property' && ordinaryPlacement(p)
@@ -33,7 +33,7 @@ export function adjustClientIssues(p, issues, labels = false) {
   const filtered = issues.filter(x => {
     const label = typeof x === 'string' ? x : x.label || ''
     if (/^Aggregate Limit/.test(label) && Number(p.aggregateLimit) === 0 && !newCgl(p)) return false
-    if (/Reinsured[’']s Retention/i.test(label)) return false
+    if (p.classOfBusiness !== 'Product Recall' && /Reinsured[’']s Retention/i.test(label)) return false
     if (newCgl(p) && (/^Deductibles$/.test(label) || /^Interest$/.test(label) || /^Principal Address(?: \d+)?$/.test(label))) return false
     return true
   })

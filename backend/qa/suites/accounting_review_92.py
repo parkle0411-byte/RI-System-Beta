@@ -149,8 +149,8 @@ try:
   # Reminder service is fully mocked: no live or test SMTP is ever contacted.
   from reminders.runner import run_payment
   from reminders.messages import resolve_recipients,finance_emails
-  people=[{'name':sp.name,'email':sp.email,'supervisor_email':''},{'name':fp.name,'email':fp.email,'role_code':'accounting'},{'name':mp.name,'email':mp.email,'role_code':'accounting_manager'}]
-  recipients=resolve_recipients({'ae':sp.name},people,finance_emails(people))
+  people=[{'id':sp.pk,'name':sp.name,'email':sp.email,'supervisor_email':''},{'name':fp.name,'email':fp.email,'role_code':'accounting'},{'name':mp.name,'email':mp.email,'role_code':'accounting_manager'}]
+  recipients=resolve_recipients({'aePersonnelId':sp.pk},people,finance_emails(people))
   check('valid recipients retained when supervisor is missing',sp.email in recipients['recipients'] and fp.email in recipients['recipients'] and recipients['missing'])
   check('Finance Manager not added to financial recipient group',mp.email not in recipients['recipients'])
   mailcase=make('MAIL',policyFrom='2031-05-16',policyTo='2032-05-16',ae=sp.name)

@@ -51,7 +51,7 @@ LIST_LIMIT = 250
 FINANCIAL_HISTORY_KEYS = ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory",
     "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking", "financeClaimTracking",
     "financeCorrectionHistory", "financeWorkflowVersion", "productionHistory", "productionReversals",
-    "propertyReversalHistory", "propertyEditHistory", "propertyDateOverrides", "facilityAccounting", "swissAccounting")
+    "propertyReversalHistory", "propertyEditHistory", "propertyDateOverrides", "facilityAccounting", "swissAccounting", "personnelIdentityHistory", "personnelIdentityVersion")
 
 def financial_input(value, stored=None):
     if not isinstance(value, dict):
@@ -137,7 +137,7 @@ class CasesView(NoStoreMixin, APIView):
 
     def list_cases(self, person):
         scoped = visible_cases(person).filter(parent_case__isnull=True)
-        rows = list(scoped.order_by("-updated_at", "-id")[:LIST_LIMIT])
+        rows = list(scoped.select_related('ae_personnel').order_by("-updated_at", "-id")[:LIST_LIMIT])
         summary = scoped.aggregate(
             total=Count("id"),
             draft=Count("id", filter=Q(status="draft")),
@@ -185,7 +185,7 @@ class CasesView(NoStoreMixin, APIView):
                 "reinsured": reinsured,
                 "reinsuredDisplayName": display_name("reinsured", reinsured),
                 "className": row.class_name_snapshot if row.class_name_snapshot is not None else (row.class_code_snapshot or ""),
-                "aeName": row.ae_name_snapshot or "",
+                "aeName": row.ae_personnel.name if row.status == 'draft' and row.ae_personnel_id else row.ae_name_snapshot or "",
                 "effectiveDate": row.effective_date,
                 "effectiveTime": "00:00" if payload.get("policyFromTime") == "00:00" else "12:00",
                 "expirationDate": row.expiration_date,
@@ -198,7 +198,7 @@ class CasesView(NoStoreMixin, APIView):
 
     def get_case(self, case_uid, person):
         parsed = _parse_uuid(case_uid)
-        row = visible_cases(person).filter(case_uid=parsed).first() if parsed else None
+        row = visible_cases(person).select_related('ae_personnel').filter(case_uid=parsed).first() if parsed else None
         if row is None:
             return _error(404, "case_not_found", "Case was not found.")
         # 記帳交易上儲存的 settlement 對「保費來源」的列永遠是過時的（付款條件上線後沒有東西再寫它）。
@@ -207,11 +207,23 @@ class CasesView(NoStoreMixin, APIView):
         from .data_integrity import financial_issues
         issues=financial_issues(row.payload)
         payload = copy.deepcopy(row.payload) if issues else resolve_clause_titles(case_payload(row))
+        if row.status == 'draft' and row.ae_personnel_id:
+            payload['ae'] = row.ae_personnel.name
+            if isinstance(payload.get('draftInput'), dict):
+                payload['draftInput']['ae'] = row.ae_personnel.name
+        if payload.get('aePersonnelId'):
+            from .personnel_identity import ae_email
+            payload['aeResolvedEmail'] = ae_email(payload)
         if not issues and row.case_kind == "endorsement" and row.parent_case_id and row.status == "draft":
             from .endorsement_rules import context_for, apply_fixed
             apply_fixed(payload, context_for(row))
         from .placing_rules import adj_rate
         computed_adj_rate = adj_rate(payload)
+        from .oversea import enabled as oversea_enabled
+        from .claim_loss_record import claim_loss_rows
+        root = Case.objects.filter(pk=row.parent_case_id).only('payload', 'tw_ref', 'case_uid').first() if row.parent_case_id else row
+        root_payload = root.payload if root and isinstance(root.payload, dict) else {}
+        claim_loss_record = claim_loss_rows(root_payload, root.tw_ref, root.case_uid) if root and not oversea_enabled(root_payload) else []
         if not issues and isinstance(payload.get("transactions"), list):
             cash = transaction_details({**payload, "currency":payload.get("currency") or row.currency, "reinsured":payload.get("reinsured") or row.reinsured_name_snapshot})
             payload["transactions"] = [
@@ -224,7 +236,7 @@ class CasesView(NoStoreMixin, APIView):
             "case": {
                 "id": row.pk, "caseUid": str(row.case_uid), "twRef": row.tw_ref, "status": row.status,
                 "caseKind": row.case_kind, "parentCaseId": row.parent_case_id, "insuredMaster": insured_master.information(row.insured_master),
-                "rowVersion": row.row_version, "payload": payload, "adjRate": computed_adj_rate,
+                "rowVersion": row.row_version, "payload": payload, "adjRate": computed_adj_rate, "claimLossRecord": claim_loss_record,
                 **({'dataError':True,'dataIssues':issues} if issues else {}),
                 "announcedAt": row.announced_at, "updatedAt": row.updated_at,
             },
@@ -278,10 +290,19 @@ class CasesView(NoStoreMixin, APIView):
         payload["facilityAccounting"] = {}
         payload["cedantTermsBasis"] = "case"
         columns = normalized["columns"]
-        if not payload.get("ownerPersonnelId"):
-            # VM 只用「目前登入者」當預設負責人（已在 load_principal 確認在職）
-            payload["ownerPersonnelId"] = person.pk
-            payload["ownerPersonnelName"] = person.name
+        from .personnel_identity import assign_creator
+        requested_owner = payload.get('ownerPersonnelId')
+        requested_ae = payload.get('aePersonnelId')
+        try:
+            assign_creator(payload, person)
+        except ValueError as exc:
+            return _error(403, 'draft_creator_ineligible', str(exc))
+        # The form preselects the creator, but the user may change either field
+        # before the first save. Resolve supplied selections by Personnel ID.
+        if requested_owner:
+            payload['ownerPersonnelId'] = requested_owner
+        if requested_ae:
+            payload['aePersonnelId'] = requested_ae
 
         split_error = None if incomplete else resolve_personnel_splits(payload)
         if split_error:
@@ -289,7 +310,14 @@ class CasesView(NoStoreMixin, APIView):
         owner = resolve_case_owner(payload)
         if "error" in owner:
             return Response(owner, status=400)
+        from .personnel_identity import resolve_ae
+        ae_personnel = resolve_ae(payload)
+        if 'error' in ae_personnel:
+            return Response(ae_personnel, status=400)
+        if isinstance(payload.get('draftInput'), dict):
+            payload['draftInput'].update(ownerPersonnelId=payload['ownerPersonnelId'], ownerPersonnelName=payload['ownerPersonnelName'])
         masters = resolve_master_references(payload)
+        masters['aeMasterId'] = None
         after = _case_state(case_uid=case_uid, status="draft", case_kind="original", row_version=1,
                             columns=columns, master_references=masters, payload=payload)
 
@@ -317,7 +345,7 @@ class CasesView(NoStoreMixin, APIView):
                     class_name_snapshot=payload.get("classOfBusiness") or None,
                     reinsured_master_id=masters["reinsuredMasterId"],
                     reinsured_name_snapshot=payload.get("reinsured") or None,
-                    ae_master_id=masters["aeMasterId"], ae_name_snapshot=payload.get("ae") or None,
+                    ae_master_id=masters["aeMasterId"], ae_personnel_id=ae_personnel['id'], ae_name_snapshot=payload.get("ae") or None,
                     currency=columns["currency"], effective_date=columns["effectiveDate"],
                     expiration_date=columns["expirationDate"], payload=payload,
                     owner_personnel_id=owner["id"],
@@ -435,6 +463,9 @@ class CasesView(NoStoreMixin, APIView):
                     return _error(400, "case_not_ready", term_issues[0]["label"], issues=term_issues)
             columns = normalized["columns"]
             stored = current.payload if isinstance(current.payload, dict) else {}
+            for identity_key in ('personnelIdentityVersion', 'personnelIdentityHistory'):
+                if identity_key in stored:
+                    payload[identity_key] = copy.deepcopy(stored[identity_key])
             from .oversea import enabled as oversea_enabled, edit_error as oversea_edit_error
             if oversea_enabled(stored) or oversea_enabled(payload):
                 problem = oversea_edit_error(current,payload,body)
@@ -489,6 +520,9 @@ class CasesView(NoStoreMixin, APIView):
             # transactions／paymentEntries 只由 claims、Reverse／Close、accounting 寫入。
             # 一般的案件編輯不得覆蓋它們，一律還原成資料庫目前的值，不管前端送了什麼。
             payload["claims"] = stored.get("claims") or []
+            # Renewal Claim snapshots are server-owned; the dedicated sync workflow edits them.
+            if 'claimLossSnapshots' in stored:
+                payload['claimLossSnapshots'] = copy.deepcopy(stored['claimLossSnapshots'])
             payload["transactions"] = stored.get("transactions") or []
             payload["paymentEntries"] = stored.get("paymentEntries") or []
             for key in ("paymentEditHistory", "claimCorrectionHistory", "accountingAdjustmentHistory", "paymentTermsHistory", "allianzClaimTracking", "greatAmericanClaimTracking", "qbeClaimTracking", "financeClaimTracking", "financeCorrectionHistory", "financeWorkflowVersion", "productionHistory", "productionReversals", "propertyReversalHistory", "propertyEditHistory", "propertyDateOverrides", "facilityAccounting"):
@@ -526,10 +560,15 @@ class CasesView(NoStoreMixin, APIView):
             if "error" in owner:
                 return Response(owner, status=400)
             if ((owner["id"] or 0) != (current.owner_personnel_id or 0)
-                    and person.role_code != "admin" and person.pk != current.owner_personnel_id
+                    and person.role_code not in ("admin", "general_manager") and person.pk != current.owner_personnel_id
                     and not (incomplete and current.status == 'draft' and current.owner_personnel_id is None and current.created_by == actor_info['id'])):
                 return _error(403, "owner_transfer_denied",
-                              "Only the current Case Owner or System Administrator can change the Case Owner.")
+                              "Only the current Case Owner, General Manager or System Administrator can change the Case Owner.")
+
+            from .personnel_identity import resolve_ae
+            ae_personnel = resolve_ae(payload, current=current)
+            if 'error' in ae_personnel:
+                return Response(ae_personnel, status=400)
 
             try:
                 insured_master.check_change(current, payload, body)
@@ -559,6 +598,7 @@ class CasesView(NoStoreMixin, APIView):
                 payload['announcedAt'] = stored.get('announcedAt') or (current.announced_at.isoformat() if current.announced_at else '')
                 refresh_oversea(payload,current.tw_ref,now)
             masters = resolve_master_references(payload)
+            masters['aeMasterId'] = current.ae_master_id if ae_personnel['id'] is None else None
             before = _case_state(
                 case_uid=current.case_uid, status=current.status, case_kind=current.case_kind,
                 row_version=current.row_version,
@@ -582,7 +622,8 @@ class CasesView(NoStoreMixin, APIView):
             current.class_name_snapshot = payload.get("classOfBusiness") or None
             current.reinsured_master_id = masters["reinsuredMasterId"]
             current.reinsured_name_snapshot = payload.get("reinsured") or None
-            current.ae_master_id = masters["aeMasterId"]
+            current.ae_master_id = masters['aeMasterId']
+            current.ae_personnel_id = ae_personnel['id']
             current.ae_name_snapshot = payload.get("ae") or None
             current.currency = columns["currency"]
             current.effective_date = columns["effectiveDate"]

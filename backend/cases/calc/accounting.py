@@ -187,8 +187,14 @@ def build_claim_payment_transactions(root_case, split_source, claim, payment):
     root_reinsurers = root_reinsurers if is_array(root_reinsurers) else []
     split_reinsurers = get(split_source, "reinsurers")
     split_reinsurers = split_reinsurers if is_array(split_reinsurers) else []
+    explicit_currency = claim.get('currency') if isinstance(claim, dict) else None
+    if explicit_currency:
+        from ..claim_currency import allocate_claim_shares
+        allocated = allocate_claim_shares(number_or_zero(get(payment, 'amount')), [number_or_zero(get(row, 'sharePct')) for row in split_reinsurers], explicit_currency)
     for split_idx, reinsurer in enumerate(split_reinsurers):
-        share_amount = money(number_or_zero(get(payment, "amount")) * number_or_zero(get(reinsurer, "sharePct")) / 100)
+        gross_share = number_or_zero(get(payment, "amount")) * number_or_zero(get(reinsurer, "sharePct")) / 100
+        selected_currency = claim.get('currency') if isinstance(claim, dict) else None
+        share_amount = allocated[split_idx] if selected_currency else money(gross_share)
         reinsurer_label = js_or(strip_facility_tag(get(reinsurer, "name")), f"Reinsurer {split_idx + 1}")
         settlement_label = js_or(js_trim(js_to_string(js_or(get(reinsurer, "foreignBroker"), ""))), reinsurer_label)
         root_idx = next(
@@ -210,6 +216,8 @@ def build_claim_payment_transactions(root_case, split_source, claim, payment):
             "paymentId": get(payment, "id"),
             "lossNo": js_or(get(claim, "lossNo"), ""),
         }
+        if selected_currency:
+            common['currency'] = selected_currency
         transactions.append({**common, "txNo": f"{tx_base}-T1", "legType": "Claim Leg 1",
                              "label": f"Receivable — {settlement_label} owes reinsurance dept (claim {loss_label})"})
         transactions.append({**common, "txNo": f"{tx_base}-T2", "legType": "Claim Leg 2",

@@ -7,7 +7,7 @@ def check(name,condition=True):
 def field(page,label):return page.locator('.el-form-item').filter(has=page.locator('.el-form-item__label').filter(has_text=re.compile('^'+re.escape(label)+'$'))).first
 def select(page,label,value):
  field(page,label).locator('.el-select__wrapper').first.click()
- page.locator('.el-select__popper[aria-hidden="false"] .el-select-dropdown__item').filter(has_text=re.compile('^'+re.escape(value)+r'(?: ·.*)?$')).first.click();page.keyboard.press('Escape');page.wait_for_timeout(250)
+ page.locator('.el-select__popper[aria-hidden="false"] .el-select-dropdown__item').filter(has_text=re.compile('^'+re.escape(value)+r'(?: [·—].*)?$')).first.click();page.keyboard.press('Escape');page.wait_for_timeout(250)
 def fill(page,label,value):
  f=field(page,label).locator('input').last;f.fill(str(value));f.press('Tab')
 def waitapi(page):
@@ -31,8 +31,8 @@ with sync_playwright() as pw:
  page.goto('http://nginx/login');page.get_by_label('Username').fill('ui.admin');page.get_by_label('Password',exact=True).fill('Ui-Test-Pass-1');page.get_by_role('button',name='Sign in',exact=True).click();page.wait_for_url('**/dashboard')
  page.goto('http://nginx/cases');page.get_by_role('button',name='+ New case',exact=True).click()
  select(page,'Reinsurance Type','Oversea Business');field(page,'Insurance Type').locator('.el-select__wrapper').click();page.wait_for_timeout(300);opts=page.locator('.el-select__popper[aria-hidden="false"] .el-select-dropdown__item').all_text_contents();print('Class options: '+repr(opts),flush=True);check('only Fine Art and Terrorism offered',len(opts)==2 and any('Fine Art' in x for x in opts) and any('Terrorism' in x for x in opts));page.keyboard.press('Escape');select(page,'Insurance Type','Fine Art')
- form=page.get_by_test_id('oversea-business-form');expect(form).to_be_visible();labels=form.locator('.el-form-item__label').all_text_contents();check('insured, AE and Policy Period fields precede financial inputs',labels==['Insured (EN)','Insured (CN)','Account Executive','Policy Period','100% Premium','Share (%)','Brokerage','Reinsurance Broker','Cedant','Performance Month','Receipt / Payment Date']);check('no generic underwriting fields',page.locator('.case-form').get_by_text('Risk Details',exact=True).count()==0)
- check('all Oversea input groups marked required',form.locator('.el-form-item.is-required').count()==11)
+ form=page.get_by_test_id('oversea-business-form');expect(form).to_be_visible();labels=form.locator('.el-form-item__label').all_text_contents();check('owner, insured, AE and Policy Period fields precede financial inputs',labels==['Case Owner','Insured (EN)','Insured (CN)','Account Executive','Policy Period','100% Premium','Share (%)','Brokerage','Reinsurance Broker','Cedant','Performance Month','Receipt / Payment Date']);check('no generic underwriting fields',page.locator('.case-form').get_by_text('Risk Details',exact=True).count()==0)
+ check('all Oversea input groups marked required',form.locator('.el-form-item.is-required').count()==12)
  check('AE defaults to signed-in user',field(page,'Account Executive').inner_text().find('UI Admin')>=0)
  fill(page,'Insured (EN)','Yageo Group');fill(page,'Insured (CN)','海外美術館');select(page,'Account Executive','Oversea UI AE')
  f=page.get_by_label('Policy effective date',exact=True);f.fill('2048-02-29');f.press('Enter');page.keyboard.press('Escape');expect(page.get_by_label('Policy expiration date',exact=True)).to_have_value('2049-02-28');check('Policy Period defaults one year with leap-day handling')

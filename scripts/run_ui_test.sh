@@ -28,23 +28,28 @@ for i in $(seq 1 60); do
 done
 docker exec -i ri-ut-backend python manage.py shell < qa/ui/seed.py 2>&1 | grep -v -i "imported auto" || exit 1
 
-rm -rf qa/ui/out && mkdir -p qa/ui/out
+# Preserve prior screenshots rather than deleting another run's output.
+if [ -e qa/ui/out ]; then
+  mv qa/ui/out "qa/ui/out.previous-$(date +%Y%m%d-%H%M%S)-$$" || exit 1
+fi
+mkdir -p qa/ui/out
 run_phase() {
-  case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z} " in *" $1 "*) ;; *) return 0 ;; esac
+  case " ${PHASES:-A PR H R B0 B K C D E F G P1 P2 O L X I Y Z} " in *" $1 "*) ;; *) return 0 ;; esac
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 ui_test.py "$1"
 }
 STATUS=0
 run_phase A || STATUS=1
-# 提醒信（不寄信模式）：先在 AE 沒有人員資料時跑一次（設定錯誤），補上 AE／主管／Finance 的 e-mail 後再跑（Suppressed），階段 R 在畫面上檢查。
-# 2026-10-13 起產生 Word 文件需要 AE 的 Email（由 Personnel 依姓名帶入），所以「設定錯誤」那一次提醒先在階段 H 之前跑，再補上聯絡資料。
+run_phase PR || STATUS=1
+run_phase CL || STATUS=1
+# 提醒信採不寄信模式；測試資料的 AE 已關聯 Personnel，確認聯絡資料完整並檢查提醒畫面。
 reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
 case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z} " in *" H "*|*" R "*)
   reminders run_signed_slip_reminders >/dev/null
   docker exec ri-ut-backend python manage.py shell -c "
 from personnel.models import Personnel
-Personnel.objects.create(name='UI AE One', department='reinsurance', role_code='sales', email='ui.ae@tw-insure.com', supervisor_name='UI Boss',
-                         supervisor_email='ui.boss@tw-insure.com', created_by='seed', updated_by='seed')
+Personnel.objects.update_or_create(name='UI AE One', department='reinsurance', defaults={'role_code':'sales', 'email':'ui.ae@tw-insure.com', 'supervisor_name':'UI Boss',
+                         'supervisor_email':'ui.boss@tw-insure.com', 'created_by':'seed', 'updated_by':'seed'})
 Personnel.objects.filter(name='UI Finance').update(email='ui.fin@tw-insure.com'); print('reminder contacts seeded')" 2>&1 | grep seeded
 esac
 run_phase H || STATUS=1

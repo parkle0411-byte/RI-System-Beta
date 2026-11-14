@@ -16,6 +16,7 @@ class Rollback(Exception): pass
 _seq = [0]
 def person(role, dept, **kw):
     _seq[0] += 1
+    kw.setdefault('email', f'zz.wf.{_seq[0]}@example.test')
     return Personnel.objects.create(name=kw.pop("name", f"ZZ WF {role} {_seq[0]}"), department=dept, role_code=role, created_by="t", updated_by="t", **kw)
 def new_client(): return Client(enforce_csrf_checks=True, HTTP_HOST="localhost", raise_request_exception=False)
 def call(c, m, url, body=None):
@@ -82,9 +83,9 @@ try:
         Case.objects.filter(pk=c1.pk).update(owner_personnel=None)
         check("no owner -> 400 case_owner_required", code(announce(sales, c1, docs=[])) == "case_owner_required")
         Case.objects.filter(pk=c1.pk).update(owner_personnel=sales_p)
-        inc = create(sales, ae="", interest="", deductibles=""); r = announce(sales, inc, docs=[])
-        check("incomplete case -> 400 case_not_ready with issues (plural message)", r.status_code == 400 and code(r) == "case_not_ready" and len(r.json()["issues"]) == 3 and r.json()["message"] == "Complete 3 required fields before Announce." and {i["field"] for i in r.json()["issues"]} == {"ae", "interest", "deductibles"}, r.content[:200])
-        one = create(sales, ae=""); check("one missing field -> singular message", announce(sales, one, docs=[]).json()["message"] == "Complete 1 required field before Announce.")
+        inc = create(sales, interest="", deductibles=""); r = announce(sales, inc, docs=[])
+        check("incomplete case -> 400 case_not_ready with issues (plural message)", r.status_code == 400 and code(r) == "case_not_ready" and len(r.json()["issues"]) == 2 and r.json()["message"] == "Complete 2 required fields before Announce." and {i["field"] for i in r.json()["issues"]} == {"interest", "deductibles"}, r.content[:200])
+        one = create(sales, interest=""); check("one missing field -> singular message", announce(sales, one, docs=[]).json()["message"] == "Complete 1 required field before Announce.")
 
         r = announce(sales, c1, docs=[]); check("no documents -> 400 documents_not_ready, coverage lists everything missing", r.status_code == 400 and code(r) == "documents_not_ready" and r.json()["coverage"]["offer"] is False and r.json()["coverage"]["missing"] == ["zz re a", "zz re b"], r.content[:250])
         dup = create(sales, reinsurers=[dict(name="ZZ Re A", sharePct=50, premium=1, riCommPct=0, taxPct=0), dict(name="zz re a (Facility)", sharePct=50, premium=1, riCommPct=0, taxPct=0)])
@@ -122,8 +123,18 @@ try:
         check("after 999 the number just gets longer (no truncation, no duplicate)", announce(sales, c6).json()["case"]["twRef"] == "TWPAR26041000")
         c7 = create(sales, policyFrom="2026-04-10"); full_docs(c7)
         check("...and 1001 follows", announce(sales, c7).json()["case"]["twRef"] == "TWPAR26041001")
-        failed = create(sales, policyFrom="2026-05-01", ae=""); full_docs(failed); announce(sales, failed)
+        failed = create(sales, policyFrom="2026-05-01", interest=""); full_docs(failed); announce(sales, failed)
         check("a failed announce does not consume a number", not ReferenceSequence.objects.filter(prefix="TWPAR2605").exists())
+        for action in ('create_endorsement', 'create_renewal'):
+            identity_source = create(sales, classCode='QAI', policyFrom='2026-08-01', policyTo='2027-08-01')
+            full_docs(identity_source)
+            announced = announce(sales, identity_source)
+            if action == 'create_renewal':
+                Case.objects.filter(pk=identity_source.pk).update(status='closed')
+            identity_source.refresh_from_db()
+            child_result = wf(gm, action, identity_source)
+            child = Case.objects.filter(case_uid=child_result.json().get('case', {}).get('caseUid')).first() if child_result.status_code == 201 else None
+            check(action + ': creator becomes owner and AE without changing the source', bool(announced.status_code == 200 and child and child.owner_personnel_id == gm_p.pk and child.ae_personnel_id == gm_p.pk and identity_source.owner_personnel_id == sales_p.pk), child_result.content[:300])
 
         # ================= Workflow: 狀態 =================
         r = call(sales, "get", "/api/case-workflow"); check("GET without caseUid -> 400", code(r) == "case_uid_required")
@@ -203,6 +214,8 @@ try:
         r = wf(sales, "create_renewal", src); j = r.json(); rn = Case.objects.get(case_uid=j["case"]["caseUid"]) if r.status_code == 201 else None
         check("renew -> 201: a new root Draft (no parent), kind renewal", r.status_code == 201 and rn.case_kind == "renewal" and rn.parent_case_id is None and rn.status == "draft" and rn.tw_ref is None and rn.owner_personnel_id == src.owner_personnel_id, (r.status_code, r.content[:200]))
         p = rn.payload
+        snapshots = p.get('claimLossSnapshots') or []
+        check('renewal captures source policy claims as independent loss snapshots', len(snapshots) == 1 and snapshots[0].get('claimId') == 'C' and snapshots[0].get('sourceTwRef') == src.tw_ref and snapshots[0].get('sourceCaseUid') == str(src.case_uid), snapshots)
         check("renewal payload: dates moved a year (2/29 -> 2/28), 'Renew', reference to the source, ledger reset, premium kept",
               p["policyFrom"] == "2029-02-28" and p["policyTo"] == "2030-02-28" and p["newOrRenew"] == "Renew" and p["renewedFromTwRef"] == src.tw_ref and p["parentTwRef"] == "" and p["endorsementSeq"] is None
               and p["claims"] == [] and p["paymentEntries"] == [] and p["statementNo"] == "" and p["originalPremium"] == 1000 and p["reinsurers"][0]["premium"] == 600 and p["reinsurers"][0]["settlementRef"] == "", p["policyFrom"])

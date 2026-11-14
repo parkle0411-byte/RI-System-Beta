@@ -29,7 +29,7 @@ def fail(code, message, status=409, **extra):
 
 
 def counterparty(payload, detail):
-    return (str(payload.get('currency') or '').upper(), ' '.join(str(detail.get('partyName') or '').split()).casefold())
+    return (str(detail.get('currency') or payload.get('currency') or '').upper(), ' '.join(str(detail.get('partyName') or '').split()).casefold())
 
 
 def signature(payload, detail):

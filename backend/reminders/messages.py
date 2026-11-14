@@ -102,12 +102,27 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
 
 
 def _name_matches(case_data, personnel):
-    target = js_lower(js_trim(_or_text(get(case_data, "ae"))))
-    matches = [row for row in personnel if js_lower(js_trim(_or_text(get(row, "name")))) == target]
-    if not target or len(matches) != 1:
-        return None, ("Account Executive name matches multiple active Personnel records." if len(matches) > 1
-                      else "Account Executive does not match one active Personnel record.")
+    identifier = case_data.get('aePersonnelId') if isinstance(case_data, dict) else None
+    if identifier is None or identifier == '':
+        return None, 'Account Executive is not linked to Personnel; confirm the historical identity.'
+    matches = [row for row in personnel if str(row.get('id')) == str(identifier)]
+    if len(matches) != 1:
+        return None, 'The linked Account Executive Personnel record is unavailable.'
     return matches[0], None
+
+
+def _can_notify(person):
+    return bool(person and person.get('is_active', True) and person.get('account_status') != 'disabled')
+
+
+def _supervisor(person, personnel):
+    address = js_lower(js_trim(_or_text(get(person, 'supervisor_email'))))
+    if not valid_email(address):
+        return '', 'Account Executive supervisor email is missing or invalid.'
+    matches = [row for row in personnel if js_lower(js_trim(_or_text(get(row, 'email')))) == address]
+    if len(matches) != 1 or not _can_notify(matches[0]):
+        return '', 'Account Executive supervisor is unavailable, inactive or has a disabled account.'
+    return address, None
 
 
 def resolve_recipients(case_data, personnel, finance_emails):
@@ -116,12 +131,12 @@ def resolve_recipients(case_data, personnel, finance_emails):
     if error:
         missing.append(error)
     else:
-        for field, label_ in [('email', 'Account Executive email'), ('supervisor_email', 'Account Executive supervisor email')]:
-            value = js_lower(js_trim(_or_text(get(ae, field))))
-            if valid_email(value):
-                recipients.append(value)
-            else:
-                missing.append(label_ + ' is missing or invalid.')
+        value = js_lower(js_trim(_or_text(get(ae, 'email'))))
+        if _can_notify(ae) and valid_email(value): recipients.append(value)
+        else: missing.append('Account Executive is inactive, has a disabled account, or has no valid email.')
+        supervisor, problem = _supervisor(ae, personnel)
+        if supervisor: recipients.append(supervisor)
+        if problem: missing.append(problem)
     recipients.extend(finance_emails)
     if not finance_emails:
         missing.append('No active Finance Staff has a valid email.')
@@ -133,7 +148,7 @@ def resolve_recipients(case_data, personnel, finance_emails):
 
 def finance_emails(personnel):
     return [row.get("email") for row in personnel
-            if js_lower(_or_text(get(row, "role_code"))) in ("accounting",) and valid_email(row.get("email"))]
+            if _can_notify(row) and js_lower(_or_text(get(row, "role_code"))) in ("accounting",) and valid_email(row.get("email"))]
 
 
 def due_kind(item, today, success_dates):
@@ -167,21 +182,34 @@ def _le(value, limit):
 
 def contact_for(case_data, personnel):
     person, error = _name_matches(case_data, personnel)
-    if error:
-        return {"error": error}
-    ae_email = js_trim(_or_text(get(person, "email")))
     from cases.property_original import scope, ordinary
+    if error:
+        if scope(case_data) and ordinary(case_data):
+            owner = next((r for r in personnel if get(r, 'id') == get(case_data, 'ownerPersonnelId')), None)
+            owner_email = js_trim(_or_text(get(owner, 'email'))) if _can_notify(owner) else ''
+            if valid_email(owner_email):
+                return {'aeEmail':'', 'supervisorName':get(owner, 'name'), 'supervisorEmail':owner_email, 'missing':[error]}
+        return {"error": error}
+    ae_email = js_trim(_or_text(get(person, "email"))) if _can_notify(person) else ''
+    missing = []
+    if not valid_email(ae_email):
+        ae_email = ''
+        missing.append('Account Executive is inactive, has a disabled account, or has no valid email.')
     if scope(case_data) and ordinary(case_data):
         owner=next((r for r in personnel if get(r,"id")==get(case_data,"ownerPersonnelId")),None)
-        owner_email=js_trim(_or_text(get(owner,"email")))
-        if not valid_email(ae_email) or not owner or not valid_email(owner_email):
-            return {"error":"Account Executive and Case Owner must have valid Email addresses for Signed Slip reminders."}
-        return {"aeEmail":ae_email,"supervisorName":get(owner,"name"),"supervisorEmail":owner_email}
+        owner_email=js_trim(_or_text(get(owner,"email"))) if _can_notify(owner) else ''
+        if not valid_email(owner_email):
+            owner_email = ''
+            missing.append('Case Owner is inactive, has a disabled account, or has no valid email.')
+        result = {"aeEmail":ae_email,"supervisorName":get(owner,"name") if owner else '',"supervisorEmail":owner_email, 'missing':missing}
+        if not ae_email and not owner_email: result['error'] = 'No valid designated Signed Slip reminder recipients. ' + ' '.join(missing)
+        return result
     supervisor_name = js_trim(_or_text(get(person, "supervisor_name")))
-    supervisor_email = js_trim(_or_text(get(person, "supervisor_email")))
-    if not valid_email(ae_email) or not supervisor_name or not valid_email(supervisor_email):
-        return {"error": "Account Executive or supervisor contact fields are incomplete or invalid."}
-    return {"aeEmail": ae_email, "supervisorName": supervisor_name, "supervisorEmail": supervisor_email}
+    supervisor_email, problem = _supervisor(person, personnel)
+    if problem: missing.append(problem)
+    result = {"aeEmail": ae_email, "supervisorName": supervisor_name, "supervisorEmail": supervisor_email, 'missing':missing}
+    if not ae_email and not supervisor_email: result['error'] = 'No valid designated Signed Slip reminder recipients. ' + ' '.join(missing)
+    return result
 
 
 def reminder_message(case_data, due, contact, link_url=ALPHA_LINK_URL, link_text=ALPHA_LINK_TEXT):

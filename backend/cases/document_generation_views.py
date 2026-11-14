@@ -16,7 +16,6 @@ from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
-from personnel.models import Personnel
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -67,17 +66,8 @@ def _valid_installment_base_date(value):
 
 
 def _ae_email(payload):
-    """Use Case email first, then the first active AE in personnel-options order."""
-    email = _text(payload, "aeEmail")
-    if email:
-        return email
-    name = _text(payload, "ae").lower()
-    if not name:
-        return ""
-    for person in Personnel.objects.filter(is_active=True).order_by("name", "id").only("name", "email"):
-        if _text({"name": person.name}, "name").lower() == name:
-            return _text({"email": person.email}, "email")
-    return ""
+    from .personnel_identity import ae_email
+    return ae_email(payload)
 
 
 def _find_case(request, case_uid):

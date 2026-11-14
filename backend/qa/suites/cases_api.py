@@ -119,20 +119,26 @@ try:
         cafe = MasterRecord.objects.create(entity_type="class", name="ZZ Café Class", display_order=1, created_by="t", updated_by="t")
         off = MasterRecord.objects.create(entity_type="reinsured", name="ZZ Off Cedant", is_active=False, deactivated_by="t", deactivated_at="2026-01-01T00:00:00Z", created_by="t", updated_by="t")
         r = create(sales, ae="zz ae one", classOfBusiness="ZZ Café Class", reinsured="ZZ Off Cedant"); m = Case.objects.get(case_uid=r.json()["case"]["caseUid"])
-        check("master refs: AE matched case-insensitively", m.ae_master_id == ae.pk and m.ae_name_snapshot == "zz ae one")
+        check("new cases use Personnel rather than the historical AE master", m.ae_master_id is None and m.ae_personnel_id == sales_p.pk and m.ae_name_snapshot == sales_p.name)
         check("master refs: inactive master not linked", m.reinsured_master_id is None)
         check("master refs: exact class name linked", m.class_master_id == cafe.pk)
         r = create(sales, classOfBusiness="ZZ Cafe Class"); m = Case.objects.get(case_uid=r.json()["case"]["caseUid"])
         check("master refs: accent-different name NOT linked (Alpha compares lower(name) exactly)", m.class_master_id is None)
 
         # --- 列表 / 範圍 ---
-        mine = Case.objects.get(case_uid=create(sales, ownerPersonnelId=view_p.pk).json()["case"]["caseUid"])
+        def historical_viewer_owned():
+            legacy = Case.objects.get(case_uid=create(sales).json()['case']['caseUid'])
+            legacy.owner_personnel_id = view_p.pk
+            legacy.payload = {**legacy.payload, 'ownerPersonnelId':view_p.pk, 'ownerPersonnelName':view_p.name}
+            legacy.save()
+            return legacy
+        mine = historical_viewer_owned()
         others = Case.objects.get(case_uid=create(sales, ownerPersonnelId=other_p.pk).json()["case"]["caseUid"])
         with_split = Case.objects.get(case_uid=create(sales, ownerPersonnelId=other_p.pk, splitEnabled=True,
             splitParties=[dict(personnelId=view_p.pk, name="x", pct=50), dict(personnelId=p1.pk, name="y", pct=50)]).json()["case"]["caseUid"])
-        recycled = Case.objects.get(case_uid=create(sales, ownerPersonnelId=view_p.pk).json()["case"]["caseUid"]); Case.objects.filter(pk=recycled.pk).update(recycled_at="2026-01-01T00:00:00Z", recycled_by="t")
-        archived = Case.objects.get(case_uid=create(sales, ownerPersonnelId=view_p.pk).json()["case"]["caseUid"]); Case.objects.filter(pk=archived.pk).update(status="posted", is_archived=True, archived_by="t", archived_at="2026-01-01T00:00:00Z")
-        child = Case.objects.get(case_uid=create(sales, ownerPersonnelId=view_p.pk).json()["case"]["caseUid"]); Case.objects.filter(pk=child.pk).update(parent_case=mine)
+        recycled = historical_viewer_owned(); Case.objects.filter(pk=recycled.pk).update(recycled_at="2026-01-01T00:00:00Z", recycled_by="t")
+        archived = historical_viewer_owned(); Case.objects.filter(pk=archived.pk).update(status="posted", is_archived=True, archived_by="t", archived_at="2026-01-01T00:00:00Z")
+        child = historical_viewer_owned(); Case.objects.filter(pk=child.pk).update(parent_case=mine)
         Case.objects.filter(pk=mine.pk).update(status="posted", tw_ref="ZZ-TEST-1")
         j = call(viewer, "get", "/api/cases").json(); uids = [c["caseUid"] for c in j["cases"]]
         check("viewer sees own-owned + split-member cases only", set(uids) >= {str(mine.case_uid), str(with_split.case_uid)} and str(others.case_uid) not in uids, uids)

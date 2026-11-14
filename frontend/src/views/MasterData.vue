@@ -18,7 +18,6 @@ const masterTypes = [
   { value: 'clause', label: 'Clause', tabLabel: 'Clauses' },
   { value: 'reinsured', label: 'Cedant', tabLabel: 'Cedants' },
   { value: 'foreign_broker', label: 'Foreign RI Broker', tabLabel: 'Foreign RI Brokers' },
-  { value: 'ae', label: 'Account Executive', tabLabel: 'Account Executive' },
   { value: 'class', label: 'Class', tabLabel: 'Classes' }
 ]
 const route = useRoute()
@@ -59,7 +58,7 @@ async function loadInsuredCount() {
 function insuredCountsChanged(data) { ++insuredCountGeneration; insuredCount.value = data.formalTotal }
 const mdmRecords = ref([])
 const mdmCounts = ref({ ae: 0, reinsurer: 0, reinsured: 0, class: 0, foreign_broker: 0, clause: 0 })
-const mdmForm = reactive({ entityType: 'ae', code: '', name: '', abbreviation: '', address: '', fixedClauses: [], ratings: [] })
+const mdmForm = reactive({ entityType: 'reinsurer', code: '', name: '', abbreviation: '', address: '', fixedClauses: [], ratings: [] })
 const mdmClauseDraft = reactive({ code: '', title: '' })
 const mdmRatingDraft = reactive({ agency: '', grade: '', outlook: '', ratingType: '', asOfDate: '', legalEntity: '', sourceUrl: '', checkedAt: '', status: '' })
 

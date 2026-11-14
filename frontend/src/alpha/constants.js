@@ -152,7 +152,7 @@ export function emptyDraft() {
     subjectivities: FIXED_TEXT.standardNone,
     occupation: '', construction: '', constructionSelections: [], constructionLegacyText: '', constructionLegacyConfirmed: false, lossPayee: '', notices: '', specialAgreement: '',
     cglInformation: { ...emptyCglInformation(), insuredBusinessSelections: [], insuredBusinessOther: '' },
-    ae: '', newOrRenew: '', exchRate: null, remark: '', postedAt: '',
+    ae: '', aePersonnelId: null, newOrRenew: '', exchRate: null, remark: '', postedAt: '',
     confirmedProductionKeys: [], productionExclusions: {}, endorsements: [], transactions: [], claims: [],
     statementNo: '', reversalCycle: 0, pendingReversalOffset: false, accountingNotifications: []
   };

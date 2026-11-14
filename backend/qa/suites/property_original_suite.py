@@ -185,7 +185,9 @@ with transaction.atomic():
         check('unclosed recognized fixture can correct Case Premium with history',update(sales,partial,{'originalPremium':2000}).status_code==200)
         transaction.set_rollback(True)
     partial.refresh_from_db()
-    check('AE locked after any RI Production confirmation',update(sales,partial,{'ae':owner.name}).status_code==409)
+    check('AE locked after any RI Production confirmation',update(sales,partial,{'aePersonnelId':owner.pk,'ae':owner.name}).status_code==409)
+    namesake = person('sales','business_2',name=staff.name,email='same-name@property.test')
+    check('a same-name different Personnel ID cannot bypass confirmed AE protection',update(sales,partial,{'aePersonnelId':namesake.pk,'ae':namesake.name}).status_code==409)
     check('Split locked after any RI Production confirmation',update(sales,partial,{'splitEnabled':True,'splitParties':split}).status_code==409)
     # Reverse only recognized RI performance, retain immutable original history.
     r=wf(sales,'reverse_case',partial);check('partial Production Case may Reverse while no Settlement',r.status_code==200,r.content[:600]);partial.refresh_from_db()

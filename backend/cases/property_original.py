@@ -369,7 +369,7 @@ def confirmed_facts(p, key):
             p.get('policyFrom'),p.get('policyTo'),
             period.get('performanceMonth') if p.get('installmentEnabled') else None,
             [(r.get('personnelId'),r.get('name'),r.get('pct')) for r in rows(p.get('splitParties'))]
-                if p.get('splitEnabled') else p.get('ae'))
+                if p.get('splitEnabled') else (p.get('aePersonnelId'), p.get('ae')) if p.get('aePersonnelId') else p.get('ae'))
     except (ValueError,IndexError,KeyError,StopIteration):
         return None
 
@@ -393,7 +393,7 @@ def edit_guard(case, p, body, actor, now):
         p['transactions']=copy.deepcopy(old.get('transactions') or [])
         p['confirmedProductionKeys']=[]
         return ''
-    mutable=set(DESCRIPTION_FIELDS)|{'ae','originalPremium','riCommPct','taxPct','currency','reinsurers',
+    mutable=set(DESCRIPTION_FIELDS)|{'ae','aePersonnelId','originalPremium','riCommPct','taxPct','currency','reinsurers',
         'policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays','splitParties','splitEnabled','endoEffectiveDate'}
     ignored=set(SERVER_FIELDS)|{'transactions','paymentEntries','claims','facilityAccounting','swissAccounting',
         'status','confirmedProductionKeys','productionPartiallyConfirmed','premiumRounding','cedantTermsBasis',
@@ -403,7 +403,7 @@ def edit_guard(case, p, body, actor, now):
     changed={k for k in changed if old.get(k) not in (None,'',[],{}) or p.get(k) not in (None,'',[],{})}
     if not changed:
         return ''
-    financial_fields={'ae','originalPremium','riCommPct','taxPct','currency','reinsurers',
+    financial_fields={'ae','aePersonnelId','originalPremium','riCommPct','taxPct','currency','reinsurers',
         'policyFrom','policyTo','performanceInstallments','installmentEnabled','paymentTermsDays',
         'splitParties','splitEnabled','endoEffectiveDate','reinsured','classOfBusiness','classCode',
         'reinsuranceStructure','parentTwRef'}

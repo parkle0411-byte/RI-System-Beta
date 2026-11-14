@@ -9,6 +9,7 @@ from xml.etree import ElementTree as E
 from django.utils import timezone
 from . import placing_rules as rules
 from .cgl_information import retroactive_text
+from .product_recall import scope as product_recall_scope
 
 W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 NS = {'w': W}
@@ -54,6 +55,9 @@ def clause_lines(p):
     from masterdata.models import MasterRecord
     from .draft import UNIVERSAL_CLAUSES
     clauses = {x['code']: x for x in UNIVERSAL_CLAUSES}
+    if product_recall_scope(p):
+        return ('This Reinsurance is subject to the same terms and conditions as the Original Policy except as otherwise provided herein and Reinsurers will follow the Wordings, Clauses and Settlements of the Original Policy.\n'
+                'LMA3333 Reinsurers Liability Clause\nIntermediary Clause (TW Insurance Brokers Ltd.)')
     cls = MasterRecord.objects.filter(entity_type='class',name=p.get('classOfBusiness'),is_active=True).first()
     records = [cls] if cls else []
     names = [x.get('name') for x in rules.named(p) if not rules.is_facility(x.get('name'))]
@@ -78,13 +82,14 @@ def clause_lines(p):
         return f'{code} {title}'.strip()
     return intro + '\n' + '\n'.join(clause_text(x) for x in resolved['clauseDetails'])
 
-def original_conditions(value):
-    tail = 'All other terms and conditions are subject to original policy wordings.'
+def original_conditions(value, *, recall=False):
+    tail = ('All other terms and conditions are as per the original policy wordings.' if recall else
+            'All other terms and conditions are subject to original policy wordings.')
     lines = [x.strip() for x in str(value or '').replace(tail,'').splitlines() if x.strip()]
     return '\n'.join(f'{i+1}. {x}' for i,x in enumerate(lines)) + '\n' + tail
 
 def loss_text(p):
-    rows=p.get('lossRecord') or []
+    rows=list(p.get('lossRecord') or []) + (list(p.get('claimLossSnapshots') or []) if p.get('renewedFromTwRef') else [])
     try:years=int(p.get('lossRecordYears'))
     except (TypeError,ValueError):years=5
     period_years=years if years>0 else 5
@@ -93,20 +98,24 @@ def loss_text(p):
     def long_date(value):
         try:return date.fromisoformat(str(value)).strftime('%d %B %Y')
         except ValueError:return str(value or '')
-    if p.get('lossAdvisedDate'):summary+=f" (as advised by TW Insurance Brokers Ltd. on {long_date(p['lossAdvisedDate'])})"
-    details=[f"{long_date(r.get('date'))} | {r.get('cause', '')} | {money(r.get('lossPaid'),p.get('currency'))}" for r in rows]
+    if product_recall_scope(p) and not rows:
+        summary = ('No previous recalls or product withdrawals since start selling.' if years == 0 and p.get('newOrRenew') == 'New' and not p.get('renewedFromTwRef') else
+                   f"No previous recalls or product withdrawals in the last {period_years} {'year' if period_years == 1 else 'years'}")
+        if p.get('lossAdvisedDate'): summary += f" (As advised to TWIB as at {long_date(p['lossAdvisedDate'])})"
+    elif p.get('lossAdvisedDate'):summary+=f" (as advised by TW Insurance Brokers Ltd. on {long_date(p['lossAdvisedDate'])})"
+    details=[f"{long_date(r.get('date'))} | {r.get('cause', '')} | {money(r.get('lossPaid'),r.get('currency') or p.get('currency'))}" for r in rows]
     return '\n'.join([summary]+details+([p['lossRecordText']] if p.get('lossRecordText') else []))
 
 def document_values(p, annual):
     from .facility_rules import fixed_interest
-    is_cgl=rules.cgl(p); currency=p.get('currency') or ''
+    recall=product_recall_scope(p); is_cgl=rules.cgl(p) or recall; currency=p.get('currency') or ''
     address='\n'.join(' '.join(str(x.get(k) or '').strip() for k in ('address','postcode')).strip() for x in p.get('situations') or [] if str(x.get('address') or '').strip())
     opt=lambda key: str(p.get(key) or '').strip() or None
     values={
         'TYPE':p.get('type'), 'REINSURED':p.get('reinsured'), 'INSURED':p.get('originalInsured'),
         'ORIGINAL INSURED':p.get('originalInsured'),'PERIOD':period(p), 'LOCATION':address or None,
         'INTEREST':fixed_interest(p) or opt('interest') or (rules.INTEREST if is_cgl else ''),
-        'LIMIT OF LIABILITY':money(p.get('limitOfLiability'),currency)+(' each occurrence' if is_cgl else ''),
+        'LIMIT OF LIABILITY':money(p.get('limitOfLiability'),currency)+(' each occurrence and in the aggregate' if recall else ' each occurrence' if is_cgl else ''),
         'AGGREGATE LIMIT':money(p.get('aggregateLimit'),currency) if p.get('aggregateLimit') else None,
         'SUB-LIMITS':opt('subLimits'),'DEDUCTIBLES':opt('deductibles'),
         'SELF-INSURED RETENTION':opt('selfInsuredRetention'),
@@ -114,7 +123,7 @@ def document_values(p, annual):
         'REINSTATEMENT PROVISIONS':opt('reinstatementProvisions'),
         'INDEMNITY PERIOD':None if is_cgl else opt('indemnityPeriod'),
         'BASIS OF VALUATION':None if is_cgl else (p.get('basisOfValuationOther') if p.get('basisOfValuation')=='Other' else p.get('basisOfValuation')),
-        'REINSURANCE CONDITIONS':clause_lines(p),'ORIGINAL CONDITIONS':original_conditions(p.get('originalConditions')),
+        'REINSURANCE CONDITIONS':clause_lines(p),'ORIGINAL CONDITIONS':original_conditions(p.get('originalConditions'), recall=recall),
         'LOSS PAYEE':None if is_cgl else opt('lossPayee'),'CO-REINSURANCE WARRANTY':opt('coReinsuranceWarranty'),
         'NOTICES':opt('notices'), 'EXPRESS WARRANTIES':opt('expressWarranties') or rules.NONE,
         'CONDITIONS PRECEDENT':opt('conditionsPrecedent') or rules.NONE, 'SUBJECTIVITIES':opt('subjectivities') or rules.NONE,
@@ -122,6 +131,13 @@ def document_values(p, annual):
         'ORDER HEREON':'', 'TOTAL DEDUCTIONS':'',
         'PREMIUM PAYMENT TERMS':'90 Days Payment Conditions - LSW3001 Premium Payment Clause',
     }
+    if recall:
+        risk=p.get('productRecall') or {}
+        sublimits=[r for r in risk.get('losses') or [] if r.get('selected')] + list(risk.get('additionalSublimits') or [])
+        values.update({'AGGREGATE LIMIT':None, 'SUB-LIMITS':'\n'.join(f"{money(r.get('amount'), currency)} in respect of {str(r.get('name') or '').strip()}" for r in sublimits),
+                       'DEDUCTIBLES':(money(p.get('deductibles'),currency)+' each and every Insured Event') if p.get('deductibles') not in (None,'') else None,
+                       'PREMIUM PAYMENT TERMS':f"{p.get('paymentTermsDays')} Day Payment condition - LSW3001 Premium Payment Clause",
+                       'CHOICE OF LAW AND JURISDICTION':risk.get('choiceOfLaw')})
     return values
 
 def insert_row(table, reference, label, value, after=None):
@@ -166,16 +182,21 @@ def render(p, ae_email, *, annual=True, previous=None, references=None):
         risk=tables[0]
         first=risk.find('w:tr/w:tc',NS);put(first,'PLACING SLIP\n'+contact)
         remove=('RETROCEDENT','CONVEYANCE','VESSELS','ADDITIONAL COVERAGES','UNDERLYING LIMITS','SITUATION')
-        rename={'INSURED':'ORIGINAL INSURED','LOCATION':'PRINCIPAL ADDRESS' if rules.cgl(p) else 'SITUATION'}
-        if rules.cgl(p):rename['LIMIT OF LIABILITY']='LIMIT OF INDEMNITY'
+        is_cgl=rules.cgl(p) or product_recall_scope(p)
+        rename={'INSURED':'ORIGINAL INSURED','LOCATION':'PRINCIPAL ADDRESS' if is_cgl else 'SITUATION'}
+        if is_cgl:rename['LIMIT OF LIABILITY']='LIMIT OF INDEMNITY'
         replace_rows(risk,values,rename,remove)
         proto=next(r for r in risk.findall('w:tr',NS) if text(r.findall('w:tc',NS)[0])=='INTEREST')
-        if rules.cgl(p):
+        if product_recall_scope(p):
+            recall=p.get('productRecall') or {}
+            event=insert_row(risk,proto,'COVERED EVENTS','\n'.join(str(r.get('name') or '').strip() for r in recall.get('events') or [] if r.get('selected')),after=proto)
+            insert_row(risk,proto,'COVERED LOSS','\n'.join(str(r.get('name') or '').strip() for r in recall.get('losses') or [] if r.get('selected')),after=event)
+        elif rules.cgl(p):
             coverage='\n'.join(str(p.get('coveragesOther') or '') if x=='Other' else x for x in p.get('coverages') or [])
             insert_row(risk,proto,'COVERAGES',coverage,after=proto)
-        if p.get('originalExclusions'):insert_row(risk,proto,'ORIGINAL EXCLUSIONS',p['originalExclusions'])
+        if p.get('originalExclusions'):insert_row(risk,proto,'ORIGINAL EXCLUSIONS',original_conditions(p['originalExclusions'], recall=True) if product_recall_scope(p) else p['originalExclusions'])
         info=tables[1]; children=list(info); start=next(i for i,r in enumerate(children) if 'FOR Property Placement'==text(r)); split=next(i for i,r in enumerate(children) if text(r)=='FOR Commercial General Liability & Products Liability Placement')
-        remove_rows=children[start:split] if rules.cgl(p) else children[split:]
+        remove_rows=children[start:split] if is_cgl else children[split:]
         for r in remove_rows:info.remove(r)
         for r in list(info.findall('w:tr',NS)):
             if text(r).startswith('FOR '):info.remove(r)
@@ -194,7 +215,7 @@ def render(p, ae_email, *, annual=True, previous=None, references=None):
             'TERRITORIAL/ JURISDICTION LIMITS':ci.get('territorialOther') if ci.get('territorialLimits')=='Other' else ci.get('territorialLimits'),
             'INSURED’S BUSINESS':rules.business_text(ci),'INSURED’S PRODUCTS':ci.get('insuredProducts'),'ESTIMATED TURNOVER':turnover,'INSURED’S WEBSITE':ci.get('insuredWebsite') or None}
         from .facility_rules import property_qs_facility
-        if property_qs_facility(p) or (rules.cgl(p) and ci.get('specialAgreementApplies')!='applicable'):iv['SPECIAL AGREEMENT']=None
+        if property_qs_facility(p) or (is_cgl and ci.get('specialAgreementApplies')!='applicable'):iv['SPECIAL AGREEMENT']=None
         replace_rows(info,iv,{'BREAKFOWN OF SUM INSURED':'BREAKDOWN OF SUM INSURED'})
         for table in tables[2:]:replace_rows(table,values)
         # Signing page always has empty Written/Signed Lines and current year.

@@ -171,8 +171,9 @@ def performance_people(case_data):
     parties = get(case_data, "splitParties")
     if js_truthy(get(case_data, "splitEnabled")) and is_array(parties) and parties:
         return [{"name": _js(js_or(get(p, "name"), get(case_data, "ae"), f"Party {i + 1}")),
-                 "pct": number_or_zero(get(p, "pct"))} for i, p in enumerate(parties)]
-    return [{"name": _js(js_or(get(case_data, "ae"), "")), "pct": 100.0}]
+                 "pct": number_or_zero(get(p, "pct")), **({'personnelId':p['personnelId']} if isinstance(p, dict) and p.get('personnelId') else {})} for i, p in enumerate(parties)]
+    return [{"name": _js(js_or(get(case_data, "ae"), "")), "pct": 100.0,
+             **({'personnelId':case_data['aePersonnelId']} if isinstance(case_data, dict) and case_data.get('aePersonnelId') else {})}]
 
 
 def rounded_shares(total, people, ae_name):
@@ -295,6 +296,7 @@ def production_source_signature(rows):
         get(row, "type"), get(row, "currency"), get(row, "rate"), get(row, "ae"), get(row, "effDate"), get(row, "expDate"),
         round2(get(row, "comm")), get(row, "premium"), get(row, "income"), get(row, "policyNo"), get(row, "endorseNo"),
         get(row, "remark"), get(row, "tranxDate"),
+        *([row['aePersonnelId']] if isinstance(row, dict) and row.get('aePersonnelId') else []),
     ] for row in (rows if is_array(rows) else [])])
 
 
@@ -467,6 +469,8 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                             "createdAt": _nullish_or(get(exclusion, "created_at"), get(exclusion, "createdAt")),
                         } if exclusion is not None else None,
                     }
+                    if person.get('personnelId'):
+                        row['aePersonnelId'] = person['personnelId']
                     (excluded_rows if exclusion is not None else rows).append(row)
     rows.sort(key=_row_sort_key)
     excluded_rows.sort(key=_row_sort_key)

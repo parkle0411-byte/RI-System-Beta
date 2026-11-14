@@ -58,7 +58,7 @@ p['endorsementAnnouncedAt']=''
 draft_schedule=build_payment_schedule(p)
 check('ordinary RI payable has no premature due date before actual Announce',draft_schedule['items'][1]['baseDate']=='' and draft_schedule['items'][1]['dueDate']=='' and draft_schedule['reviewRequired'])
 user=get_user_model().objects.create_user(username='zz.auw.endo',password='AUW-Endo-Password-9!')
-person=Personnel.objects.create(name='QA AUW Endorsement AE',department='admin',role_code='admin',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
+person=Personnel.objects.create(name='QA AUW Endorsement AE',department='admin',role_code='admin',email='qa-auw-endorsement@example.test',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
 client=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False)
 def call(method,url,body=None):
  client.get('/api/auth/csrf');kw={'HTTP_X_CSRFTOKEN':client.cookies['csrftoken'].value}

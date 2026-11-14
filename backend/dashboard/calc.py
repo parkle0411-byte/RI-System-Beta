@@ -224,6 +224,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     from cases.accounting_policy import stored_all_settled
     rates = {(r['year_month'], r['currency']): float(r['rate']) for r in fx_rows}
     missing_fx = []
+    claim_outstanding = {}
     estimated_fx = []
     latest = {}
     for fx in fx_rows:
@@ -254,6 +255,13 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             if tx.get('reversed') or tx.get('isReversalEntry') or detail['cashTracking'] == 'derived' or abs(detail['outstanding']) < .005:
                 continue
             if not recent(tx):
+                continue
+            from cases.claim_currency import original_currency_claim
+            if original_currency_claim(payload, tx):
+                claim_currency = str(tx.get('currency') or payload.get('currency') or '').upper()
+                group = claim_outstanding.setdefault(claim_currency, {'currency':claim_currency, 'receivable':0.0, 'payable':0.0})
+                key = 'receivable' if detail['paymentDirection'] == 'receivable' else 'payable'
+                group[key] += abs(detail['outstanding'])
                 continue
             from cases.accounting_policy import fx_for_transaction
             rate,posting_month,estimated=fx_for_transaction(payload,tx,rates,latest)
@@ -307,6 +315,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
             "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
             "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2, "outstandingSince": outstanding_since,
+            "claimOutstandingByCurrency": [dict(currency=key, receivable=round(group['receivable'], 2), payable=round(group['payable'], 2)) for key, group in sorted(claim_outstanding.items())],
             "accountingTotalIncomplete": bool(missing_fx or data_errors), "missingPostingRates": missing_fx,
             "accountingTotalEstimated":bool(estimated_fx), "estimatedPostingRates":estimated_fx,
             **({"dataErrors":data_errors} if data_errors else {}),

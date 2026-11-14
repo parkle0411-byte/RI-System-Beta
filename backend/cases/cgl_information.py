@@ -30,6 +30,8 @@ def is_standard_cgl(payload):
 
 
 def normalize_information(payload, errors, *, text, number, date_value, rows):
+    from .product_recall import scope as recall_scope
+    is_recall = recall_scope(payload)
     raw = payload.get('cglInformation')
     if raw is None:
         raw = {}
@@ -43,7 +45,7 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
         return value
     form = choice('policyForm', 'Policy Form', POLICY_FORMS)
     claims = form == 'Claims-Made Form'
-    erp = choice('extendedReportingApplies', 'Extended Reporting Period applicability', APPLICABILITY) if claims else ''
+    erp = choice('extendedReportingApplies', 'Extended Reporting Period applicability', APPLICABILITY) if claims or is_recall else ''
     territory = choice('territorialLimits', 'Territorial / Jurisdiction Limits', TERRITORIES)
     special = choice('specialAgreementApplies', 'Special Agreement applicability', APPLICABILITY)
     # Existing agreement text is retained when opening/saving a legacy CGL case.
@@ -64,7 +66,7 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
         'retroactiveDate': '',
         'retroactiveDates': [],
         'extendedReportingApplies': erp,
-        'extendedReportingPeriod': text(raw.get('extendedReportingPeriod'), 3000) if erp == 'applicable' else '',
+        'extendedReportingPeriod': text(raw.get('extendedReportingPeriod'), 3000) if erp == 'applicable' or is_recall else '',
         'territorialLimits': territory,
         'territorialOther': text(raw.get('territorialOther'), 3000) if territory == 'Other' else '',
         'insuredBusiness': text(raw.get('insuredBusiness'), 3000),
@@ -74,7 +76,7 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
         'specialAgreementApplies': special,
     }
 
-    if claims:
+    if claims or is_recall:
         for index, row in enumerate(rows(retroactive_rows(raw), 'Retroactive Dates', errors)):
             if not isinstance(row, dict):
                 errors.append(f'Retroactive Date {index + 1} must be an object.')
@@ -89,11 +91,23 @@ def normalize_information(payload, errors, *, text, number, date_value, rows):
         temp = {**payload, 'cglInformation': result}
         normalize_extra(payload, temp)
         result = temp['cglInformation']
+    elif is_recall:
+        from .placing_rules import BUSINESSES, business_text
+        selected = raw.get('insuredBusinessSelections')
+        result['insuredBusinessSelections'] = [x for x in selected if x in BUSINESSES] if isinstance(selected, list) else []
+        result['insuredBusinessOther'] = text(raw.get('insuredBusinessOther'), 3000)
+        result['insuredBusiness'] = business_text(result)
+        source_rows = raw.get('estimatedTurnover') if isinstance(raw.get('estimatedTurnover'), list) else []
+        for i, row in enumerate(result['estimatedTurnover']):
+            source = source_rows[i] if i < len(source_rows) and isinstance(source_rows[i], dict) else {}
+            row['regionOther'] = text(source.get('regionOther'), 3000)
     return result
 
 
 def information_issues(payload):
-    if not is_standard_cgl(payload):
+    from .product_recall import scope as recall_scope
+    is_recall = recall_scope(payload)
+    if not is_standard_cgl(payload) and not is_recall:
         return []
     info = payload.get('cglInformation')
     info = info if isinstance(info, dict) else {}
@@ -136,6 +150,18 @@ def information_issues(payload):
         add('specialAgreementApplies', 'Special Agreement applicability')
     elif info.get('specialAgreementApplies') == 'applicable' and not filled(payload.get('specialAgreement')):
         issues.append({'field': 'specialAgreement', 'label': 'Special Agreement'})
+    if is_recall:
+        from .placing_rules import BUSINESSES, REGIONS
+        selected = info.get('insuredBusinessSelections')
+        if not isinstance(selected, list) or not selected or any(x not in BUSINESSES for x in selected):
+            add('insuredBusinessSelections', 'Insured’s Business — select at least one available option')
+        if isinstance(selected, list) and 'Other' in selected and not filled(info.get('insuredBusinessOther')):
+            add('insuredBusinessOther', 'Insured’s Business — Other')
+        for i, row in enumerate(turnover if isinstance(turnover, list) else []):
+            if isinstance(row, dict) and row.get('region') not in REGIONS:
+                add(f'estimatedTurnover.{i}.region', 'Turnover Region must use an available option')
+            elif isinstance(row, dict) and row.get('region') == 'Other' and not filled(row.get('regionOther')):
+                add(f'estimatedTurnover.{i}.regionOther', 'Turnover Region — Other')
     return issues
 
 

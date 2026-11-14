@@ -58,8 +58,8 @@ def _open_cases():
 
 
 def _people(*extra):
-    return list(Personnel.objects.filter(is_active=True).order_by("id")
-                .values("id", "name", "email", "supervisor_name", "supervisor_email", *extra))
+    return list(Personnel.objects.order_by("id")
+                .values("id", "name", "email", "supervisor_name", "supervisor_email", "is_active", "account_status", *extra))
 
 
 def _audit(**kw):
@@ -125,7 +125,12 @@ def run_signed_slip(today=None):
                    actor=SLIP_ACTOR, metadata={"alertOn": today})
             result["attempted"] += 1
             continue
-        recipients = list(dict.fromkeys([contact["aeEmail"], contact["supervisorEmail"]]))
+        if contact.get('missing'):
+            error = {"caseUid": str(case.case_uid), "twRef": case.tw_ref or "", "error": ' '.join(contact['missing']), "partialDelivery": True}
+            result['configurationErrors'].append(error)
+            _audit(entity_type='case', entity_id=case.case_uid, action='signed_slip_configuration_error', before=None, after=error,
+                   actor=SLIP_ACTOR, metadata={'alertOn': today})
+        recipients = list(dict.fromkeys(address for address in [contact["aeEmail"], contact["supervisorEmail"]] if address))
         mail = msg.reminder_message(case_data, due, contact, *_link())
         try:
             with transaction.atomic():

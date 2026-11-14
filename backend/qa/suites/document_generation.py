@@ -65,6 +65,7 @@ try:
         adm_p, sales_p, gm_p = person("admin", "admin"), person("sales", "reinsurance"), person("general_manager", "reinsurance")
         fin_p, view_p = person("accounting", "finance"), person("viewer", "business_1")
         admin, sales, gm, fin, viewer = account(adm_p, "admin"), account(sales_p, "sales"), account(gm_p, "gm"), account(fin_p, "fin"), account(view_p, "view")
+        Personnel.objects.filter(pk=sales_p.pk).update(email="zz.master.email@example.invalid")
         draft, posted = make_case(sales, "draft"), make_case(sales, "posted")
         original_draft_payload = dict(draft.payload)
         recycled = make_case(sales, "draft"); Case.objects.filter(pk=recycled.pk).update(recycled_at=timezone.now())
@@ -162,6 +163,7 @@ try:
         for kind in ("cover", "debit"):
             r = docx(sales, kind=kind, caseUid=str(posted.case_uid))
             check(f"{kind}: both policy dates missing -> 409", r.status_code == 409 and code(r) == "policy_period_required")
+        Personnel.objects.filter(pk=sales_p.pk).update(email=None)
         for label, value in (("missing", None), ("null", None), ("empty", ""), ("whitespace", " \t\n"), ("fullwidth whitespace", "　"), ("BOM whitespace", "\ufeff")):
             payload = dict(original_payload)
             if label == "missing":
@@ -189,6 +191,7 @@ try:
                 check(f"{kind}: {label} AE Email without personnel fallback -> 409, no audit", r.status_code == 409
                       and code(r) == "ae_email_required" and message(r) == "Complete the AE Email in the case or Personnel before generating a document."
                       and gen_audit(posted.case_uid).count() == before)
+        Personnel.objects.filter(pk=sales_p.pk).update(email="zz.master.email@example.invalid")
         for structure in ("QS", "XOL"):
             for label, value in (("missing", None), ("null", None), ("empty", ""), ("whitespace", " \t\n"), ("fullwidth whitespace", "　"), ("BOM whitespace", "\ufeff")):
                 payload = {**original_payload, "reinsuranceStructure": structure, "underlyingLimits": "Primary layer limit"}
@@ -385,7 +388,8 @@ try:
         for value in (None, "", " \t", "　", "\ufeff"):
             payload = {**original_payload, "ae": "  " + sales_p.name.upper() + "  ", "aeEmail": value}
             check(f"blank Case Email {value!r} resolves active Personnel", _ae_email(payload) == "zz.master.email@example.invalid")
-        check("Case Email overrides active Personnel", _ae_email({**original_payload, "ae": sales_p.name}) == "zz.case.email@example.invalid")
+        check("linked Personnel Email overrides historical Case Email", _ae_email({**original_payload, "ae": sales_p.name}) == "zz.master.email@example.invalid")
+        check("unlinked historical case can use its retained Email", _ae_email({**original_payload, "aePersonnelId": None, "ae": sales_p.name}) == "zz.case.email@example.invalid")
         options = call(sales, "get", "/api/personnel-options")
         chosen = next((p for p in options.json().get("personnel", []) if p["id"] == sales_p.pk), {})
         check("case-writing sales receive AE work Email in personnel options", options.status_code == 200 and chosen.get("email") == "zz.master.email@example.invalid")

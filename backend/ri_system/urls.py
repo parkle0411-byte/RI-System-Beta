@@ -5,6 +5,7 @@ from masterdata.market_views import LloydsRatingsView
 from personnel.account_views import CreateAccountView, DisableAccountView, EnableAccountView, ResetPasswordView
 from cases.accounting_views import AccountingView
 from cases.claims_views import ClaimsView
+from cases.claim_loss_snapshot_views import ClaimLossSnapshotView
 from production.views import ProductionReportView
 from reminders.views import CaseRemindersView
 from dashboard.views import DashboardTargetsView, DashboardView
@@ -16,6 +17,7 @@ from cases.recycle_views import DraftRecycleBinView
 from cases.reference_views import ReconciliationReferencesView
 from cases.views import CasesView
 from cases.insured_views import InsuredMasterView
+from cases.personnel_history_views import CasePersonnelHistoryView
 from cases.workflow_views import AnnounceView, WorkflowView
 from personnel.views import PersonnelOptionsView, PersonnelView
 
@@ -44,6 +46,7 @@ urlpatterns = [
     path("api/audit-log", include("audit.urls")),
     path("api/insured-masters", InsuredMasterView.as_view(), name="insured-masters"),
     path("api/cases", CasesView.as_view(), name="cases"),
+    path("api/case-personnel-history", CasePersonnelHistoryView.as_view(), name="case-personnel-history"),
     path("api/case-reconciliation-references", ReconciliationReferencesView.as_view(), name="case-reconciliation-references"),
     path("api/draft-recycle-bin", DraftRecycleBinView.as_view(), name="draft-recycle-bin"),
     path("api/case-documents", CaseDocumentsView.as_view(), name="case-documents"),
@@ -53,6 +56,7 @@ urlpatterns = [
     path("api/case-workflow", WorkflowView.as_view(), name="case-workflow"),
     path("api/accounting", AccountingView.as_view(), name="accounting"),
     path("api/claims", ClaimsView.as_view(), name="claims"),
+    path("api/claim-loss-snapshot", ClaimLossSnapshotView.as_view(), name="claim-loss-snapshot"),
     path("api/document-generation-log", DocumentGenerationLogView.as_view(), name="document-generation-log"),
     path("api/case-reminders", CaseRemindersView.as_view(), name="case-reminders"),
     path("api/production-report", ProductionReportView.as_view(), name="production-report"),

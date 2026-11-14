@@ -33,14 +33,14 @@ def ready():
 class Rollback(Exception):pass
 try:
  with transaction.atomic():
-  person=Personnel.objects.create(name='CGL QA Owner',department='reinsurance',role_code='sales',created_by='qa',updated_by='qa')
+  person=Personnel.objects.create(name='CGL QA Owner',email='cgl@example.invalid',department='reinsurance',role_code='sales',created_by='qa',updated_by='qa')
   user=get_user_model().objects.create_user(username='cgl.qa',password='CGL-QA-only-9!');person.auth_user_id=str(user.pk);person.account_status='active';person.save()
   client=Client(enforce_csrf_checks=True,HTTP_HOST='localhost',raise_request_exception=False)
   def call(method,path,body=None):
    client.get('/api/auth/csrf');kw={'HTTP_X_CSRFTOKEN':client.cookies['csrftoken'].value}
    return getattr(client,method)(path,data=json.dumps(body),content_type='application/json',**kw) if body is not None else getattr(client,method)(path,**kw)
   response=call('post','/api/auth/login',{'username':user.username,'password':'CGL-QA-only-9!'});assert response.status_code==200,response.content
-  base=ready();base['ownerPersonnelId']=person.pk
+  base=ready();base.update(ownerPersonnelId=person.pk,aePersonnelId=person.pk,ae=person.name)
   norm=normalize_draft(base);check('valid CGL normalization',not norm['errors'],norm['errors'])
   value=norm['value'];check('CGL removes property readiness requirements',not validate_announce_ready(value,allow_zero_loss_years=True),validate_announce_ready(value,allow_zero_loss_years=True))
   check('turnover supports independent currencies and zero amount',value['cglInformation']['estimatedTurnover'][1]==dict(region='Other regions',currency='TWD',amount=0))
@@ -77,7 +77,8 @@ try:
   case.refresh_from_db();stored=copy.deepcopy(case.payload);stored['cglInformation']['insuredProducts']='';Case.objects.filter(pk=case.pk).update(payload=stored)
   response=call('post','/api/document-generation-log',{'caseUid':uid,'kind':'cover','format':'docx','cglInformation':base['cglInformation']});check('Cover Note rejects missing stored Information despite request override',response.status_code==409 and response.json().get('error')=='cgl_information_required',response.content[:300])
   response=call('post','/api/document-generation-log',{'caseUid':uid,'kind':'debit','format':'docx'});check('Debit Note has no new Information requirement',response.status_code==204,response.content[:300])
-  p=copy.deepcopy(base);p['lossAdvisedDate']='';response=call('post','/api/cases',{'case':p});check('Loss Record save requirements preserved',response.status_code==400)
+  p=copy.deepcopy(base);p['lossAdvisedDate']='';response=call('post','/api/cases',{'case':p});check('missing Loss Record date can be saved as a draft',response.status_code==201,response.content[:300])
+  check('missing Loss Record date blocks Review and Announce',any(i['field']=='lossAdvisedDate' for i in validate_announce_ready(normalize_draft(p)['value'],allow_zero_loss_years=True)))
   p=copy.deepcopy(base);p['cglInformation']['estimatedTurnover'][0]['amount']=-1;response=call('post','/api/cases',{'case':p});check('invalid entered amount rejected at save',response.status_code==400)
   raise Rollback()
 except Rollback:pass

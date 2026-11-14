@@ -78,7 +78,7 @@ def ledger_rows(cases, now=None, shared=None):
                 "legType": _text(get(tx, "legType")), "reinsured": c["reinsured"],
                 "reinsurer": _text(get(tx, "reinsurer")), "label": _text(get(tx, "label")),
                 "amount": amount, "paid": amount if settled else 0, "outstanding": 0 if settled else amount,
-                "currency": c["currency"], "reconciliationRef": reconciliation_ref_for(payload, tx),
+                "currency": tx.get("currency") or c["currency"], "reconciliationRef": reconciliation_ref_for(payload, tx),
                 "settlement": "settled" if settled else "open",
                 "paymentStatus": "settled" if settled else "upcoming",
                 "settledAt": js_or(get(tx, "settledAt"), None), "settledBy": js_or(get(tx, "settledBy"), None),

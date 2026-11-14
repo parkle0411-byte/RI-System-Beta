@@ -189,7 +189,7 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     inp = input_
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(inp):
-        keep = {'premiumAdjustment','installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','performanceMonth','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
+        keep = {'premiumAdjustment','installmentEnabled','performanceInstallments','parentTwRef','endorsementSeq','endorsementSource','endorsementRules','endoEffectiveDate','endoTypes','endoText','ownerPersonnelId','ownerPersonnelName','aePersonnelId','aeEmail','reinsuranceStructure','classOfBusiness','classCode','currency','originalPremium','reinsured','receiptPaymentDate','performanceMonth','reinsurers','originalInsured','originalInsuredCn','policyFrom','policyFromTime','policyTo','policyToTime','ae','status','transactions','paymentEntries','confirmedProductionKeys','productionExclusions','postedAt','reversalCycle','pendingReversalOffset','accountingNotifications','statementNo'}
         inp = {k:v for k,v in inp.items() if k in keep}
         inp['typePrefix'] = ''
         inp['newOrRenew'] = 'New'
@@ -290,13 +290,20 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         if len(split_parties)==2 and all(r["pct"] is not None for r in split_parties) and sum(r["pct"] for r in split_parties)!=100:
             errors.append("Performance Split must use the paired 40%/60% or 70%/30% percentages.")
     loss_record = []
+    from .product_recall import scope as recall_loss_scope
     for index, row in enumerate(rows(get(inp, "lossRecord"), "Loss Record", errors)):
         n = index + 1
-        loss_record.append({
+        entry = {
             "date": js_or(nullable_date(get(row, "date"), f"Loss {n} Date of Loss", errors), ""),
             "cause": text(get(row, "cause"), 1000),
             "lossPaid": nullable_number(get(row, "lossPaid"), f"Loss {n} Loss Amount", errors, min=0),
-        })
+        }
+        if recall_loss_scope(inp):
+            from .claim_currency import CURRENCIES
+            entry['currency'] = text(get(row, 'currency'), 3).upper()
+            if entry['currency'] and entry['currency'] not in CURRENCIES:
+                errors.append(f'Loss {n} Currency must use an available option.')
+        loss_record.append(entry)
 
     effective_date = nullable_date(get(inp, "policyFrom"), "Effective date", errors)
     expiration_date = nullable_date(get(inp, "policyTo"), "Expiration date", errors)
@@ -306,7 +313,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         errors.append("Effective time must be 12:00 or 00:00.")
     if policy_to_time not in ("00:00", "12:00"):
         errors.append("Expiration time must be 12:00 or 00:00.")
-    if effective_date and expiration_date and (expiration_date < effective_date or (property_scope(inp) or cgl_qs_scope(inp) or stp_scope(inp)) and expiration_date == effective_date):
+    from .product_recall import scope as recall_scope
+    if effective_date and expiration_date and (expiration_date < effective_date or (property_scope(inp) or cgl_qs_scope(inp) or stp_scope(inp) or recall_scope(inp)) and expiration_date == effective_date):
         errors.append("Expiration date must be later than Effective date." if property_scope(inp) else "Expiration date cannot be earlier than Effective date.")
 
     from .oversea import issues as oversea_issues
@@ -372,6 +380,10 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["classOfBusiness"] = text(get(inp, "classOfBusiness"), 160)
     value["classCode"] = "ST" if stp_scope(inp) else text(get(inp, "classCode"), 80)
     value["reinsuranceStructure"] = reinsurance_structure
+    from .product_recall import scope as recall_scope
+    if recall_scope(value):
+        value['classCode'] = 'PR'
+        value['type'] = 'Product Recall Facultative Reinsurance'
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(inp):
         value["receiptPaymentDate"] = nullable_date(get(inp, "receiptPaymentDate"), "Receipt / Payment Date", errors) or ""
@@ -415,9 +427,16 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     value["clauseDetails"] = clause_details
     value["autoClauses"] = auto_clauses
     value["manualClauses"] = manual_clauses
+    if recall_scope(inp):
+        value['clauses'] = [row['code'] for row in UNIVERSAL_CLAUSES]
+        value['clauseDetails'] = [dict(row) for row in UNIVERSAL_CLAUSES]
+        value['autoClauses'] = []
+        value['manualClauses'] = []
     value["status"] = "draft"
     from .facility_rules import fixed_interest
     value["interest"] = fixed_interest(inp) or text(get(inp, "interest"), 3000)
+    if recall_scope(value):
+        value['interest'] = 'Reinsurance of the Reinsured’s liability under the original policy.'
     value["limitOfLiability"] = (text(get(inp, "limitOfLiability"), 5000) if stp_scope(inp) else nullable_number(get(inp, "limitOfLiability"), liability_limit_label(inp), errors, min=0))
     value["aggregateLimit"] = nullable_number(get(inp, "aggregateLimit"), "Aggregate Limit", errors, min=0)
     value["underlyingLimits"] = "" if reinsurance_structure == "QS" else text(get(inp, "underlyingLimits"), 3000)
@@ -458,6 +477,10 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
             value[key] = result_rows
 
     value["ae"] = text(get(inp, "ae"), 160)
+    if 'aePersonnelId' in inp:
+        value['aePersonnelId'] = nullable_number(get(inp, 'aePersonnelId'), 'Account Executive Personnel ID', errors, min=1, integer=True)
+    if 'aeEmail' in inp:
+        value['aeEmail'] = text(get(inp, 'aeEmail'), 254)
     value["newOrRenew"] = text(get(inp, "newOrRenew"), 20)
     value["exchRate"] = nullable_number(get(inp, "exchRate"), "Exchange rate", errors, min=0)
     value["remark"] = text(get(inp, "remark"), 5000)
@@ -500,9 +523,10 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if is_standard_cgl(value) or any(key in inp for key in RISK_KEYS):
         value.update(normalize_risk_details(inp, errors, text=text))
 
-    if is_standard_cgl(value) or "cglInformation" in inp:
+    from .product_recall import scope as recall_information_scope
+    if is_standard_cgl(value) or recall_information_scope(value) or "cglInformation" in inp:
         value["cglInformation"] = normalize_information(inp, errors, text=text, number=nullable_number, date_value=nullable_date, rows=rows)
-        if is_standard_cgl(value) and value["cglInformation"]["specialAgreementApplies"] == "notApplicable":
+        if (is_standard_cgl(value) or recall_information_scope(value)) and value["cglInformation"]["specialAgreementApplies"] == "notApplicable":
             value["specialAgreement"] = ""
 
     if requires_manual_tw_ref(value) and not value.get("parentTwRef"):
@@ -528,6 +552,10 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
         for key in ('endorsementSource','endorsementRules'):
             if key in inp:value[key]=inp[key]
     value.update(inactive)
+    from .product_recall import scope as product_recall_scope
+    if product_recall_scope(value):
+        risk = inp.get('productRecall')
+        value['productRecall'] = json_roundtrip(risk) if isinstance(risk, dict) else {}
     from .cgl_information import normalize_aggregate
     normalize_aggregate(inp, value)
     from .placing_rules import normalize_extra, share_issues
@@ -561,6 +589,19 @@ def loss_record_save_errors(payload, *, case_kind="original"):
     from .oversea import enabled as oversea_enabled
     if oversea_enabled(payload):
         return []
+    # CGL QS drafts may be incomplete; Review/Announce validates the history.
+    from .cgl_qs import scope as cgl_qs_scope
+    from .product_recall import scope as recall_scope
+    if cgl_qs_scope(payload) or recall_scope(payload):
+        for i, row in enumerate(get(payload, 'lossRecord') or []):
+            amount = get(row, 'lossPaid')
+            if _filled(amount) and (not js_is_finite(js_to_number(amount)) or js_to_number(amount) <= 0):
+                errors.append(f'Loss {i + 1} Loss Amount must be greater than 0.')
+        if recall_scope(payload):
+            from .product_recall import issues as recall_issues
+            errors.extend(issue['label'] for issue in recall_issues(payload, ready=False)
+                          if issue['field'].startswith('lossRecord.') and issue['label'] not in errors)
+        return errors
     from .stp import scope as stp_scope
     if property_scope(payload) or stp_scope(payload):
         years = get(payload, "lossRecordYears")
@@ -606,6 +647,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
         issues.append({"field": field, "label": label})
 
     value = payload if isinstance(payload, (dict, list)) else {}
+    from .product_recall import scope as recall_scope
+    product_recall = recall_scope(value)
     if property_qs_currency_scope(value) and str(value.get("currency") or "").strip().upper() not in ("TWD", "USD"):
         add("currency", PROPERTY_QS_CURRENCY_MESSAGE)
     from .stp import scope as stp_scope, issues as stp_issues
@@ -641,12 +684,14 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     address_label = 'Original Insured Address' if stp_scope(value) else 'Principal Address' if is_standard_cgl(value) else 'Situation'
     situations = get(value, "situations")
     situations = situations if is_array(situations) else []
-    if not situations:
+    if not situations and not product_recall:
         add("situations", address_label)
     for index, row in enumerate(situations):
+        if product_recall and not _filled(get(row, "address")) and not _filled(get(row, "postcode")):
+            continue
         if not _filled(get(row, "address")):
             add(f"situations.{index}.address", f"Principal Address {index + 1}" if is_standard_cgl(value) else f"Situation {index + 1} Risk Address")
-        if not (cgl_qs_scope(value) and not _filled(get(row, "postcode"))) and not (PROPERTY_POSTCODE if property_scope(value) or stp_scope(value) else _POSTCODE_RE).match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
+        if not ((cgl_qs_scope(value) or product_recall) and not _filled(get(row, "postcode"))) and not (PROPERTY_POSTCODE if property_scope(value) or stp_scope(value) else _POSTCODE_RE).match(js_trim(js_to_string(js_or(get(row, "postcode"), "")))):
             add(f"situations.{index}.postcode", f"{address_label} {index + 1} Postcode")
 
     reinsurers = get(value, "reinsurers")
@@ -676,14 +721,14 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
 
     if not _filled(get(value, "limitOfLiability")):
         add("limitOfLiability", liability_limit_label(value))
-    if not _filled(get(value, "deductibles")):
+    if not product_recall and not _filled(get(value, "deductibles")):
         add("deductibles", "Deductibles")
     from .sum_insured import all_facility
     if not all_facility(value) and not _filled(get(value, "originalConditions")):
         add("originalConditions", "Original Conditions")
-    if not is_standard_cgl(value) and not stp_scope(value) and get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
+    if not product_recall and not is_standard_cgl(value) and not stp_scope(value) and get(value, "basisOfValuation") == "Other" and not _filled(get(value, "basisOfValuationOther")):
         add("basisOfValuationOther", "Basis of Valuation — Other")
-    if not is_standard_cgl(value) and not stp_scope(value):
+    if not product_recall and not is_standard_cgl(value) and not stp_scope(value):
         if not _filled(get(value, "occupation")):
             add("occupation", "Occupation")
         if not _filled(get(value, "construction")):
@@ -706,6 +751,8 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
     issues.extend(type_issues(value))
     issues.extend(risk_details_issues(value))
     issues.extend(information_issues(value))
+    from .product_recall import issues as product_recall_issues
+    issues.extend(product_recall_issues(value, ready=True))
     if not _filled(get(value, "lossAdvisedDate")):
         add("lossAdvisedDate", "Loss record advised by broker on")
     raw_years = get(value, "lossRecordYears")
@@ -726,6 +773,20 @@ def validate_announce_ready(payload, *, allow_zero_loss_years=False, case_kind=N
             add(f"lossRecord.{index}.cause", f"Loss {n} Cause")
         if not _filled(get(row, "lossPaid")):
             add(f"lossRecord.{index}.lossPaid", f"Loss {n} Loss Amount")
+
+    if _filled(get(value, 'renewedFromTwRef')):
+        from .claims_views import _real_date
+        for index, row in enumerate(value.get('claimLossSnapshots') or []):
+            if not isinstance(row, dict):
+                add(f'claimLossSnapshots.{index}', 'Claim loss snapshot is invalid')
+                continue
+            if not _real_date(row.get('date')):
+                add(f'claimLossSnapshots.{index}.date', f'Claim loss {index + 1} Date of Loss')
+            if not _filled(row.get('cause')):
+                add(f'claimLossSnapshots.{index}.cause', f'Claim loss {index + 1} Cause')
+            amount = js_to_number(row.get('lossPaid'))
+            if row.get('lossPaid') is None or not js_is_finite(amount) or amount < 0 or row.get('snapshotModified') is True and amount <= 0:
+                add(f'claimLossSnapshots.{index}.lossPaid', f'Claim loss {index + 1} Loss Amount')
 
     for field, label in (("originalPremium", "100% Premium"),):
         if not _filled(get(value, field)):

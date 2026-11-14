@@ -37,6 +37,7 @@
   // Document-only QS Property presentation. Never reorder or write Case rows.
   function newQs(c) { return c && c.placingRulesVersion === 'placing-qs-20261028-v1' && c.reinsuranceStructure === 'QS'; }
   function newCgl(c) { return newQs(c) && c.classOfBusiness === 'Commercial General Liability'; }
+  function isProductRecall(c) { return text(c && c.classOfBusiness).toLowerCase() === 'product recall' && qsStructure(c); }
   function propertyExtras(c) { return newQs(c) && c.classOfBusiness === 'Property' && (!(c.reinsurers || []).some(r => r.name) || (c.reinsurers || []).some(r => r.name && !/\(Facility\)\s*$/i.test(r.name))); }
   function qsProperty(c) {
     return text(c && c.reinsuranceStructure).toUpperCase() === 'QS'
@@ -70,6 +71,7 @@
   }
 
   function coverPaymentTerms(c) {
+    if (isProductRecall(c)) return (text(c && c.paymentTermsDays) || '0') + ' Day Payment condition - LSW3001 Premium Payment Clause';
     const suffix = ' Day Payment condition - LSW 3001 Premium Payment Clause';
     const valid = value => Number.isInteger(Number(value)) && Number(value) >= 15;
     if (!qsProperty(c) && !isStp(c)) return (text(c && c.paymentTermsDays) || '0') + suffix;
@@ -96,12 +98,14 @@
   }
 
   function originalClauseText(c, value) {
+    if (isProductRecall(c)) return text(value) + '\nAll other terms and conditions are as per the original policy wordings.';
     return qsStructure(c) ? originalClauseLines(value).concat([ORIGINAL_CONDITIONS_TAIL]).join('\n')
       : appendRequiredTail(value, ORIGINAL_CONDITIONS_TAIL);
   }
 
   function lossDocumentRows(c) {
-    const rows = Array.isArray(c && c.lossRecord) ? c.lossRecord : [];
+    const rows = [...(Array.isArray(c && c.lossRecord) ? c.lossRecord : []),
+      ...(c?.renewedFromTwRef && Array.isArray(c.claimLossSnapshots) ? c.claimLossSnapshots : [])];
     if (!qsProperty(c)) return rows;
     return rows.map((row, index) => ({ row, index, date: Date.parse(row.date) }))
       .sort((a, b) => (Number.isFinite(b.date) ? b.date : -Infinity) - (Number.isFinite(a.date) ? a.date : -Infinity)
@@ -372,6 +376,10 @@
   }
 
   function clauseDetails(c) {
+    if (isProductRecall(c)) return [
+      {code:'LMA3333', title:'LMA3333 Reinsurers Liability Clause'},
+      {code:'INTERMEDIARY', title:'Intermediary Clause (TW Insurance Brokers Ltd.)'}
+    ];
     const snapshots = Array.isArray(c && c.clauseDetails) ? c.clauseDetails : [];
     const codes = Array.isArray(c && c.clauses) ? c.clauses : [];
     const byCode = new Map();
@@ -415,19 +423,26 @@
   }
 
   function lossValues(c) {
-    const rows = Array.isArray(c && c.lossRecord) ? c.lossRecord : [];
+    const rows = lossDocumentRows(c);
     const years = Number.parseInt(c && c.lossRecordYears, 10);
     const periodYears = years > 0 ? years : 5;
     const countText = rows.length === 0 ? 'Loss Clean' : `${rows.length} ${rows.length === 1 ? 'loss' : 'losses'}`;
     let summary = years === 0 && rows.length === 0 && c && c.newOrRenew === 'New' && !c.renewedFromTwRef
       ? 'Loss Clean since operation.'
       : `${countText} in the past ${periodYears} ${periodYears === 1 ? 'year' : 'years'}`;
+    if (isProductRecall(c) && !rows.length) {
+      summary = years === 0 && c.newOrRenew === 'New' && !c.renewedFromTwRef
+        ? 'No previous recalls or product withdrawals since start selling.'
+        : `No previous recalls or product withdrawals in the last ${periodYears} ${periodYears === 1 ? 'year' : 'years'}`;
+      if (text(c.lossAdvisedDate)) summary += ` (As advised to TWIB as at ${longDate(c.lossAdvisedDate)})`;
+      return {summary, dates:'', causes:'', paid:''};
+    }
     if (text(c && c.lossAdvisedDate)) summary += ` (as advised by TW Insurance Brokers Ltd. on ${longDate(c.lossAdvisedDate)})`;
     return {
       summary,
       dates: rows.map(row => longDate(row.date) || '—').join('\n'),
       causes: rows.map(row => text(row.cause) || '—').join('\n'),
-      paid: rows.map(row => formatMoney(row.lossPaid, c)).join('\n'),
+      paid: rows.map(row => row.currency ? `${text(row.currency).toUpperCase()} ${formatMoney(row.lossPaid, { ...c, currency: row.currency })}` : formatMoney(row.lossPaid, c)).join('\n'),
     };
   }
 
@@ -488,11 +503,11 @@
       PERIOD: period(c, true),
       PERIOD_SHORT: period(c, false),
       INTEREST: facilityInterest(c) || text(c && c.interest) || (newCgl(c) ? 'Reinsurance of the Reinsured’s liability under the original policy.' : ''),
-      LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c) + (newCgl(c) ? ' each occurrence' : ''),
+      LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c) + (isProductRecall(c) ? ' each occurrence and in the aggregate' : newCgl(c) ? ' each occurrence' : ''),
       AGGREGATE_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
       UNDERLYING_LIMITS: qsProperty(c) ? '' : Array.isArray(c && c.cglInformationRows) && text(c && c.reinsuranceStructure).toUpperCase() !== 'XOL' ? '' : text(c && c.underlyingLimits),
-      SUB_LIMITS: text(c && c.subLimits),
-      DEDUCTIBLES: text(c && c.deductibles),
+      SUB_LIMITS: isProductRecall(c) ? [...(c.productRecall?.losses || []).filter(row => row.selected), ...(c.productRecall?.additionalSublimits || [])].map(row => `${currencyLabel(c)} ${formatMoney(row.amount, c)} in respect of ${text(row.name)}`).join('\n') : text(c && c.subLimits),
+      DEDUCTIBLES: isProductRecall(c) ? (text(c.deductibles) ? `${currencyLabel(c)} ${formatMoney(c.deductibles, c)} each and every Insured Event` : '') : text(c && c.deductibles),
       REINSURED_RETENTION: pureFacility(c) ? 'Advice of Reinsured’s retention waived' : text(c && c.reinsuredRetention) || ((qsProperty(c) || newCgl(c)) ? "Advice of Reinsured's retention waived." : ""),
       REINSTATEMENT_PROVISIONS: pureFacility(c) ? '' : text(c && c.reinstatementProvisions),
       INDEMNITY_PERIOD: Array.isArray(c && c.cglInformationRows) ? '' : text(c && c.indemnityPeriod),
@@ -1144,7 +1159,7 @@
     xml = expandRepeatingRows(xml, '{{LOSS_DATES}}', lossRows, row => ({
       '{{LOSS_DATES}}': longDate(row.date) || '—',
       '{{LOSS_CAUSES}}': text(row.cause) || '—',
-      '{{LOSS_PAID}}': formatMoney(row.lossPaid, c),
+      '{{LOSS_PAID}}': row.currency ? `${text(row.currency).toUpperCase()} ${formatMoney(row.lossPaid, { ...c, currency: row.currency })}` : formatMoney(row.lossPaid, c),
     }), { wholeFrameWhenEmpty: true });
 
     const reinsurers = securityDocumentRows(c);
@@ -1182,9 +1197,9 @@
     });
 
     if (qsStructure(c)) {
-      xml = expandListParagraph(xml, '{{ORIGINAL_CONDITIONS}}', originalClauseLines(c && c.originalConditions), {
+      xml = expandListParagraph(xml, '{{ORIGINAL_CONDITIONS}}', isProductRecall(c) ? text(c.originalConditions).split(/\r?\n/).filter(Boolean) : originalClauseLines(c && c.originalConditions), {
         numId: DECIMAL_LIST_NUM_ID,
-        tail: ORIGINAL_CONDITIONS_TAIL,
+        tail: isProductRecall(c) ? 'All other terms and conditions are as per the original policy wordings.' : ORIGINAL_CONDITIONS_TAIL,
       });
     } else {
     const originalConditionsText = appendRequiredTail(c && c.originalConditions, ORIGINAL_CONDITIONS_TAIL);
@@ -1194,9 +1209,9 @@
     }
 
     if (qsStructure(c)) {
-      xml = expandListParagraph(xml, '{{ORIGINAL_EXCLUSIONS}}', originalClauseLines(c && c.originalExclusions), {
+      xml = expandListParagraph(xml, '{{ORIGINAL_EXCLUSIONS}}', isProductRecall(c) ? text(c.originalExclusions).split(/\r?\n/).filter(Boolean) : originalClauseLines(c && c.originalExclusions), {
         numId: DECIMAL_LIST_NUM_ID,
-        tail: ORIGINAL_CONDITIONS_TAIL,
+        tail: isProductRecall(c) ? 'All other terms and conditions are as per the original policy wordings.' : ORIGINAL_CONDITIONS_TAIL,
       });
     } else {
     const originalExclusionsText = appendRequiredTail(c && c.originalExclusions, ORIGINAL_CONDITIONS_TAIL);
@@ -1451,6 +1466,27 @@
   // Render escaped text before normal placeholders, protecting literal braces.
   function applyCglRiskDetails(xml, c) {
     if (!Array.isArray(c && c.cglInformationRows)) return xml;
+    if (isProductRecall(c)) {
+      if (!(c.situations || []).some(row => text(row.address))) {
+        const address = findFrameForToken(xml, scanTableFrames(xml), '{{SITUATION}}');
+        if (address) {
+          const row = address.frame.rows[address.rowIndex];
+          xml = xml.slice(0, row.start) + xml.slice(row.end);
+        }
+      }
+      const found = findFrameForToken(xml, scanTableFrames(xml), '{{INTEREST}}');
+      if (found) {
+        const row = found.frame.rows[found.rowIndex], template = xml.slice(row.start, row.end);
+        const additions = [['COVERED EVENTS', c.productRecall?.events], ['COVERED LOSS', c.productRecall?.losses]]
+          .map(([label, rows]) => {
+            const value = (rows || []).filter(item => item.selected).map(item => text(item.name)).filter(Boolean).join('\n');
+            return template.replace('>INTEREST<', '>' + label + '<').split('{{INTEREST}}').join(xmlValue(value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;'));
+          }).join('');
+        xml = xml.slice(0, row.end) + additions + xml.slice(row.end);
+      }
+      const defaultLaw = 'This (re)insurance shall be governed by and construed in according with the law of Republic of China, Taiwan and the each party agrees to submit to the exclusive jurisdiction of the Courts of the Republic of China, Taiwan.';
+      xml = xml.replace(defaultLaw, xmlValue(c.productRecall?.choiceOfLaw).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;'));
+    }
     [
       { token: '{{INTEREST}}', heading: 'INTEREST', label: 'COVERAGES', value: c.cglCoveragesText },
       { token: '{{DEDUCTIBLES}}', heading: 'DEDUCTIBLES', label: 'SELF-INSURED RETENTION', value: c.selfInsuredRetention },
@@ -1474,7 +1510,7 @@
     if (!newQs(c)) return xml;
     const additions = [
       {token:'{{DEDUCTIBLES}}', heading:'DEDUCTIBLES', label:'SELF-INSURED RETENTION', value:propertyExtras(c) ? c.selfInsuredRetention : ''},
-      {token:'{{REINSTATEMENT_PROVISIONS}}', heading:'REINSTATEMENT PROVISIONS', label:'CO-REINSURANCE WARRANTY', value:(newCgl(c) || propertyExtras(c)) ? c.coReinsuranceWarranty : ''}
+      {token:'{{REINSTATEMENT_PROVISIONS}}', heading:'REINSTATEMENT PROVISIONS', label:'CO-REINSURANCE WARRANTY', value:(newCgl(c) || isProductRecall(c) || propertyExtras(c)) ? c.coReinsuranceWarranty : ''}
     ];
     additions.forEach(item => {
       if (!text(item.value)) return;

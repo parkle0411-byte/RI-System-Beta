@@ -24,7 +24,7 @@ def check(name, condition):
 
 user = get_user_model().objects.create_user(username='zz.auw.defaults', password='AUW-Defaults-Password-9!')
 person = Personnel.objects.create(name='QA AUW Default AE', department='admin', role_code='admin',
-    auth_user_id=str(user.pk), account_status='active', created_by='qa', updated_by='qa')
+    email='qa-auw-default@example.test', auth_user_id=str(user.pk), account_status='active', created_by='qa', updated_by='qa')
 for kind, name in [('ae', person.name), ('class', 'Property'), ('reinsured', 'QA AUW Cedant'),
                    ('reinsurer', TARGET), ('foreign_broker', 'Howden Specialty Limited')]:
     MasterRecord.objects.get_or_create(entity_type=kind, name=name, defaults={'created_by':'qa', 'updated_by':'qa'})

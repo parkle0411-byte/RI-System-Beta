@@ -21,7 +21,7 @@ def check(label,value):
  assert value,label
  checks.append(label);print('PASS '+label,flush=True)
 user=get_user_model().objects.create_user(username='zz.auw.identity',password='AUW-Identity-QA-9!')
-person=Personnel.objects.create(name='QA AUW Identity AE',department='admin',role_code='admin',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
+person=Personnel.objects.create(name='QA AUW Identity AE',department='admin',role_code='admin',email='qa-auw-identity@example.test',auth_user_id=str(user.pk),account_status='active',created_by='qa',updated_by='qa')
 for kind,name in [('ae',person.name),('class','Property'),('reinsured','QA Identity Cedant'),('reinsurer',AUW),('reinsurer','QA Identity Ordinary'),('foreign_broker','Howden Specialty Limited')]:
  MasterRecord.objects.get_or_create(entity_type=kind,name=name,defaults={'created_by':'qa','updated_by':'qa'})
 def call(method,url,body=None,c=None):

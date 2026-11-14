@@ -22,6 +22,9 @@ def selection_issues(payload):
         if not isinstance(row, dict):
             continue
         name = " ".join(str(row.get("name") or "").split()).casefold()
+        if klass == 'product recall' and re.search(r'\bfacility\b', name):
+            issues.append({'field': f'reinsurers.{index}.name', 'label': f'Reinsurer {index + 1}: Facility is not available for Product Recall.'})
+            continue
         if klass == 'stock throughput' and re.search(r'\bfacility\b', name) and not any(name == target.casefold() for target, _, _ in RULES):
             issues.append({"field": f"reinsurers.{index}.name", "label": f"Reinsurer {index + 1}: Facility is not available for Stock Throughput."})
             continue

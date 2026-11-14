@@ -48,6 +48,11 @@ _ref = [0]
 def make_case(c, status="posted", **over):
     r = call(c, "post", "/api/cases", {"case": ready(**over)}); assert r.status_code == 201, r.content
     case = Case.objects.get(case_uid=r.json()["case"]["caseUid"])
+    ae_name = over.get('ae', 'ZZ REM AE')
+    linked = Personnel.objects.filter(name=ae_name).first()
+    payload = {**case.payload, 'ae':ae_name, 'aePersonnelId':linked.pk if linked else None}
+    Case.objects.filter(pk=case.pk).update(ae_personnel_id=linked.pk if linked else None, ae_name_snapshot=ae_name, payload=payload)
+    case.refresh_from_db()
     if status != "draft":
         _ref[0] += 1
         # 2026-10-16 92 項規則：財務提醒依正式帳款（已建立的保費交易）；合成案件直接建立對應交易
@@ -70,6 +75,8 @@ try:
     # 2026-10-16：財務提醒信獨立由 RI_PAYMENT_REMINDER_ENABLED（PAYMENT_REMINDER_EMAIL_ENABLED）控制，不連動 Signed Slip 開關
     with transaction.atomic(), override_settings(REMINDER_EMAIL_ENABLED=False, PAYMENT_REMINDER_EMAIL_ENABLED=False, REMINDER_LINK_URL="http://vm.example/ri", REMINDER_LINK_TEXT="開啟 VM"):
         ae = person("ZZ REM AE", email="ZZ.AE@tw-insure.com", supervisor_name="ZZ Boss", supervisor_email="zz.boss@tw-insure.com")
+        person("ZZ REM Boss", role="general_manager", email="zz.boss@tw-insure.com")
+        person("ZZ REM Test Boss", role="general_manager", email="boss@example.com")
         person("ZZ REM Finance", role="accounting", dept="finance", email="zz.fin@tw-insure.com")
         sales_p = person("ZZ REM Sales")
         sales = account(sales_p, "sales")
@@ -105,6 +112,14 @@ try:
         runner.run_signed_slip(d(DAY60, 7))
         check("day 67: weekly reminder again", len(slips(a)) == 2)
 
+        partial = make_case(sales)
+        Personnel.objects.filter(pk=ae.pk).update(account_status='disabled')
+        partial_result = runner.run_signed_slip(DAY60)
+        partial_alerts = slips(partial)
+        check('disabled AE is skipped while the active supervisor receives the Signed Slip reminder', len(partial_alerts) == 1 and partial_alerts[0].recipients == ['zz.boss@tw-insure.com']
+              and any(e['caseUid'] == str(partial.case_uid) and e.get('partialDelivery') for e in partial_result['configurationErrors']), partial_result)
+        Personnel.objects.filter(pk=ae.pk).update(account_status='not_configured')
+
         b = make_case(sales)
         Personnel.objects.filter(pk=ae.pk).update(supervisor_email="boss@example.com")
         runner.run_signed_slip(DAY60)
@@ -116,7 +131,7 @@ try:
         c = make_case(sales, ae="ZZ REM Nobody")
         runner.run_signed_slip(DAY60)
         err = audits("signed_slip_configuration_error", c.case_uid).first()
-        check("AE without a Personnel record -> configuration error audit, no alert", not slips(c) and err and err.after_data["error"] == "Account Executive does not match one active Personnel record."
+        check("AE without a Personnel record -> configuration error audit, no alert", not slips(c) and err and err.after_data["error"] == "Account Executive is not linked to Personnel; confirm the historical identity."
               and err.metadata == {"alertOn": DAY60}, err and err.after_data)
 
         signed_doc(a, ["ZZ Re B"])
@@ -240,8 +255,8 @@ try:
         # 2026-10-16 第 85 項：有效收件人（Finance）先寄，AE 缺漏不再整封擋下寫 Audit 錯誤，而是在 API 最上方另列即時缺漏提示（at 為空）；
         # Audit 紀錄仍新到舊。此時 Finance e-mail 已被上一段清空，所以即時提示同時列出 AE 與 Finance 缺漏。
         check("API: configuration errors from the Audit Log (both reminders, newest first) plus the live payment contact warning", any(e["reminder"] == "signed_slip" and e["alertDate"] == DAY60
-              and e["error"] == "Account Executive does not match one active Personnel record." for e in logged)
-              and errs[0]["reminder"] == "payment" and errs[0]["at"] is None and errs[0]["alertKind"] == "contact_missing" and "Account Executive does not match one active Personnel record." in errs[0]["error"]
+              and e["error"] == "Account Executive is not linked to Personnel; confirm the historical identity." for e in logged)
+              and errs[0]["reminder"] == "payment" and errs[0]["at"] is None and errs[0]["alertKind"] == "contact_missing" and "Account Executive is not linked to Personnel; confirm the historical identity." in errs[0]["error"]
               and [e["at"] for e in logged] == sorted([e["at"] for e in logged], reverse=True), errs[:3])
         check("API: viewer cannot see a case that is not theirs -> 404", call(viewer, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 404)
         check("API: Finance can inspect case reminders under the approved all-case read permission", call(fin, "get", f"/api/case-reminders?caseUid={p.case_uid}").status_code == 200)

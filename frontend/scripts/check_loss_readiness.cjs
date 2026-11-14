@@ -25,6 +25,8 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/propertyOrigi
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/lib/accounting.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{premiumInputErrors});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/swissCgl.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRetroactive.js'), 'utf8').replace(/export /g, ''), context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/productRecall.js'), 'utf8').replace(/export /g, ''), context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/claimLossSnapshots.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglInformation.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/cglQs.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{cglQsScope,cglQsIssues,draftFormatIssues});})()', context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/propertyQsCurrency.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{propertyQsCurrencyScope,propertyQsCurrencyIssues});})()', context);
@@ -73,6 +75,9 @@ check('Renew cannot use zero years', {lossRecordYears: 0, newOrRenew: 'Renew'}, 
 check('renewal linkage prevents zero-year New bypass', {lossRecordYears: 0, renewedFromTwRef: 'QA-ROOT'},
   ['Loss history years']);
 console.log(`${count}/${count} Loss Record readiness regression checks passed`);
+assert.deepStrictEqual(Array.from(context.claimLossSnapshotIssues({renewedFromTwRef:'X', claimLossSnapshots:[{date:'2026-01-01',cause:'Fire',lossPaid:0,snapshotModified:false}]})), []);
+assert.deepStrictEqual(Array.from(context.claimLossSnapshotIssues({renewedFromTwRef:'X', claimLossSnapshots:[{date:'2026-01-01',cause:'',lossPaid:0,snapshotModified:true}]})), ['Claim loss 1 Cause','Claim loss 1 Loss Amount']);
+console.log('PASS renewal Claim loss snapshot readiness');
 
 const cgl = {aggregateLimit:1000000,originalInsuredCn:'QA CN',reinsuredRetention:'As original',reinsurers:[{...base.reinsurers[0],paymentTermsDays:90}],typePrefix: 'Commercial General Liability', type: 'Commercial General Liability Facultative Reinsurance as original', coverages: ['Premises-Operations Liability'], classOfBusiness: 'Commercial General Liability', occupation: '', construction: '', sumInsured: [],
   cglInformation: {policyForm: 'Occurrence Form', territorialLimits: 'USA/Canada Only', insuredBusiness: 'Manufacturing', insuredProducts: 'Products',

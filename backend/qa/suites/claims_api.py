@@ -139,7 +139,7 @@ try:
         for label, claim in (("Date of Loss missing (VM: required)", {}), ("Date of Loss blank", {"dateOfLoss": "  "}), ("Date of Loss 2026-02-30", {"dateOfLoss": "2026-02-30"}),
                              ("Date of Loss text", {"dateOfLoss": "last May"}), ("Date of Loss 2026/05/01", {"dateOfLoss": "2026/05/01"})):
             r = act(sales, "create_claim", root, claim=claim); check(f"create: {label} -> 400 invalid_date_of_loss", r.status_code == 400 and code(r) == "invalid_date_of_loss", (r.status_code, code(r)))
-        for label, reserve in (("reserve text (Alpha stored 0)", "abc"), ("reserve negative", -1), ("reserve -0.5 text", "-0.5"), ("reserve Infinity", "Infinity")):
+        for label, reserve in (("reserve text (Alpha stored 0)", "abc"), ("reserve negative", -1), ("reserve -0.5 text", "-0.5"), ("reserve Infinity", "Infinity"), ("reserve blank", ""), ("reserve zero", 0)):
             r = act(sales, "create_claim", root, claim={"dateOfLoss": "2026-05-01", "outstandingReserve": reserve})
             check(f"create: {label} -> 400 invalid_claim_reserve", r.status_code == 400 and code(r) == "invalid_claim_reserve", (r.status_code, code(r)))
         check("create: failed attempts changed nothing", Case.objects.get(pk=root.pk).row_version == v0 and Case.objects.get(pk=root.pk).payload == before)
@@ -149,13 +149,20 @@ try:
               and j["claimsState"]["rootRowVersion"] == v0 + 1 and j["claimsState"]["claims"] == root.payload["claims"], j)
         check("claim fields: trimmed/capped text, reserve parsed with comma and rounded to cents (VM), no payments", c1["id"] == 1 and len(c1["lossNo"]) == 160 and c1["lossNo"].startswith("Lx")
               and len(c1["causeOfLoss"]) == 2000 and c1["outstandingReserve"] == 1234.57 and c1["payments"] == [] and c1["dateOfLoss"] == "2026-05-01", c1)
+        Case.objects.filter(pk__in=[root.pk, e1.pk]).update(owner_personnel_id=view_p.pk)
+        root_detail = call(viewer, 'get', '/api/cases?caseUid=' + str(root.case_uid))
+        endo_detail = call(viewer, 'get', '/api/cases?caseUid=' + str(e1.case_uid))
+        check('case viewers see the same policy-period Claim loss on original and endorsement', root_detail.status_code == 200 and endo_detail.status_code == 200
+              and root_detail.json()['case']['claimLossRecord'] == endo_detail.json()['case']['claimLossRecord']
+              and root_detail.json()['case']['claimLossRecord'][0]['lossPaid'] == 1234.57, (root_detail.content[:200], endo_detail.content[:200]))
+        Case.objects.filter(pk__in=[root.pk, e1.pk]).update(owner_personnel_id=sales_p.pk)
         a = audit(root.case_uid, "create_claim").first()
         check("audit create_claim: before/after payload, metadata", a and a.metadata == {"claimId": 1, "action": "create_claim"} and a.before_data["rowVersion"] == v0
               and a.before_data["payload"].get("claims", []) == [] and a.after_data["payload"]["claims"][0]["id"] == 1)
         check("snapshot claim_created at the new version (VM addition)", snaps(root.case_uid, "claim_created").filter(entity_version=v0 + 1).exists())
-        r = act(sales, "create_claim", e1, root=root, claim={"dateOfLoss": "2026-06-30"}); root.refresh_from_db()
-        check("create from an endorsement view: stored on the root as claim #2, blank reserve is 0", r.status_code == 200 and [c["id"] for c in root.payload["claims"]] == [1, 2]
-              and root.payload["claims"][1]["outstandingReserve"] == 0 and (Case.objects.get(pk=e1.pk).payload or {}).get("claims") in (None, []), root.payload["claims"])
+        r = act(sales, "create_claim", e1, root=root, claim={"dateOfLoss": "2026-06-30", "outstandingReserve": 100}); root.refresh_from_db()
+        check("create from an endorsement view: stored on the root as claim #2 with positive reserve", r.status_code == 200 and [c["id"] for c in root.payload["claims"]] == [1, 2]
+              and root.payload["claims"][1]["outstandingReserve"] == 100 and (Case.objects.get(pk=e1.pk).payload or {}).get("claims") in (None, []), root.payload["claims"])
 
         # ================= 準備金 =================
         v1 = root.row_version
@@ -201,6 +208,8 @@ try:
         tx2 = [t for t in root.payload["transactions"] if "-C1-P2-" in t["txNo"]]
         check("negative payment allowed (recovery / correction), payment id 2, negative transactions", r.status_code == 200 and root.payload["claims"][0]["payments"][1]["amount"] == -200
               and len(tx2) == 6 and all(t["amount"] < 0 for t in tx2), r.content[:200])
+        loss_rows = claims(sales, root).json()['claimsState']['claimLossRecord']
+        check('claim loss record includes reserve and signed obligations in original currency', loss_rows[0]['claimId'] == 1 and loss_rows[0]['currency'] == 'USD' and loss_rows[0]['lossPaid'] == 800.01, loss_rows)
         rows = [x for x in ledger(fin, root) if x["source"] == "claim"]
         check("claim transactions appear in the Accounting ledger", len(rows) == 12 and all(x["settlement"] == "open" for x in rows), len(rows))
         # 2026-10-16「92 項會計規則重新確認」第 65／71 項：GET 對每筆付款另加顯示用 canCorrect（可否更正）與 dueDate（建帳台灣日＋15）；
@@ -211,9 +220,58 @@ try:
               and [pay["dueDate"] for pay in shown[0]["payments"]] == [add_calendar_days(taipei_date(pay["createdAt"]), 15) for pay in root.payload["claims"][0]["payments"]]
               and all(pay["canCorrect"] is True for pay in shown[0]["payments"]), shown[0]["payments"])
         # 2026-10-16 第 62 項：出險日不在任何保單／批單期間 -> claim_split_pending_review，不寫入付款或交易。
-        r = act(sales, "create_claim", root, claim={"dateOfLoss": "2028-01-01"}); root.refresh_from_db(); v3 = root.row_version; before = root.payload
+        r = act(sales, "create_claim", root, claim={"dateOfLoss": "2028-01-01", "outstandingReserve": 100}); root.refresh_from_db(); v3 = root.row_version; before = root.payload
         r = act(sales, "record_payment", root, claimId=3, payment={"amount": 10, "date": "2028-01-02"}); root.refresh_from_db()
         check("Date of Loss outside every policy/endorsement period -> claim_split_pending_review, nothing written", code(r) == "claim_split_pending_review" and root.row_version == v3 and root.payload == before, (r.status_code, code(r)))
+        # Changing the loss date must preserve already-created obligations and ledger entries.
+        before_tx = copy.deepcopy(root.payload.get('transactions', []))
+        before_payments = copy.deepcopy(root.payload['claims'][0]['payments'])
+        r = act(sales, 'update_loss_date', root, claimId=1, dateOfLoss='2026-06-01', reason='')
+        check('loss date change requires a reason', r.status_code == 400 and code(r) == 'correction_reason_required')
+        r = act(sales, 'update_loss_date', root, claimId=1, dateOfLoss='2026-02-30', reason='Correct date')
+        check('loss date change rejects invalid calendar dates', r.status_code == 400 and code(r) == 'invalid_date_of_loss')
+        r = act(sales, 'update_loss_date', root, claimId=1, dateOfLoss='2026-06-01', reason='Correct date'); root.refresh_from_db()
+        history = root.payload['claims'][0].get('lossDateHistory', [])
+        check('loss date change preserves existing obligations and transactions', r.status_code == 200 and root.payload.get('transactions', []) == before_tx and root.payload['claims'][0]['payments'] == before_payments, r.content[:200])
+        check('loss date change records old date, new date, reason and actor', bool(history) and history[-1].get('before') == '2026-05-01' and history[-1].get('after') == '2026-06-01' and history[-1].get('reason') == 'Correct date' and bool(history[-1].get('changedAt')) and bool(history[-1].get('changedBy')), history)
+        old_cause = root.payload['claims'][0].get('causeOfLoss') or ''
+        r = act(sales, 'update_cause', root, claimId=1, causeOfLoss='Updated cause'); root.refresh_from_db()
+        from cases.claim_loss_record import claim_loss_rows
+        cause_history = root.payload['claims'][0].get('causeHistory', [])
+        check('claim cause change updates derived loss record and preserves accounting', r.status_code == 200 and claim_loss_rows(root.payload)[0]['cause'] == 'Updated cause' and root.payload.get('transactions', []) == before_tx and root.payload['claims'][0]['payments'] == before_payments, r.content[:200])
+        check('claim cause change records before, after and actor', bool(cause_history) and cause_history[-1].get('before') == old_cause and cause_history[-1].get('after') == 'Updated cause' and bool(cause_history[-1].get('changedBy')), cause_history)
+        r = act(sales, 'update_cause', root, claimId=1, causeOfLoss=None)
+        check('claim cause change rejects non-text input', r.status_code == 400 and code(r) == 'invalid_cause')
+        multi = make_case(sales, 'posted', classOfBusiness='Commercial General Liability', classCode='GL', typePrefix='Commercial General Liability',
+                          reinsurers=[dict(name='ZZ Re A', sharePct=60, premium=600, riCommPct=5, taxPct=0, paymentTermsDays=90),
+                                      dict(name='ZZ Re B', sharePct=40, premium=400, riCommPct=5, taxPct=0, paymentTermsDays=90)])
+        r = act(sales, 'create_claim', multi, claim={'dateOfLoss':'2026-05-01', 'outstandingReserve':100, 'currency':'TWD'}); multi.refresh_from_db()
+        check('multi-currency claim uses selected currency', r.status_code == 200 and multi.payload['claims'][0].get('currency') == 'TWD', r.content[:300])
+        r = act(sales, 'record_payment', multi, claimId=1, payment={'date':'2026-06-01', 'amount':101}); multi.refresh_from_db()
+        multi_tx = [t for t in multi.payload.get('transactions', []) if t.get('source') == 'claim']
+        check('claim obligations use claim currency and integer TWD shares', r.status_code == 200 and len(multi_tx) == 4 and all(t.get('currency') == 'TWD' and t['amount'] == int(t['amount']) for t in multi_tx), multi_tx)
+        accounting = call(fin, 'get', '/api/accounting').json()
+        original_rows = [row for row in accounting.get('transactionRows', []) if row.get('caseUid') == str(multi.case_uid) and row.get('source') == 'claim']
+        check('multi-currency Claim Accounting rows do not display FX conversions', len(original_rows) == 4 and all(row.get('currency') == 'TWD' and row.get('amountNtd') is None and row.get('outstandingNtd') is None and row.get('fxNotApplicable') is True for row in original_rows), original_rows)
+        from dashboard.calc import build_dashboard
+        from production.views import case_source
+        metrics = build_dashboard([case_source(multi)], [], [], timezone.now(), production_rules=True)['metrics']
+        claim_totals = metrics.get('claimOutstandingByCurrency') or []
+        check('Dashboard separates Claim receivables and payables by original currency', claim_totals == [{'currency':'TWD', 'receivable':101, 'payable':101}]
+              and metrics['outstandingLeg1Ntd'] == 0 and metrics['outstandingLeg2Ntd'] == 0, metrics)
+        before_numbers = [t['txNo'] for t in multi_tx]
+        r = act(sales, 'update_currency', multi, claimId=1, currency='USD', reason='Correct currency'); multi.refresh_from_db()
+        changed = [t for t in multi.payload.get('transactions', []) if t.get('source') == 'claim']
+        check('currency correction changes every transaction, not identifiers', r.status_code == 200 and [t['txNo'] for t in changed] == before_numbers and all(t.get('currency') == 'USD' for t in changed), r.content[:300])
+        check('currency correction preserves before and after history', len(multi.payload['claims'][0].get('currencyHistory', [])) == 1, multi.payload['claims'][0])
+        r = act(sales, 'create_claim', multi, claim={'dateOfLoss':'2026-05-01', 'outstandingReserve':10, 'currency':'EUR'}); multi.refresh_from_db()
+        r2 = act(sales, 'record_payment', multi, claimId=2, payment={'date':'2026-06-01', 'amount':25}); multi.refresh_from_db()
+        metrics = build_dashboard([case_source(multi)], [], [], timezone.now(), production_rules=True)['metrics']
+        grouped = {row['currency']:row for row in metrics.get('claimOutstandingByCurrency') or []}
+        check('different Claim currencies are totalled separately without FX rates', r.status_code == 200 and r2.status_code == 200 and set(grouped) == {'USD','EUR'}
+              and grouped['USD']['receivable'] == 101 and grouped['EUR']['receivable'] == 25 and not metrics['missingPostingRates'], grouped)
+        compact = call(fin, 'get', '/api/accounting?view=list').json()
+        check('Accounting currency filter includes each Claim transaction currency', {'USD','EUR'} <= set(compact.get('currencies') or []), compact.get('currencies'))
         raise Rollback()
 except Rollback:
     pass
