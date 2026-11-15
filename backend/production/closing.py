@@ -6,7 +6,7 @@
   - 保費交易（Leg 1–3）：沒有分期的案件，全部確認後（而且原本不是 closed）一次產生整個案件全額；
     有分期的案件，每一期的所有 key 都確認就產生「該期」的交易（依該期比例，每期只產生一次）——
     2026-09-29 起（Alpha v63 同步）；以前是全部期別都確認才一次產生，分期案件在最後一期關帳前 SoA 看不到任何交易。
-    產生時若有待沖銷（pendingReversalOffset），先為「已 Reverse、還沒沖過」的交易加上 -RVS{cycle} 沖銷分錄
+    產生時若有待沖銷（pendingReversalOffset），先為「已 Reverse、還沒沖過」的交易加上 -RVS{cycle} 沖銷分錄；重建的交易加 -V{cycle}（第二批，2026-11-13 問題 6-2）
 與 Alpha v63 的 JavaScript 逐位一致（差異測試：qa/alpha_js/excerpts/production-excerpts.js）。
 """
 from cases.calc.accounting import build_premium_transactions
@@ -118,8 +118,10 @@ def confirm_case(source, report_rows, posting_month=None):
             payload["pendingReversalOffset"] = False
         from datetime import datetime, timezone
         created_at = datetime.now(timezone.utc).isoformat()
+        # Batch 2 (2026-11-13 decision 6-2): rebuilt accounts after whole-Case Reverse end in
+        # -V{cycle}; C is used only for Claims.
         new_transactions = [
-            {**t, "txNo": f"{js_to_string(get(t, 'txNo'))}-C{js_num_str(cycle)}"} if cycle > 0 else t
+            {**t, "txNo": f"{js_to_string(get(t, 'txNo'))}-V{js_num_str(cycle)}"} if cycle > 0 else t
             for entry in batches for t in build_premium_transactions(transaction_case, entry)
         ]
         actual_month = posting_month or (str(report_rows[0].get("month") or "") if report_rows else "")

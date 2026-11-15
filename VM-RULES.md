@@ -275,7 +275,12 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **Announce 時立即建帳**；分期一次建立全部期別。Production 只認列業績與月份，不重複建帳；零業績仍保留帳款。
 - 一般保費案件（Oversea Business 依 §4.8）每案／每期／**每家正分攤再保人**各有獨立 T1（Cedant）、T2（再保人）、T3（經紀費）；零分攤不建帳。
 - 分配：先算整筆 Cedant T1，依再保人比例分配（最大比例吸收尾差，同比例依案件順序），再把每家 T1 分期（第一期吸收該家尾差）。例：T1=1,000、33.33/33.33/33.34 → 333/333/334；兩期各 50% → 499/501。T2 各家獨立計算；每家 T3 = 自己的 T1 − 自己的 T2。
-- 交易編號（現行寫法；新寫法見財會統一第二批，配合案件重置上線）：保費 `-R{n}-T1／T2／T3`、分期接在 T 後 `-I{n}`、批單在 TW Ref 後 `-E{nn}`、理賠 `-C{理賠}-P{付款}-R{n}-T1／T2`；整件 Reverse 的沖回 `-RVS{輪次}`、重建 `-C{輪次}`；財會更正（已關帳月份）的沖回 `-RVS{次數}`、新帳 `-ADJ{次數}`；早期版面分績 `a／b`。舊資料的 TX／CLM 原樣保存，畫面以新寫法顯示。
+- 交易編號（財會統一第二批，配合新系統案件重置上線；C 只代表理賠）：
+  - 保費 `-R{n}-T1／T2／T3`；分期放在 T 前面 `-R{n}-I{期}-T{1／2／3}`（Oversea 同樣 `-R{n}-I{期}-T3`）；Cedant 合計帳款沒有 R：`-T1`、`-I{期}-T1`；早期版面分績接在 T 後 `a／b`（例 `-R1-I2-T1a`）。
+  - 批單在 TW Ref 後 `-E{nn}`；理賠 `-C{理賠}-P{付款}-R{n}-T1／T2`。
+  - 整件 Reverse：沖回 `-RVS{輪次}`、重建 `-V{輪次}`（例 `TWPF2601001-R1-I2-T1-V1`）。
+  - 財會更正（已關帳月份）：同一次更正共用次數，沖回 `{原編號}-ADJ{次數}-OLD`、新帳 `{原編號}-ADJ{次數}`（例 第 2 次更正：`-R1-T1-ADJ2-OLD` 沖回 `-R1-T1-ADJ1`，新帳 `-R1-T1-ADJ2`）。
+  - 不寫轉換程式：上線時新系統案件須已重置（部署前檢查沒有舊寫法帳款）。舊資料的寫法不變（`LTX-…-T{n}`、`LTX-…-C1-T{n}`）；更早期的 TX／CLM 原樣保存，畫面以新寫法顯示。
 - 所有具名再保人都依本節建帳（2026-11-13）：名稱含 Facility／PWS 但不在五家清單者照一般再保人規則，Announce 建帳、逐步取位；不再有「Production 關帳才建帳」的路徑。
 - 批單的 Production 月份與帳款基準 L＝批改生效日與實際 Announce 台灣日期較晚者（已關帳則順延第一個未關帳月）。
 
@@ -537,6 +542,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-15 12:20 | 財會規則統一第二批：交易編號重整（§8.1；分期 I 在 T 前、重建 `-V`、財會更正沖回 `-ADJ{n}-OLD`）；只換後端 | `backups/accounting_numbering_20261115_122014/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounting-unify-work/rollback-batch2.sh 20261115_122014`（回復前會列出已用新寫法的案件） | `ri-backend:before-accounting-numbering-20261115_122014`（前端未變） | 候選映像 API 130/130（新增 transaction_numbering 23 項）、畫面 21 階段 341 項通過；部署前正式資料舊寫法帳款 0 件（不需轉換）；正式後端逐檔一致、無 migration、無資料修改；Dashboard／Production 合計與部署前相同 |
 | 11-15 11:12 | 財會規則統一第一批（§8.1–8.5、§9、§10、§17）；P8 部分清理；舊資料進 Production、Production 起算月份 2026-11 | `backups/accounting_unify_20261115_111238/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounting-unify-work/rollback.sh 20261115_111238` | `ri-backend:before-accounting-unify-20261115_111238`／`ri-frontend:before-accounting-unify-20261115_111238` | 候選映像 API 129/129、畫面 21 階段 341 項通過；重建比對內容與候選一致；正式容器為候選映像、後端逐檔一致、無 migration、無正式資料修改；正式資料 Dashboard／Production 與部署前試算一致 |
 | 11-14 21:29 | Product Recall QS、Personnel、Claim／Loss Record 共通變更；12 筆唯一 AE 歷史關聯回填 | `backups/product-recall-20261114_212639/`（含部署前 DB、文件及回填前 DB） | `ri-backend:before-product-recall-20261114_212639`／`ri-frontend:before-product-recall-20261114_212639` | 候選後端 128 組 API 全通過；全部瀏覽器階段及修正後重跑通過；正式 migration、主檔、回填快照及首頁驗證 |
 | 10-05 | Audit 暫停、清除 264 筆 | `backups/ri_system_before_audit_clear_20261005_142025.sql` | | |
@@ -690,6 +696,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-15：依業主同意部署財會規則統一第二批（交易編號重整，§8.1）：分期 I 放在 T 前（`-R1-I2-T1`）、整件 Reverse 重建改 `-V{輪次}`、財會更正沖回改 `{原編號}-ADJ{次數}-OLD`（同次更正與新帳共用次數）；C 只代表理賠。正式資料沒有舊寫法帳款，不需轉換；理賠、批單、無分期保費與舊資料編號不變。
 
 - 2026-11-15：依業主同意部署財會規則統一第一批：所有具名再保人走新會計規則；批改 Cedant 付款從批改生效日起算；TWD 收付款須為整數；Claim 金額精度與分攤尾差給最大份額；Dashboard 納入舊資料並換算所有 Claim；最新匯率規則；P8 部分清理（保留 History 用的付款與結算紀錄）；舊資料保費／批改按 Revenue Month 進 Production；Production 起算月份 2026-11，之前月份視同關帳、匯率鎖定，新系統 2026-11 以前的 Production 改認列於 2026-11。
 

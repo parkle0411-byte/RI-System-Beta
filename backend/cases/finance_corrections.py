@@ -151,7 +151,10 @@ def correct_accounts(case, p, old, old_live, expected, old_details, changed, act
             if pair in closed_pairs or prior.get('caseAggregate') and pair[0] in closed_ledger_periods:
                 original = {**copy.deepcopy(prior), 'reversed': True, 'financeCorrectionId': correction_id,
                             'financeSuperseded': True}
-                reversal = {**copy.deepcopy(prior), 'txNo': prior['txNo'] + '-RVS' + str(revision),
+                # Batch 2 (2026-11-13 decision 6-4): the correction pair shares its revision number:
+                # the reversal is {base}-ADJ{n}-OLD and the replacement {base}-ADJ{n}. Whole-Case
+                # Reverse keeps -RVS{cycle}.
+                reversal = {**copy.deepcopy(prior), 'txNo': no + '-ADJ' + str(revision) + '-OLD',
                     'amount': -prior['amount'], 'reversed': False, 'isReversalEntry': True,
                     'financeCorrectionId': correction_id, 'financeReversalOf': prior['txNo'],
                     'createdAt': now, 'financeDates': dates}

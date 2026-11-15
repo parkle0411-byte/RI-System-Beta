@@ -49,7 +49,7 @@ class Command(BaseCommand):
                 continue
             cycle = js_to_number(js_or(get(payload, "reversalCycle"), 0))
             new_transactions = [
-                {**t, "txNo": f"{js_to_string(get(t, 'txNo'))}-C{js_num_str(cycle)}"} if cycle > 0 else t
+                {**t, "txNo": f"{js_to_string(get(t, 'txNo'))}-V{js_num_str(cycle)}"} if cycle > 0 else t
                 for entry in batches for t in build_premium_transactions(transaction_case, entry)
             ]
             plans.append((case, payload, base + new_transactions, [b["id"] for b in batches], len(new_transactions)))

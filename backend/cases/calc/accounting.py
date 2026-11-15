@@ -109,6 +109,8 @@ def build_premium_transactions(case_data, installment=None):
     reinsurers = reinsurers if is_array(reinsurers) else []
     for reinsurer_idx, reinsurer in enumerate(reinsurers):
         legs = installment["amounts"][reinsurer_idx] if installment else calc_legs_for_reinsurer(case_data, reinsurer)
+        # Batch 2 (2026-11-13 decision 6-3): the installment number comes before T, as in
+        # Oversea: -R1-I2-T1 (split parties -R1-I2-T1a).
         tag = f"-I{js_num_str(installment['number'])}" if installment else ""
         note = f" · Installment {installment['label']}" if installment else ""
         extra = {"installmentId": installment["id"], "installmentLabel": installment["label"]} if installment else {}
@@ -147,7 +149,7 @@ def build_premium_transactions(case_data, installment=None):
                     if complete and party_idx == 1:
                         amount = round_money(leg["amount"] - round_money(leg["amount"] * pct_a / 100))
                     transactions.append({
-                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg['legType'][4]}{suffix}{tag}",
+                        "txNo": f"{tw_ref}-R{reinsurer_idx + 1}{tag}-T{leg['legType'][4]}{suffix}",
                         "legType": f"{leg['legType']}{suffix}",
                         "label": f"{leg['label']} ({js_to_string(js_or(party_name, 'Unassigned'))}, {js_num_str(pct)}%){note}",
                         "amount": amount,
@@ -161,7 +163,7 @@ def build_premium_transactions(case_data, installment=None):
         else:
             for leg_idx, leg in enumerate(base):
                 transactions.append({
-                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}-T{leg['legType'][4]}{tag}",
+                    "txNo": f"{tw_ref}-R{reinsurer_idx + 1}{tag}-T{leg['legType'][4]}",
                     "legType": leg["legType"],
                     "label": f"{leg['label']}{note}",
                     "amount": leg["amount"],

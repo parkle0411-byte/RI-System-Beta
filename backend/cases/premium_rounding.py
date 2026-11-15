@@ -36,7 +36,7 @@ def converted(payload, tw_ref=""):
         if not isinstance(entry, dict) or entry.get("source") == "claim" or str(entry.get("legType", "")).startswith("Claim"):
             continue
         no = re.sub(r"-RVS[0-9]+$", "", str(entry.get("txNo") or ""))
-        no = re.sub(r"-C[0-9]+$", "", no)
+        no = re.sub(r"-V[0-9]+$", "", no)   # rebuild after whole-Case Reverse (batch 2)
         if no not in amounts:
             raise ValueError("Unrecognized premium transaction; cannot safely recalculate " + no)
         entry["amount"] = -amounts[no] if entry.get("isReversalEntry") else amounts[no]

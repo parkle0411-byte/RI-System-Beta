@@ -44,11 +44,17 @@ try:
   p,error=proposed(c,900);check('closed report financial correction allowed',not error,error)
   ledger=p['transactions'];live=[t for t in ledger if not t.get('reversed') and not t.get('isReversalEntry')]
   check('closed T2/T3 retain old + reversal + replacement, T1 unchanged',len(ledger)==7 and len(live)==3 and next(t for t in live if t['legType']=='Leg 1')['txNo']==leg(c,'Leg 1'),ledger)
+  base_t2,base_t3=leg(c,'Leg 2'),leg(c,'Leg 3')
+  numbers={t['txNo'] for t in ledger if t.get('isReversalEntry')},{t['txNo'] for t in live if t['legType']!='Leg 1'}
+  check('batch 2: correction reversal is {base}-ADJ1-OLD and replacement {base}-ADJ1',numbers==({base_t2+'-ADJ1-OLD',base_t3+'-ADJ1-OLD'},{base_t2+'-ADJ1',base_t3+'-ADJ1'}),numbers)
+  check('batch 2: correction reversal points to the replaced account',{t['financeReversalOf'] for t in ledger if t.get('isReversalEntry')}=={base_t2,base_t3},ledger)
   c.payload=p;c.save();preview=build_production_preview([case_source(c)],'2026-11',{'2026-11':{'USD':40}},[])['rows']
   check('closed correction reverses full premium and income at original FX',len(preview)==2 and sorted(t['premium'] for t in preview)==[-30000,30000] and sorted(t['income'] for t in preview)==[-6000,8400] and all(t['rate']==30 for t in preview),preview)
   report.refresh_from_db();check('closed original report remains byte-for-byte unchanged',report.rows==oldrows)
   p,error=proposed(c,850);check('second correction builds on latest effective version',not error,error)
   check('second correction has no duplicate active transaction numbers',len({t['txNo'] for t in p['transactions']})==len(p['transactions']),p['transactions'])
+  second=[t for t in p['transactions'] if t.get('financeCorrectionId')==p['financeCorrectionHistory'][-1]['id'] and (t.get('isReversalEntry') or not t.get('reversed'))]
+  check('batch 2: second correction shares revision 2 (ADJ2-OLD reverses ADJ1, new ADJ2)',sorted((t['txNo'],t.get('financeReversalOf') or '') for t in second)==sorted([(base_t2+'-ADJ2',''),(base_t2+'-ADJ2-OLD',base_t2+'-ADJ1'),(base_t3+'-ADJ2',''),(base_t3+'-ADJ2-OLD',base_t3+'-ADJ1')]),[(t['txNo'],t.get('financeReversalOf')) for t in second])
   c.payload=p;c.save();preview=build_production_preview([case_source(c)],'2026-11',{'2026-11':{'USD':99}},[])['rows']
   check('repeated corrections telescope to current income',len(preview)==4 and sum(t['income'] for t in preview)==3600 and sum(t['premium'] for t in preview)==0,preview)
   result=confirm_production(case_source(c),preview,'2026-11');c.payload=result['payload'];c.save()
@@ -58,6 +64,7 @@ try:
   expected_latest=c.payload['financeCorrectionHistory'][-1]['productionEffectiveRows'][0]
   case_reverse_rows=reversed_p['productionReversals'][-1]['rows']
   check('whole Case Reverse after closed corrections reverses latest effective premium and income',len(case_reverse_rows)==1 and case_reverse_rows[0]['premium']==-expected_latest['premium'] and case_reverse_rows[0]['income']==-expected_latest['income'],case_reverse_rows)
+  check('batch 2: whole Case Reverse after corrections keeps -RVS1 on the live accounts',sorted({t['txNo'] for t in reversed_p['transactions'] if t.get('isReversalEntry')}-{t['txNo'] for t in c.payload['transactions'] if t.get('isReversalEntry')})==sorted(t['txNo']+'-RVS1' for t in c.payload['transactions'] if t.get('source')!='claim' and not t.get('reversed') and not t.get('isReversalEntry')),reversed_p['transactions'])
   source={**case_source(c),'payload':reversed_p,'status':'reversed'}
   reversal_preview=build_production_preview([source],'2026-12',{'2026-12':{'USD':99}},[])['rows']
   check('whole Case reversal after corrections appears once at original FX',len(reversal_preview)==1 and reversal_preview[0]['income']==-expected_latest['income'] and reversal_preview[0]['rate']==30,reversal_preview)

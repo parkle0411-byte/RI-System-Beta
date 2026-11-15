@@ -171,18 +171,20 @@ def transactions(p, now, old=()):
     previous={t.get('txNo'):t for t in rows(list(old))}
     result=[]
     for period in periods(p):
-        suffix = f"-I{period['number']}" if p.get('installmentEnabled') else ''
-        suffix += f'-C{cycle}' if cycle else ''
+        # Batch 2 (2026-11-13 decisions 6-2/6-3): the installment number comes before T
+        # (-I2-T1, -R1-I2-T2) and a rebuild after whole-Case Reverse ends in -V{cycle}.
+        tag = f"-I{period['number']}" if p.get('installmentEnabled') else ''
+        suffix = f'-V{cycle}' if cycle else ''
         common={'installmentId':period['id'],'installmentLabel':period['label'], 'source':'premium',
                 'createdAt':now,'postedMonth':'','productionRecognized':False, 'settlement':'open'}
-        entries=[dict(txNo=f'{refs}-T1{suffix}',legType='Leg 1',label='Receivable from Cedant',
+        entries=[dict(txNo=f'{refs}{tag}-T1{suffix}',legType='Leg 1',label='Receivable from Cedant',
                       amount=period['t1'],reinsurer='',reinsurerIdx=None,caseAggregate=True),
-                 dict(txNo=f'{refs}-T3{suffix}',legType='Leg 3',label='Brokerage retained',
+                 dict(txNo=f'{refs}{tag}-T3{suffix}',legType='Leg 3',label='Brokerage retained',
                       amount=period['t3'],reinsurer='',reinsurerIdx=None,caseAggregate=True)]
         for index,(r,value) in enumerate(zip(rows(p.get('reinsurers')),period['t2s'])):
             from .calc.accounting import strip_facility_tag
             name=r.get('foreignBroker') or strip_facility_tag(r.get('name')) or ''
-            entries.append(dict(txNo=f'{refs}-R{index+1}-T2{suffix}',legType='Leg 2',
+            entries.append(dict(txNo=f'{refs}-R{index+1}{tag}-T2{suffix}',legType='Leg 2',
                 label='Payable to '+name,amount=value,reinsurer=name,reinsurerIdx=index,
                 viaForeignBroker=bool(r.get('foreignBroker'))))
         from .premium_ledger import per_reinsurer
@@ -194,7 +196,7 @@ def transactions(p, now, old=()):
                 name=r.get('foreignBroker') or strip_facility_tag(r.get('name')) or ''
                 t1, t2=period['t1shares'][index], period['t2s'][index]
                 for leg, value, label in [(1,t1,'Receivable from Cedant'),(2,t2,'Payable to '+name),(3,money(num(t1)-num(t2),p),'Brokerage retained')]:
-                    entries.append(dict(txNo=f'{refs}-R{index+1}-T{leg}{suffix}', legType=f'Leg {leg}',
+                    entries.append(dict(txNo=f'{refs}-R{index+1}{tag}-T{leg}{suffix}', legType=f'Leg {leg}',
                         label=label, amount=value, reinsurer=name, reinsurerName=strip_facility_tag(r.get('name')), reinsurerIdx=index,
                         viaForeignBroker=bool(r.get('foreignBroker')), perReinsurer=True))
         for entry in entries:
