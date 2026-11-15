@@ -30,6 +30,10 @@ CASE_DOCUMENT_ROOT = os.getenv("RI_CASE_DOCUMENT_ROOT", "/data/documents")
 # Dashboard／Production Report 的結果快取（ri_system/result_cache.py）。RI_RESULT_CACHE=false 關閉；保險上限預設 60 秒。
 RESULT_CACHE_ENABLED = os.getenv("RI_RESULT_CACHE", "true").lower() == "true"
 RESULT_CACHE_TTL_SECONDS = int(os.getenv("RI_RESULT_CACHE_TTL", "60"))
+# 2026-11-15 owner decision: Production Reports start at this month. Earlier months are
+# historical (treated as closed): imported Legacy Data is their recognized Production, and
+# new-system production that would fall there is recognized in this month instead.
+PRODUCTION_START_MONTH = os.getenv("RI_PRODUCTION_START_MONTH", "2026-11")
 # 上傳以 JSON（base64）送出：10 MB 的檔案約 14 MB 的請求內容
 DATA_UPLOAD_MAX_MEMORY_SIZE = 44 * 1024 * 1024
 # Signed Slip／忘記密碼沿用 RI_EMAIL_ENABLED；舊名仍相容。

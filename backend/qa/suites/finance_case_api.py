@@ -1,3 +1,6 @@
+# 2026-11-15: this suite tests Production mechanics with past-dated synthetic months; the
+# Production start month (historical months) is covered by production_start_month.
+from django.test import override_settings as _ovr; _ovr(PRODUCTION_START_MONTH='').enable()
 """End-to-end Case edit, Finance and real Production lifecycle on disposable MySQL."""
 from pathlib import Path
 exec(Path('/app/qa/suites/property_original_suite.py').read_text().split('with transaction.atomic():\n try:')[0])

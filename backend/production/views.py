@@ -170,7 +170,8 @@ class ProductionReportView(NoStoreMixin, APIView):
         person = request.ri_principal
         state = load_month(month, cached=True)
         latest = state["reports"][0] if state["reports"] else None
-        closed = any(r.status == "closed" for r in state["reports"])
+        historical = calc.is_historical(month)
+        closed = historical or any(r.status == "closed" for r in state["reports"])
         preview = state["preview"]
         return Response(json_roundtrip({
             "ok": True, "displayVersion": DISPLAY_VERSION, "month": month, "headers": calc.PRODUCTION_REPORT_HEADERS,
@@ -180,9 +181,10 @@ class ProductionReportView(NoStoreMixin, APIView):
             "summary": summary(preview),
             "scope": {
                 "readOnly": not can_operate(person), "canOperate": can_operate(person), "canClose": can_close(person), "monthClosed": closed,
+                "historicalMonth": historical, "productionStartMonth": calc.start_month(),
                 "fxLocked": closed or any(r.is_locked for r in state["fx_rows"]),
                 "canGenerate": can_operate(person) and not closed and not preview["missingRateCurrencies"],
-                "canCloseLatest": can_close(person) and latest is not None and latest.status == "valid"
+                "canCloseLatest": not historical and can_close(person) and latest is not None and latest.status == "valid"
                 and latest.source_signature == preview["sourceSignature"],
             },
         }))
@@ -199,6 +201,8 @@ class ProductionReportView(NoStoreMixin, APIView):
         permitted = can_close(request.ri_principal) if action == "close" else can_operate(request.ri_principal)
         if not permitted:
             return _error(403, "permission_denied", "Only Finance Manager or System Administrator can modify Production Reports.")
+        if calc.is_historical(month):
+            return _error(409, "historical_month", f"Months before {calc.start_month()} are historical and treated as closed; Legacy Data is their recognized Production.")
         with monthly_operation(month) as acquire:
             deferred_to = None
             if action == "exclude":
@@ -208,7 +212,7 @@ class ProductionReportView(NoStoreMixin, APIView):
                     if not _MONTH.match(candidate) or candidate <= month:
                         return _error(409, "no_open_month", "No later open month is available for this exclusion.")
                     acquire(candidate)
-                    if not ProductionReport.objects.filter(year_month=candidate, status="closed").exists():
+                    if not calc.is_historical(candidate) and not ProductionReport.objects.filter(year_month=candidate, status="closed").exists():
                         deferred_to = candidate
                         break
             with transaction.atomic():

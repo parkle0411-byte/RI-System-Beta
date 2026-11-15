@@ -49,6 +49,7 @@ class FxRatesView(NoStoreMixin, APIView):
                 "maintainedCurrencies": CURRENCIES,
                 "externalRateSource": False,
                 "lockedMonthsEditable": False,
+                "historicalBeforeMonth": __import__('production.calc', fromlist=['start_month']).start_month(),
                 "completeMonthRequired": True,
             },
         })
@@ -122,6 +123,10 @@ class FxRatesView(NoStoreMixin, APIView):
         request_id = request_id_from(request)
 
         with monthly_operation(year_month), transaction.atomic():
+            from production.calc import is_historical, start_month
+            if is_historical(year_month):
+                # 2026-11-15 owner decision: historical months are treated as closed, FX included.
+                return Response({"error": "month_locked", "message": f"Months before {start_month()} are historical and treated as closed; their FX rates are locked."}, status=409)
             if ProductionReport.objects.filter(year_month=year_month, status="closed").exists():
                 return Response({"error": "month_locked", "message": "This Performance month is locked because its Production Report is closed."}, status=409)
             existing = {

@@ -317,6 +317,8 @@ def register_cash_group(view, request, body, context=None):
             cash = cents(row.get('cashAmount', row.get('amount', 0))); offset = cents(row.get('offsetAmount', 0)); total = cash
             if offset:
                 return fail('offsets_disabled', 'New offsets are disabled. Record actual receipts and payments separately.', 400)
+            if current[0] == 'TWD' and cash % 100:
+                return fail('twd_whole_number', 'TWD Cash Amount must be a whole number.', 400)
             if cash < 0 or offset < 0 or total <= 0 or total > abs(cents(d['outstanding'])):
                 raise ValueError()
         except (ValueError, TypeError):

@@ -15,8 +15,10 @@ def kind(payload, name):
         return 'qbe'
     if ga_target(payload, name):
         return 'great_american'
-    # Preserve Swiss, other Facility and PWS rules outside the reviewed scope.
-    if str(name or '').strip() and not re.search(r'facility|\bpws\b', str(name), re.I):
+    # Swiss keeps its own rules (''); since 2026-11-13 every other named
+    # reinsurer, including unlisted Facility/PWS names, follows the ordinary rules.
+    from .accounting_policy import facility
+    if str(name or '').strip() and not facility(name):
         return 'ordinary'
     return ''
 

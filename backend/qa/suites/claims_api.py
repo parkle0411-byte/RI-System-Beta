@@ -143,7 +143,10 @@ try:
             r = act(sales, "create_claim", root, claim={"dateOfLoss": "2026-05-01", "outstandingReserve": reserve})
             check(f"create: {label} -> 400 invalid_claim_reserve", r.status_code == 400 and code(r) == "invalid_claim_reserve", (r.status_code, code(r)))
         check("create: failed attempts changed nothing", Case.objects.get(pk=root.pk).row_version == v0 and Case.objects.get(pk=root.pk).payload == before)
-        r = act(sales, "create_claim", root, claim={"lossNo": "  L" + "x" * 200, "dateOfLoss": "2026-05-01", "causeOfLoss": "c" * 2500, "outstandingReserve": "1,234.567"})
+        # 2026-11-14 owner decision (problem 11): Claim amounts beyond the currency precision are rejected, not rounded.
+        r = act(sales, "create_claim", root, claim={"dateOfLoss": "2026-05-01", "outstandingReserve": "1,234.567"})
+        check("create: USD reserve with three decimals -> 400 invalid_claim_precision", r.status_code == 400 and code(r) == "invalid_claim_precision", (r.status_code, code(r)))
+        r = act(sales, "create_claim", root, claim={"lossNo": "  L" + "x" * 200, "dateOfLoss": "2026-05-01", "causeOfLoss": "c" * 2500, "outstandingReserve": "1,234.57"})
         j = r.json(); root.refresh_from_db(); c1 = root.payload["claims"][0]
         check("create -> 200 {ok, action, claimId 1, claimsState}", r.status_code == 200 and j["ok"] is True and j["action"] == "create_claim" and j["claimId"] == 1
               and j["claimsState"]["rootRowVersion"] == v0 + 1 and j["claimsState"]["claims"] == root.payload["claims"], j)
@@ -170,8 +173,10 @@ try:
         r = act(sales, "update_reserve", root, outstandingReserve=1); check("reserve: claimId missing -> 404", code(r) == "claim_not_found")
         for bad in ("abc", -0.01, "1e999"):
             r = act(sales, "update_reserve", root, claimId=1, outstandingReserve=bad); check(f"reserve {bad!r} -> 400 invalid_claim_reserve", code(r) == "invalid_claim_reserve", code(r))
-        r = act(sales, "update_reserve", root, claimId="1", outstandingReserve=5000.555); root.refresh_from_db()
-        check("reserve updated (claimId as text works like Number()), rounded to cents", r.status_code == 200 and root.payload["claims"][0]["outstandingReserve"] == 5000.56 and root.row_version == v1 + 1, r.content[:200])
+        r = act(sales, "update_reserve", root, claimId="1", outstandingReserve=5000.555)
+        check("reserve with three decimals -> 400 invalid_claim_precision (2026-11-14)", r.status_code == 400 and code(r) == "invalid_claim_precision", code(r))
+        r = act(sales, "update_reserve", root, claimId="1", outstandingReserve=5000.56); root.refresh_from_db()
+        check("reserve updated (claimId as text works like Number())", r.status_code == 200 and root.payload["claims"][0]["outstandingReserve"] == 5000.56 and root.row_version == v1 + 1, r.content[:200])
         check("audit update_claim_reserve + snapshot claim_reserve_updated", audit(root.case_uid, "update_claim_reserve").first().metadata == {"claimId": 1, "action": "update_reserve"}
               and snaps(root.case_uid, "claim_reserve_updated").exists())
         r = act(sales, "update_reserve", root, claimId=1, outstandingReserve=""); root.refresh_from_db()
@@ -179,14 +184,15 @@ try:
 
         # ================= 理賠付款 =================
         v2 = root.row_version
-        for label, pay in (("amount 0", {"amount": 0, "date": "2026-07-01"}), ("amount text", {"amount": "abc", "date": "2026-07-01"}), ("amount missing", {"date": "2026-07-01"}),
-                           ("amount 0.004 rounds to 0 (VM)", {"amount": 0.004, "date": "2026-07-01"})):
+        for label, pay in (("amount 0", {"amount": 0, "date": "2026-07-01"}), ("amount text", {"amount": "abc", "date": "2026-07-01"}), ("amount missing", {"date": "2026-07-01"})):
             r = act(sales, "record_payment", root, claimId=1, payment=pay); check(f"payment: {label} -> 400 payment_amount_required", r.status_code == 400 and code(r) == "payment_amount_required", (r.status_code, code(r)))
+        r = act(sales, "record_payment", root, claimId=1, payment={"amount": 0.004, "date": "2026-07-01"})
+        check("payment: USD 0.004 exceeds two decimals -> 400 invalid_claim_precision (2026-11-14)", r.status_code == 400 and code(r) == "invalid_claim_precision", (r.status_code, code(r)))
         for label, pay in (("date missing (VM: required)", {"amount": 10}), ("date 2026-13-01", {"amount": 10, "date": "2026-13-01"}), ("date text", {"amount": 10, "date": "soon"})):
             r = act(sales, "record_payment", root, claimId=1, payment=pay); check(f"payment: {label} -> 400 invalid_payment_date", r.status_code == 400 and code(r) == "invalid_payment_date", (r.status_code, code(r)))
         r = act(sales, "record_payment", root, claimId=5, payment={"amount": 10, "date": "2026-07-01"}); check("payment: unknown claim -> 404", code(r) == "claim_not_found")
         check("payment: failed attempts changed nothing", Case.objects.get(pk=root.pk).row_version == v2)
-        r = act(sales, "record_payment", e1, root=root, claimId=1, payment={"amount": "1,000.005", "date": "2026-07-01", "note": " first "}); root.refresh_from_db()
+        r = act(sales, "record_payment", e1, root=root, claimId=1, payment={"amount": "1,000.01", "date": "2026-07-01", "note": " first "}); root.refresh_from_db()
         p1 = root.payload["claims"][0]["payments"][0]; tx = [t for t in root.payload.get("transactions", []) if t.get("source") == "claim"]
         # 2026-10-16「92 項會計規則重新確認」：付款紀錄另存伺服器建立時間 createdAt（到期日起算）及出險日適用的 splitSource；
         # 原本的 id／日期／金額／備註斷言不變，splitSource 必須是出險日（2026-05-01）適用的 e1（Archived／Draft 不採用）。
@@ -257,8 +263,10 @@ try:
         from production.views import case_source
         metrics = build_dashboard([case_source(multi)], [], [], timezone.now(), production_rules=True)['metrics']
         claim_totals = metrics.get('claimOutstandingByCurrency') or []
-        check('Dashboard separates Claim receivables and payables by original currency', claim_totals == [{'currency':'TWD', 'receivable':101, 'payable':101}]
-              and metrics['outstandingLeg1Ntd'] == 0 and metrics['outstandingLeg2Ntd'] == 0, metrics)
+        # 2026-11-15 owner decision (conflict 2): the Dashboard converts every Claim into the TWD
+        # receivable / payable totals; Accounting keeps the original-currency display above.
+        check('Dashboard converts Claim receivables and payables into the TWD totals', claim_totals == []
+              and metrics['outstandingLeg1Ntd'] == 101 and metrics['outstandingLeg2Ntd'] == 101, metrics)
         before_numbers = [t['txNo'] for t in multi_tx]
         r = act(sales, 'update_currency', multi, claimId=1, currency='USD', reason='Correct currency'); multi.refresh_from_db()
         changed = [t for t in multi.payload.get('transactions', []) if t.get('source') == 'claim']
@@ -267,9 +275,12 @@ try:
         r = act(sales, 'create_claim', multi, claim={'dateOfLoss':'2026-05-01', 'outstandingReserve':10, 'currency':'EUR'}); multi.refresh_from_db()
         r2 = act(sales, 'record_payment', multi, claimId=2, payment={'date':'2026-06-01', 'amount':25}); multi.refresh_from_db()
         metrics = build_dashboard([case_source(multi)], [], [], timezone.now(), production_rules=True)['metrics']
-        grouped = {row['currency']:row for row in metrics.get('claimOutstandingByCurrency') or []}
-        check('different Claim currencies are totalled separately without FX rates', r.status_code == 200 and r2.status_code == 200 and set(grouped) == {'USD','EUR'}
-              and grouped['USD']['receivable'] == 101 and grouped['EUR']['receivable'] == 25 and not metrics['missingPostingRates'], grouped)
+        missing = {row['currency'] for row in metrics['missingPostingRates']}
+        check('Claims in other currencies convert at their own currency; without FX they are reported as Awaiting FX', r.status_code == 200 and r2.status_code == 200
+              and not metrics.get('claimOutstandingByCurrency') and {'USD','EUR'} <= missing and metrics['outstandingLeg1Ntd'] == 0, metrics['missingPostingRates'])
+        fx_rows = [{'year_month': timezone.localtime().strftime('%Y-%m'), 'currency': cur, 'rate': rate} for cur, rate in (('USD', 30.0), ('EUR', 35.0))]
+        metrics = build_dashboard([case_source(multi)], [], fx_rows, timezone.now(), production_rules=True)['metrics']
+        check('with FX, Claim receivables convert at each Claim currency (USD 101 x 30 + EUR 25 x 35)', round(metrics['outstandingLeg1Ntd'], 2) == 101 * 30 + 25 * 35, metrics['outstandingLeg1Ntd'])
         compact = call(fin, 'get', '/api/accounting?view=list').json()
         check('Accounting currency filter includes each Claim transaction currency', {'USD','EUR'} <= set(compact.get('currencies') or []), compact.get('currencies'))
         raise Rollback()

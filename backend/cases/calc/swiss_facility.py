@@ -171,7 +171,11 @@ def apply_legacy_schedule(payload, items, now):
                         accountingLeadDays=10, paymentRule='swiss_cedant_80_90', reminderDate=accounting)
         if is_swiss:
             cedant = by_key.get(item['installmentId'] + ':cedant', {})
-            accounting = add_days(cedant.get('baseDate', ''), 90)
+            # 2026-11-13: the endorsement Cedant counts from the effective date, but the
+            # Swiss period keeps the later of effective and actual Announce (L).
+            from .payment_terms import endorsement_base_date
+            swiss_base = endorsement_base_date(payload) if payload.get('parentTwRef') and payload.get('installmentEnabled') is not True else cedant.get('baseDate', '')
+            accounting = add_days(swiss_base, 90)
             original = quarter(accounting)
             if refund:
                 original = max(previous_quarter(original), quarter(local_date(payload.get('endorsementAnnouncedAt'))))

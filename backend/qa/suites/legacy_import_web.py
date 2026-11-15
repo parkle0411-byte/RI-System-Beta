@@ -224,7 +224,13 @@ try:
         check('new claim keeps zero rates', LegacyTransaction.objects.get(pk=r.json()['uid']).data.get('commissionRate') == 0)
         r = admin.patch('/api/legacy', json.dumps(dict(id=str(t['QA9003'].uid), version=t['QA9003'].version, action='retract')), content_type='application/json')
         check('imported rows cannot be returned to draft', r.status_code == 409, r.content[:200])
-        check('imported endorsement never feeds Production', admin.get('/api/production-report?month=2026-09').json()['rows'] == [])
+        # 2026-11-15 owner decision: imported premium/endorsement rows are Production by Revenue Month;
+        # 2026-09 is before the start month (2026-11), so it is listed read-only as recognized Production.
+        hist = admin.get('/api/production-report?month=2026-09').json()
+        check('imported endorsement is listed as recognized Production in its historical Revenue Month',
+              any(r.get('legacyTransactionId') == str(t['QA9005'].uid) for r in hist['rows']) and hist['scope']['historicalMonth'] and hist['scope']['monthClosed'], hist['scope'])
+        r = admin.post('/api/production-report', json.dumps(dict(action='generate', month='2026-09', sourceSignature=hist['sourceSignature'])), content_type='application/json')
+        check('a historical month cannot be generated', r.status_code == 409 and r.json().get('error') == 'historical_month', r.content[:200])
         check('native Case, Production and reconciliation records unchanged (apart from QA review)', native()[:2] == before[:2])
 
         r = upload(admin, good); again = r.json(); keys.append(ImportBatch.objects.get(pk=again['id']).storage_key)

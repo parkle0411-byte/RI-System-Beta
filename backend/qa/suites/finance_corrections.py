@@ -1,3 +1,6 @@
+# 2026-11-15: this suite tests Production mechanics with past-dated synthetic months; the
+# Production start month (historical months) is covered by production_start_month.
+from django.test import override_settings as _ovr; _ovr(PRODUCTION_START_MONTH='').enable()
 """Closed Production retains both sides at original FX; review batches remain indivisible."""
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])

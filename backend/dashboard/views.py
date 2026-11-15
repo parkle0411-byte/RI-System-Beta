@@ -99,7 +99,8 @@ class DashboardView(NoStoreMixin, APIView):
             case_fingerprint = (result_cache.table_fingerprint(live.exclude(status="draft")), live.filter(status="draft", parent_case__isnull=True).count())
         else:
             case_fingerprint = result_cache.table_fingerprint(live)   # 只看自己的案件：可見範圍可能因草稿內容改變，用完整指紋
-        fingerprint = (case_fingerprint, result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()), result_cache.table_fingerprint(ProductionReport.objects.filter(status="closed"), stamp="closed_at"))   # 報表沒有 updated_at，用關帳時間
+        from legacy.models import LegacyTransaction
+        fingerprint = (case_fingerprint, result_cache.table_fingerprint(LegacyTransaction.objects.all(), version="version"), result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()), result_cache.table_fingerprint(ProductionReport.objects.filter(status="closed"), stamp="closed_at"))   # 報表沒有 updated_at，用關帳時間
         key = ("dashboard", "all" if see_all else ("person", person.pk), local.strftime("%Y-%m-%d"), local.strftime("%H:%M") > "12:00", brokerage_year)
 
         def compute():
@@ -112,7 +113,11 @@ class DashboardView(NoStoreMixin, APIView):
             fx = [{"year_month": f.year_month, "currency": f.currency, "rate": float(f.rate)}
                   for f in FxRate.objects.order_by("year_month", "id")]
             closed = list(ProductionReport.objects.filter(status="closed").values("year_month", "rows"))
-            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year)
+            # Problems 5 / D (2026-11-13/14): the company-wide Dashboard includes Legacy Data.
+            # Personal dashboards keep showing only the person's own Cases.
+            from legacy.dashboard import dashboard_inputs
+            legacy = dashboard_inputs() if see_all else None
+            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year, legacy=legacy)
 
         return Response(json_roundtrip(result_cache.get_or_compute(key, fingerprint, compute)))
 

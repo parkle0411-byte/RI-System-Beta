@@ -169,7 +169,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 結構 `OVERSEA`，Class 只能 Fine Art／Terrorism；獨立簡化表單的財務必填項目為 **100% Premium、Share (%)、Brokerage 金額、Reinsurance Broker、Cedant、實際收付款日期**。Currency 隨 Premium 選定，新案預設 USD；負責人與 AE 預帶登入者。不要求一般案件的承保條件、Loss Record、條款。
 - 補充 Insured (EN)、Insured (CN)、Policy Period（日期及時間）與 Account Executive；AE 預帶登入者，可由合格 Personnel 選擇調整。所有列出的輸入欄位均為 Announce 必填，包含中英文被保險人、保單起訖日期與 AE；Draft 可暫存未完成資料。中文被保險人沿用既有 Announce 建立正式主檔規則。Policy Period 與實際收付款日分別保存。
 - **Brokerage 直接是 T3 金額**，不乘保費或 Share、不從 T1−T2 推算。100% Premium × Share 僅作分攤保費資訊。TWD 為整數，其他貨幣最多兩位小數；正佣金為向所選 Broker 收款、負佣金為付款。不建 T1／T2、零額保費排程、分績或 Claim。原單與批單可各自選擇 Brokerage 分期，比例各期 >0 且總和 100%；依貨幣精度自動分攤，尾差優先調整第一期；若該期不足以吸收，依序調整後續期，避免反向金額。每期分別填實際收付款日，分別產生獨立 T3。
-- **Accounting Date＝實際收付款日期−10 個日曆天**，可跨月、跨年、閏年；實際日期原樣保留。原單 Announce 以 Policy Period 的 Effective Date 年月及 Class 代碼分配 TW Ref；實際收付款日及分期日期不影響取號；單筆 `...-R1-T3`，分期為 `...-R1-I1-T3`、`...-R1-I2-T3` 等。各期 Accounting Date 依各自實際日減 10 天，Production 依各期實際月份認列各期精確 Brokerage，關帳不重複建帳。
+- **Accounting Date＝實際收付款日期−10 個日曆天**，可跨月、跨年、閏年；實際日期原樣保留。原單 Announce 以 Policy Period 的 Effective Date 年月及 Class 代碼分配 TW Ref；實際收付款日及分期日期不影響取號；單筆 `...-R1-T3`，分期為 `...-R1-I1-T3`、`...-R1-I2-T3` 等。各期 Accounting Date 依各自實際日減 10 天；Production 依各期自己設定的 Performance Month（2026-11-13 起新案必填，既有月份保留）認列各期精確 Brokerage，關帳不重複建帳。
 - 批單沿用既有最新來源與原單鏈限制，編號接原單 `-E01`、`-E02`。原單 100% Premium、Share、Currency、Broker、Cedant 與 Policy Period 沿用來源並鎖定；另填本次 100% Premium Adjustment 與 Brokerage 增減（加收正、退還負；無變動填 0）、批單生效日、說明及實際收付款日。批單保費差額乘 Share，依分期比例及貨幣精度分攤並依各期實際月份計入 Production；零 Brokerage 仍認列非零保費。每張批單可選擇單筆或分期，每期建立獨立 T3；不改寫原單分期、收付或已認列業績。未輸入保費差額的舊批單沿用零保費認列；原單保費資訊不重複計入批單保費統計。
 - 不生成任何文件（畫面隱藏，後端封鎖），Announce 前須上傳並選用國外 RI Broker 提供的 Note：Original 僅接受 Credit Note；批單可用 Debit Note 或 Credit Note，不依金額正負自動決定種類。每案／每張批單獨立附件，不能沿用原單附件；未選用、已刪或檔案本體遺失均不能 Announce。不要求一般 Offer Slip／Signed Slip。Draft 可先儲存，最終須確認 Note、Brokerage 及實際日期。
 - 更正 TW Ref. 後，既有提醒紀錄的主旨、內容及交易鍵原樣保留；系統依舊號與目前交易編號的對應延續提醒節奏，不重發或跳過既有週期。
@@ -275,7 +275,8 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **Announce 時立即建帳**；分期一次建立全部期別。Production 只認列業績與月份，不重複建帳；零業績仍保留帳款。
 - 一般保費案件（Oversea Business 依 §4.8）每案／每期／**每家正分攤再保人**各有獨立 T1（Cedant）、T2（再保人）、T3（經紀費）；零分攤不建帳。
 - 分配：先算整筆 Cedant T1，依再保人比例分配（最大比例吸收尾差，同比例依案件順序），再把每家 T1 分期（第一期吸收該家尾差）。例：T1=1,000、33.33/33.33/33.34 → 333/333/334；兩期各 50% → 499/501。T2 各家獨立計算；每家 T3 = 自己的 T1 − 自己的 T2。
-- 交易編號：保費 T1／T2／T3、理賠 C{id}；後綴分績 a／b、分期 I{n}、批單 E{n}、更正 C{n}、沖銷 RVS{n}。舊資料的 TX／CLM 原樣保存，畫面以新寫法顯示。
+- 交易編號（現行寫法；新寫法見財會統一第二批，配合案件重置上線）：保費 `-R{n}-T1／T2／T3`、分期接在 T 後 `-I{n}`、批單在 TW Ref 後 `-E{nn}`、理賠 `-C{理賠}-P{付款}-R{n}-T1／T2`；整件 Reverse 的沖回 `-RVS{輪次}`、重建 `-C{輪次}`；財會更正（已關帳月份）的沖回 `-RVS{次數}`、新帳 `-ADJ{次數}`；早期版面分績 `a／b`。舊資料的 TX／CLM 原樣保存，畫面以新寫法顯示。
+- 所有具名再保人都依本節建帳（2026-11-13）：名稱含 Facility／PWS 但不在五家清單者照一般再保人規則，Announce 建帳、逐步取位；不再有「Production 關帳才建帳」的路徑。
 - 批單的 Production 月份與帳款基準 L＝批改生效日與實際 Announce 台灣日期較晚者（已關帳則順延第一個未關帳月）。
 
 ### 8.2 到期日與畫面提醒日
@@ -292,7 +293,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | Swiss CGL QS | B＋90 | 到期前 15 天 | B 所在月底＋90 | 到期前 10 天 |
 
 - **Swiss Property 結算期**：每年 2/14、5/14、8/14、11/14；11–1 月→2/14、2–4 月→5/14、5–7 月→8/14、8–10 月→11/14。原始期依 Cedant B＋90 歸期，與「最後有效收款日歸期」「財務確認日（Cedant 自動銷帳的實際台灣操作日，不可回填）歸期」取最晚。月底為確認截止。未收妥先顯示預計期。退保費可依 Announce 截止規則提前一期。
-- **批單**：把 B 換成 L；Cedant 到期 L＋C（Facility 為 L＋90）；再保人依上表公式（Swiss Property 依固定結算期）。
+- **批單**（2026-11-13 業主決定）：Cedant 端從**批改生效日 E**起算：到期 E＋C（Facility 為 E＋90），提醒日照上表（一般到期前 15 天、Swiss Property E＋80），與 Word Debit／Credit Note 相同；回溯批單 Announce 時已過到期日即照實顯示逾期。再保人端把 B 換成 L，依上表公式（Swiss Property 依固定結算期，原始期依 L＋90 歸期）。新系統與舊資料新增批單相同；已收付或已結清的帳款保留原日期。
 - 遲收 Cedant 款、部分收付、補登日期都不重算原期限。超過實際到期日才算逾期。
 
 ### 8.3 財會對帳與實際收付（2026-11-10 部署）
@@ -301,7 +302,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 同一實際對象可跨案、跨期、跨幣別對帳，同對象全部有效對帳合為一個邏輯批次，原始各次對帳事件與幣別保留。對帳日期必填，Review reference／Explanation 選填。
 - 取消對帳須填原因，整個對象批次一起取消。任何幣別成員有有效收付或歷史抵銷時，先依原沖回限制處理；任何成員變動均須取消整批並重新對帳。
 - 停止一切新增抵銷／純抵銷，僅登錄實際現金收款與付款。既有抵銷繼續反映餘額與收付前置條件，保留查閱及合法整筆沖回。
-- Record Selected 可選同一實際對象的多個幣別、兩種方向，逐列 Cash Amount 預帶 Outstanding，可修改。系統按幣別與方向建立獨立收款／付款登錄，不互抵，不跨幣別加總。
+- Record Selected 可選同一實際對象的多個幣別、兩種方向，逐列 Cash Amount 預帶 Outstanding，可修改。系統按幣別與方向建立獨立收款／付款登錄，不互抵，不跨幣別加總。台幣 Cash Amount 只准整數（2026-11-14），輸入小數該列失敗並提示；外幣最多兩位。
 - 同畫面待登錄列共用實際收付款日期、Accounting Dept. Ref.／Note，參考號或說明至少一項；已完成登錄維持其原存日期與參考號，另記操作時間。
 - 合法列先保存，失敗列保留輸入及原因，只重送失敗列。0 金額列為失敗，不默默跳過或產生虛構現金。提交／列識別碼防止網路中斷或重送造成重複入帳；重試不能換成另一個對象。
 - 保費、退保費、理賠及 Oversea 現金 T3 均允許部分收付。畫面只有 Open／Settled；部分收付仍為 Open，收付足額才自動結清。
@@ -313,7 +314,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ### 8.4 賠款與財務追蹤
 - Claim Payment 建立時立即建再保人應收與 Cedant 應付；準備金只追蹤不建帳。比例依出險當天適用的保單／批單。
-- 到期：一般、AUW、Allianz、Great American、QBE、Swiss CGL＝建帳台灣日期＋15日；Swiss Property 依建帳日歸入固定結算期；日期及各家提醒頻率不因本次改版更動。
+- 金額（2026-11-14／15）：所有險種的台幣理賠（Reserve、付款）只准整數、其他幣別最多兩位，不偷偷取整。拆給各家再保人時與保費相同：台幣每家整數、外幣兩位，尾差給比例最大的一家（同比例依案件順序），合計等於該筆付款。例：TWD 1,005、50／30／20 → 502／302／201。
+- 到期：一般、AUW、Allianz、Great American、QBE、Swiss CGL＝建帳台灣日期＋15日；Swiss Property 依建帳日歸入固定結算期；Accounting 提醒日一律為到期前 7 天（例：10-15 建帳 → 10-30 到期 → 10-23 提醒）。
 - 同一請款累計付出不得超過該請款已收（含既有合法抵銷）。其他保費應收不能取代尚未收回的理賠款。
 - Record claim follow-up 擴大至所有未結理賠，保存日期、操作人及內容；不改餘額，不代表已收付；舊追蹤紀錄保留。
 - 理賠正式更正仍受收付、對帳整批取消及有效日期／有限金額檢查保護。
@@ -329,7 +331,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 ### 8.5 金額取位與匯率
 - 保費**逐步取位**：TWD 每一步四捨五入到整數，USD 到兩位；佣金與 Tax 以取位後的分出保費計算；T1＝分出保費 − 佣金 − Tax。負數 .5 遠離零（與正數對稱）。Case 合計、會計、付款排程與 Word 同一口徑。例：TWD 999、10%／15%／1% → 100／15／1／T1=84。
 - 賠款與收付款兩位小數。分期尾差集中第一期。
-- 未 Production 認列的保費以最新月匯率暫估台幣並標示 Estimated；認列後固定為實際認列月份的正式匯率。賠款用建帳月份匯率。缺匯率不擋原幣作業，顯示 Awaiting FX。
+- 未 Production 認列的保費以最新月匯率暫估台幣並標示 Estimated（「最新月」＝本月或以前最新的月份；提前輸入的未來月份要到該月才使用，完全沒有過去匯率才用未來月份；Accounting 與 Dashboard 相同，2026-11-14）；認列後固定為實際認列月份的正式匯率。賠款用建帳月份匯率。缺匯率不擋原幣作業，顯示 Awaiting FX。
 - 畫面：TWD 整數不補 .00，USD 兩位；12 個金額欄位顯示千分位。
 
 ### 8.6 提醒信（目前未寄出，見 §1）
@@ -366,6 +368,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - 案件金額更正依 §8.4a：原月未關帳直接反映修正；已關帳完整沖回及補入受影響再保人的保費與收入，沿用原認列匯率，列本月／第一個未關帳月份，原報表不可改寫。
 
+- 分績尾差（2026-11-13）：Reinsurance Staff 先依比例取位，Other Staff 拿差額（70／30 例：1,005 → 704／301）；與舊資料 AE／Sub AE 規則相同。已關帳報表不改寫。
+- **起始月與歷史月份（2026-11-15 業主決定）**：Production 從 **2026-11** 起產生與關帳（`RI_PRODUCTION_START_MONTH`）。2026-10 以前為歷史月份，視同已關帳：不能產生、關帳、排除，匯率鎖定；頁面唯讀列出該月匯入的舊資料保費／批單業績（即其已認列的 Production），沒有 Excel。新系統業績月份若在起始月之前，一律列在起始月認列。
 - 業績月份：原單／續保單期以保單生效月份為準，不因較晚 Announce 而延後；分期依各期 Performance Month；批單取批改生效月與 Announce 月較晚者；已關帳月份自動建立不可改寫的排除紀錄，順延到第一個未關帳月份。零收入不列業績。
 - Finance Staff 只能看預覽與既有版本、下載 Excel；Finance Manager 與 System Administrator 可產生、排除、關帳。
 - 關帳、產生、排除、匯率存檔共用月份操作鎖（衝突立即回 409 operation_busy）；關帳前在鎖內重讀完整預覽，來源或匯率有變就拒絕並要求重新產生。已關帳月份不能改匯率。
@@ -379,7 +383,10 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - 缺少上帳月份匯率時，僅在 Accounting · Receivable / Payable 區塊顯示 Awaiting FX；Dashboard 頂端不再重複顯示匯率警告。換算與缺匯率處理維持。
 
-- 標題：Production & Records Overview。Total Gross Premium、Outstanding · Cedant / Reinsurer 以 TWD 前綴顯示；YTD Brokerage Trend (TWD)；Total Bound YTD；New Business MTD 卡片有 + New Case（需 `cases.write`）。
+- 標題：Production & Records Overview。Total Gross Premium、Accounting · Receivable / Payable（依收付方向分：向再保人收的理賠款屬 Receivable、退給 Cedant 的退費屬 Payable）以 TWD 前綴顯示；YTD Brokerage Trend (TWD)；Total Bound YTD；New Business MTD 卡片有 + New Case（需 `cases.write`）。
+- Total Gross Premium（2026-11-13／14）：保期內保單的原單加已 Announce 批單，用與 Accounting 相同的逐步取位分出保費，依「本月或以前最新月份」匯率換算。保期以最新已 Announce 批單的到期日判斷，In-Force Policies 與 Expected Renewals 也用同一判斷。公司全體 Dashboard 含仍在保期內的舊資料：以 Cedant's Policy No. 為一件（未填用 Old Reference），保期為該件已確認保費列與批單的最晚到期日。Total Bound YTD、New Business 等新簽件數只算新系統案件。
+- 舊資料（公司全體 Dashboard）：Brokerage 趨勢含舊資料保費列與批單列（匯入及新增，依 Revenue Month；歷史月份顯示舊資料已認列業績並標示 closed；已關帳月份與 Production 報表一致，未關帳預估）；起始月前的新系統業績畫在起始月；未收付合計含全部舊資料未結清帳款，5 年判斷對匯入的舊交易用原 Effective Date（理賠用 DOL）、新增批單／理賠用確認日。個人 Dashboard 只看自己的案件。
+- 理賠（2026-11-15）：Dashboard 未收付合計的所有理賠都換算台幣（理賠自己的幣別、建帳月匯率）；Accounting 畫面對 CGL／Product Recall／STP 理賠維持原幣顯示、不換算。
 - 未結清應收應付以 Accounting 實際帳款與上帳月匯率為準，**只算 5 年內建立的帳款**（每天滾動，畫面註明起算日）；跳過「整件已銷帳」的案件，Accounting 若發現標記與實際欠款不符會在 warnings 列出。已關帳業績用正式報表，未關帳標示預估。
 - 時間一律台北時間。
 
@@ -481,9 +488,9 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **網頁匯入 Register（2026-11-11 業主決定）**：
   - 限 System Administrator，在 Legacy 分頁 Import Batches 上傳 Register（工作表 `Facultative`）→ 預覽 → 確認匯入（核對 SHA256）。預覽有任何錯誤或警告都不能匯入；沒有新交易可匯入時也不能確認。不提供網頁撤回；匯錯以業主授權維護程序處理。可分批匯入各再保人的 Register；已匯入的流水號自動略過。
   - 接受 Class PD 與 GL（GL 以 CGL 舊資料呈現）；Fac / Claim 必填；不再限定已結清。業主指定的排除（`import_exclusions.json`，F13333）與更正（`import_corrections.json`，F2898：Fac / Claim＝Fac、New / Renew＝New）在預覽列出，原始 Excel 值保留。
-  - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（僅資料，**不進 Production 報表**）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
+  - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（2026-11-15 起：保費列與批單列依此月份列入 Production；起始月 2026-11 以前視為已認列的歷史月份，理賠不列入）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
   - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
-  - 匯入列不建立 Case、不進 Production／Dashboard、不能退回草稿或編輯業務資料。
+  - 匯入列不建立 Case、不能退回草稿或編輯業務資料；保費列與批單列依 Revenue Month 列入 Production 與 Dashboard（2026-11-15，見 §9 起始月）。
   - Accounting 對象名稱（2026-11-13 業主決定）：任何名稱結尾帶「(Facility)」者在 Accounting 一律顯示不含「(Facility)」的名稱（歷史列、未結清列與新案相同，同一公司只有一個對象名稱）；舊資料本身仍保留完整名稱與 Facility／一般付款規則的區分。
   - 從匯入列新增批單／理賠時沿用來源險種（GL 匯入列新增的仍為 CGL；2026-11-11 修正）。
   - R/I Comm. %／Tax %（2026-11-11）：匯入時由 Register 公式「Our Share Premium × 固定比率」讀出（只辨識公式文字，不執行）；直接填數值者以金額 ÷ 承接保費換算；比率 × 承接保費與金額不符或公式無法辨識時預覽警告、不能匯入。理賠不存比率。Legacy 明細顯示；從匯入列新增批單時預帶來源比率（可修改）。舊交易金額仍以 Excel 為準。
@@ -503,7 +510,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 分頁名稱及內容介面使用英文，主分頁固定 `Legacy Data (Old Register)`；原始中文資料不翻譯。
 - 從 confirmed 舊交易帶入資料；Old Reference 可修改，保留原來源交易關聯及案號快照。新交易只有 Endorsement／Claim；不建立 Case。草稿只由建立者編輯、確認；首次確認產生 `LTX-YYYY-000001`，確認年度採台灣年度。未對帳、無收付歷史且未進已關帳 Production 的交易，建立者可退回草稿；再次確認沿用原號。
 - Endorsement 與 Claim 分開登錄；批單 Effective Date 為本次批單生效日，Expiry Date 固定保留來源到期日，前者不得晚於後者。Endorsement No. 確認前必填。實際確認時已超過來源到期五年者須選原因；Only Other 另須補充說明；原因由管理員維護並留痕。
-- 批單手填 100% Premium、Share (%)、R/I Commission (%)、Tax (%)、原幣 Brokerage 金額；先取位 Our Share Premium，再算佣金與稅；淨額與既有 Leg 算式相同。Bkg.(%) 依金額反推；零承接保費且有 Brokerage 時用正／負100%顯示並填原因。AE/Sub AE 沿用已核准分績與原幣、台幣尾差規則。
+- 批單手填 100% Premium、Share (%)、R/I Commission (%)、Tax (%)、原幣 Brokerage 金額；先取位 Our Share Premium，再算佣金與稅；淨額與既有 Leg 算式相同。Bkg.(%) 依金額反推；零承接保費且有 Brokerage 時用正／負100%顯示並填原因。AE/Sub AE 沿用已核准分績與原幣、台幣尾差規則。Brokerage 手填、付再保人金額由 Brokerage 倒推，是舊資料與新系統（T3＝T1−T2 由系統計算）的刻意差異（2026-11-14 業主確認）。
 - 理賠只填本筆承接賠款，不計佣金、稅、Brokerage 或處理費，兩邊金額相等；DOL 必填且須落在來源 Effective Date 至 Expiry Date（含首尾）內。允許負數退回賠款，不必連結原理賠，負數必填原因。負數向 Cedant 收回後才退還再保人；正負理賠均不得先墊付超過該筆已回收賠款（含既有合法抵銷）。理賠不填 Revenue Month，不進 Production。
 - 新交易確認後接到既有 Accounting 對帳、原幣收付、部分賠款、同對象跨幣別、兩方向分開實際收付、部分收付及整批沖回；停止新增抵銷，保留歷史抵銷。正式歷史 3,693 筆維持已對帳／已結清，不補造銀行或覆核事件；仍不提供歷史更正、作廢、匯入或撤回寫入。
 - 批單 Revenue Month 手動選尚未關帳月份、不預設；使用該月共用匯率，不提供逐筆覆寫。缺匯率不擋確認及原幣 Accounting；未關帳隨月匯率更正重算，關帳需補齊匯率並凍結台幣快照；不從 Production 排除操作改變選定月份。
@@ -515,7 +522,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **同一張保單**＝同一個 Old Reference（TW Ref；每個 TW Ref 是一家再保人的分保）。**最新期間**＝同一 Old Reference 所有已確認保費列與批單列中最早起日＋最晚到期日。Payment Split（C／R）暫不使用。
 - **來源**：理賠只能從原始保費列新增；批單可從保費列或批單新增，不能從理賠。
 - **鎖定沿用來源**：Cedant、Settlement Party、Old Reference、New / Renew。批單另鎖幣別、Share、AE／Sub AE 分配（沿用的 Sub AE 不檢查在職；換 AE 須在職）；Insured EN／CN 可改。理賠另鎖 Insured（帶同一 Old Reference 最新已確認批單的名稱，無批單用原保單）；Property 理賠鎖幣別，其他險種可選。
-- **付款規則**依 Settlement Party 自動判斷（各 Facility 名稱，其餘一般），不能選；一般規則的付款天數帶入來源可改，Facility 的 Cedant 固定 90 天。
+- **付款規則**依 Settlement Party 自動判斷（各 Facility 名稱，其餘一般），不能選；批單的 Cedant／再保人付款天數一律帶入來源並鎖定（2026-11-14，與新系統批單相同），Facility 的 Cedant 固定 90 天。
+- **匯入台幣取整（2026-11-14）**：Register 的台幣金額匯入時取整數：Net Premium from Cedant 與 Brokerage 各自四捨五入，Net Premium to Reinsurer＝前者 − Brokerage；理賠金額取整。原始 Register 值另存 `amountsOriginal`，原始 Excel 保留。
 - **批單**：生效日須在最新期間內（含頭尾），且不得早於同一 Old Reference 前一張已確認批單（可同日）；可改期但只能改到期日（起日固定，完整期間最長 18 個曆月，到期日不得早於生效日）；Endorsement No. 必填且同一 Old Reference 已確認批單（含匯入）不得重複；100% Premium 與 Brokerage 不得同時為 0；Share 鎖定，R/I Comm. %／Tax % 帶入可改；Brokerage 填金額；**Revenue Month 自動**＝批改生效月與確認月較晚者，已關帳順延第一個未關帳月（同新系統 §9），不能改；超過 5 年依最新到期日須選原因。
 - **理賠**：新增 **Loss No.（必填）**與 **Cause of Loss（選填）**，Note for Claim 保留；DOL 須在最新期間內；到期日＝確認日 +15 天（Swiss 季結）；AE 須在職；先收再付。每筆理賠是獨立 SoA；理賠明細列出同一 Old Reference＋同一 Loss No. 的所有理賠與累計（僅顯示）；Accounting 交易編號下顯示 Loss No.。
 - **金額**：TWD 只准整數、其他幣別最多兩位小數，不自動取整（100% Premium、Brokerage、理賠金額）。Installment No.、Statement No.、Reinsurer's Ref. No. 帶入來源可改。
@@ -529,6 +537,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-15 11:12 | 財會規則統一第一批（§8.1–8.5、§9、§10、§17）；P8 部分清理；舊資料進 Production、Production 起算月份 2026-11 | `backups/accounting_unify_20261115_111238/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounting-unify-work/rollback.sh 20261115_111238` | `ri-backend:before-accounting-unify-20261115_111238`／`ri-frontend:before-accounting-unify-20261115_111238` | 候選映像 API 129/129、畫面 21 階段 341 項通過；重建比對內容與候選一致；正式容器為候選映像、後端逐檔一致、無 migration、無正式資料修改；正式資料 Dashboard／Production 與部署前試算一致 |
 | 11-14 21:29 | Product Recall QS、Personnel、Claim／Loss Record 共通變更；12 筆唯一 AE 歷史關聯回填 | `backups/product-recall-20261114_212639/`（含部署前 DB、文件及回填前 DB） | `ri-backend:before-product-recall-20261114_212639`／`ri-frontend:before-product-recall-20261114_212639` | 候選後端 128 組 API 全通過；全部瀏覽器階段及修正後重跑通過；正式 migration、主檔、回填快照及首頁驗證 |
 | 10-05 | Audit 暫停、清除 264 筆 | `backups/ri_system_before_audit_clear_20261005_142025.sql` | | |
 | 10-14 | 全面除錯修正 | `backups/ri_system_before_debug_round2_20261014_132129.sql` | `before-debug-round2-20261014_132129` | 49 組測試 |
@@ -681,6 +690,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-15：依業主同意部署財會規則統一第一批：所有具名再保人走新會計規則；批改 Cedant 付款從批改生效日起算；TWD 收付款須為整數；Claim 金額精度與分攤尾差給最大份額；Dashboard 納入舊資料並換算所有 Claim；最新匯率規則；P8 部分清理（保留 History 用的付款與結算紀錄）；舊資料保費／批改按 Revenue Month 進 Production；Production 起算月份 2026-11，之前月份視同關帳、匯率鎖定，新系統 2026-11 以前的 Production 改認列於 2026-11。
 
 - 2026-11-14：依業主同意部署 Product Recall QS 及 Case Owner／AE、Claim、Loss Record、CGL Turnover 共通變更；正式回填 12 筆唯一 AE Personnel 關聯，保留快照。
 

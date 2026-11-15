@@ -1,3 +1,6 @@
+# 2026-11-15: this suite tests Production mechanics with past-dated synthetic months; the
+# Production start month (historical months) is covered by production_start_month.
+from django.test import override_settings as _ovr; _ovr(PRODUCTION_START_MONTH='').enable()
 """Performance Split cents: a + b equals the leg exactly and the Leg 1 total equals the payment schedule.
 
 Pure calculations (no database writes), so it can also run outside the disposable stack.

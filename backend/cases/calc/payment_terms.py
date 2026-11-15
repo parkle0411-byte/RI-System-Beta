@@ -101,6 +101,15 @@ def endorsement_base_date(case_data):
     return max(effective, announced_date)
 
 
+def endorsement_effective_date(case_data):
+    """Owner decision 2026-11-13: an endorsement's Cedant receipt/refund counts from
+    the endorsement effective date (not the later Announce date), matching the Word
+    Debit/Credit Note. Reinsurer dates and Production months still use
+    endorsement_base_date (the later of effective and actual Announce)."""
+    effective = get(case_data, "endoEffectiveDate")
+    return effective if isinstance(effective, str) and month_end_date(effective) else ""
+
+
 def auw_payment_dates(case_data, installment):
     source_date = installment["baseDate"]
     if get(case_data, "installmentEnabled") is not True and js_truthy(get(case_data, "parentTwRef")):
@@ -352,13 +361,13 @@ def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
         cedant_base = base_date
         cedant_rule = {"contractDueDate": add_calendar_days(cedant_base, cedant_terms) if cedant_base and cedant_terms is not None else "", "accountingLeadDays": 15}
         if js_truthy(get(case_data, "parentTwRef")) and get(case_data, "installmentEnabled") is not True:
-            cedant_base = endorsement_base_date(case_data)
+            cedant_base = endorsement_effective_date(case_data)
             cedant_terms = 90 if fixed_cedant(case_data) else valid_terms(get(case_data, "paymentTermsDays"))
-            cedant_rule = {"paymentRule": "endorsement_later_announce_effective",
+            cedant_rule = {"paymentRule": "endorsement_effective_date",
                            "contractDueDate": add_calendar_days(cedant_base, cedant_terms) if cedant_base and cedant_terms is not None else "",
                            "accountingLeadDays": 15}
             if not cedant_base:
-                issues.append("Endorsement: payment base date requires Announce and a valid endorsement effective date.")
+                issues.append("Endorsement: the Cedant payment base date requires a valid endorsement effective date.")
         cedant_key = installment["id"] + ":cedant"
         cedant_amount, cedant_paid, cedant_outstanding = balances(
             cedant_amounts[installment_index] if installment_index < len(cedant_amounts) else None, applied.get(cedant_key))
@@ -458,8 +467,8 @@ def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
         item["status"] = _status_for(item.get("contractDueDate", ""), abs(item["outstanding"]), abs(item["paid"]), today, now)
         if item["status"] == "upcoming" and item.get("dueDate") and today >= item["dueDate"]:
             item["status"] = "reminder"
-    from ..facility_accounting import apply_schedules
-    items = apply_schedules(case_data, items)
+    from ..facility_accounting import attach_schedule_history
+    items = attach_schedule_history(case_data, items)
     from ..allianz_accounting import apply_schedules as allianz_schedules
     items = allianz_schedules(case_data, items)
     from ..great_american_accounting import apply_schedules as ga_schedules

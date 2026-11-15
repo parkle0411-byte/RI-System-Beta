@@ -89,7 +89,9 @@ try:
             "INSERT INTO ri_legacy_import_batches(id,filename,sha256,storage_key,status,manifest,created_by,created_at,withdrawal) VALUES('00000000000000000000000000000001','x','x','x','preview','{}','qa',NOW(),'{}')") and not denied('UPDATE ri_legacy_import_batches SET filename=filename'))
         unchanged=LegacyTransaction.objects.get(pk=t.pk)
         check('all rejected writes preserve the old record',unchanged.version==1 and unchanged.data==t.data and unchanged.financial=={})
-        check('no historical Production preview rows',c.get('/api/production-report?month=2020-01').json()['rows']==[])
+        # 2026-11-15 owner decision: the imported premium row is the recognized Production of its historical month.
+        hist=c.get('/api/production-report?month=2020-01').json()
+        check('historical month lists the imported row read-only',[r.get('legacyTransactionId') for r in hist['rows']]==[str(t.uid)] and hist['scope']['historicalMonth'],hist['scope'])
         raise Rollback()
 except Rollback:pass
 print(f'{len(checks)}/{len(checks)} passed')

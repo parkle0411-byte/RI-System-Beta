@@ -117,9 +117,8 @@ class AccountingView(NoStoreMixin, APIView):
         from .accounting_policy import fx_for_transaction, stored_all_settled, settled_flag_mismatch, SETTLED_FLAG_WARNING
         fx_rows=list(FxRate.objects.values('year_month','currency','rate'))
         rates={(r['year_month'],r['currency']):float(r['rate']) for r in fx_rows}
-        latest={}
-        for r in fx_rows:
-            if r['currency'] not in latest or r['year_month']>latest[r['currency']][0]:latest[r['currency']]=(r['year_month'],float(r['rate']))
+        from .accounting_policy import latest_rates
+        latest=latest_rates(fx_rows, taipei_date(now)[:7])
         for case in cases:
             try:
                 from .data_integrity import financial_issues

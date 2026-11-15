@@ -161,6 +161,10 @@ def register_accounts(view, request, body):
         if not currency or actual_party != scope or d.get('paymentDirection') not in ('receivable', 'payable'):
             result.update(error='account_unavailable', message='Select an active cash account for the chosen counterparty.')
             continue
+        if currency == 'TWD' and value % 100:
+            # Owner decision 2026-11-14: TWD receipts and payments are whole numbers.
+            result.update(error='twd_whole_number', message='TWD Cash Amount must be a whole number.')
+            continue
         key = (currency, d['paymentDirection'])
         bid = batches.setdefault(key, str(uuid.uuid4()))
         single = {**body, 'allocations': [{**row, 'rowVersion': case.row_version, 'offsetAmount': 0}],

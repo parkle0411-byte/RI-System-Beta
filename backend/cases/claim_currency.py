@@ -44,13 +44,23 @@ def valid_amount(value, currency):
 
 
 def allocate_claim_shares(amount, shares, currency):
-    """Allocate rounded minor units so the lines sum to the rounded total share."""
-    from .calc.jsnum import js_round
-    factor = 1 if str(currency or '').upper() == 'TWD' else 100
-    raw = [float(amount) * float(share or 0) / 100 * factor for share in shares]
-    units = [math.floor(value) for value in raw]
-    remainder = int(js_round(sum(raw))) - sum(units)
-    order = sorted(range(len(raw)), key=lambda i: (-(raw[i] - units[i]), i))
-    for i in order[:max(0, remainder)]:
-        units[i] += 1
-    return [value / factor for value in units]
+    """Owner decision 2026-11-15 (same as premium allocation): each reinsurer share is
+    rounded to the currency unit (TWD whole numbers, others two decimals, .5 away from
+    zero), and the tail goes to the largest share (ties in Case order), so the lines
+    sum to the rounded total share. E.g. TWD 1,005 at 50/30/20 -> 502 / 302 / 201."""
+    from decimal import ROUND_HALF_UP
+    unit = Decimal('1') if str(currency or '').upper() == 'TWD' else Decimal('0.01')
+    def number(value):
+        try:
+            result = Decimal(str(value).replace(',', ''))
+            return result if result.is_finite() else Decimal(0)
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal(0)
+    total = number(amount)
+    weights = [max(Decimal(0), number(share)) for share in shares]
+    values = [(total * w / 100).quantize(unit, rounding=ROUND_HALF_UP) for w in weights]
+    target = (total * sum(weights) / 100).quantize(unit, rounding=ROUND_HALF_UP)
+    order = sorted((i for i, w in enumerate(weights) if w), key=lambda i: (-weights[i], i))
+    if order:
+        values[order[0]] += target - sum(values)
+    return [float(v) for v in values]

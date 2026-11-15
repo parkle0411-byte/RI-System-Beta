@@ -258,8 +258,7 @@ def transaction_details(payload, now=None, schedule_result=None):
                       and other.get('installmentId')==tx.get('installmentId'))
             if exact or fallback:
                 paired.append(candidate)
-        # 2026-10-14：經紀費（T3）不再自動結清；只有 T1／T2 開始收付款時顯示 partial，結清一律由會計人工確認
-        # （facility_accounting.apply_transactions 依 T1／T2 的人工確認狀態決定 T3 能否確認）
+        # T3 settles automatically once its own T1／T2 settle (finance_workflow.apply_details).
         partial=any(abs(p['paid'])>0 for p in paired)
         detail['settlement']='partial' if partial else 'open'
         detail['paymentStatus']=detail['settlement']
@@ -269,8 +268,8 @@ def transaction_details(payload, now=None, schedule_result=None):
         detail['settlementDependencies']=[{'txNo':p['_tx']['txNo'],'settlement':p['settlement']} for p in paired]
     from .allianz_accounting import apply_details
     apply_details(payload, details, schedule, now)
-    from .facility_accounting import apply_transactions
-    apply_transactions(payload, details, schedule)
+    from .facility_accounting import attach_history
+    attach_history(payload, details)
     from .great_american_accounting import apply_details as ga_details
     ga_details(payload, details, schedule, now)
     from .qbe_accounting import apply_details as qbe_details

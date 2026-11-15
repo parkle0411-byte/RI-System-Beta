@@ -16,7 +16,8 @@ _MONTH = re.compile(r'^[0-9]{4}-(0[1-9]|1[0-2])$')
 
 def defer_closed_production(case, actor, request_id=None):
     source = case_source(case)
-    months = {row['performanceMonth'] for row in calc.installment_allocations(calc.normalize_source(source))}
+    # Historical months (before the start month) are recognized in the start month first.
+    months = {calc.effective_month(row['performanceMonth']) for row in calc.installment_allocations(calc.normalize_source(source))}
     closed = set(ProductionReport.objects.filter(status='closed').values_list('year_month', flat=True))
     deferred = []
     for month in sorted(months & closed):

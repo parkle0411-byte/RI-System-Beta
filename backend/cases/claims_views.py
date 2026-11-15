@@ -243,9 +243,10 @@ class ClaimsView(NoStoreMixin, APIView):
                 "outstandingReserve": reserve,
                 "payments": [],
             }
+            # 2026-11-14 owner decision: TWD Claims accept whole numbers only in every class.
+            if not valid_amount(get(data, 'outstandingReserve'), chosen_currency):
+                return _error(400, 'invalid_claim_precision', 'The reserve has too many decimal places for the Claim currency.')
             if multi_currency_scope(payload):
-                if not valid_amount(get(data, 'outstandingReserve'), chosen_currency):
-                    return _error(400, 'invalid_claim_precision', 'The reserve has too many decimal places for the Claim currency.')
                 claim['currency'] = chosen_currency
             payload["claims"].append(claim)
         else:
@@ -326,16 +327,16 @@ class ClaimsView(NoStoreMixin, APIView):
                 reserve = money(reserve)
                 if not js_is_finite(reserve):
                     return _error(400, "invalid_claim_reserve", "Outstanding Reserve must remain finite after rounding.")
-                from .claim_currency import valid_amount
-                if claim.get('currency') and not valid_amount(body.get('outstandingReserve'), claim['currency']):
+                from .claim_currency import valid_amount, claim_currency
+                if str(body.get('outstandingReserve') or '').strip() and not valid_amount(body.get('outstandingReserve'), claim_currency(payload, claim)):
                     return _error(400, 'invalid_claim_precision', 'The reserve has too many decimal places for the Claim currency.')
                 claim["outstandingReserve"] = reserve
             else:
                 data = body.get("payment")
                 # 理賠付款可以是負數（追償、自負額沖抵等，2026-09-25 確認），只拒絕 0 與看不懂的輸入
                 amount = _parse_amount(get(data, "amount"))
-                from .claim_currency import valid_amount
-                if claim.get('currency') and not valid_amount(get(data, 'amount'), claim['currency']):
+                from .claim_currency import valid_amount, claim_currency
+                if amount is not None and str(get(data, 'amount') or '').strip() and not valid_amount(get(data, 'amount'), claim_currency(payload, claim)):
                     return _error(400, 'invalid_claim_precision', 'The obligation has too many decimal places for the Claim currency.')
                 amount = money(amount) if amount is not None else 0
                 if not amount or not js_is_finite(amount):

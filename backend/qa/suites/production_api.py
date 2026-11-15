@@ -115,6 +115,14 @@ try:
         c6 = at(make_case(sales, "posted", policyFrom="2031-06-01", policyTo="2032-06-01"),                         # 台北 6/1 01:00 Announce
                 datetime(2031, 5, 31, 17, 0, tzinfo=tz.utc))
 
+        # 2026-11-13 (problem 2): every named reinsurer uses the Announce-time ledger. These
+        # fixtures bypass Announce, so build the ledger Announce would have created.
+        from cases.property_original import refresh_transactions, periods as property_periods
+        def announce_ledger(case):
+            case.refresh_from_db(); p = copy.deepcopy(case.payload); p.update(twRef=case.tw_ref, transactions=[])
+            refresh_transactions(p, case.announced_at.isoformat()); Case.objects.filter(pk=case.pk).update(payload=p); case.refresh_from_db()
+        for _case in (c1, c2, c3, c6, c9):
+            announce_ledger(_case)
         j = get(fin, M1).json(); rows = mine(j["rows"], c1, c2, c3, c4, c5, c6)
         by = lambda case: [r for r in rows if r["caseUid"] == str(case.case_uid)]
         check("Draft case is not in the preview", by(c5) == [])
@@ -139,7 +147,8 @@ try:
         check("c2 (TWD, 50/50 split): rate 1, two people per reinsurer, shares add up", len(r2) == 4 and all(r["rate"] == 1 for r in r2)
               and {r["ae"] for r in r2} == {"ZZ A", "ZZ B"}, [(r["ae"], r["premium"], r["income"]) for r in r2])
         check("c3 installment: only the May installment (I1) is in May", {r["installmentId"] for r in by(c3)} == {"I1"})
-        check("c4 (Reversed) is included", len(by(c4)) == 2)
+        # 2026-11-13 (problem 2): a Reversed case contributes only its recognized reversal rows; c4 was never recognized.
+        check("c4 (Reversed, never recognized) is not in the preview", by(c4) == [], [r["id"] for r in by(c4)])
         check("summary totals match the rows", j["summary"]["rowCount"] == len(j["rows"]) and j["summary"]["premiumNtd"] == sum((r["premium"] or 0) for r in j["rows"]))
 
         # ================= 排除 =================
@@ -213,32 +222,26 @@ try:
         c1.refresh_from_db(); tx = c1.payload.get("transactions", [])
         check("c1: all keys confirmed -> Confirmed (closed), not partial", c1.status == "closed" and c1.payload["productionPartiallyConfirmed"] is False
               and sorted(c1.payload["confirmedProductionKeys"]) == sorted(r["reinsurerKey"] for r in r1) and c1.row_version == before[c1.pk] + 1)
-        check("c1: premium transactions Leg 1-3 numbered from the TW Ref", len(tx) >= 6 and all(t["txNo"].startswith(c1.tw_ref + "-R") for t in tx), [t["txNo"] for t in tx][:3])
+        check("c1: Announce-time transactions kept and marked recognized in May", len(tx) >= 6 and all(t["txNo"].startswith(c1.tw_ref + "-R") for t in tx)
+              and all(t.get("productionRecognized") is True and t.get("postedMonth") == M1 for t in tx), [(t["txNo"], t.get("postedMonth")) for t in tx][:3])
         check("c1: audit production_case_confirmed + VM snapshot", audit(c1.case_uid, "production_case_confirmed").first().metadata == {"reportUid": v2["reportUid"], "month": M1, "productionClosed": True}
               and snaps(c1.case_uid, "production_case_confirmed").filter(entity_version=c1.row_version).exists())
         c2.refresh_from_db()
-        check("c2: one reinsurer deferred -> stays Announced, partially confirmed, no transactions", c2.status == "posted" and c2.payload["productionPartiallyConfirmed"] is True
-              and not c2.payload.get("transactions"), (c2.status, c2.payload.get("productionPartiallyConfirmed")))
+        check("c2: one reinsurer deferred -> stays Announced, partially confirmed, its Announce-time ledger not yet recognized", c2.status == "posted" and c2.payload["productionPartiallyConfirmed"] is True
+              and bool(c2.payload.get("transactions")) and not any(t.get("productionRecognized") for t in c2.payload["transactions"]), (c2.status, c2.payload.get("productionPartiallyConfirmed")))
         c3.refresh_from_db()
         check("c3: June installment still open -> stays Announced, partial", c3.status == "posted" and c3.payload["productionPartiallyConfirmed"] is True)
-        # 分期案件每關一期就產生「該期」的交易（2026-09-29 起）：原本要等所有期別都關帳，SoA 一直是空的
         t3 = c3.payload.get("transactions", [])
-        leg = lambda rows, name, r: [t for t in rows if t["legType"] == name and t["reinsurerIdx"] == r]
-        check("c3: May installment closed -> only I1 transactions: 2 reinsurers x Leg 1-3, numbered ...-I1 with installmentId",
-              len(t3) == 6 and all(t["installmentId"] == "I1" and t["installmentLabel"] == M1 and t["txNo"].endswith("-I1") for t in t3)
-              and sorted(t["txNo"] for t in t3) == sorted(f"{c3.tw_ref}-R{r}-T{n}-I1" for r in (1, 2) for n in (1, 2, 3)), [t["txNo"] for t in t3])
-        check("c3: I1 amounts = 60% of each leg (600/1000): A 324 / 205.2 / 118.8, B 216 / 91.2 / 124.8",
-              [leg(t3, n, r)[0]["amount"] for r in (0, 1) for n in ("Leg 1", "Leg 2", "Leg 3")] == [324, 205.2, 118.8, 216, 91.2, 124.8],
-              [(t["txNo"], t["amount"]) for t in t3])
-        check("c3: transaction label names the installment", all(t["label"].endswith(f" · Installment {M1}") for t in t3), t3[0]["label"])
-        check("c3: audit says not fully closed while the transactions exist", audit(c3.case_uid, "production_case_confirmed").first().metadata["productionClosed"] is False)
+        plan = property_periods(c3.payload)
+        check("c3: both installments were created at Announce; only I1 is recognized in May",
+              len(t3) == 12 and all((t.get("productionRecognized") is True and t["postedMonth"] == M1) if t["installmentId"] == "I1" else not t.get("productionRecognized") for t in t3), [(t["txNo"], t.get("postedMonth")) for t in t3])
+        check("c3: I1 ledger equals the installment schedule (per reinsurer T1 / T2)",
+              [t["amount"] for t in sorted((t for t in t3 if t["installmentId"] == "I1" and t["legType"] in ("Leg 1", "Leg 2")), key=lambda t: (t["reinsurerIdx"], t["legType"]))]
+              == [v for r in (0, 1) for v in (plan[0]["t1shares"][r], plan[0]["t2s"][r])], [(t["txNo"], t["amount"]) for t in t3])
+        check("c3: audit says not fully closed", audit(c3.case_uid, "production_case_confirmed").first().metadata["productionClosed"] is False)
         c4.refresh_from_db(); t4 = c4.payload["transactions"]
-        rvs = [t for t in t4 if "-RVS" in t["txNo"]]
-        check("c4 (Reversed): closed; one -RVS1 offset for the not-yet-offset entry only", c4.status == "closed" and [t["txNo"] for t in rvs] == ["ZZ-OLD-R1-TX1-RVS1"]
-              and rvs[0]["amount"] == -100 and rvs[0]["isReversalEntry"] is True and rvs[0]["settlement"] == "open" and c4.payload["pendingReversalOffset"] is False, [t["txNo"] for t in t4])
-        check("c4: original entry marked reversalOffsetApplied; new cycle transactions end with -C1", t4[0].get("reversalOffsetApplied") is True
-              and any(t["txNo"].endswith("-C1") for t in t4) and all(not t["txNo"].endswith("-C1") for t in t4[:3]), [t["txNo"] for t in t4])
-        check("confirmedCases counts cases closed now (c1, c4, plus any real ones)", body.get("confirmedCases", 0) >= 2)
+        check("c4 (Reversed): not in the Production rows, ledger and status untouched by the close", c4.status == "reversed" and [t["txNo"] for t in t4] == ["ZZ-OLD-R1-TX1", "ZZ-OLD-R1-TX2"], [t["txNo"] for t in t4])
+        check("confirmedCases counts cases closed now (c1, plus any real ones)", body.get("confirmedCases", 0) >= 1)
         f = FxRate.objects.get(year_month=M1, currency="USD")
         check("FX for the month locked", f.is_locked and f.lock_reason == f"Production Report {M1} closed" and f.locked_by and f.row_version == 2)
         check("VM: FX lock audited (lock_fx_rate) + snapshot fx_rate_locked", audit(f.id, "lock_fx_rate", "fx_rate").exists() and snaps(f.id, "fx_rate_locked", "fx_rate").exists())
@@ -261,23 +264,16 @@ try:
         check("June close -> 200; confirmedCases counts cases that became fully Confirmed (c3 via its 2nd installment, c2, c6)", r.status_code == 200
               and r.json().get("confirmedCases", 0) >= 3, r.content[:300])
         c3.refresh_from_db(); t3 = c3.payload["transactions"]
-        check("c3: now Confirmed (closed); 12 transactions, I1 rows untouched and 6 new I2 rows numbered ...-I2",
-              c3.status == "closed" and c3.payload["productionPartiallyConfirmed"] is False and len(t3) == 12
-              and [t["installmentId"] for t in t3] == ["I1"] * 6 + ["I2"] * 6 and all(t["txNo"].endswith("-I2") for t in t3[6:]), [t["txNo"] for t in t3])
-        check("c3: I2 amounts = the rest (216 / 136.8 / 79.2 and 144 / 60.8 / 83.2); I1 + I2 = the full legs",
-              [leg(t3[6:], n, r)[0]["amount"] for r in (0, 1) for n in ("Leg 1", "Leg 2", "Leg 3")] == [216, 136.8, 79.2, 144, 60.8, 83.2]
-              and all(money(leg(t3[:6], n, r)[0]["amount"] + leg(t3[6:], n, r)[0]["amount"]) == full
-                      for r, n, full in ((0, "Leg 1", 540), (0, "Leg 2", 342), (0, "Leg 3", 198), (1, "Leg 1", 360), (1, "Leg 2", 152), (1, "Leg 3", 208))),
-              [(t["txNo"], t["amount"]) for t in t3[6:]])
-        # 再關一次同一個案件的同一期不會重複（沒有 I1／I2 以外的列）
-        check("c3: every installment has exactly one live set of transactions", len({t["txNo"] for t in t3}) == 12)
+        check("c3: now Confirmed (closed); the same 12 Announce-time transactions, I2 recognized in June",
+              c3.status == "closed" and c3.payload["productionPartiallyConfirmed"] is False and len({t["txNo"] for t in t3}) == 12
+              and all(t["postedMonth"] == (M1 if t["installmentId"] == "I1" else M2) and t.get("productionRecognized") for t in t3), [(t["txNo"], t.get("postedMonth")) for t in t3])
         c2.refresh_from_db(); c6.refresh_from_db()
         check("c2 (not installments): all keys confirmed in June -> closed with full-amount transactions (no installmentId)",
-              c2.status == "closed" and len(c2.payload["transactions"]) >= 6 and all("installmentId" not in t for t in c2.payload["transactions"]), c2.status)
+              c2.status == "closed" and len(c2.payload["transactions"]) >= 6 and all(t.get("installmentId") in (None, "FULL", "case-effective-date") for t in c2.payload["transactions"]), [t.get("installmentId") for t in c2.payload["transactions"]])
 
         # SoA 的狀態欄：帶 installmentId 的交易只看該期的付款排程項目
         Case.objects.filter(pk=c3.pk).update(payload={**c3.payload, "paymentEntries": [
-            {"scheduleKey": "I1:cedant", "amount": 540, "entryType": "payment", "paidAt": "2031-06-01"}]})
+            {"scheduleKey": "I1:cedant", "amount": plan[0]["t1"], "entryType": "payment", "paidAt": "2031-06-01"}]})
         got = call(sales, "get", f"/api/cases?caseUid={c3.case_uid}").json()["case"]["payload"]["transactions"]
         st = lambda inst, name, r: [t["paymentScheduleSettlement"] for t in got if t["installmentId"] == inst and t["legType"] == name and t["reinsurerIdx"] == r][0]
         # 2026-10-14：不再自動結清；餘額歸零後為 pending_confirmation，須會計人工確認
@@ -295,13 +291,13 @@ try:
         check("a version bump without content change before close is fine (state is re-read)", r.status_code == 200, r.content[:200])
 
         # ================= transactions 損毀 =================
-        c8 = at(make_case(sales, "reversed", policyFrom="2031-08-01", policyTo="2032-08-01", currency="TWD"), EARLY)
-        patch(c8, pendingReversalOffset=True, transactions=[None])
+        c8 = at(make_case(sales, "posted", policyFrom="2031-08-01", policyTo="2032-08-01", currency="TWD"), EARLY)
+        patch(c8, transactions=[None])
         j = get(finm, M4).json()
         rep = post(finm, "generate", M4, sourceSignature=j["sourceSignature"]).json()["report"]
         r = post(finm, "close", M4, reportUid=rep["reportUid"], rowVersion=1, sourceSignature=j["sourceSignature"])
         check("close with a null inside transactions -> 409 transactions_corrupt, nothing closed", code(r) == "transactions_corrupt"
-              and ProductionReport.objects.get(report_uid=rep["reportUid"]).status == "valid" and Case.objects.get(pk=c8.pk).status == "reversed", code(r))
+              and ProductionReport.objects.get(report_uid=rep["reportUid"]).status == "valid" and Case.objects.get(pk=c8.pk).status == "posted", code(r))
         raise Rollback()
 except Rollback:
     pass

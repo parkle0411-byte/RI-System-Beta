@@ -452,7 +452,8 @@
     const order = reinsurers.reduce((total, row) => total + number(row.sharePct), 0);
     const rawPremium = number(c && c.originalPremium);
     const originalPremium = ['TWD', 'USD'].includes(currencyLabel(c)) && c?.premiumRounding !== 'legacy-cents' ? premiumRound(rawPremium, c) : rawPremium;
-    const propertyOriginal = !c?.accountingLegacyMath && c?.premiumRounding !== 'legacy-cents' && c?.propertyOriginalRules !== 'historical' && reinsurers.length > 0 && reinsurers.every(r=>["Lloyd's Underwriter Syndicate No. 0609 AUW (Facility)", "Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)", "Great American Insurance Company, Singapore Branch (Facility)", "QBE Hongkong & Shanghai Insurance Limited (Facility)", "Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)"].some(n=>n.toLowerCase()===String(r.name||'').trim().toLowerCase()) || !/facility|\bpws\b/i.test(r.name || ''));
+    // 2026-11-13: same scope as backend accounting_policy.scope (every named reinsurer uses the shared ledger rules).
+    const propertyOriginal = !c?.accountingLegacyMath && c?.premiumRounding !== 'legacy-cents' && c?.propertyOriginalRules !== 'historical' && reinsurers.some(r => String(r?.name || '').trim());
     const components = (propertyOriginal ? [{sharePct:order}] : reinsurers).map(row => {
       const cp = premiumRound(originalPremium * number(row.sharePct) / 100, c);
       const commission = premiumRound(cp * number(c && c.riCommPct) / 100, c);

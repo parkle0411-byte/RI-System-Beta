@@ -49,7 +49,7 @@ try:
    check(label+' full RI recovery automatically releases Cedant refund',details(ref)[tx(ref,'Leg 2')]['settlement']=='settled')
    check(label+' RI refund receipt automatically settles',(details(ref)[tx(ref, 'Leg 2')]['settlement']=='settled'))
    check(label+' full Cedant refund accepted before its original due date',full(fin,ref,'Leg 1').status_code==200)
-   check(label+' refund keeps original due date',details(ref)[tx(ref,'Leg 1')]['contractDueDate']==('2026-11-19' if label=='Ordinary' else '2027-01-18'))
+   check(label+' Cedant refund due date counts from the endorsement effective date (2026-11-13)',details(ref)[tx(ref,'Leg 1')]['contractDueDate']==('2026-10-31' if label=='Ordinary' else '2026-12-30'),details(ref)[tx(ref,'Leg 1')]['contractDueDate'])
    check(label+' cancelling refund collection after Cedant payment blocked',(settle(fin, ref, 'Leg 2', undo=True).status_code==410))
   # Whole-period incoming checks include every RI share, never just the target row.
   for label,name in KINDS[1:]:

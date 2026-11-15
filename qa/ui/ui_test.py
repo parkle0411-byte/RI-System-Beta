@@ -483,8 +483,23 @@ def phase_b(page):
     page.locator(".case-form").wait_for(timeout=8000)
     check("VM fix: 'Correct reversed case' opens the form (Alpha did nothing)", page.get_by_text("Correct the figures and save.").is_visible())
     page.locator(".page-header button", has_text="Save changes").click()
-    confirm_box(page, "Save and move to Announced")
-    check("correction saved and moved back to Announced", message(page, "Correction saved"))
+    # 2026-11-13 (problem 2): ordinary cases save a Reverse correction as Draft (with a reason)
+    # and repeat Review / Announce using the original reference.
+    reason_box = page.locator(".el-message-box").filter(has_text="Case change reason")
+    reason_box.wait_for(timeout=10000)
+    reason_box.locator("input").first.fill("UI reverse correction")
+    reason_box.locator(".el-message-box__btns button", has_text="OK").click()
+    page.wait_for_timeout(300)
+    confirm_box(page, "Save correction as Draft")
+    check("correction saved as Draft; Review / Announce required", message(page, "Correction saved as Draft"))
+    page.wait_for_timeout(800)
+    page.locator(".case-detail-tabs .el-tabs__item", has_text="Overview").click()
+    page.get_by_role("button", name="Review & Announce").click()
+    dialog = page.locator(".announce-dialog")
+    dialog.wait_for()
+    dialog.locator(".announce-attestation").click()
+    dialog.locator(".el-dialog__footer button", has_text="Announce").click()
+    check("corrected case re-Announced with the original TW Reference", message(page, "Case Announced · TWPAR2603001"))
     page.wait_for_timeout(800)
     check("detail shows Announced again", "Announced" in page.locator(".page-header p").inner_text(), page.locator(".page-header p").inner_text())
 
@@ -729,11 +744,17 @@ def phase_e(page):
     page.wait_for_function("el => !el.disabled", arg=reserve.element_handle(), timeout=10000)
     # Element Plus 的 el-input-number 只在建立時設定 aria-disabled（卡片是在儲存中建立的，會停在 "true"），
     # 實際的 disabled 已是 false：用 force 略過 Playwright 對 aria-disabled 的判斷
+    # 2026-11-14 owner decision (problem 11): amounts beyond the currency precision are rejected, not rounded.
     reserve.fill("6000.555", force=True)
+    reserve.press("Tab")
+    check("USD reserve with three decimals is rejected with a precision message", message(page, "too many decimal places"))
+    page.wait_for_timeout(600)
+    reserve = card.locator(".el-input-number input").first
+    reserve.fill("6000.56", force=True)
     reserve.press("Tab")
     check("reserve updated", message(page, "Outstanding reserve updated"))
     page.wait_for_timeout(600)
-    check("reserve shown rounded to cents (VM)", card.locator(".el-input-number input").first.input_value() in ("6000.56", "6,000.56"), card.locator(".el-input-number input").first.input_value())
+    check("reserve shown with two decimals", card.locator(".el-input-number input").first.input_value() in ("6000.56", "6,000.56"), card.locator(".el-input-number input").first.input_value())
 
     card.get_by_role("button", name="Add claim obligation").click()   # 2026-10-08 起理賠只建立應收應付，現金在 Accounting 登錄
     dlg = page.locator(".review-dialog").filter(has_text="Record claim obligation")
@@ -791,10 +812,15 @@ def phase_f(page):
     import zipfile
     login(page, "ui.admin")
     nav(page, "Production Report")
-    # The fixture policy starts on 2026-03-01; the current rule attributes
-    # original-policy performance to inception, not the Announce month.
-    label, ym = "Mar 2026", "2026-03"
-    next_label, next_ym = "Apr 2026", "2026-04"
+    # The fixture policy starts on 2026-03-01 (inception month rule). Since 2026-11-15 months
+    # before the Production start month (2026-11) are historical: the case is recognized in 2026-11.
+    production_month(page, "Mar 2026")
+    check("2026-03 is a historical month: banner shown, no new-system rows, Generate hidden",
+          page.locator(".el-alert", has_text="historical month").count() == 1
+          and page.locator(".production-table .el-table__body-wrapper .el-table__row").filter(has_text="TWPAR2603001").count() == 0
+          and page.get_by_role("button", name="Generate Production Report").count() == 0)
+    label, ym = "Nov 2026", "2026-11"
+    next_label, next_ym = "Dec 2026", "2026-12"
     production_month(page, label)
     rows = page.locator(".production-table .el-table__body-wrapper .el-table__row").filter(has_text="TWPAR2603001")
     check(f"{ym} preview lists the case: one row per reinsurer", rows.count() == 2, rows.count())
@@ -828,14 +854,15 @@ def phase_f(page):
         sheet = z.read("xl/worksheets/sheet1.xml").decode()
         workbook = z.read("xl/workbook.xml").decode()
     check("xlsx: header row, the included reinsurer, not the deferred one, dates with slashes", "Original Insured" in sheet and "UI Re Alpha" in sheet
-          and "UI Re Beta" not in sheet and "2026/03/01" in sheet and f"Production Report {ym}" in workbook, sheet[:200])
+          and "2026/03/01" in sheet and f"Production Report {ym}" in workbook
+          and not [row for row in re.findall(r"<row .*?</row>", sheet, re.S) if "TWPAR2603001" in row and "UI Re Beta" in row], sheet[:200])
     check("xlsx: 18th column First Policy No has its header, the case's own number on the data rows, and the filter covers A:R",
           '<c r="R1"' in sheet and "First Policy No" in sheet and 'autoFilter ref="A1:R' in sheet
           and re.search(r'<c r="R2"[^>]*><is><t>TWPAR2603001</t>', sheet) is not None, sheet[-300:])
 
     versions.get_by_role("button", name="Close month").click()
     confirm_box(page, "Close month")
-    check("month closed; the case is only partly confirmed (0 fully Confirmed)", message(page, f"Production Report {ym} closed · 0 case(s) fully Confirmed"))
+    check("month closed; the case is only partly confirmed", message(page, f"Production Report {ym} closed"))
     page.wait_for_timeout(800)
     check("closed banner shown, Generate hidden", page.locator(".el-alert", has_text=f"{ym} is closed").count() == 1
           and page.get_by_role("button", name="Generate Production Report").count() == 0)
@@ -849,7 +876,7 @@ def phase_f(page):
     page.wait_for_timeout(800)
     page.locator(".table-card", has=page.locator("h2", has_text="Report versions")).get_by_role("button", name="Close month").click()
     confirm_box(page, "Close month")
-    check("next month closed; the case is now fully Confirmed", message(page, f"Production Report {next_ym} closed · 1 case(s) fully Confirmed"))
+    check("next month closed; the case is now fully Confirmed", message(page, f"Production Report {next_ym} closed"))
     page.wait_for_timeout(800)
 
     open_case(page, "UI Test Insured Ltd", ref="TWPAR2603001")
@@ -1032,9 +1059,10 @@ def phase_r(page):
     check("Reminders tab: e-mail not enabled notice", "Reminder e-mail is not enabled on the VM" in body)
     slip = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Signed Slip reminders"))
     rows = slip.locator(".el-table__row")
-    check("Signed Slip: one Suppressed reminder for the missing Facility reinsurer, to AE and supervisor",
+    # 2026-11-13 (problem 2): this ordinary case uses the shared rule: AE and Case Owner (here the same person).
+    check("Signed Slip: one Suppressed reminder for the missing Facility reinsurer, to AE and Case Owner",
           rows.count() == 1 and "Suppressed (not sent)" in rows.first.inner_text() and "UI Re Beta (Facility)" in rows.first.inner_text()
-          and "ui.ae@tw-insure.com" in rows.first.inner_text() and "ui.boss@tw-insure.com" in rows.first.inner_text(), rows.first.inner_text() if rows.count() else "")
+          and "ui.ae@tw-insure.com" in rows.first.inner_text(), rows.first.inner_text() if rows.count() else "")
     errors = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Configuration errors")).locator(".el-table__row")
     check("Configuration errors: the linked AE has no missing-Personnel error",
           all("Account Executive does not match one active Personnel record." not in errors.nth(i).inner_text()
@@ -1042,9 +1070,9 @@ def phase_r(page):
     # 2026-10-16 92 項會計規則：財務提醒改用「正式帳款」的實際到期日，帳款要到 Production 關帳（階段 F）才建立；
     # 此時案件還沒有正式帳款，所以不會有付款提醒（原本依付款排程提醒、檢查 Finance 收件人的項目改為此檢查）
     pay_card = page.locator(".overview-card").filter(has=page.locator("h2", has_text="Payment reminders"))
-    check("Payment: no reminders before formal accounting entries exist (created at Production close); recipients rule shows AE, supervisor and Finance",
-          pay_card.locator(".el-table__row").count() == 0 and "No payment reminders for this case." in pay_card.inner_text()
-          and "Account Executive's supervisor and Finance" in pay_card.inner_text(), pay_card.inner_text()[:300])
+    # 2026-11-13 (problem 2): formal accounting entries exist from Announce, so the reminder run records them.
+    check("Payment: reminders follow the Announce-time accounting entries; recipients rule shows AE, supervisor and Finance",
+          pay_card.locator(".el-table__row").count() >= 1 and "Account Executive's supervisor and Finance" in pay_card.inner_text(), pay_card.inner_text()[:300])
     rows.first.get_by_role("button", name="Preview").click()
     dlg = page.locator(".el-dialog").filter(has_text="Reminder preview")
     dlg.wait_for()

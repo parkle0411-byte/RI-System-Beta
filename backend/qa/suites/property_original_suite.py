@@ -1,3 +1,6 @@
+# 2026-11-15: this suite tests Production mechanics with past-dated synthetic months; the
+# Production start month (historical months) is covered by production_start_month.
+from django.test import override_settings as _ovr; _ovr(PRODUCTION_START_MONTH='').enable()
 from qa.finance_fixtures import review_case, cash as reviewed_cash, prepare_case_correction
 """Exercise owner-approved business outcomes through API and production calculations."""
 from pathlib import Path
@@ -221,7 +224,7 @@ with transaction.atomic():
     legacy={**p,VERSION_KEY:'historical','twRef':'LEGACY'}
     check('historical precision retains current protections and aggregate historical layout',enabled(legacy) and len(build_premium_transactions(legacy))==4)
     facility={**p,VERSION_KEY:VERSION,'reinsurers':[{**p['reinsurers'][0],'name':'Test Re (Facility)'}]}
-    check('Facility rules override the new ordinary accounting policy',not enabled(facility))
+    check('unlisted Facility names follow the shared Announce-time ledger rules (2026-11-13, problem 2)',enabled(facility))
     # Exercise actual Generate / Close API and verify it does not generate a second ledger.
     final_ris=[{**r,'name':r['name']+' Final scenario'} for r in p_ready()['reinsurers']]
     final=posted(sales,ownerPersonnelId=owner.pk,ae=staff.name,reinsured='Final scenario Cedant',reinsurers=final_ris)

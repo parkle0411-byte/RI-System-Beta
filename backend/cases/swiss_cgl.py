@@ -17,13 +17,17 @@ def target(payload, name=None):
 
 
 def apply_schedule(payload, items, now):
-    from .calc.payment_terms import endorsement_base_date, month_end_date, add_calendar_days
+    from .calc.payment_terms import endorsement_base_date, endorsement_effective_date, month_end_date, add_calendar_days
     from .payment_policy import actual_cash
     state = payload.get('swissAccounting') or {}
     for item in items:
         item.update(swissCase=True, swissCgl=True)
         swiss = item['partyType'] == 'reinsurer' and target(payload, (payload.get('reinsurers') or [])[int(item['partyKey'][1:])-1].get('name'))
-        base = endorsement_base_date(payload) if payload.get('parentTwRef') else item['baseDate']
+        if payload.get('parentTwRef'):
+            # 2026-11-13: Cedant from the endorsement effective date; Swiss keeps L.
+            base = endorsement_base_date(payload) if swiss else endorsement_effective_date(payload)
+        else:
+            base = item['baseDate']
         if item['partyType'] == 'cedant' or swiss:
             anchor = month_end_date(base) if swiss else base
             due = add_calendar_days(anchor, 90) if anchor else ''

@@ -45,8 +45,9 @@ def locked_fields(data):
                      'brokerage','subAe','aePct','cedantDays','reinsurerDays'}
         if str(data.get('classOfBusiness') or 'Property')=='Property':keys|={'currency'}
         return keys
-    keys=common|{'currency','share','subAe','aePct'}
-    if data.get('rule')!='ordinary':keys|={'cedantDays','reinsurerDays'}
+    # 2026-11-14 owner decision: like native endorsements, payment terms always follow
+    # the source (ordinary and Facility alike).
+    keys=common|{'currency','share','subAe','aePct','cedantDays','reinsurerDays'}
     return keys
 
 

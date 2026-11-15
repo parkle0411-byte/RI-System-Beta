@@ -150,6 +150,20 @@ def converted(row, rule_cache):
             if not ok:notes.append(f'{column} does not equal Our Share Premium x a fixed rate; check the Register formula.')
             data[key]=rate;sources[key]=source
         data['rateSource']=sources
+    if currency == 'TWD':
+        # Follow-up B (2026-11-14): TWD accounts are whole numbers. Cedant net and
+        # Brokerage are rounded; the reinsurer net is Cedant net - Brokerage (the same
+        # formula as new legacy endorsements). Claims round the claim amount. The exact
+        # Register values stay in amountsOriginal (the original Excel is kept as well).
+        from cases.calc.premium_money import premium_money
+        whole = lambda value: premium_money(value, {'currency': 'TWD'}) if value is not None else None
+        if any(v is not None and float(v) != int(float(v)) for k, v in a.items() if k != 'brokeragePct'):
+            data['amountsOriginal'] = dict(a)
+        for key in ('premium', 'commission', 'tax', 'claim', 'brokerage', 'cedantNet', 'reinsurerNet'):
+            a[key] = whole(a[key])
+        if not claim and a['cedantNet'] is not None and a['brokerage'] is not None:
+            a['reinsurerNet'] = whole(a['cedantNet'] - a['brokerage'])
+        data['brokerage'] = a['brokerage']; data['claim'] = a['claim']
     rate=money('Exchange Rate');total=money('Bkg. (in TWD)');ae=money('Re Dept. Bkg. (in TWD)')
     premium_twd=rounded(a['premium']*rate,'TWD')
     people=[dict(name=data['ae'],income=ae,premium=premium_twd,incomeOriginal=None,pct=None)]

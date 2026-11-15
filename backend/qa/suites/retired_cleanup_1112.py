@@ -46,7 +46,8 @@ check('the old payment module is removed', gone)
 import cases.accounting_views as AV, cases.swiss_accounting as SW, cases.facility_accounting as FA
 check('old single-payment methods are removed', not hasattr(AV.AccountingView, 'record_payment') and not hasattr(AV.AccountingView, 'reverse_payment'))
 check('old offset and manual settlement handlers are removed', not hasattr(SW, '_offset') and not hasattr(FA, 'settlement_action'))
-check('settlement display helpers are kept', all(hasattr(FA, n) for n in ('apply_schedules', 'apply_transactions', 'schedule_signature', 'tx_signature', 'state_for', 'is_confirmed')))
+# 2026-11-15 (problem 8): the overwritten manual-settlement calculation is removed; history display helpers stay.
+check('settlement history helpers are kept; overwritten manual calculation removed', all(hasattr(FA, n) for n in ('attach_history', 'schedule_signature', 'tx_signature', 'state_for', 'is_confirmed')) and not hasattr(FA, 'apply_schedules') and not hasattr(FA, 'apply_transactions'))
 try:
     resolve('/api/render-document-pdf'); removed = False
 except Resolver404:

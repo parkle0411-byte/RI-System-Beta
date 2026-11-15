@@ -208,21 +208,27 @@ try:
         r = put(sales, uid, cur["rowVersion"], e4); st = Case.objects.get(case_uid=uid).payload
         check("#8 omitting them does not erase them either", r.status_code == 200 and len(st["claims"]) == 1 and len(st["transactions"]) == 1 and len(st["paymentEntries"]) == 1)
 
+        # The earlier #8 check stored a synthetic transaction without a number; Announced
+        # ordinary cases always carry real ledgers, so rebuild them before the edit checks.
+        from cases.property_original import refresh_transactions
         # The remaining checks cover the retained legacy Facility contract.
         # Ordinary placements now use accounting_ag / cgl_qs for the A-G
         # correction and Reverse rules; they no longer use this old contract.
         legacy = copy.deepcopy(Case.objects.get(case_uid=uid).payload)
         legacy['reinsurers'][0]['name'] = 'ZZ Legacy (Facility)'
         Case.objects.filter(case_uid=uid).update(payload=legacy)
-        # 已 Announce（posted）：舊 Facility 付款條件鎖定
+        _c = Case.objects.get(case_uid=uid); _p = copy.deepcopy(_c.payload); _p["transactions"] = []; _p["paymentEntries"] = []
+        _p["twRef"] = _c.tw_ref; refresh_transactions(_p, "2026-01-01T00:00:00Z"); Case.objects.filter(case_uid=uid).update(payload=_p)
+        # 2026-11-13 (problem 2): this unlisted Facility name now follows the ordinary rules: an
+        # Announced change needs a reason; unpaid accounts are then corrected (no Endorsement needed).
         Case.objects.filter(case_uid=uid).update(status="posted", tw_ref="ZZ-TEST-2")
         cur = load(sales, uid); pt = copy.deepcopy(cur["payload"]); pt["paymentTermsDays"] = 45
-        r = put(sales, uid, cur["rowVersion"], pt); check("posted: changing payment terms -> 409 payment_terms_locked", r.status_code == 409 and code(r) == "payment_terms_locked")
+        r = put(sales, uid, cur["rowVersion"], pt); check("posted: changing payment terms without a reason -> 409 property_edit_locked", r.status_code == 409 and code(r) == "property_edit_locked", r.content[:200])
         pt = copy.deepcopy(cur["payload"]); pt["reinsurers"][0]["paymentTermsDays"] = 60
-        check("posted: changing a reinsurer's payment terms -> locked", code(put(sales, uid, cur["rowVersion"], pt)) == "payment_terms_locked")
+        _r = put(sales, uid, cur["rowVersion"], pt); check("posted: changing a reinsurer's terms first requires evidence covering the revised reinsurer", code(_r) == "documents_not_ready", _r.content[:200])
         pt = copy.deepcopy(cur["payload"]); pt["installmentEnabled"] = True
         pt["performanceInstallments"] = [{"id": "I1"}, {"id": "I2"}]
-        check("posted: turning installments on -> locked", code(put(sales, uid, cur["rowVersion"], pt)) == "payment_terms_locked")
+        check("posted: turning installments on without a reason -> locked", code(put(sales, uid, cur["rowVersion"], pt)) == "property_edit_locked")
         pt = copy.deepcopy(cur["payload"]); pt["remark"] = "posted edit"
         r = put(sales, uid, cur["rowVersion"], pt)
         check("posted: other edits allowed, status stays posted, reason case_updated / action update_case",
@@ -232,8 +238,10 @@ try:
         Case.objects.filter(case_uid=uid).update(payload={**Case.objects.get(case_uid=uid).payload,
             "performanceInstallments": [{"id": "I1", "paymentBaseDate": "2026-02-01", "paymentTermsDays": 30, "reinsurerPaymentTerms": {"r10": 30, "r2": 45}}]})
         cur = load(sales, uid); pt = copy.deepcopy(cur["payload"])
+        _r = put(sales, uid, cur["rowVersion"], pt, reason="QA normalize"); check("posted: storing the normalized terms with a reason -> 200", _r.status_code == 200, _r.content[:300])
+        cur = load(sales, uid); pt = copy.deepcopy(cur["payload"])
         pt["performanceInstallments"][0]["reinsurerPaymentTerms"] = {"r2": 45, "r10": 30}
-        check("posted: same payment terms in a different key order are NOT a change", put(sales, uid, cur["rowVersion"], pt).status_code == 200)
+        _r = put(sales, uid, cur["rowVersion"], pt); check("posted: same payment terms in a different key order are NOT a change", _r.status_code == 200, _r.content[:200])
 
         # #7 Reversed 存檔要明確確認
         Case.objects.filter(case_uid=uid).update(status="reversed")
@@ -241,35 +249,37 @@ try:
         r = put(sales, uid, cur["rowVersion"], rv); check("#7 reversed: save without confirmation -> 409 reverse_correction_confirmation_required", r.status_code == 409 and code(r) == "reverse_correction_confirmation_required")
         r = put(sales, uid, cur["rowVersion"], rv, reverseCorrectionConfirmed="true"); check("#7 reversed: only boolean true confirms", code(r) == "reverse_correction_confirmation_required")
         check("#7 nothing changed while unconfirmed", Case.objects.get(case_uid=uid).status == "reversed")
-        r = put(sales, uid, cur["rowVersion"], rv, reverseCorrectionConfirmed=True)
+        r = put(sales, uid, cur["rowVersion"], rv, reverseCorrectionConfirmed=True, reason="QA reverse correction")
         st = Case.objects.get(case_uid=uid)
-        check("#7 reversed + confirmed -> back to posted, payload.status posted", r.status_code == 200 and r.json()["case"]["status"] == "posted" and st.status == "posted" and st.payload["status"] == "posted")
+        check("#7 reversed + confirmed with a reason -> a fresh Draft for re-Announce (ordinary rule)", r.status_code == 200 and r.json()["case"]["status"] == "draft" and st.status == "draft", r.content[:200])
         Case.objects.filter(case_uid=uid).update(status="closed"); cur = load(sales, uid)
-        r = put(sales, uid, cur["rowVersion"], cur["payload"]); check("closed case not editable -> 409 case_not_editable", r.status_code == 409 and code(r) == "case_not_editable")
+        r = put(sales, uid, cur["rowVersion"], cur["payload"]); check("closed (Confirmed) ordinary case: an unchanged save is accepted without a reason", r.status_code == 200 and r.json()["case"]["status"] == "closed", r.content[:200])
         Case.objects.filter(case_uid=uid).update(status="posted")
 
+        # 2026-11-13 (problem 2): this fixture's unlisted Facility name now follows the ordinary
+        # rules, so an Announced change carries a reason as on every ordinary case.
         # 負責人移轉
         cur = load(sales, uid); tr = copy.deepcopy(cur["payload"]); tr["ownerPersonnelId"] = other_p.pk
-        r = put(admin, uid, cur["rowVersion"], tr); check("admin may transfer the owner", r.status_code == 200 and Case.objects.get(case_uid=uid).owner_personnel_id == other_p.pk, r.content[:150])
+        r = put(admin, uid, cur["rowVersion"], tr, reason="QA owner / personnel change"); check("admin may transfer the owner", r.status_code == 200 and Case.objects.get(case_uid=uid).owner_personnel_id == other_p.pk, r.content[:150])
         cur = load(sales, uid); tr = copy.deepcopy(cur["payload"]); tr["ownerPersonnelId"] = sales_p.pk
-        r = put(sales, uid, cur["rowVersion"], tr); check("non-owner, non-admin cannot transfer -> 403 owner_transfer_denied", r.status_code == 403 and code(r) == "owner_transfer_denied")
-        r = put(sales, uid, cur["rowVersion"], cur["payload"]); check("non-owner may still edit without changing the owner", r.status_code == 200)
+        r = put(sales, uid, cur["rowVersion"], tr, reason="QA owner / personnel change"); check("non-owner, non-admin cannot transfer -> 403 owner_transfer_denied", r.status_code == 403 and code(r) == "owner_transfer_denied")
+        r = put(sales, uid, cur["rowVersion"], cur["payload"], reason="QA owner / personnel change"); check("non-owner may still edit without changing the owner", r.status_code == 200)
         other = account(other_p, "other"); cur = load(other, uid); tr = copy.deepcopy(cur["payload"]); tr["ownerPersonnelId"] = sales_p.pk
-        r = put(other, uid, cur["rowVersion"], tr); check("current owner may hand the case over", r.status_code == 200 and Case.objects.get(case_uid=uid).owner_personnel_id == sales_p.pk)
+        r = put(other, uid, cur["rowVersion"], tr, reason="QA owner / personnel change"); check("current owner may hand the case over", r.status_code == 200 and Case.objects.get(case_uid=uid).owner_personnel_id == sales_p.pk)
         # 歷史人員可以保留：離職的負責人／拆分人員不會擋住編輯，但不能新選
         Personnel.objects.filter(pk=sales_p.pk).update(is_active=True)
         Case.objects.filter(case_uid=uid).update(owner_personnel=gone, payload={**Case.objects.get(case_uid=uid).payload, "ownerPersonnelId": gone.pk, "ownerPersonnelName": gone.name})
         cur = load(admin, uid); ok = copy.deepcopy(cur["payload"]); ok["remark"] = "keep inactive owner"
-        check("inactive historical owner kept on edit", put(admin, uid, cur["rowVersion"], ok).status_code == 200)
+        check("inactive historical owner kept on edit", put(admin, uid, cur["rowVersion"], ok, reason="QA owner / personnel change").status_code == 200)
         cur = load(admin, uid); nw = copy.deepcopy(cur["payload"]); nw["ownerPersonnelId"] = ns.pk; other_gone = person("sales", is_active=False, deactivated_by="t", deactivated_at="2026-01-01T00:00:00Z"); nw["ownerPersonnelId"] = other_gone.pk
-        check("selecting a different inactive owner is refused", code(put(admin, uid, cur["rowVersion"], nw)) == "invalid_case_owner")
+        check("selecting a different inactive owner is refused", code(put(admin, uid, cur["rowVersion"], nw, reason="QA owner / personnel change")) == "invalid_case_owner")
         Case.objects.filter(case_uid=uid).update(payload={**Case.objects.get(case_uid=uid).payload, "splitEnabled": True,
             "splitParties": [{"personnelId": ns.pk, "name": ns.name, "pct": 50}, {"personnelId": p1.pk, "name": p1.name, "pct": 50}]})
         cur = load(admin, uid); ok = copy.deepcopy(cur["payload"]); ok["remark"] = "keep non-eligible split"
-        check("non-eligible historical split person kept on edit", put(admin, uid, cur["rowVersion"], ok).status_code == 200)
+        check("non-eligible historical split person kept on edit", put(admin, uid, cur["rowVersion"], ok, reason="QA owner / personnel change").status_code == 200)
         cur = load(admin, uid); nw = copy.deepcopy(cur["payload"]); nw["splitParties"][1] = {"personnelId": ns.pk + 0, "name": "", "pct": 50}; nw["splitParties"][0] = {"personnelId": p2.pk, "name": "", "pct": 50}
         nw["splitParties"][1] = {"personnelId": other_gone.pk, "name": "", "pct": 50}
-        check("adding a NEW inactive split person is refused", code(put(admin, uid, cur["rowVersion"], nw)) == "invalid_personnel_split")
+        check("adding a NEW inactive split person is refused", code(put(admin, uid, cur["rowVersion"], nw, reason="QA owner / personnel change")) == "invalid_personnel_split")
 
         # 版本一路遞增、每次都有稽核
         final = Case.objects.get(case_uid=uid)

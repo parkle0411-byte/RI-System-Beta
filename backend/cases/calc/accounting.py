@@ -187,14 +187,13 @@ def build_claim_payment_transactions(root_case, split_source, claim, payment):
     root_reinsurers = root_reinsurers if is_array(root_reinsurers) else []
     split_reinsurers = get(split_source, "reinsurers")
     split_reinsurers = split_reinsurers if is_array(split_reinsurers) else []
-    explicit_currency = claim.get('currency') if isinstance(claim, dict) else None
-    if explicit_currency:
-        from ..claim_currency import allocate_claim_shares
-        allocated = allocate_claim_shares(number_or_zero(get(payment, 'amount')), [number_or_zero(get(row, 'sharePct')) for row in split_reinsurers], explicit_currency)
+    # 2026-11-15: every Claim (all classes) uses its currency precision and gives the
+    # tail to the largest share; Claims without an explicit currency use the Case currency.
+    from ..claim_currency import allocate_claim_shares, claim_currency
+    allocated = allocate_claim_shares(number_or_zero(get(payment, 'amount')), [number_or_zero(get(row, 'sharePct')) for row in split_reinsurers], claim_currency(root_case, claim))
     for split_idx, reinsurer in enumerate(split_reinsurers):
-        gross_share = number_or_zero(get(payment, "amount")) * number_or_zero(get(reinsurer, "sharePct")) / 100
         selected_currency = claim.get('currency') if isinstance(claim, dict) else None
-        share_amount = allocated[split_idx] if selected_currency else money(gross_share)
+        share_amount = allocated[split_idx]
         reinsurer_label = js_or(strip_facility_tag(get(reinsurer, "name")), f"Reinsurer {split_idx + 1}")
         settlement_label = js_or(js_trim(js_to_string(js_or(get(reinsurer, "foreignBroker"), ""))), reinsurer_label)
         root_idx = next(

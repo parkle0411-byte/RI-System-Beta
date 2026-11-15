@@ -1,4 +1,9 @@
-"""Production rows from formal standalone transactions, never historical imports."""
+"""Production rows from Legacy Data (owner decision 2026-11-15).
+
+Imported Register premium and endorsement rows, and new legacy endorsements, are Production
+by their Revenue Month; claims never are. Months before the Production start month are
+historical (treated as closed): their legacy rows are listed read-only as recognized
+Production and are never generated or closed again."""
 import copy
 import hashlib
 import json
@@ -7,8 +12,7 @@ from .services import rate_for, audit, fail
 
 
 def report_sources(month):
-    # Imported Register rows (batch set) never feed Production (owner 2026-11-11: Revenue Month is data only).
-    return LegacyTransaction.objects.filter(status='confirmed',historical=False,batch__isnull=True,revenue_month=month,data__kind='endorsement').select_related('corrects').order_by('uid')
+    return LegacyTransaction.objects.filter(status='confirmed',revenue_month=month,data__kind__in=('premium','endorsement')).select_related('corrects').order_by('uid')
 
 
 def append_preview(preview,month):
@@ -45,7 +49,9 @@ def freeze_report(person,rows):
     records=list(LegacyTransaction.objects.select_for_update().filter(pk__in=ids).select_related('corrects'))
     if len(records)!=len(ids):fail('A legacy Production source is no longer available.',409)
     for t in records:
-        if t.status!='confirmed' or t.historical:fail('A legacy Production source changed.',409)
+        if t.status!='confirmed':fail('A legacy Production source changed.',409)
+        if t.batch_id is not None:
+            continue  # Imported rows keep the Register's TWD amounts and rate from import.
         snapshot=rate_for(t)
         if snapshot.get('rate') is None:fail('Resolve missing FX before closing Production.',409)
         before=copy.deepcopy(t.fx_snapshot)

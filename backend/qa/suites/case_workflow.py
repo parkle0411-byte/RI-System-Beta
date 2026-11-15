@@ -141,7 +141,8 @@ try:
         check("GET unknown case -> 404; viewer 403; GM allowed", code(call(sales, "get", f"/api/case-workflow?caseUid={uuid.uuid4()}")) == "case_not_found" and call(viewer, "get", f"/api/case-workflow?caseUid={c1.case_uid}").status_code == 403 and call(gm, "get", f"/api/case-workflow?caseUid={c1.case_uid}").status_code == 200)
         w = call(sales, "get", f"/api/case-workflow?caseUid={c1.case_uid}").json()["workflow"]
         check("state of an announced root: chain=[root], latest=root, actions", [x["caseUid"] for x in w["chain"]] == [str(c1.case_uid)] and w["latestCaseUid"] == str(c1.case_uid) and w["root"]["twRef"] == "TWPAR2603001"
-              and w["actions"] == {"canCreateEndorsement": True, "canRenew": False, "renewalNotice": "", "canEditAnnounced": True, "canReverse": False, "canNotifyAccounting": True}, w["actions"])
+              # 2026-11-13 (problem 2): an Announced ordinary case without accounting activity can be reversed.
+              and w["actions"] == {"canCreateEndorsement": True, "canRenew": False, "renewalNotice": "", "canEditAnnounced": True, "canReverse": True, "canNotifyAccounting": True}, w["actions"])
         check("state: chain fields", w["chain"][0]["originalInsured"] == "ZZ Insured" and w["chain"][0]["policyFromTime"] == "12:00" and w["chain"][0]["endoTypes"] == [] and w["chain"][0]["parentCaseId"] is None)
         names = [p["name"] for p in w["accountingStaff"]]
         check("state: active Finance people only, sorted by name", "ZZ WF Fin A" in names and "ZZ WF Fin B" in names and names.index("ZZ WF Fin A") < names.index("ZZ WF Fin B") and fin_off.name not in names and biz.name not in names and sales_p.name not in names, names)
@@ -226,14 +227,22 @@ try:
         check("...unless the renewal Draft was recycled", wf(sales, "create_renewal", src).status_code == 201)
 
         # ================= Reverse =================
-        rv = c3; Case.objects.filter(pk=rv.pk).update(status="closed", payload={**Case.objects.get(pk=rv.pk).payload, "reversalCycle": 1, "confirmedProductionKeys": ["k"], "productionPartiallyConfirmed": True,
-            "transactions": [{"legType": "Leg 1"}, {"legType": "Leg 1", "isReversalEntry": True}, {"legType": "Leg 2", "reversed": False}]}); rv.refresh_from_db()
-        r = wf(sales, "reverse_case", c4); check("reverse a non-closed case -> 409 reverse_status (checked before the version)", code(r) == "reverse_status")
+        # 2026-11-13 (problem 2): every named reinsurer uses the Announce-time ledger, so Reverse
+        # immediately adds -RVS entries for recognized cases (no pending Production-close offset).
+        from cases.property_original import refresh_transactions
+        rv = c3; _p = copy.deepcopy(Case.objects.get(pk=rv.pk).payload)
+        _p.update(twRef=rv.tw_ref, transactions=[], paymentEntries=[], reversalCycle=1, confirmedProductionKeys=["k"], productionPartiallyConfirmed=True)
+        refresh_transactions(_p, "2026-01-01T00:00:00Z"); live_before = copy.deepcopy(_p["transactions"])
+        Case.objects.filter(pk=rv.pk).update(status="closed", payload=_p); rv.refresh_from_db()
+        r = wf(sales, "reverse_case", inc); check("reverse a Draft -> 409 reverse_status (checked before the version)", code(r) == "reverse_status")
         r = wf(sales, "reverse_case", rv, rowVersion=99); check("reverse: stale version -> 409", code(r) == "version_conflict" and r.json()["currentRowVersion"] == rv.row_version)
         r = wf(sales, "reverse_case", rv); j = r.json(); rv.refresh_from_db(); p = rv.payload
         check("reverse -> 200, status reversed, version+1, cycle 2", r.status_code == 200 and rv.status == "reversed" and j["reversalCycle"] == 2 and p["reversalCycle"] == 2 and j["case"]["status"] == "reversed", (r.status_code, j))
-        check("reverse payload: transactions flagged reversed except reversal entries, offset pending, production confirmation cleared",
-              p["transactions"] == [{"legType": "Leg 1", "reversed": True}, {"legType": "Leg 1", "isReversalEntry": True}, {"legType": "Leg 2", "reversed": True}] and p["pendingReversalOffset"] is True and p["confirmedProductionKeys"] == [] and p["productionPartiallyConfirmed"] is False, p["transactions"])
+        flagged = {t["txNo"]: t for t in p["transactions"] if not t.get("isReversalEntry")}
+        entries = {t["txNo"]: t for t in p["transactions"] if t.get("isReversalEntry")}
+        check("reverse payload: live transactions flagged reversed with -RVS2 entries, no pending offset, production confirmation cleared",
+              bool(live_before) and all(flagged[t["txNo"]].get("reversed") is True and entries[t["txNo"] + "-RVS2"]["amount"] == -t["amount"] for t in live_before)
+              and not p.get("pendingReversalOffset") and p["confirmedProductionKeys"] == [] and p["productionPartiallyConfirmed"] is False, p["transactions"])
         check("reverse: audit reverse_case + snapshot case_reversed (VM addition)", audit(rv.case_uid, "reverse_case").first().metadata == {"reversalCycle": 2} and audit(rv.case_uid, "reverse_case").first().before_data["status"] == "closed"
               and snaps(rv.case_uid, "case_reversed").first().entity_version == rv.row_version and snaps(rv.case_uid, "case_reversed").first().snapshot_data["status"] == "reversed")
         bad = create(sales, classCode="BAD", policyFrom="2026-08-01"); Case.objects.filter(pk=bad.pk).update(status="closed", payload={**Case.objects.get(pk=bad.pk).payload, "transactions": [{"legType": "Leg 1"}, None]}); bad.refresh_from_db(); n_audit = AuditLog.objects.count()
@@ -283,7 +292,7 @@ try:
                     r = call(sales, "post", "/api/document-generation-log", {"caseUid": str(optional.case_uid), "kind": kind, "format": "docx"})
                     check(f"{structure}: commission {value!r} permits {kind} Word after Announce", r.status_code == 204, r.content[:250])
                 updated_payload = {**optional.payload, "riCommPct": None}
-                r = call(sales, "put", "/api/cases", {"caseUid": str(optional.case_uid), "rowVersion": optional.row_version, "case": updated_payload})
+                r = call(sales, "put", "/api/cases", {"caseUid": str(optional.case_uid), "rowVersion": optional.row_version, "case": updated_payload, "reason": "QA optional field cleared"})
                 optional.refresh_from_db()
                 check(f"{structure}: announced Case edit can clear commission", r.status_code == 200 and optional.payload["riCommPct"] is None, r.content[:250])
         required_deductions = create(sales, riCommPct=None, reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=None, taxPct=0)])
@@ -309,7 +318,7 @@ try:
                     r = call(sales, "post", "/api/document-generation-log", {"caseUid": str(optional_tax.case_uid), "kind": kind, "format": "docx"})
                     check(f"{structure}: Tax {value!r} permits {kind} Word after Announce", r.status_code == 204, r.content[:250])
                 updated_payload = {**optional_tax.payload, "taxPct": None}
-                r = call(sales, "put", "/api/cases", {"caseUid": str(optional_tax.case_uid), "rowVersion": optional_tax.row_version, "case": updated_payload})
+                r = call(sales, "put", "/api/cases", {"caseUid": str(optional_tax.case_uid), "rowVersion": optional_tax.row_version, "case": updated_payload, "reason": "QA optional field cleared"})
                 optional_tax.refresh_from_db()
                 check(f"{structure}: announced Case edit can clear Tax", r.status_code == 200 and optional_tax.payload["taxPct"] is None, r.content[:250])
         required_ri_tax = create(sales, taxPct=None, reinsurers=[dict(name="ZZ Re A", sharePct=100, premium=1000, riCommPct=5, taxPct=None)])

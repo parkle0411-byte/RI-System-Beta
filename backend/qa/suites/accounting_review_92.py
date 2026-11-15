@@ -192,7 +192,9 @@ try:
   check('legacy creation date recovered from payment snapshot, not obligation date',all(t['dueDate']=='2026-04-17' for t in legacy.payload['transactions'] if t.get('source')=='claim'))
   check('legacy correction preserves business history independent of audit',bool(legacy.payload.get('accountingAdjustmentHistory')))
   check('previously handled transaction amounts are preserved',a.payload['transactions']==protected)
-  check('legacy zero-income obligations backfill first open month',[t['postedMonth'] for t in oldzero.payload['transactions']]==['2031-06']*3 and oldzero.status=='closed')
+  # 2026-11-13 (problem 2): unlisted Facility names follow the Announce-time ledger rules; the
+  # one-time review command no longer creates ledgers through the retired Production-close path.
+  check('unlisted Facility case is not rebuilt through the retired Production-close path',oldzero.payload['transactions']==[] and oldzero.status=='posted',(oldzero.status,len(oldzero.payload['transactions'])))
   check('legacy repairs never rewrite closed Production reports',list(__import__('production.models',fromlist=['ProductionReport']).ProductionReport.objects.values('report_uid','rows','row_version','status'))==old_report)
   check('legacy repair is idempotent',preview_repair()['changedCases']==0)
   print(str(len(checks))+'/'+str(len(checks))+' accounting review checks passed',flush=True)

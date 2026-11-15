@@ -23,7 +23,6 @@ def normalized(name):
     return _normalized_text(str(name or ''))
 
 _FACILITY_KEYS = frozenset(_normalized_text(n) for n in FACILITIES)
-_FACILITY_OR_PWS = re.compile(r'facility|\bpws\b', re.I)
 
 def facility(name):
     return normalized(name) in _FACILITY_KEYS
@@ -37,7 +36,10 @@ def scope(p):
     names=[r.get('name') for r in rows(p.get('reinsurers')) if r.get('name')]
     if p.get('endorsementRules') == 'facultative-v1' and p.get('reinsuranceStructure') in ('QS', 'XOL'):
         return bool(names)
-    return bool(names) and all(facility(n) or not _FACILITY_OR_PWS.search(str(n)) for n in names)
+    # 2026-11-13 owner decision: every named reinsurer is either one of the five
+    # Facilities or follows the ordinary rules; no name is left on the old
+    # Production-close posting path.
+    return bool(names)
 
 def fixed_cedant(p):
     return scope(p) and any(facility(r.get('name')) for r in rows(p.get('reinsurers')))
@@ -97,9 +99,25 @@ def apply_claim_details(payload,details,now):
         if d['paymentStatus']=='upcoming' and today>=first:
             d['paymentStatus']='reminder'
 
+def latest_rates(fx_rows, current_month):
+    """Owner decision 2026-11-14: the "latest month rate" used for estimates is the most
+    recent month at or before the current Taipei month; a future month is used only when
+    no earlier rate exists. Shared by Accounting and the Dashboard."""
+    earlier, any_month = {}, {}
+    for r in fx_rows:
+        cur, month, rate = r['currency'], r['year_month'], float(r['rate'])
+        if cur not in any_month or month > any_month[cur][0]:
+            any_month[cur] = (month, rate)
+        if month <= current_month and (cur not in earlier or month > earlier[cur][0]):
+            earlier[cur] = (month, rate)
+    return {**any_month, **earlier}
+
+
 def fx_for_transaction(payload,tx,rates,latest):
     """Return (rate, month, estimated); no fallback for a formally posted month."""
     currency=str(payload.get('currency') or 'TWD').upper()
+    if tx.get('source')=='claim' and tx.get('currency'):
+        currency=str(tx['currency']).upper()  # multi-currency Claims convert at their own currency
     if not scope(payload):
         month=tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7]
         return (1 if currency=='TWD' else rates.get((month,currency)),month,False)

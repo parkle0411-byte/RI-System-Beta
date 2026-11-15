@@ -92,7 +92,7 @@ FxRate.objects.create(year_month=f'{y:04d}-{m:02d}', currency='USD', rate='31.2'
 # inception month even when Announce happened later (2026-11-05 owner rule).
 docker exec ri-ut-backend python manage.py shell -c "
 from fxrates.models import FxRate
-for ym in ('2026-03','2026-04'):
+for ym in ('2026-11','2026-12'):   # Production start month 2026-11 and the month after (2026-11-15 rule)
  FxRate.objects.get_or_create(year_month=ym,currency='USD',defaults={'rate':'31.2','created_by':'seed','updated_by':'seed'})
 print('inception-month FX seeded')" 2>&1 | grep seeded
 run_phase F || STATUS=1

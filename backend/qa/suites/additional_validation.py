@@ -78,25 +78,35 @@ try:
             r=claim('create_claim',claim=dict(dateOfLoss=DOL,outstandingReserve=value));case.refresh_from_db()
             check('unrepresentable/negative reserve rejected '+value,r.status_code==400 and r.data.get('error')=='invalid_claim_reserve',r.data)
             check('rejected reserve leaves case/version/snapshots unchanged '+value,before==(case.row_version,case.payload,EntitySnapshot.objects.count()))
+        # 2026-11-14 owner decision (problem 11): TWD Claim amounts are whole numbers in every
+        # class; decimals are rejected instead of being rounded silently.
+        before=(case.row_version,case.payload,EntitySnapshot.objects.count())
         r=claim('create_claim',claim=dict(dateOfLoss=DOL,outstandingReserve=12.345));case.refresh_from_db()
-        check('valid reserve rounds to two decimals',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==12.35,r.data)
+        check('TWD reserve with decimals rejected',r.status_code==400 and r.data.get('error')=='invalid_claim_precision',r.data)
+        check('rejected TWD reserve leaves case/version/snapshots unchanged',before==(case.row_version,case.payload,EntitySnapshot.objects.count()))
+        r=claim('create_claim',claim=dict(dateOfLoss=DOL,outstandingReserve=12));case.refresh_from_db()
+        check('whole TWD reserve accepted',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==12,r.data)
         before=(case.row_version,case.payload,EntitySnapshot.objects.count())
         r=claim('update_reserve',claimId=1,outstandingReserve='1e308');case.refresh_from_db()
-        check('updating reserve also rejects rounding overflow',r.status_code==400 and r.data.get('error')=='invalid_claim_reserve',r.data)
+        check('updating reserve also rejects rounding overflow',r.status_code==400 and r.data.get('error') in ('invalid_claim_reserve','invalid_claim_precision'),r.data)
         check('failed reserve update leaves case/version/snapshots unchanged',before==(case.row_version,case.payload,EntitySnapshot.objects.count()))
         r=claim('update_reserve',claimId=1,outstandingReserve=0.001);case.refresh_from_db()
-        check('zero reserve after rounding remains valid',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==0,r.data)
-        for value in ['1e308','-1e308',0.001,0.004]:
+        check('TWD reserve update with decimals rejected',r.status_code==400 and r.data.get('error')=='invalid_claim_precision',r.data)
+        r=claim('update_reserve',claimId=1,outstandingReserve=0);case.refresh_from_db()
+        check('zero reserve remains valid',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==0,r.data)
+        for value in ['1e308','-1e308',0.001,0.004,12.5]:
             before=(case.row_version,case.payload,EntitySnapshot.objects.count())
             r=claim('record_payment',claimId=1,payment=dict(date='2026-01-02',amount=value));case.refresh_from_db()
-            check('unrepresentable/rounded zero payment rejected '+str(value),r.status_code==400,r.data)
+            check('unrepresentable/decimal TWD payment rejected '+str(value),r.status_code==400,r.data)
             check('rejected claim payment creates no payment/transaction/snapshot '+str(value),before==(case.row_version,case.payload,EntitySnapshot.objects.count()))
-        for value,expected in [(12.345,12.35),(-12.34,-12.34),(100.005,100.01)]:
+        for value in (12,-12,100):
             r=claim('record_payment',claimId=1,payment=dict(date='2026-01-02',amount=value));case.refresh_from_db()
-            check('signed claim payment keeps existing rounding '+str(value),r.status_code==200 and case.payload['claims'][0]['payments'][-1]['amount']==expected,r.data)
-            check('valid signed payment builds nonzero claim transactions '+str(value),any(t['amount']!=0 for t in case.payload['transactions'][-4:]))
+            check('signed whole TWD claim payment accepted '+str(value),r.status_code==200 and case.payload['claims'][0]['payments'][-1]['amount']==value,r.data)
+            new_legs=[t for t in case.payload['transactions'] if t.get('source')=='claim' and t.get('paymentId')==case.payload['claims'][0]['payments'][-1]['id']]
+            check('claim legs are whole TWD and total the payment '+str(value),bool(new_legs) and all(float(t['amount']).is_integer() for t in new_legs)
+                  and sum(t['amount'] for t in new_legs if t['legType']=='Claim Leg 1')==value,[t['amount'] for t in new_legs])
         r=claim('update_reserve',claimId=1,outstandingReserve='1e306');case.refresh_from_db()
-        check('no new amount cap introduced for a finite rounded reserve',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==1e306,r.data)
+        check('no new amount cap introduced for a finite whole reserve',r.status_code==200 and case.payload['claims'][0]['outstandingReserve']==1e306,r.data)
         check('Audit remains paused',AuditLog.objects.count()==audit_before)
         raise Rollback()
 except Rollback:pass

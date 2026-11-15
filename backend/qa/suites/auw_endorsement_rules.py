@@ -35,14 +35,16 @@ for stamp,effective,expected,month_end in [
   p=copy.deepcopy(raw);p.update(endoEffectiveDate=effective,endorsementAnnouncedAt=stamp,originalPremium=premium)
   p['reinsurers'][0]['premium']=premium*.8
   items=build_payment_schedule(p)['items'];c,r=items
-  assert endorsement_base_date(p)==expected and c['baseDate']==expected
-  assert c['termsDays']==90 and c['contractDueDate']==plus(expected,90) and c['dueDate']==plus(expected,75)
+  # 2026-11-13: the Cedant counts from the endorsement effective date; AUW keeps L.
+  assert endorsement_base_date(p)==expected and c['baseDate']==effective
+  assert c['termsDays']==90 and c['contractDueDate']==plus(effective,90) and c['dueDate']==plus(effective,75)
   assert r['sourceBaseDate']==expected and r['baseDate']==month_end and r['contractDueDate']==plus(month_end,120) and r['dueDate']==plus(month_end,110)
  check('later-date calendar arithmetic, signed/zero premiums and Taiwan date '+stamp,True)
 for missing in ['',None,'2026-01-01','invalid','2026-01-01T00:00:00']:
  p={**raw,'endorsementAnnouncedAt':missing,'createdAt':'2099-01-01','postedAt':'2099-01-01'}
  schedule=build_payment_schedule(p)
- check('missing/invalid actual Announce never uses created/posted/today '+repr(missing),all(i['dueDate']=='' for i in schedule['items']) and schedule['reviewRequired'])
+ check('missing/invalid actual Announce never uses created/posted/today '+repr(missing),all(i['dueDate']=='' for i in schedule['items'] if i['partyType']!='cedant') and schedule['reviewRequired'])
+ check('Cedant date needs only the endorsement effective date '+repr(missing),next(i for i in schedule['items'] if i['partyType']=='cedant')['dueDate']==plus(raw['endoEffectiveDate'],75))
 p={**raw,'endorsementAnnouncedAt':'2026-03-01T00:00:00Z','endoEffectiveDate':'2026-02-30'}
 check('invalid real endorsement date is pending review',all(i['dueDate']=='' for i in build_payment_schedule(p)['items']))
 p=copy.deepcopy(raw);p['reinsurers'][0]['sharePct']=90;p['reinsurers'].append(dict(name='Ordinary RI',sharePct=10,premium=800,riCommPct=5,taxPct=1,paymentTermsDays=45));p['endorsementAnnouncedAt']='2026-04-02T00:00:00Z'
@@ -50,7 +52,7 @@ items=build_payment_schedule(p)['items']
 check('mixed case ordinary RI payable starts at later Announce/effective date and retains its term',items[2]['baseDate']=='2026-04-02' and items[2]['dueDate']==plus('2026-04-02',35) and items[1]['baseDate']=='2026-04-30')
 p=copy.deepcopy(raw);p.update(originalPremium=-1000,endoEffectiveDate='2026-03-15',endorsementAnnouncedAt='2026-04-02T00:00:00Z');p['reinsurers']=[dict(name='Ordinary RI',sharePct=100,premium=-800,riCommPct=5,taxPct=1,paymentTermsDays=45)]
 items=build_payment_schedule(p)['items']
-check('ordinary RI recovery uses the later endorsement Announce date',items[1]['baseDate']=='2026-04-02' and items[1]['dueDate']==plus('2026-04-02',35) and items[0]['baseDate']=='2026-04-02')
+check('ordinary RI recovery uses the later endorsement Announce date',items[1]['baseDate']=='2026-04-02' and items[1]['dueDate']==plus('2026-04-02',35) and items[0]['baseDate']=='2026-03-15')
 p=copy.deepcopy(raw);p.update(originalPremium=500,endoEffectiveDate='2026-03-15',endorsementAnnouncedAt='2026-04-02T00:00:00Z');p['reinsurers']=[dict(name='Payable RI',sharePct=50,premium=800,riCommPct=5,taxPct=1,paymentTermsDays=45),dict(name='Recovery RI',sharePct=50,premium=-200,riCommPct=5,taxPct=1,paymentTermsDays=45)]
 items=build_payment_schedule(p)['items']
 check('mixed RI payable and recovery each follow their cash direction',items[1]['baseDate']=='2026-04-02' and items[2]['baseDate']=='2026-04-02')
@@ -104,7 +106,7 @@ assert r.status_code==200,r.content;child.refresh_from_db()
 check('successful Announce stores the exact authoritative time once',child.announced_at==stamp and child.payload['endorsementAnnouncedAt']==stamp.isoformat())
 rows=[row for row in call('get','/api/accounting').json()['rows'] if row['caseUid']==str(child.case_uid)]
 c=next(row for row in rows if row['partyType']=='cedant');r=next(row for row in rows if row['partyType']=='reinsurer')
-check('Accounting uses Feb 1 for Cedant and Feb month end for AUW',c['baseDate']=='2050-02-01' and c['termsDays']==90 and c['dueDate']==plus('2050-02-01',75) and r['baseDate']=='2050-02-28' and r['dueDate']==plus('2050-02-28',110))
+check('Accounting uses the effective date for Cedant and Feb month end (later Announce) for AUW',c['baseDate']=='2050-01-15' and c['termsDays']==90 and c['dueDate']==plus('2050-01-15',75) and r['baseDate']=='2050-02-28' and r['dueDate']==plus('2050-02-28',110))
 check('AUW reminder uses internal date, not contract date',reminder_kind(r,r['dueDate'])=='due_today' and reminder_kind(r,r['contractDueDate'])!='due_today')
 p=copy.deepcopy(child.payload);p.update(endorsementAnnouncedAt='2099-01-01T00:00:00Z',endorsementPerformanceMonth='2099-01');p['reinsurers'][0]['riCommPct']=7
 r=save(child,p);assert r.status_code==200,r.content;child.refresh_from_db()

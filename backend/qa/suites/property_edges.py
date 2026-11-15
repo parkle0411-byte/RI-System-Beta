@@ -1,3 +1,6 @@
+# 2026-11-15: this suite tests Production mechanics with past-dated synthetic months; the
+# Production start month (historical months) is covered by production_start_month.
+from django.test import override_settings as _ovr; _ovr(PRODUCTION_START_MONTH='').enable()
 from qa.finance_fixtures import review_case, cash as reviewed_cash, prepare_case_correction
 """Exercise owner-approved business outcomes through API and production calculations."""
 from pathlib import Path

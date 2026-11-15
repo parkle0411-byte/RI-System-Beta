@@ -53,8 +53,11 @@ check('Accounting shows the Loss No.',any(r.get('caseUid')==cl['uid'] and r.get(
 # --- Facility days locked; ordinary days editable ---
 fsrc=make_source('RULE-SW',party='Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)',rule='swiss',effectiveDate='2025-01-01',expiryDate='2025-12-31')
 f=create(src=fsrc);bad_save(f,{'cedantDays':120},'Facility Cedant terms follow the rule')
-o=create(src=pol);o=save(o,{'cedantDays':120,'reinsurerDays':45})
-check('ordinary-rule terms are pre-filled and editable',o['data']['cedantDays']==120 and o['data']['reinsurerDays']==45)
+# 2026-11-14 owner decision (problem 10): endorsement payment terms always follow the source.
+o=create(src=pol);source_days=(o['data'].get('cedantDays'),o['data'].get('reinsurerDays'))
+check('ordinary-rule terms are pre-filled from the source',all(isinstance(d,int) and d>=15 for d in source_days),source_days)
+bad_save(o,{'cedantDays':source_days[0]+30},'ordinary-rule Cedant terms follow the source')
+bad_save(o,{'reinsurerDays':source_days[1]+30},'ordinary-rule reinsurer terms follow the source')
 
 # --- GL claim currency may change; Property may not ---
 gl=make_source('RULE-GL',classOfBusiness='Commercial General Liability',classCode='GL',effectiveDate='2025-01-01',expiryDate='2025-12-31')

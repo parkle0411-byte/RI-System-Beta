@@ -7,7 +7,9 @@ const accountingFacilities=new Set(["Lloyd's Underwriter Syndicate No. 0609 AUW 
 const accountingName=n=>String(n||'').trim().replace(/\s+/g,' ').toLowerCase()
 export const fixedCedant=p=>objectRows(p?.reinsurers).some(r=>accountingFacilities.has(accountingName(r.name)))
 export const legacyMath=p=>Boolean(p?.accountingLegacyMath || p?.premiumRounding==='legacy-cents' || p?.propertyOriginalRules==='historical')
-export const propertyEnabled=p=>p?.reinsuranceStructure !== 'OVERSEA' && !p?._legacyCalculation && objectRows(p?.reinsurers).some(r=>r.name) && objectRows(p?.reinsurers).filter(r=>r.name).every(r=>accountingFacilities.has(accountingName(r.name)) || !/facility|\bpws\b/i.test(r.name))
+// 2026-11-13: same normalization as backend accounting_policy.normalized; one shared Facility check.
+export const isAccountingFacility=name=>accountingFacilities.has(accountingName(name))
+export const propertyEnabled=p=>p?.reinsuranceStructure !== 'OVERSEA' && !p?._legacyCalculation && objectRows(p?.reinsurers).some(r=>r.name)
 
 export const perReinsurer=p=>p?.premiumLedgerLayout==='per-reinsurer-v1' || (!p?.premiumLedgerLayout && !legacyMath(p) && !objectRows(p?.transactions).some(t=>t.source!=='claim'&&!t.reversed&&!t.isReversalEntry))
 
@@ -111,14 +113,14 @@ export function propertyIssues(p) {
   if (n(p.originalPremium) <= 0) add('originalPremium','100% Premium must be greater than 0')
   ;(p.reinsurers || []).forEach((r,i) => {
     if (n(r.premium)<=0) add(`reinsurers.${i}.premium`,`Reinsurer ${i+1} Premium must be greater than 0`)
-    if (!/facility|\bpws\b/i.test(r.name || '') && !filled(r.paymentTermsDays)) add(`reinsurers.${i}.paymentTermsDays`,`Reinsurer ${i+1} Payment Terms (Days)`)
+    if (!isAccountingFacility(r.name) && !filled(r.paymentTermsDays)) add(`reinsurers.${i}.paymentTermsDays`,`Reinsurer ${i+1} Payment Terms (Days)`)
   })
   if (filled(p.aggregateLimit) && n(p.aggregateLimit)<=0) add('aggregateLimit','Aggregate Limit must be greater than 0')
   if (p.splitEnabled && ![[40,60],[70,30]].some(pair => pair.every((v,i) => n(p.splitParties?.[i]?.pct)===v))) add('splitParties','Reinsurance Staff / Other Staff split must be 40% / 60% or 70% / 30%')
   if (p.installmentEnabled) (p.performanceInstallments || []).forEach((r,i) => {
     if (n(r.premium)<=0) add(`performanceInstallments.${i}.premium`,`Installment ${i+1} Premium must be greater than 0`)
-    if (!/facility|\bpws\b/i.test(r.name || '') && !filled(r.paymentTermsDays)) add(`performanceInstallments.${i}.paymentTermsDays`,`Installment ${i+1} Cedant Payment Terms (Days)`)
-    ;(p.reinsurers || []).forEach((ri,j) => {if (!/facility|\bpws\b/i.test(ri.name || '') && !filled(r.reinsurerPaymentTerms?.[`r${j+1}`])) add(`performanceInstallments.${i}.reinsurerPaymentTerms.r${j+1}`,`Installment ${i+1} Reinsurer ${j+1} Payment Terms (Days)`)})
+    if (!filled(r.paymentTermsDays)) add(`performanceInstallments.${i}.paymentTermsDays`,`Installment ${i+1} Cedant Payment Terms (Days)`)
+    ;(p.reinsurers || []).forEach((ri,j) => {if (!isAccountingFacility(ri.name) && !filled(r.reinsurerPaymentTerms?.[`r${j+1}`])) add(`performanceInstallments.${i}.reinsurerPaymentTerms.r${j+1}`,`Installment ${i+1} Reinsurer ${j+1} Payment Terms (Days)`)})
   })
   return issues
 }

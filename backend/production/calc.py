@@ -68,6 +68,24 @@ def month_end(month):
     return iso_date_prefix(_utc_days(int(match.group(1)), int(match.group(2)), 0))
 
 
+def start_month():
+    """First month that can be generated and closed (settings.PRODUCTION_START_MONTH)."""
+    from django.conf import settings
+    value = getattr(settings, "PRODUCTION_START_MONTH", "") or ""
+    return value if _MONTH.match(value) else ""
+
+
+def is_historical(month):
+    """Months before the start month are historical: treated as closed, never generated."""
+    first = start_month()
+    return bool(first and isinstance(month, str) and _MONTH.match(month) and month < first)
+
+
+def effective_month(month):
+    """New-system production in a historical month is recognized in the start month."""
+    return start_month() if is_historical(month) else month
+
+
 def next_production_month(month):
     match = _MONTH.match(month) if isinstance(month, str) else None
     if not match:
@@ -364,7 +382,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
             for batch in case_data.get("productionReversals") or []:
                 for snapshot in batch.get("rows") or []:
                     if snapshot["id"] in batch.get("confirmedKeys",[]):continue
-                    if batch["month"] != month and not deferred_from(exclusions,case_data["id"],snapshot["key"],snapshot["reinsurerKey"],month):continue
+                    if effective_month(batch["month"]) != month and not deferred_from(exclusions,case_data["id"],snapshot["key"],snapshot["reinsurerKey"],month):continue
                     excluded = exclusion_for(exclusions,case_data["id"],snapshot["key"],snapshot["reinsurerKey"],month)
                     row={**snapshot,"caseRowVersion":case_data["rowVersion"],"month":month,"tranxDate":month_end(month),"exclusion":excluded}
                     (excluded_rows if excluded else rows).append(row)
@@ -380,7 +398,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
         plist = property_periods(case_data) if property_case else None
         for installment_index, installment in enumerate(installment_allocations(case_data, plist)):
             key = f"{js_num_str(case_id)}:{installment['id']}"
-            belongs = installment["performanceMonth"] == month
+            belongs = effective_month(installment["performanceMonth"]) == month
             raw, tail = _income_split(case_data, reinsurers, installment)
             property_premiums = None
             period = plist[installment_index] if property_case else None

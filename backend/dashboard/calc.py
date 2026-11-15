@@ -167,7 +167,7 @@ def _pad2(n):
     return f"{n:02d}"
 
 
-def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None):
+def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None):
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     today = now.strftime("%Y-%m-%d")
     year, month_number = now.year, now.month
@@ -188,7 +188,21 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     active_endorsements = [r for r in rows if js_truthy(get(r, "parent_case_id")) and _live(r)
                            and is_array(get(r["payload"], "endoTypes")) and get(r["payload"], "endoTypes")
                            and js_truthy(get(r["payload"], "policyTo")) and _ge_text(r["payload"]["policyTo"], today)]
-    in_force = [r for r in roots if _live(r) and js_truthy(get(r["payload"], "policyTo")) and _ge_text(r["payload"]["policyTo"], today)]
+    # Follow-up C (2026-11-14): a policy's period ends at the latest Announced
+    # endorsement expiry; Gross Premium, In-Force and Expected Renewals share it.
+    latest_to = {}
+    for r in rows:
+        parent = get(r, "parent_case_id")
+        expiry = get(r["payload"], "policyTo")
+        if js_truthy(parent) and _live(r) and isinstance(expiry, str) and expiry:
+            if expiry > latest_to.get(parent, ""):
+                latest_to[parent] = expiry
+    def policy_to(r):
+        own = get(r["payload"], "policyTo")
+        own = own if isinstance(own, str) else ""
+        later = latest_to.get(get(r, "id"), "")
+        return later if later > own else own
+    in_force = [r for r in roots if _live(r) and policy_to(r) and _ge_text(policy_to(r), today)]
 
     def posted_month(r):
         return month(js_or(get(r["payload"], "postedAt"), get(r, "announced_at")))
@@ -201,22 +215,43 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     ytd_current, ytd_prior = ytd(year), ytd(year - 1)
     renewals_ytd = ytd(year, lambda p: get(p, "newOrRenew") == "Renew")
     renewals_mtd = len([r for r in roots if _live(r) and get(r["payload"], "newOrRenew") == "Renew" and posted_month(r) == current_month])
-    expected_renewals_mtd = len([r for r in roots if _live(r) and month(get(r["payload"], "policyTo")) == current_month])
+    expected_renewals_mtd = len([r for r in roots if _live(r) and month(policy_to(r)) == current_month])
     new_business_mtd = len([r for r in roots if _live(r) and get(r["payload"], "newOrRenew") == "New" and posted_month(r) == current_month])
 
     gross = out1 = out2 = 0.0
     class_totals, reinsurer_totals = {}, {}
-    for r in in_force:
+    # Problem 3 (2026-11-13): Gross Premium uses the stepwise-rounded ceded premium
+    # (same as Accounting) and includes Announced endorsements of in-force policies.
+    from cases.calc.accounting import calc_legs_for_reinsurer
+    in_force_ids = {get(r, "id") for r in in_force}
+    contributors = in_force + [r for r in rows if js_truthy(get(r, "parent_case_id")) and _live(r)
+                               and get(r, "parent_case_id") in in_force_ids]
+    for r in contributors:
         if r.get("_financialInvalid"):continue
         payload = r["payload"]
         rate = case_rate(payload)
         for reinsurer in _reinsurers(payload):
-            amount = reinsurer_legs(payload, reinsurer)["cedantPremium"] * rate
+            amount = calc_legs_for_reinsurer(payload, reinsurer)["cp"] * rate
             gross += amount
             class_name = js_to_string(js_or(get(payload, "classOfBusiness"), "Unclassified"))
             class_totals[class_name] = class_totals.get(class_name, 0.0) + amount
             name = js_or(strip_facility(get(reinsurer, "name"), production_rules), "Unnamed")
             reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
+    legacy_in_force = legacy_renewals = 0
+    for policy in (legacy or {}).get("policies", []):
+        expiry = policy.get("expiry") or ""
+        if month(expiry) == current_month:
+            legacy_renewals += 1
+        if not expiry or not _ge_text(expiry, today):
+            continue
+        legacy_in_force += 1
+        for item in policy.get("items", []):
+            amount = number_or_zero(item.get("premium")) * case_rate({"currency": item.get("currency")})
+            gross += amount
+            class_totals[item["className"]] = class_totals.get(item["className"], 0.0) + amount
+            name = js_or(strip_facility(item.get("party"), production_rules), "Unnamed")
+            reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
+    expected_renewals_mtd += legacy_renewals
     # Accounting obligations remain outstanding after policy expiry. Convert each
     # at its own posting month; unknown FX stays visibly incomplete, never zero.
     from cases.cash_ledger import transaction_details
@@ -226,10 +261,8 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     missing_fx = []
     claim_outstanding = {}
     estimated_fx = []
-    latest = {}
-    for fx in fx_rows:
-        cur=fx["currency"];m=fx["year_month"]
-        if cur not in latest or m>latest[cur][0]:latest[cur]=(m,float(fx["rate"]))
+    from cases.accounting_policy import latest_rates
+    latest = latest_rates(fx_rows, current_month)
     # 2026-10-29 業主：未結清應收／應付只算 5 年內建立的帳款（正常 2 年內結清）。往回 5 年、每天滾動（台北今天）。
     # 每筆帳款看它自己建立的時間（createdAt，台北日期）：保費帳款是 Announce 時、理賠帳款是記錄理賠付款時。
     # 建立時間缺漏或無法解讀的照算（不藏欠款）。
@@ -247,7 +280,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             continue   # 這件案件的帳款全都超過 5 年：不計算
         if stored_all_settled(payload):
             continue   # 2026-10-29 業主：整件都已銷帳（依帳款標記）就不重算；標記是否正確由 Accounting 每次核對
-        currency = str(payload.get('currency') or 'TWD').upper()
+        case_currency = str(payload.get('currency') or 'TWD').upper()
         stored = {t.get('txNo'): t for t in payload.get('transactions', []) if isinstance(t, dict)}
         # 2026-10-29：與 Accounting 共用每件案件記住的答案（同一份資料、同一個台北日期才共用），見 cases/case_result_cache
         for no, detail in cached_case_result('details', payload, now, lambda: transaction_details(payload, now)).items():
@@ -256,13 +289,9 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
                 continue
             if not recent(tx):
                 continue
-            from cases.claim_currency import original_currency_claim
-            if original_currency_claim(payload, tx):
-                claim_currency = str(tx.get('currency') or payload.get('currency') or '').upper()
-                group = claim_outstanding.setdefault(claim_currency, {'currency':claim_currency, 'receivable':0.0, 'payable':0.0})
-                key = 'receivable' if detail['paymentDirection'] == 'receivable' else 'payable'
-                group[key] += abs(detail['outstanding'])
-                continue
+            # Conflict 2 (2026-11-15): every Claim is converted into the TWD totals at its
+            # own currency and posting month (Accounting keeps its 11-14 display).
+            currency = str(tx.get('currency') or case_currency).upper() if tx.get('source') == 'claim' else case_currency
             from cases.accounting_policy import fx_for_transaction
             rate,posting_month,estimated=fx_for_transaction(payload,tx,rates,latest)
             if estimated:estimated_fx.append({'currency':currency,'month':posting_month or None,'caseId':r.get('id'),'txNo':no})
@@ -275,6 +304,28 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             else:
                 out2 += value
 
+    for item in (legacy or {}).get("outstanding", []):
+        if item.get("ageDate") and item["ageDate"] < outstanding_since:
+            continue
+        cur = item.get("currency") or "TWD"
+        if cur == "TWD":
+            rate = 1
+        elif item.get("postedRate"):
+            rate = item["postedRate"]
+        elif rates.get((item.get("postedMonth"), cur)):
+            rate = rates[(item["postedMonth"], cur)]
+        elif latest.get(cur):
+            rate = latest[cur][1]
+            estimated_fx.append({'currency': cur, 'month': latest[cur][0], 'caseId': None, 'txNo': item.get('txNo')})
+        else:
+            missing_fx.append({'currency': cur, 'month': item.get('postedMonth') or None, 'caseId': None})
+            continue
+        value = item["outstanding"] * rate
+        if item.get("paymentDirection") == "receivable":
+            out1 += value
+        else:
+            out2 += value
+
     trend_year = year if brokerage_year is None else brokerage_year
     trend_months = month_number if trend_year == year else 12
     monthly = {f"{y}-{_pad2(m)}": 0.0 for y in (trend_year - 1, trend_year) for m in range(1, 13)}
@@ -285,8 +336,14 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         rate = case_rate(r["payload"])
         entries = production.installment_allocations(r["payload"]) if production_rules else installment_income(r["payload"])
         for entry in entries:
-            if entry["performanceMonth"] in monthly:
-                monthly[entry["performanceMonth"]] += entry["income"] * rate
+            # 2026-11-15: new-system production before the start month is recognized in the start month.
+            entry_month = production.effective_month(entry["performanceMonth"]) if production_rules else entry["performanceMonth"]
+            if entry_month in monthly:
+                monthly[entry_month] += entry["income"] * rate
+
+    for entry in (legacy or {}).get("trend", []):
+        if entry.get("month") in monthly and entry.get("incomeTwd") is not None:
+            monthly[entry["month"]] += number_or_zero(entry["incomeTwd"])
 
     closed_months = set()
     visible_ids = {str(r.get('id')) for r in rows}
@@ -295,7 +352,8 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         if report_month in monthly:
             closed_months.add(report_month)
             monthly[report_month] = sum(number_or_zero(row.get('income')) for row in report.get('rows', [])
-                                        if str(row.get('caseId')) in visible_ids)
+                                        if str(row.get('caseId')) in visible_ids
+                                        or (legacy is not None and str(row.get('caseId') or '').startswith('legacy:')))
 
     targets_annual, targets_monthly = None, {}
     for t in target_rows:
@@ -311,7 +369,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         "metrics": {
             "ytdCurrent": ytd_current, "ytdPrior": ytd_prior, "renewalsMtd": renewals_mtd,
             "expectedRenewalsMtd": expected_renewals_mtd, "newBusinessMtd": new_business_mtd,
-            "inForcePolicies": len(in_force), "activeEndorsements": len(active_endorsements),
+            "inForcePolicies": len(in_force) + legacy_in_force, "activeEndorsements": len(active_endorsements),
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
             "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
             "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2, "outstandingSince": outstanding_since,
@@ -322,8 +380,8 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         },
         "brokerage": {
             "labels": months,
-            "currentStatus": ["closed" if f"{trend_year}-{m}" in closed_months else "estimated" for m in months],
-            "priorStatus": ["closed" if f"{trend_year-1}-{m}" in closed_months else "estimated" for m in months],
+            "currentStatus": ["closed" if f"{trend_year}-{m}" in closed_months or production.is_historical(f"{trend_year}-{m}") else "estimated" for m in months],
+            "priorStatus": ["closed" if f"{trend_year-1}-{m}" in closed_months or production.is_historical(f"{trend_year-1}-{m}") else "estimated" for m in months],
             "current": [monthly[f"{trend_year}-{m}"] for m in months],
             "prior": [monthly[f"{trend_year - 1}-{m}"] for m in months],
             "target": [js_or(targets_monthly.get(f"{trend_year}-{m}"), 0) for m in months],

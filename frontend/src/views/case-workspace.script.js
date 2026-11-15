@@ -1189,7 +1189,21 @@ export function useCaseWorkspace() {
     } finally { claimsSaving.value = false }
   }
 
+  // 2026-11-14 owner decision: TWD Claim amounts are whole numbers in every class; others at most two decimals.
+  function claimPrecisionError(value, currency, label) {
+    const number = Number(String(value ?? '').replace(/,/g, ''))
+    if (!Number.isFinite(number)) return ''
+    const digits = String(currency || '').toUpperCase() === 'TWD' ? 0 : 2
+    const factor = 10 ** digits
+    return Math.abs(number * factor - Math.round(number * factor)) > 1e-7 ? `${label} has too many decimal places for ${currency || 'the Claim currency'}.` : ''
+  }
+  function activeClaimCurrency(claim) {
+    return String(claim?.currency || claimsState.value.currency || '').toUpperCase()
+  }
+
   async function createClaim() {
+    const createError = claimPrecisionError(claimForm.outstandingReserve, claimForm.currency || claimsState.value.currency, 'Outstanding Reserve')
+    if (createError) return ElMessage.error(createError)
     const saved = await submitClaimAction('create_claim', { claim: { ...claimForm } })
     if (!saved) return
     Object.assign(claimForm, { lossNo: '', dateOfLoss: '', outstandingReserve: null, causeOfLoss: '', currency: claimsState.value.currency || '' })
@@ -1197,6 +1211,8 @@ export function useCaseWorkspace() {
   }
 
   async function updateClaimReserve(claim) {
+    const reserveError = claimPrecisionError(claim.outstandingReserve, activeClaimCurrency(claim), 'Outstanding Reserve')
+    if (reserveError) return ElMessage.error(reserveError)
     const saved = await submitClaimAction('update_reserve', { claimId: claim.id, outstandingReserve: claim.outstandingReserve })
     if (saved) ElMessage.success('Outstanding reserve updated')
   }
@@ -1252,6 +1268,9 @@ export function useCaseWorkspace() {
     // 理賠付款可以是負數（追償、自負額沖抵等），只擋 0 與無效輸入（同 Alpha）
     if (!Number(paymentForm.amount)) return ElMessage.error('Enter a non-zero payment amount.')
     if (paymentForm.paymentId != null && !paymentForm.reason?.trim()) return ElMessage.error('Enter the correction reason.')
+    const paymentClaim = (claimsState.value.claims || []).find(row => Number(row?.id) === Number(activeClaimId.value))
+    const amountError = claimPrecisionError(paymentForm.amount, activeClaimCurrency(paymentClaim), 'Payment amount')
+    if (amountError) return ElMessage.error(amountError)
     const saved = await submitClaimAction(paymentForm.paymentId == null ? 'record_payment' : 'correct_payment', { claimId: activeClaimId.value, paymentId: paymentForm.paymentId, reason: paymentForm.reason, payment: { ...paymentForm } })
     if (!saved) return
     paymentDialogVisible.value = false

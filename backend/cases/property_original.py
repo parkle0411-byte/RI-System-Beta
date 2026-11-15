@@ -460,7 +460,9 @@ def edit_guard(case, p, body, actor, now):
 
 
 def report_amounts(p, period_id, rate, all_periods=None):
-    """Balanced NTD rows. Other Staff first; Reinsurance Staff keeps the remainder."""
+    """Balanced NTD rows. Reinsurance Staff (first party) first; Other Staff keeps the
+    remainder (owner decision 2026-11-13: on a 70/30 tail Other Staff gets the smaller
+    amount, e.g. 1,005 -> 704 / 301), the same as the legacy AE / Sub AE rule."""
     plist = periods(p) if all_periods is None else all_periods
     period=next(r for r in plist if (r['id'] if p.get('installmentEnabled') else 'FULL')==period_id)
     premiums,incomes=report_values(p,period,plist)
@@ -475,17 +477,21 @@ def report_amounts(p, period_id, rate, all_periods=None):
     pp,ii=convert(premiums),convert(incomes)
     if not p.get('splitEnabled'):
         return [( [x],[y] ) for x,y in zip(pp,ii)]
-    pct=num(rows(p.get('splitParties'))[1].get('pct'))/100
+    pct=num(rows(p.get('splitParties'))[0].get('pct'))/100
     def split(values):
-        others=[money(num(v)*pct,ntd) for v in values]
+        firsts=[money(num(v)*pct,ntd) for v in values]
         target=money(sum(map(num,values))*pct,ntd)
         order=sorted((i for i,w in enumerate(weights) if w),key=lambda i:(-weights[i],i))
-        if order:others[order[0]]=money(num(others[order[0]])+num(target)-sum(map(num,others)),ntd)
-        return [[money(num(v)-num(other),ntd),other] for v,other in zip(values,others)]
+        if order:firsts[order[0]]=money(num(firsts[order[0]])+num(target)-sum(map(num,firsts)),ntd)
+        return [[first,money(num(v)-num(first),ntd)] for v,first in zip(values,firsts)]
     return list(zip(split(pp),split(ii)))
 
 
 def reverse_payload(p, month, now, actor, reason):
+    # A damaged ledger (a non-object entry) is refused unchanged, as on the old path.
+    if isinstance(p.get('transactions'), list) and any(not isinstance(t, dict) for t in p['transactions']):
+        from .workflow import TransactionsCorrupt
+        raise TransactionsCorrupt()
     from .cash_ledger import transaction_details
     from .accounting_rules import premium_activity
     details=transaction_details(p)
@@ -526,6 +532,10 @@ def confirm_production(source, report_rows, month):
     from .calc.jsnum import get
     from production.calc import production_keys_for_case
     p=copy.deepcopy(get(source,'payload') or {})
+    # A damaged ledger (a non-object entry) is refused, as on the retired close-time path.
+    if isinstance(p.get('transactions'), list) and any(not isinstance(t, dict) for t in p['transactions']):
+        from production.closing import TransactionsCorrupt
+        raise TransactionsCorrupt()
     current=[r for r in report_rows if not r.get('isProductionReversal')]
     negative=[r for r in report_rows if r.get('isProductionReversal')]
     confirmed=list(p.get('confirmedProductionKeys') or [])
