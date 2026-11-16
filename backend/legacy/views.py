@@ -4,6 +4,7 @@ from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from ri_system.authz import RIPermission,NoStoreMixin,object_body
+from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆，單筆很大的資料不會讓排序記憶體不足
 from cases import storage
 from .models import LegacyTransaction,ImportBatch,LegacyAudit
 from .services import fail,representation
@@ -25,7 +26,7 @@ class TransactionsView(NoStoreMixin,APIView):
             if t.data.get('kind')=='claim' and str(t.data.get('lossNo') or '').strip():
                 value['lossGroup']=loss_group(t)
             value['audit']=[dict(action=e.action,actor=e.actor_name,at=e.occurred_at.isoformat(),reason=e.reason)
-                for e in LegacyAudit.objects.filter(entity=str(t.uid)).order_by('occurred_at')]
+                for e in sorted_rows(LegacyAudit.objects.filter(entity=str(t.uid)),'occurred_at')]
             return Response(value)
         q=str(request.query_params.get('q') or '').strip()[:200]
         if q:qs=qs.filter(Q(reference__icontains=q)|Q(number__icontains=q)|Q(data__statementNo__icontains=q)|
@@ -35,7 +36,7 @@ class TransactionsView(NoStoreMixin,APIView):
         try:page=min(1000000,max(1,int(request.query_params.get('page',1))));size=min(100,max(1,int(request.query_params.get('size',25))))  # 2026-11-10：頁碼上限，超大頁碼回空白頁而非資料庫錯誤
         except ValueError:fail('Invalid pagination.')
         return Response(dict(count=qs.count(),page=page,role=request.ri_principal.role_code,readOnly=request.ri_principal.role_code not in ('sales','general_manager','admin'),
-            rows=[representation(t,request.ri_principal) for t in qs.order_by('-created_at','uid')[(page-1)*size:page*size]]))
+            rows=[representation(t,request.ri_principal) for t in sorted_rows(qs,'-created_at','uid',start=(page-1)*size,stop=page*size)]))
 
 
     def post(self,request):
@@ -78,7 +79,7 @@ class ImportView(NoStoreMixin,APIView):
             r=FileResponse(storage.open_read(b.storage_key),content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             r['Content-Disposition']=content_disposition(b.filename)
             return r
-        return Response(dict(readOnly=False,batches=[_batch(b) for b in ImportBatch.objects.order_by('-created_at')[:100]]))
+        return Response(dict(readOnly=False,batches=[_batch(b) for b in sorted_rows(ImportBatch.objects.all(),'-created_at',stop=100)]))
 
 
 def _batch(b):
@@ -121,7 +122,7 @@ def loss_group(t):
     from .ledger import payload_for,details
     key=' '.join(str(t.data.get('lossNo')).split()).casefold()
     rows=[];total=0
-    for x in LegacyTransaction.objects.filter(reference=t.reference,status='confirmed',data__kind='claim').order_by('first_confirmed_at','created_at'):
+    for x in sorted_rows(LegacyTransaction.objects.filter(reference=t.reference,status='confirmed',data__kind='claim'),'first_confirmed_at','created_at'):
         if ' '.join(str(x.data.get('lossNo') or '').split()).casefold()!=key:continue
         try:
             legs=[d for d in details(payload_for(x)).values() if d['cashTracking']=='cash']

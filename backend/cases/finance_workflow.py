@@ -47,7 +47,8 @@ def review_batches():
     """
     from .models import FinanceReconciliationBatch
     groups = {}; history = []
-    for original in FinanceReconciliationBatch.objects.all().order_by('created_at', 'id'):
+    from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆，很大的審核批次不會讓排序記憶體不足
+    for original in sorted_rows(FinanceReconciliationBatch.objects.all(), 'created_at', 'id'):
         if original.status != 'active':
             history.append(original)
             continue
@@ -193,7 +194,8 @@ def cancel_review(view, request, body):
         return fail('reason_required', 'Enter the reason for cancelling this entire review batch.', 400)
     try:
         # Lock every event, including events created by later reviews for this group.
-        events = list(FinanceReconciliationBatch.objects.select_for_update().filter(status='active').order_by('created_at', 'id'))
+        from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序並鎖定編號，再讀整筆
+        events = sorted_rows(FinanceReconciliationBatch.objects.select_for_update().filter(status='active'), 'created_at', 'id')
         original = next(b for b in events if str(b.pk) == str(body.get('reviewBatchId')))
         scope = ' '.join(original.party_name.split()).casefold()
         events = [b for b in events if ' '.join(b.party_name.split()).casefold() == scope]

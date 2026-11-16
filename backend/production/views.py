@@ -119,11 +119,12 @@ def load_month(month, *, cached=False):
     fx_rows = list(FxRate.objects.filter(year_month=month).order_by("currency"))
     exclusions = list(_exclusions(month))
     exclusions.sort(key=lambda e: (e.created_at, str(e.id)))
-    reports = list(ProductionReport.objects.filter(year_month=month).order_by("-version"))
+    from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆，單筆很大的資料不會讓排序記憶體不足
+    reports = sorted_rows(ProductionReport.objects.filter(year_month=month), "-version")
     fx_rates = {month: {r.currency: float(r.rate) for r in fx_rows}}
 
     def compute():
-        cases = list(_live_cases().order_by(F("announced_at").asc(nulls_last=True), F("created_at").asc(nulls_last=True), "id"))
+        cases = sorted_rows(_live_cases(), F("announced_at").asc(nulls_last=True), F("created_at").asc(nulls_last=True), "id")
         sources = [case_source(c) for c in cases]
         # First Policy No 要沿著續保鏈往回追：連結表用「所有有 TW Ref 的案件」建（含已封存），中間有一張被封存也不會斷
         links = calc.reference_links(Case.objects.filter(tw_ref__isnull=False).values_list("tw_ref", "payload").iterator())

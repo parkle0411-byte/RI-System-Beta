@@ -72,7 +72,8 @@ with connection.cursor() as c:
     c.execute("SELECT table_name, ROUND((data_length+index_length)/1024/1024,1) FROM information_schema.tables WHERE table_schema=DATABASE() ORDER BY (data_length+index_length) DESC LIMIT 3")
     top = c.fetchall()
 print('資料庫大小：%s MB（最大的表：%s）' % (size, '、'.join(f'{n} {s} MB' for n, s in top)))
-person = (Personnel.objects.filter(role_code__in=('accounting_manager', 'accounting', 'admin'), is_active=True, account_status='active')
+# 2026-11-16：跳過「須先改密碼」的帳號（系統會擋下它的所有業務 API，量測會變成 403）
+person = (Personnel.objects.filter(role_code__in=('accounting_manager', 'accounting', 'admin'), is_active=True, account_status='active', must_change_password=False)
           .exclude(auth_user_id=None).order_by('id').first())
 if person is None:
     print('Accounting 回應：沒有可用的財會／管理員帳號，略過')

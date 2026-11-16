@@ -42,7 +42,8 @@ def row(r, sig):
 
 def state(case):
     p=case.payload or {}; sig=signature(p)
-    rows=list(PlacingSlipVersion.objects.filter(case=case,deleted_at__isnull=True).order_by('-version'))
+    from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆
+    rows=sorted_rows(PlacingSlipVersion.objects.filter(case=case,deleted_at__isnull=True),'-version')
     eligible=rules.enabled(p) and rules.has_ordinary(p)
     uploaded=any(r.source=='uploaded' for r in rows)
     return {'eligible':eligible,'canGenerate':eligible and case.status=='draft' and not uploaded,

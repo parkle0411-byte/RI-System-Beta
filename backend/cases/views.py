@@ -137,7 +137,8 @@ class CasesView(NoStoreMixin, APIView):
 
     def list_cases(self, person):
         scoped = visible_cases(person).filter(parent_case__isnull=True)
-        rows = list(scoped.select_related('ae_personnel').order_by("-updated_at", "-id")[:LIST_LIMIT])
+        from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆，單一很大的案件不會讓清單打不開
+        rows = sorted_rows(scoped.select_related('ae_personnel'), "-updated_at", "-id", stop=LIST_LIMIT)
         summary = scoped.aggregate(
             total=Count("id"),
             draft=Count("id", filter=Q(status="draft")),

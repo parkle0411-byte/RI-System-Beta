@@ -16,6 +16,7 @@ from audit.models import AuditLog
 from cases.calc.jsnum import js_or, js_to_string, js_trim
 from cases.views import visible_cases
 from ri_system.authz import NoStoreMixin, RIPermission
+from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆
 
 from .messages import label
 from .models import PaymentAlert, SignedSlipAlert
@@ -55,8 +56,8 @@ class CaseRemindersView(NoStoreMixin, APIView):
             "at": _time(e.occurred_at), "reminder": CONFIG_ACTIONS[e.action],
             "alertDate": (e.metadata or {}).get("alertOn") or (e.metadata or {}).get("alertDate"),
             "alertKind": (e.metadata or {}).get("alertKind"), "error": (e.after_data or {}).get("error"),
-        } for e in AuditLog.objects.filter(entity_type="case", entity_id=str(case.case_uid), action__in=list(CONFIG_ACTIONS))
-                              .order_by("-occurred_at", "-id")[:60]]
+        } for e in sorted_rows(AuditLog.objects.filter(entity_type="case", entity_id=str(case.case_uid), action__in=list(CONFIG_ACTIONS)),
+                               "-occurred_at", "-id", stop=60)]
         from .messages import resolve_recipients, finance_emails
         from .runner import _people
         people = _people('role_code')

@@ -31,7 +31,8 @@ def dashboard_inputs():
     """Plain dicts for dashboard.calc.build_dashboard(legacy=...)."""
     from .ledger import accounting_data
     from .services import rate_for
-    records = list(LegacyTransaction.objects.filter(status='confirmed').order_by('reference', 'uid'))
+    from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆
+    records = sorted_rows(LegacyTransaction.objects.filter(status='confirmed'), 'reference', 'uid')
     policies, trend = {}, []
     by_uid = {}
     for t in records:

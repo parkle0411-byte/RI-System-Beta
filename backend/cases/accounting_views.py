@@ -96,7 +96,7 @@ class AccountingView(NoStoreMixin, APIView):
     permission_map = {"GET": "accounting.read", "POST": "accounting.read"}
 
     def get(self, request):
-        cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").defer("parent_case__payload").order_by("tw_ref", "id")
+        cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").defer("parent_case__payload")
         # 2026-11-02：上層案件只用到 case_uid，不讀它的整份 payload
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
         case_views, rows, warnings, transactions, swiss_rows, schedule_rows = [], [], [], [], [], []
@@ -119,7 +119,9 @@ class AccountingView(NoStoreMixin, APIView):
         rates={(r['year_month'],r['currency']):float(r['rate']) for r in fx_rows}
         from .accounting_policy import latest_rates
         latest=latest_rates(fx_rows, taipei_date(now)[:7])
-        for case in cases:
+        # 2026-11-16：先排序編號再讀整筆（順序同 tw_ref, id），單一很大的案件不會讓 Accounting 打不開
+        from ri_system.sorted_fetch import sorted_rows
+        for case in sorted_rows(cases, "tw_ref", "id"):
             try:
                 from .data_integrity import financial_issues
                 integrity=financial_issues(case.payload)

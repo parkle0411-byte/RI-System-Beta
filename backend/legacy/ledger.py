@@ -11,6 +11,7 @@ from datetime import date
 from django.db import models
 from django.db.models.expressions import RawSQL
 from django.utils import timezone
+from ri_system.sorted_fetch import sorted_keys, sorted_rows   # 2026-11-16：先排序編號再讀整筆，單筆很大的舊資料不會讓排序記憶體不足
 from .models import LegacyTransaction
 from .money import number
 from .protocol import LegacyPayload
@@ -167,7 +168,8 @@ def details(p, now=None, schedules=None):
             baseDate=item.get('baseDate',''),dueDate=reminder,contractDueDate=due,dueTime='',
             termsDays=item.get('termsDays'),paymentRule=p['legacyData'].get('rule',''),
             settlement='settled' if not outstanding else 'partial' if paid else 'open',
-            paymentStatus=_status_for(due or reminder,abs(amount(outstanding)),abs(amount(paid)),today,now),
+            # 2026-11-16 業主決定：已結清的現金列一律 settled（舊資料理賠沒有到期日，原本會回 pending_review）；T3 衍生列照舊
+            paymentStatus='settled' if not outstanding and not derived else _status_for(due or reminder,abs(amount(outstanding)),abs(amount(paid)),today,now),
             fullPaymentRequired=src=='premium',canRecord=bool(outstanding and not derived and not p.get('legacyHistorical')),
             cashParts=[dict(scheduleKey=item.get('scheduleKey','transaction:'+no),outstanding=abs(amount(outstanding)))],
             nonCashPaid=sum(e['amount'] for e in entries if e.get('nonCash')),
@@ -259,7 +261,7 @@ def historical_queryset():
 def _compute_accounting_data():
     """原本的完整計算（快取關閉時使用，也是快取結果的比對基準）。"""
     views=[];rows=[]
-    for t in accounting_queryset().order_by('reference','uid'):
+    for t in sorted_rows(accounting_queryset(),'reference','uid'):
         view,items=_accounting_one(t)
         views.append(view);rows.extend(items)
     return views,rows
@@ -306,7 +308,7 @@ def _historical_results():
     with _CACHE_LOCK:
         hit=_CACHE.get('value') if _CACHE.get('key')==key else None
     if hit is None:
-        hit={str(t.uid):_accounting_one(t) for t in qs.order_by('reference','uid')}
+        hit={str(t.uid):_accounting_one(t) for t in sorted_rows(qs,'reference','uid')}
         if (_today(),_fingerprint(qs))==key:
             with _CACHE_LOCK:
                 _CACHE.clear();_CACHE.update(key=key,value=hit)
@@ -343,9 +345,12 @@ def _open_results():
     """未結清舊資料每筆的 (uid, view, rows, schedule_rows)，依 reference、uid 排序。"""
     qs=accounting_queryset().filter(historical=False)
     if not _open_cache_enabled():
-        return [(t.uid,*_accounting_full(t)) for t in qs.order_by('reference','uid')]
+        return [(t.uid,*_accounting_full(t)) for t in sorted_rows(qs,'reference','uid')]
     today=_today()
-    order=list(qs.order_by('reference','uid').annotate(row_digest=_row_digest()).values_list('uid','row_digest'))
+    # 2026-11-16：指紋要讀整列，所以不和排序放在同一個查詢（排序只用編號），單筆很大的舊資料不會讓排序記憶體不足
+    keys=sorted_keys(qs,'reference','uid')
+    digests=dict(qs.filter(pk__in=keys).annotate(row_digest=_row_digest()).values_list('uid','row_digest')) if keys else {}
+    order=[(uid,digests[uid]) for uid in keys if uid in digests]
     found={}
     with _OPEN_LOCK:
         for uid,digest in order:
@@ -408,7 +413,7 @@ def accounting_data(scope='all',_opened=None):
                     views.append(dict(view));rows.extend(dict(row) for row in items)
                 return views,rows
         views=[];rows=[]
-        for t in historical_queryset().order_by('reference','uid'):
+        for t in sorted_rows(historical_queryset(),'reference','uid'):
             view,items=_accounting_one(t)
             views.append(view);rows.extend(items)
         return views,rows

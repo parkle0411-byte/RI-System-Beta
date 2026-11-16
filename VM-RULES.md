@@ -35,7 +35,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **Frontend**：`package.json` 精確版本＋`package-lock.json`，`node:22-alpine` 以 `npm ci` 建置。Word 產生程式在 `frontend/public/alpha-documents/`（`docx-templates.js`、`vm-docx-generator.js`），不經 Vite 打包。前端拆檔（2026-11-13）：第三方套件獨立成 `vendor-*` 檔（內容不變時檔名不變，部署後沿用瀏覽器快取），各頁面由 router 動態載入、各自成檔，登入頁留在主檔；部署後舊分頁載入已不存在的頁面檔時，自動整頁重新載入到目的頁（只重試一次）。
 - **Backend**：`requirements.txt` 精確版本，基底 `python:3.13-slim-bookworm`。gunicorn **4 個 worker**（= CPU 核心數；不可用 `--threads`，壓測時會撐爆記憶體）。Admin Panel 是唯讀 Django admin（`/admin/`，只有 System Administrator）。
 - **Nginx**：`nginx:1.28-alpine`（與前端靜態檔同映像）；JSON／JS／CSS 啟用 gzip；轉發逾時 60 秒；`/static`、`/assets` 帶 nosniff 與 X-Frame-Options；SPA HTML 用 no-store、no-referrer；access log 遮蔽密碼重設 token。`/alpha-documents/`（Word 產生程式，不帶雜湊檔名）為 `Cache-Control: no-cache`：瀏覽器可保存但每次使用前以 ETag 確認，未更新回 304（2026-11-13）；SPA HTML 仍為 no-store、`/assets/` 仍為 immutable。
-- **MySQL**：`compose.yaml` 固定映像摘要（不用標籤）；`innodb_buffer_pool_size=512MB`。網站以最小權限的 `ri_runtime` 連線（多數表沒有 DELETE；Audit 表只有 SELECT／INSERT）；維護用 `ri_app`。例外（2026-11-13 業主決定，見 §4.5）：`ri_entity_snapshots` 另有 UPDATE 權限，由 trigger 限制只能覆蓋「案件仍是 Draft 的 draft_updated 副本」；DELETE 仍一律禁止，`ri_audit_log`／`ri_legacy_audit` 不變。
+- **MySQL**：`compose.yaml` 固定映像摘要（不用標籤）；`innodb_buffer_pool_size=512MB`；`sort_buffer_size=2MB`（2026-11-16 業主決定，以 `SET PERSIST` 設定、存在資料庫的 `mysqld-auto.cnf`，不在 `compose.yaml`；重啟後保留。查詢：`SELECT @@global.sort_buffer_size`；還原：`RESET PERSIST sort_buffer_size`）。網站以最小權限的 `ri_runtime` 連線（多數表沒有 DELETE；Audit 表只有 SELECT／INSERT）；維護用 `ri_app`。例外（2026-11-13 業主決定，見 §4.5）：`ri_entity_snapshots` 另有 UPDATE 權限，由 trigger 限制只能覆蓋「案件仍是 Draft 的 draft_updated 副本」；DELETE 仍一律禁止，`ri_audit_log`／`ri_legacy_audit` 不變。
 - **主機**：時區 Asia/Taipei（提醒排程 cron 依賴它）。硬體：Xeon E5-2620 v3、VMware 4 vCPU／8 GB；單一請求吃單核，換新一代 CPU 才會明顯變快。
 - **PDF 已退役**：只產生 Word，PDF 由使用者在 Word 匯出；Gotenberg 已移除，`/api/render-document-pdf` 固定回 410。
 - 升級任何一項：先更新這張表與鎖定檔，再重跑全部測試。
@@ -59,9 +59,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 30–40 分鐘，目前為 122 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 2 小時，目前為 132 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 分段載入 Y 16 項、前端拆檔與快取 Z 14 項（2026-11-13），合計 329 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 分段載入 Y 16 項、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16），合計 356 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
@@ -86,8 +86,8 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
     - 候選映像若含其他 session 尚未完成的修改（`git status` 有不屬於本次的變更），先問業主是否一起部署，不要自行帶上線。
 - **Docker 映像保留（2026-11-06 業主決定；2026-11-12 修訂回滾點）**：`ri-*` 自建映像一律保留——容器使用中（含已停止）、7 天內建立或 tag 日期在 7 天內、本文件／腳本／compose 有寫到（`before-*` 回滾點除外）；其餘可刪。**`before-*` 回滾點**：7 天內全部保留，另外 `ri-backend`、`ri-frontend` 各自不論多舊至少保留最新 10 個（`ROLLBACK_KEEP_MIN`）；超過的每週清理時刪除，即使「部署與回復紀錄」有寫到——更舊的版本改由版本紀錄（Git）重建，資料由備份還原。第三方映像（mysql、nginx、node、python…）不自動刪。清理用 `scripts/docker_cleanup.sh`（預設預覽，`--apply` 才刪；`KEEP_DAYS` 可調），同時清超過 7 天的建置快取與 dangling 映像。每週三 06:00（台灣時間）由 parkle 的 crontab 自動執行，紀錄在 `logs/docker-cleanup.log`。不要用 `docker system prune -a` 或 `docker rmi -f`。
 - **大型測試時段與記憶體（2026-11-10 業主決定；2026-11-11 修訂）**：VM 只有 8 GB，測試與正式系統共用。同仁正式使用系統前，壓測（`qa/stress/`）、全部 API／全部畫面測試等大型測試不限時段；正式使用後改在下班後執行（開始正式使用時由業主告知，再更新本條）。跑完檢查 `free -m`，有 swap 時在空閒記憶體大於 swap 用量的前提下執行 `sudo swapoff -a && sudo swapon -a`，把正式系統搬回記憶體（約數分鐘，網站不停）。用不到的測試環境要停止（不刪除）。2026-11-10 停止的 3 組與 `ri-oversea-premium-adj-retry` 已於 2026-11-12 依業主決定刪除（含測試資料 volume）。。
-- **備份保留（2026-11-12 業主決定）**：`backups/` 內 14 天內的備份全部保留。超過 14 天的：每天保留最後一份，以及所有在「改資料庫結構（migration）、匯入、清空或批次寫入正式資料」之前拍的備份；其餘刪除，保留的打包成 `backups/archive_<起>-<迄>.tar.zst`（打包後逐位元驗證再移除原檔，取用時 `tar -I zstd -xf … -C backups <路徑>`）。每週三 Debug 時把剛滿 14 天的備份列出保留／刪除清單，業主看過才刪。已處理：9 月 18 個檔案 → 保留 13 個於 `archive_20260921-20260929.tar.zst`、刪除 5 個（匯入文字紀錄、2 份變動後快照、`before_pin`、空的文件壓縮檔）；10 月 `archive_20261001-20261029.tar.zst`（未刪）。
-- **每週健檢報告（2026-11-13 業主決定）**：`scripts/weekly_health.sh`（唯讀；`--no-log` 只印出，否則附加到 `logs/weekly-health.log`）。每週三 Debug 時執行並向業主報告：主機記憶體／swap／硬碟、容器、映像與備份數量、最慢的 10 個 API（nginx `urt`，容器重建後重新累計）、案件與舊資料筆數、資料庫大小、Accounting「打開時／舊資料歷史／完整清單」三段的時間與大小。Dashboard 或 Accounting 打開超過約 3 秒時提出優化選項（含 `~/RI System/perf-work/round3-20261110` 未部署的共用快取）。
+- **備份保留（2026-11-12 業主決定）**：`backups/` 內 14 天內的備份全部保留。超過 14 天的：每天保留最後一份，以及所有在「改資料庫結構（migration）、匯入、清空或批次寫入正式資料」之前拍的備份；其餘刪除，保留的打包成 `backups/archive_<起>-<迄>.tar.zst`（打包後逐位元驗證再移除原檔，取用時 `tar -I zstd -xf … -C backups <路徑>`）。每週三 Debug 時把剛滿 14 天的備份列出保留／刪除清單，業主看過才刪。已處理：9 月 18 個檔案 → 保留 13 個於 `archive_20260921-20260929.tar.zst`、刪除 5 個（匯入文字紀錄、2 份變動後快照、`before_pin`、空的文件壓縮檔）；10 月 `archive_20261001-20261029.tar.zst`（未刪）；2026-11-16 依業主決定刪除 10-30 的 5 份部署前備份（cgl_aggregate_retroactive、endorsement_sections、allianz_reminder、endo_note_order_percent、case_keyin_ui；當天沒有保留任何一份，前後最近為 10 月打包檔與 11-02 `case_keyin_refinement`）。
+- **每週健檢報告（2026-11-13 業主決定）**：`scripts/weekly_health.sh`（唯讀；`--no-log` 只印出，否則附加到 `logs/weekly-health.log`）。每週三 Debug 時執行並向業主報告：主機記憶體／swap／硬碟、容器、映像與備份數量、最慢的 10 個 API（nginx `urt`，容器重建後重新累計）、案件與舊資料筆數、資料庫大小、Accounting「打開時／舊資料歷史／完整清單」三段的時間與大小。Dashboard 或 Accounting 打開超過約 3 秒時提出優化選項（含 `~/RI System/perf-work/round3-20261110` 未部署的共用快取）。（2026-11-16：量測 Accounting 時跳過「須先改密碼」的帳號）
 - **工作資料夾（2026-11-12）**：`~/RI System` 內已上線功能的 16 個工作資料夾（accounting、legacy、oversea、stp、nav-icons、property-qs-currency、data-clear…）已打包為 `backups/work-folders_20261112.tar.zst`（14,925 個檔案，逐檔比對一致後移除原資料夾）；含 STP Word 視覺檢查用的 LibreOffice 執行環境（`stp-work/tools/`，需要時解壓）。`RI-docs`（決策文件）與 `perf-work`（未部署的共用快取）保留原處。
 - **開發工具舊版本清理（2026-11-07 業主決定）**：`scripts/tools_cleanup.sh`（預設預覽，`--apply` 才刪）每週三 06:00 接在 Docker 清理之後由 parkle 的 crontab 自動執行，紀錄在 `logs/tools-cleanup.log`。清 parkle 家目錄內 Codex、Claude Code、VS Code 伺服器與擴充套件的舊版本、VS Code 擴充安裝檔快取，以及 `/tmp/ri-*` 暫存；一律保留執行中、目前版本、最新版本與 7 天內的項目，工具正在更新時跳過。不處理其他帳號（如 olin1）。
 
@@ -477,6 +477,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
   - **未結清舊資料**：帳款與付款排程同一次計算共用（`legacy.ledger.accounting_bundle`），並逐筆快取，鑰匙為「該列內容 MD5＋台北日期」（比照每件案件結果快取）；對帳狀態即時套用、不進快取；每 worker 最多 `RI_LEGACY_OPEN_CACHE_SIZE` 筆（預設 20,000），`RI_LEGACY_OPEN_CACHE=false` 關閉。2,000 筆未結清時 Accounting 打開的請求約 9 秒 → 首次約 7 秒、之後約 1.3 秒。測試 `legacy_open_cache`。
   - **Accounting 畫面**：清單改為整份替換（不逐欄追蹤）、排序比較值每列只算一次；清單超過 2,000 列時文字篩選等 0.3 秒沒有再輸入才套用（列數少時立即）。2 萬列時切換分頁約 20 秒 → 約 2 秒。
   - 1 萬筆（8,000 已結清＋2,000 未結清）實測：打開到可操作約 38 秒 → 約 5 秒；剩餘時間主要是資料量（6,000 列約 21 MB）。已結清歷史約 79 MB、背景載入；舊資料持續增加時的長期做法是歷史改為伺服器查詢／分頁（尚未做，需業主決定畫面規則）。
+- **單筆很大的資料（2026-11-16 業主決定）**：MySQL 排序時會把查詢讀到的每個欄位（含篩選條件用到的 JSON）放進排序緩衝區，單筆超過緩衝區就整個查詢失敗（Out of sort memory），例如一件案件超過 256 KB 時 Accounting、Account List、Production Report 對所有人打不開。對大型 JSON 表的排序查詢一律用 `ri_system/sorted_fetch.py`（先篩選出編號、只用編號排序、再依編號讀整筆，結果順序相同）：案件、財會審核批次、Audit、草稿回收桶、Placing Slip 版本、舊資料交易／稽核／匯入批次，共 16 處；另把 `sort_buffer_size` 調為 2 MB 作為備援。量測：每筆理賠付款約讓案件增加 7 KB（3 家再保人；每筆交易各複製一份再保人名單），2026-11-16 正式最大案件 18 KB；1 萬筆舊資料時打開 Accounting 的伺服器時間約多 0.1–0.25 秒。新增查詢時沿用此做法，`large_rows` 測試組會把每種資料灌到超過緩衝區檢查。
 - nginx 日誌行尾記錄回應時間：`rt`＝整個請求、`urt`＝後端處理（秒）；例：`docker logs ri-nginx 2>/dev/null | grep -o 'urt=[0-9.]*'`（容器重建時清空）。
 
 ## 16. 已退役／已移除
@@ -540,6 +541,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 ---
 
 - **Master Data 修改理由（2026-11-16）**：Reinsurer、Cedant、Foreign RI Broker、Class 與一般 Clause 的編輯及停用必須填寫非空理由；新增與單純重新啟用不要求。理由保存在版本快照；Audit 暫停時不寫 Audit。
+- **重新啟用（2026-11-16 業主決定）**：Reactivate 先不帶理由送出；儲存內容不變時直接啟用。若重新啟用會一併改變儲存內容（例如 Lloyd's Syndicate 舊資料被畫面補上市場資料），後端回 `reason_required`，畫面才跳出填理由視窗，填寫後再送一次；取消則不變更。正式資料有 3 筆停用的 Lloyd's Syndicate（2609 AUW、3622 AFB、6107 AFB）屬於後者。
 
 ## 部署與回復紀錄
 
@@ -699,6 +701,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-16 | Production Report 的 Property 一律顯示 PD；已存報表版本 PF→PD（2026-10 一列，正式資料寫入，前後內容存備份；只換後端） | `backups/production_pd_20261116_173040` | `ri-backend:before-production-pd-20261116_173040` | 候選映像完整 API 131 組（production_api 84，3 項新行為檢查以舊程式驗證會失敗）；基礎版本中途換成 00f7eb21（指南更新）後重建，重跑相關 11 組 API 與畫面 A＋P1＋P2；正式資料副本演練（其他資料表 CHECKSUM 不變）；無 migration |
 
+| 11-16 21:35 | 大型資料排序（先排序編號再讀整筆，16 處）＋MySQL `sort_buffer_size` 2 MB（SET PERSIST，不重啟）；舊資料已結清理賠列 paymentStatus settled；Reactivate 需要理由時跳出填理由視窗；每週健檢跳過須改密碼帳號 | `backups/large_rows_20261116_213535`；回復用 `perf-work/stage-g-20261116/rollback.sh 20261116_213535`（含還原 MySQL 設定） | `ri-backend:before-large-rows-20261116_213535`／`ri-frontend:before-large-rows-20261116_213535` | 候選 API 132 組全通過（新 `large_rows` 50 項，舊程式驗證會失敗）；畫面 356 項（新 M 11 項，舊前端驗證會失敗）；正式資料 766 個回應僅 24 筆舊資料理賠列狀態不同，部署後與候選逐位元組相同；1 萬筆舊資料計時；無 migration、無業務資料寫入 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -708,6 +712,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-16：依業主確認部署大型資料排序保護（§2 MySQL、§15）、舊資料已結清理賠列狀態、主資料重新啟用流程（§12）、每週健檢帳號選擇；刪除 10-30 的 5 份舊備份（§3 備份保留）。
 
 - 2026-11-16：本次公告與完整 MDM／Schema 指南更新：依目前 VM 核對資料表、Product Recall、STP、理賠、會計、Oversea 與舊案流程；只更新參考文件。
 

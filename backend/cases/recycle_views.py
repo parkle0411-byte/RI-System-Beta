@@ -82,10 +82,11 @@ class DraftRecycleBinView(NoStoreMixin, APIView):
 
     def get(self, request):
         now = timezone.now()
-        items = (
+        from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆
+        items = sorted_rows(
             DraftRecycleBin.objects.select_related("original_case")
-            .filter(restored_at__isnull=True, permanently_deleted_at__isnull=True, original_case__recycled_at__isnull=False)
-            .order_by("-deleted_at", "-id")[:LIST_LIMIT]
+            .filter(restored_at__isnull=True, permanently_deleted_at__isnull=True, original_case__recycled_at__isnull=False),
+            "-deleted_at", "-id", stop=LIST_LIMIT,
         )
         return Response({"ok": True, **POLICY, "items": [item_view(i, now) for i in items]})
 

@@ -17,7 +17,8 @@ def report_sources(month):
 
 def append_preview(preview,month):
     from production.calc import month_end, production_class_code
-    transactions=list(report_sources(month))
+    from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆，單筆很大的舊資料不會讓排序記憶體不足
+    transactions=sorted_rows(report_sources(month),'uid')
     if not transactions:return preview  # Keep native no-legacy signatures intact.
     result=copy.deepcopy(preview); signatures=[]
     missing=set(result['missingRateCurrencies'])

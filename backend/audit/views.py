@@ -19,11 +19,13 @@ class AuditLogView(NoStoreMixin, APIView):
         except (TypeError, ValueError):
             requested = 100
         limit = min(max(requested, 1), 250)
-        events = list(
-            AuditLog.objects.order_by("-occurred_at", "-id").values(
+        # 2026-11-16：先排序編號再讀整筆，單筆很大的紀錄不會讓排序記憶體不足（ri_system/sorted_fetch.py）
+        from ri_system.sorted_fetch import sorted_values
+        events = sorted_values(
+            AuditLog.objects.all(), ("-occurred_at", "-id"), (
                 "id", "entity_type", "entity_id", "action", "before_data", "after_data",
                 "actor_id", "actor_name", "actor_role", "request_id", "source",
                 "occurred_at", "retention_until", "metadata",
-            )[:limit]
+            ), stop=limit,
         )
         return Response({"ok": True, "displayVersion": "V 0.003", "events": events, "readOnly": True, "recordingEnabled": audit_recording_enabled()})

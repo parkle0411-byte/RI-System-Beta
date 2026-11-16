@@ -255,9 +255,9 @@ function masterPayloadFromForm() {
 }
 
 const reasonTypes = ['reinsurer', 'reinsured', 'foreign_broker', 'class', 'clause']
-async function requestMasterReason() {
+async function requestMasterReason(message = 'Enter the reason for this change.') {
   try {
-    const result = await ElMessageBox.prompt('Enter the reason for this change.', 'Change reason', { inputValidator: value => Boolean(String(value || '').trim()) || 'Reason is required.' })
+    const result = await ElMessageBox.prompt(message, 'Change reason', { inputValidator: value => Boolean(String(value || '').trim()) || 'Reason is required.' })
     return result.value.trim()
   } catch { return null }
 }
@@ -302,17 +302,30 @@ async function saveMasterRecord() {
 }
 
 async function toggleMasterStatus(row) {
-  const changeReason = row.isActive && reasonTypes.includes(row.entityType) ? await requestMasterReason() : ''
-  if (row.isActive && reasonTypes.includes(row.entityType) && !changeReason) return
+  const needsReason = reasonTypes.includes(row.entityType)
+  let changeReason = row.isActive && needsReason ? await requestMasterReason() : ''
+  if (row.isActive && needsReason && !changeReason) return
   mdmSaving.value = true; shell.error = ''
   try {
-    const body = await jsonOrThrow(await apiFetch('/api/master-data', {
+    const send = (reason) => apiFetch('/api/master-data', {
       method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         id: row.id, rowVersion: row.rowVersion, entityType: row.entityType,
-        code: row.code, name: row.name, payload: JSON.stringify(row.payload || {}), isActive: !row.isActive, changeReason
+        code: row.code, name: row.name, payload: JSON.stringify(row.payload || {}), isActive: !row.isActive, changeReason: reason
       })
-    }))
+    })
+    let response = await send(changeReason)
+    // 2026-11-16 owner decision: Reactivate asks for a reason only when the server reports that the saved details would also change
+    // (for example details filled in from the Lloyd's market profile).
+    if (!row.isActive && needsReason && response.status === 400) {
+      const problem = await response.clone().json().catch(() => ({}))
+      if (problem.error === 'reason_required') {
+        changeReason = await requestMasterReason('Reactivating this record also updates its saved details. Enter the reason for this change.')
+        if (!changeReason) return
+        response = await send(changeReason)
+      }
+    }
+    const body = await jsonOrThrow(response)
     await loadMasterData()
     ElMessage.success(body.record.isActive ? 'Master record reactivated' : 'Master record deactivated')
   } catch (err) {
