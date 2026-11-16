@@ -16,7 +16,7 @@ def report_sources(month):
 
 
 def append_preview(preview,month):
-    from production.calc import month_end
+    from production.calc import month_end, production_class_code
     transactions=list(report_sources(month))
     if not transactions:return preview  # Keep native no-legacy signatures intact.
     result=copy.deepcopy(preview); signatures=[]
@@ -31,7 +31,7 @@ def append_preview(preview,month):
             result['rows'].append(dict(id=f'{key}:{i}',key=key,reinsurerKey='legacy-party',caseId=key,
                 caseUid=uid,caseRowVersion=t.version,legacyTransactionId=uid,installmentId='FULL',month=month,
                 originalInsured=d.get('insured',''),reinsured=d.get('cedant',''),reinsurer=d.get('party',''),
-                classCode=d.get('classCode') or 'PD',type=d.get('newRenew',''),currency=t.currency,rate=fx.get('rate'),missingRate=pending,
+                classCode=production_class_code({'classCode':d.get('classCode') or 'PD','classOfBusiness':d.get('classOfBusiness') or 'Property'}),type=d.get('newRenew',''),currency=t.currency,rate=fx.get('rate'),missingRate=pending,
                 ae=person['name'],effDate=d.get('effectiveDate',''),expDate=d.get('expiryDate',''),
                 comm=d.get('commissionRate',0),premium=person.get('premium'),income=person.get('income'),
                 policyNo=d.get('policyNo',''),firstPolicyNo=t.reference,endorseNo=d.get('endorsementNo',''),

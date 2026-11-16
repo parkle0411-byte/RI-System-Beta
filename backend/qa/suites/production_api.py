@@ -298,6 +298,22 @@ try:
         r = post(finm, "close", M4, reportUid=rep["reportUid"], rowVersion=1, sourceSignature=j["sourceSignature"])
         check("close with a null inside transactions -> 409 transactions_corrupt, nothing closed", code(r) == "transactions_corrupt"
               and ProductionReport.objects.get(report_uid=rep["reportUid"]).status == "valid" and Case.objects.get(pk=c8.pk).status == "posted", code(r))
+
+        # ================= Class：Property 一律顯示 PD（2026-11-16 業主決定；案件本身仍存 PF） =================
+        M9 = "2031-11"; fx(M9, "USD", 31)
+        pf = at(make_case(sales, "posted", classOfBusiness="Property", classCode="PF", policyFrom="2031-11-01", policyTo="2032-11-01"), EARLY)
+        low = at(make_case(sales, "posted", classOfBusiness="", classCode="pf", policyFrom="2031-11-01", policyTo="2032-11-01"), EARLY)
+        gl = at(make_case(sales, "posted", classOfBusiness="Commercial General Liability", classCode="GL", policyFrom="2031-11-01", policyTo="2032-11-01"), EARLY)
+        rows9 = get(fin, M9).json()["rows"]
+        check("Class: native Property (PF) shows PD in the Production Report", mine(rows9, pf) and {r["classCode"] for r in mine(rows9, pf)} == {"PD"}, mine(rows9, pf))
+        check("Class: a PF code without a class name also shows PD", mine(rows9, low) and {r["classCode"] for r in mine(rows9, low)} == {"PD"}, mine(rows9, low))
+        check("Class: other classes keep their code (GL)", mine(rows9, gl) and {r["classCode"] for r in mine(rows9, gl)} == {"GL"}, mine(rows9, gl))
+        check("Class: the case itself keeps PF", Case.objects.get(pk=pf.pk).payload["classCode"] == "PF")
+        from production.calc import production_class_code
+        check("Class: helper maps Property / PF / pf to PD and leaves PD, GL, FA and PAR (other names)",
+              [production_class_code(x) for x in ({"classOfBusiness": "Property", "classCode": "PF"}, {"classCode": " pf "}, {"classOfBusiness": "property"},
+               {"classCode": "PD", "classOfBusiness": "Property"}, {"classCode": "GL"}, {"classCode": "FA", "classOfBusiness": "Fine Art"},
+               {"classCode": "PAR", "classOfBusiness": "ZZ Class"})] == ["PD", "PD", "PD", "PD", "GL", "FA", "PAR"])
         raise Rollback()
 except Rollback:
     pass

@@ -308,6 +308,16 @@ def production_keys_for_case(source):
     return [key for group in production_key_groups_for_case(source) for key in group["keys"]]
 
 
+def production_class_code(case_data):
+    """Production Report Class (owner 2026-11-16): Property is always PD, the code of the legacy
+    Registers, so native Property cases (MDM code PF) and legacy rows read the same. Other classes keep
+    their stored code. Only the report shows PD; cases, TW Ref and MDM keep PF."""
+    code = _js(js_or(get(case_data, "classCode"), get(case_data, "classOfBusiness"), ""))
+    if js_upper(js_trim(js_to_string(code))) == "PF" or js_trim(js_to_string(js_or(get(case_data, "classOfBusiness"), ""))).casefold() == "property":
+        return "PD"
+    return code
+
+
 def production_source_signature(rows):
     return js_json_stringify([[
         get(row, "id"), get(row, "originalInsured"), get(row, "reinsured"), get(row, "reinsurer"), get(row, "classCode"),
@@ -470,7 +480,7 @@ def build_production_preview(case_rows, month, fx_rates=UNDEFINED, exclusions=UN
                         "originalInsured": _js(js_or(get(case_data, "originalInsured"), "")),
                         "reinsured": _js(js_or(get(case_data, "reinsured"), "")),
                         "reinsurer": js_or(js_trim(_js(js_or(get(reinsurer, "foreignBroker"), ""))), reinsurer_name),
-                        "classCode": _js(js_or(get(case_data, "classCode"), get(case_data, "classOfBusiness"), "")),
+                        "classCode": production_class_code(case_data),
                         "type": "R" if get(case_data, "newOrRenew") == "Renew" else "N",
                         "currency": currency, "rate": rate, "missingRate": rate is None,
                         "ae": js_or(person["name"], _js(js_or(ae, ""))),
