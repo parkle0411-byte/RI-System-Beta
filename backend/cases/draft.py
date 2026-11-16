@@ -526,6 +526,11 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     from .product_recall import scope as recall_information_scope
     if is_standard_cgl(value) or recall_information_scope(value) or "cglInformation" in inp:
         value["cglInformation"] = normalize_information(inp, errors, text=text, number=nullable_number, date_value=nullable_date, rows=rows)
+        raw_info = inp.get('cglInformation')
+        if (recall_information_scope(value) and existing_premiums is None and not inp.get('parentTwRef')
+                and not inp.get('renewedFromTwRef') and inp.get('newOrRenew') != 'Renew'
+                and (not isinstance(raw_info, dict) or 'policyForm' not in raw_info)):
+            value['cglInformation']['policyForm'] = 'Occurrence Form'
         if (is_standard_cgl(value) or recall_information_scope(value)) and value["cglInformation"]["specialAgreementApplies"] == "notApplicable":
             value["specialAgreement"] = ""
 

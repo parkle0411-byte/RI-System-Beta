@@ -11,6 +11,12 @@ export function initialRecall() {
   }
 }
 
+export function orderedRecallRows(rows, group) {
+  const prefix = group === 'events' ? 'event' : 'loss'
+  const rank = row => { const i = [1, 2, 3, 4].findIndex(n => row?.id === `${prefix}-${n}`); return i < 0 ? 4 : i }
+  return [...(rows || [])].sort((a, b) => rank(a) - rank(b))
+}
+
 export function productRecallIssues(p) {
   if (!recallScope(p)) return []
   const issues = [], risk = p.productRecall || {}, add = (field, label) => issues.push({ field, label })
@@ -20,7 +26,6 @@ export function productRecallIssues(p) {
   if (!['USD', 'TWD'].includes(p.currency)) add('currency', 'Product Recall currency must be TWD or USD')
   if (limit == null || limit <= 0) add('limitOfLiability', 'Limit of Indemnity must be greater than 0')
   for (const [field, label] of [['originalExclusions','Original Exclusions'], ['originalConditions','Original Conditions'], ['reinsuredRetention','Reinsured’s Retention'], ['expressWarranties','Express Warranties'], ['conditionsPrecedent','Conditions Precedent'], ['subjectivities','Subjectivities']]) if (!filled(p[field])) add(field, label)
-  if (!filled(risk.choiceOfLaw)) add('productRecall.choiceOfLaw', 'Choice of Law and Jurisdiction')
   for (const [key, label] of [['events','Covered Event'], ['losses','Covered Loss'], ['additionalSublimits','Additional Sub-limit']]) {
     const rows = Array.isArray(risk[key]) ? risk[key] : [], names = new Set()
     if (key !== 'additionalSublimits' && !rows.some(row => row.selected && filled(row.name))) add(`productRecall.${key}`, `Select at least one ${label}`)

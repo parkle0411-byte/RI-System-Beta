@@ -38,6 +38,11 @@
   function newQs(c) { return c && c.placingRulesVersion === 'placing-qs-20261028-v1' && c.reinsuranceStructure === 'QS'; }
   function newCgl(c) { return newQs(c) && c.classOfBusiness === 'Commercial General Liability'; }
   function isProductRecall(c) { return text(c && c.classOfBusiness).toLowerCase() === 'product recall' && qsStructure(c); }
+  function orderedRecallRows(rows, group) {
+    const prefix = group === 'events' ? 'event' : 'loss';
+    const rank = row => { const i = [1, 2, 3, 4].findIndex(n => row?.id === `${prefix}-${n}`); return i < 0 ? 4 : i; };
+    return [...(rows || [])].sort((a, b) => rank(a) - rank(b));
+  }
   function propertyExtras(c) { return newQs(c) && c.classOfBusiness === 'Property' && (!(c.reinsurers || []).some(r => r.name) || (c.reinsurers || []).some(r => r.name && !/\(Facility\)\s*$/i.test(r.name))); }
   function qsProperty(c) {
     return text(c && c.reinsuranceStructure).toUpperCase() === 'QS'
@@ -507,7 +512,7 @@
       LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c) + (isProductRecall(c) ? ' each occurrence and in the aggregate' : newCgl(c) ? ' each occurrence' : ''),
       AGGREGATE_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
       UNDERLYING_LIMITS: qsProperty(c) ? '' : Array.isArray(c && c.cglInformationRows) && text(c && c.reinsuranceStructure).toUpperCase() !== 'XOL' ? '' : text(c && c.underlyingLimits),
-      SUB_LIMITS: isProductRecall(c) ? [...(c.productRecall?.losses || []).filter(row => row.selected), ...(c.productRecall?.additionalSublimits || [])].map(row => `${currencyLabel(c)} ${formatMoney(row.amount, c)} in respect of ${text(row.name)}`).join('\n') : text(c && c.subLimits),
+      SUB_LIMITS: isProductRecall(c) ? [...orderedRecallRows(c.productRecall?.losses, 'losses').filter(row => row.selected), ...(c.productRecall?.additionalSublimits || [])].map(row => `${currencyLabel(c)} ${formatMoney(row.amount, c)} in respect of ${text(row.name)}`).join('\n') : text(c && c.subLimits),
       DEDUCTIBLES: isProductRecall(c) ? (text(c.deductibles) ? `${currencyLabel(c)} ${formatMoney(c.deductibles, c)} each and every Insured Event` : '') : text(c && c.deductibles),
       REINSURED_RETENTION: pureFacility(c) ? 'Advice of Reinsured’s retention waived' : text(c && c.reinsuredRetention) || ((qsProperty(c) || newCgl(c)) ? "Advice of Reinsured's retention waived." : ""),
       REINSTATEMENT_PROVISIONS: pureFacility(c) ? '' : text(c && c.reinstatementProvisions),
@@ -1478,15 +1483,13 @@
       const found = findFrameForToken(xml, scanTableFrames(xml), '{{INTEREST}}');
       if (found) {
         const row = found.frame.rows[found.rowIndex], template = xml.slice(row.start, row.end);
-        const additions = [['COVERED EVENTS', c.productRecall?.events], ['COVERED LOSS', c.productRecall?.losses]]
-          .map(([label, rows]) => {
-            const value = (rows || []).filter(item => item.selected).map(item => text(item.name)).filter(Boolean).join('\n');
+        const additions = [['COVERED EVENTS', c.productRecall?.events, 'events'], ['COVERED LOSS', c.productRecall?.losses, 'losses']]
+          .map(([label, rows, group]) => {
+            const value = orderedRecallRows(rows, group).filter(item => item.selected).map(item => text(item.name)).filter(Boolean).join('\n');
             return template.replace('>INTEREST<', '>' + label + '<').split('{{INTEREST}}').join(xmlValue(value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;'));
           }).join('');
         xml = xml.slice(0, row.end) + additions + xml.slice(row.end);
       }
-      const defaultLaw = 'This (re)insurance shall be governed by and construed in according with the law of Republic of China, Taiwan and the each party agrees to submit to the exclusive jurisdiction of the Courts of the Republic of China, Taiwan.';
-      xml = xml.replace(defaultLaw, xmlValue(c.productRecall?.choiceOfLaw).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;'));
     }
     [
       { token: '{{INTEREST}}', heading: 'INTEREST', label: 'COVERAGES', value: c.cglCoveragesText },

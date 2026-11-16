@@ -16,6 +16,7 @@ def check(n,ok):
  if not ok:print('FAIL '+n)
 def write(c,method,body):
  c.get('/api/auth/csrf')
+ if method == 'put': body = {'changeReason':'Test update', **body}
  return getattr(c,method)('/api/master-data',data=json.dumps(body),content_type='application/json',HTTP_X_CSRFTOKEN=c.cookies['csrftoken'].value)
 class Rollback(Exception):pass
 try:

@@ -212,10 +212,10 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 
 ### 5.2a Product Recall QS（2026-11-14）
 - 獨立 Product Recall 險種，僅一般 Facultative QS，支援原單、續保與批單；流程、權限、分期、佣金、稅與帳務以一般 CGL QS 為基礎。TWD／USD，預設 USD；Cedant／再保人 Tax 預設 1%，Cedant／一般再保人付款天數預設 90。TW Ref 為 TWPR＋保單生效年兩碼＋月兩碼＋每月流水號（至少三碼），Announce 取號；批單、分期及理賠沿用既有後綴。
-- Covered Events 預設 Defect、Malicious Product Tampering、Product Extortion、Government Recall；Covered Loss 預設 First Party Recall Costs、Third Party Recall Costs、Consultant and Advisor Costs、Extortion Costs。可取消、增加單行項目與排序；每類至少一項，空白列須補齊或刪除。清單內名稱去前後空白、忽略大小寫不得重複；固定項目不可更名。
+- Covered Events 預設 Defect、Malicious Product Tampering、Product Extortion、Government Recall；Covered Loss 預設 First Party Recall Costs、Third Party Recall Costs、Consultant and Advisor Costs、Extortion Costs。可取消或增加單行項目；範本項目依範本順序固定排列，自訂項目接在後面並保留相對順序，兩組均不提供手動排序。每類至少一項，空白列須補齊或刪除。清單內名稱去前後空白、忽略大小寫不得重複；固定項目不可更名。
 - Limit of Indemnity 為案件幣別正數，文件接 each occurrence and in the aggregate。每個已選 Covered Loss 對應必填正數 Sub-limit，可另加項目；取消選擇保留金額但不檢查或輸出。所有輸出 Sub-limit 均不得超過 Limit；額外項目不可與 Covered Loss 同名。TWD 整數、USD 最多兩位小數。Deductibles 與自由文字 Self-Insured Retention 至少一項；Deductibles 有填時大於 0 且不超過 Limit，文件接 each and every Insured Event。
-- Principal Address 選填；Interest 固定原單責任再保句。Retention、Original Exclusions／Conditions 與可修改的 warranties、conditions precedent、subjectivities、法律管轄依已確認預設與必填規則。Reinsurance Conditions 固定範本文字、LMA3333 與 Intermediary Clause，文件最後附兩項完整條文；Premium Payment Terms 使用 Cedant Collection Days 及 LSW3001 名稱，不附完整 LSW3001。
-- Information 使用 CGL Policy Form、Retroactive Date、Extended Reporting Period、Territorial Limits 及 Insured Business 規則；Claims-Made 預設，切換 Occurrence 隱藏且保留從屬資料。Products 必填、Website 選填。Turnover 明細按幣別加總且文件保留原幣；單筆只顯示一行，各幣別 Case 幣別優先後按字母排序。CGL QS／Swiss CGL QS 文件也採同一原幣顯示規則；Overview Adj. Rate 仍依生效月匯率計算，缺匯率顯示 N/A。
+- Principal Address 選填；Interest 固定原單責任再保句。Retention、Original Exclusions／Conditions 與可修改的 warranties、conditions precedent、subjectivities 依已確認預設與必填規則。Choice of Law and Jurisdiction 在案件畫面隱藏，Cover Note 與 Placing Slip 固定輸出範本條文。Reinsurance Conditions 固定範本文字、LMA3333 與 Intermediary Clause，文件最後附兩項完整條文；Premium Payment Terms 使用 Cedant Collection Days 及 LSW3001 名稱，不附完整 LSW3001。
+- Information 使用 CGL Policy Form、Retroactive Date、Extended Reporting Period、Territorial Limits 及 Insured Business 規則；新案預設 Occurrence Form；續保及批單沿用來源選擇，可再修改。Claims-Made 才顯示從屬資料，切換 Occurrence 隱藏且保留。Products 必填、Website 選填。Turnover 明細按幣別加總且文件保留原幣；單筆只顯示一行，各幣別 Case 幣別優先後按字母排序。CGL QS／Swiss CGL QS 文件也採同一原幣顯示規則；Overview Adj. Rate 仍依生效月匯率計算，缺匯率顯示 N/A。
 - Loss Record 明細可用 TWD、USD、EUR、JPY、GBP、HKD、MYR，各筆保留原幣；New 的 0 年無損失句為 No previous recalls or product withdrawals since start selling.，後接 Broker Advised Date。Cover Note 依 CGL 版面與已確認的 Product Recall 順序；Placing Slip 為獨立生成程式，使用相同 Product Recall 業務資料。
 
 ### 5.3 純 Facility 案件
@@ -542,6 +542,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-16 14:23 | Product Recall 固定 Covered Events／Loss 順序、固定法律管轄、新案預設 Occurrence Form | `backups/before-recall-order-20261116_142158.sql`、`backups/before-recall-order-source-20261116_142158.tar.gz` | `ri-backend:before-recall-order-20261116_142158`／`ri-frontend:before-recall-order-20261116_142158` | 131 組 API、全部瀏覽器回歸、Product Recall 畫面及兩種 Word 文件專項通過；無 migration、無資料批次改寫 |
 | 11-15 12:20 | 財會規則統一第二批：交易編號重整（§8.1；分期 I 在 T 前、重建 `-V`、財會更正沖回 `-ADJ{n}-OLD`）；只換後端 | `backups/accounting_numbering_20261115_122014/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounting-unify-work/rollback-batch2.sh 20261115_122014`（回復前會列出已用新寫法的案件） | `ri-backend:before-accounting-numbering-20261115_122014`（前端未變） | 候選映像 API 130/130（新增 transaction_numbering 23 項）、畫面 21 階段 341 項通過；部署前正式資料舊寫法帳款 0 件（不需轉換）；正式後端逐檔一致、無 migration、無資料修改；Dashboard／Production 合計與部署前相同 |
 | 11-15 11:12 | 財會規則統一第一批（§8.1–8.5、§9、§10、§17）；P8 部分清理；舊資料進 Production、Production 起算月份 2026-11 | `backups/accounting_unify_20261115_111238/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounting-unify-work/rollback.sh 20261115_111238` | `ri-backend:before-accounting-unify-20261115_111238`／`ri-frontend:before-accounting-unify-20261115_111238` | 候選映像 API 129/129、畫面 21 階段 341 項通過；重建比對內容與候選一致；正式容器為候選映像、後端逐檔一致、無 migration、無正式資料修改；正式資料 Dashboard／Production 與部署前試算一致 |
 | 11-14 21:29 | Product Recall QS、Personnel、Claim／Loss Record 共通變更；12 筆唯一 AE 歷史關聯回填 | `backups/product-recall-20261114_212639/`（含部署前 DB、文件及回填前 DB） | `ri-backend:before-product-recall-20261114_212639`／`ri-frontend:before-product-recall-20261114_212639` | 候選後端 128 組 API 全通過；全部瀏覽器階段及修正後重跑通過；正式 migration、主檔、回填快照及首頁驗證 |
@@ -696,6 +697,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-16：依業主確認部署 Product Recall 的固定 Covered Events／Loss 順序、固定法律管轄條文及新案預設 Occurrence Form。
 
 - 2026-11-15：依業主同意部署財會規則統一第二批（交易編號重整，§8.1）：分期 I 放在 T 前（`-R1-I2-T1`）、整件 Reverse 重建改 `-V{輪次}`、財會更正沖回改 `{原編號}-ADJ{次數}-OLD`（同次更正與新帳共用次數）；C 只代表理賠。正式資料沒有舊寫法帳款，不需轉換；理賠、批單、無分期保費與舊資料編號不變。
 

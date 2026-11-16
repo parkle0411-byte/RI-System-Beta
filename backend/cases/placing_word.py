@@ -133,11 +133,12 @@ def document_values(p, annual):
     }
     if recall:
         risk=p.get('productRecall') or {}
-        sublimits=[r for r in risk.get('losses') or [] if r.get('selected')] + list(risk.get('additionalSublimits') or [])
+        from .product_recall import CHOICE_OF_LAW, ordered_rows
+        sublimits=[r for r in ordered_rows(risk.get('losses'), 'losses') if r.get('selected')] + list(risk.get('additionalSublimits') or [])
         values.update({'AGGREGATE LIMIT':None, 'SUB-LIMITS':'\n'.join(f"{money(r.get('amount'), currency)} in respect of {str(r.get('name') or '').strip()}" for r in sublimits),
                        'DEDUCTIBLES':(money(p.get('deductibles'),currency)+' each and every Insured Event') if p.get('deductibles') not in (None,'') else None,
                        'PREMIUM PAYMENT TERMS':f"{p.get('paymentTermsDays')} Day Payment condition - LSW3001 Premium Payment Clause",
-                       'CHOICE OF LAW AND JURISDICTION':risk.get('choiceOfLaw')})
+                       'CHOICE OF LAW AND JURISDICTION':CHOICE_OF_LAW})
     return values
 
 def insert_row(table, reference, label, value, after=None):
@@ -189,8 +190,9 @@ def render(p, ae_email, *, annual=True, previous=None, references=None):
         proto=next(r for r in risk.findall('w:tr',NS) if text(r.findall('w:tc',NS)[0])=='INTEREST')
         if product_recall_scope(p):
             recall=p.get('productRecall') or {}
-            event=insert_row(risk,proto,'COVERED EVENTS','\n'.join(str(r.get('name') or '').strip() for r in recall.get('events') or [] if r.get('selected')),after=proto)
-            insert_row(risk,proto,'COVERED LOSS','\n'.join(str(r.get('name') or '').strip() for r in recall.get('losses') or [] if r.get('selected')),after=event)
+            from .product_recall import ordered_rows
+            event=insert_row(risk,proto,'COVERED EVENTS','\n'.join(str(r.get('name') or '').strip() for r in ordered_rows(recall.get('events'), 'events') if r.get('selected')),after=proto)
+            insert_row(risk,proto,'COVERED LOSS','\n'.join(str(r.get('name') or '').strip() for r in ordered_rows(recall.get('losses'), 'losses') if r.get('selected')),after=event)
         elif rules.cgl(p):
             coverage='\n'.join(str(p.get('coveragesOther') or '') if x=='Other' else x for x in p.get('coverages') or [])
             insert_row(risk,proto,'COVERAGES',coverage,after=proto)

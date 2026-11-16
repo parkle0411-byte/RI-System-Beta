@@ -66,6 +66,12 @@ def normalize(p, *, existing=None):
         return {'errors': structure_issues, 'value': None}
     if not scope(p, existing):
         return normalize_draft(p, existing_premiums=existing)
+    from .product_recall import scope as recall_scope, issues as recall_issues
+    if recall_scope(p) and existing is None and not p.get('parentTwRef') and not p.get('renewedFromTwRef') and p.get('newOrRenew') != 'Renew':
+        info = p.get('cglInformation')
+        if info is None or isinstance(info, dict) and 'policyForm' not in info:
+            p = copy.deepcopy(p)
+            p['cglInformation'] = {**(info or {}), 'policyForm': 'Occurrence Form'}
     # Size/shape limits are storage constraints, not business completeness.
     try:
         encoded = json.dumps(p, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
@@ -77,7 +83,6 @@ def normalize(p, *, existing=None):
         if key in p and (not isinstance(p[key], list) or len(p[key]) > 500):
             return {'errors': [f'{key} must be a list of at most 500 entries.'], 'value': None}
     raw = {k: copy.deepcopy(v) for k, v in p.items() if k in EDITABLE}
-    from .product_recall import scope as recall_scope, issues as recall_issues
     if recall_scope(p):
         problems = recall_issues(p, ready=False)
         if problems:

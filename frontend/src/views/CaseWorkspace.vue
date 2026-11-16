@@ -884,7 +884,6 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <el-form-item v-if="!allFacilityReinsurers" label="Express Warranties"><el-input v-model="draft.expressWarranties" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item v-if="!allFacilityReinsurers" label="Conditions Precedent"><el-input v-model="draft.conditionsPrecedent" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item label="Subjectivities"><el-input v-model="draft.subjectivities" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item v-if="recallScope(draft) && draft.productRecall" label="Choice of Law and Jurisdiction" required><el-input v-model="draft.productRecall.choiceOfLaw" type="textarea" :rows="3" maxlength="3000" /></el-form-item>
                 </CaseFormSection>
 
                 <CaseFormSection v-if="isCglInformation || recallScope(draft)" name="information" title="Information">

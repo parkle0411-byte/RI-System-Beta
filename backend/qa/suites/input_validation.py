@@ -102,7 +102,7 @@ with transaction.atomic(), override_settings(AUDIT_LOG_PAUSED=True):
     response = call('post','/api/master-data',dict(entityType='class',name='ZZ Valid '+tag))
     check('valid master creation still works',response.status_code==201,response.content[:150])
     master = MasterRecord.objects.get(name='ZZ Valid '+tag)
-    response = call('put','/api/master-data',dict(id=master.pk,rowVersion=1,entityType='class',name=master.name+' edited'))
+    response = call('put','/api/master-data',dict(id=master.pk,rowVersion=1,entityType='class',name=master.name+' edited',changeReason='Test update'))
     check('valid master update still works',response.status_code==200,response.content[:150])
 
     helpers = {}

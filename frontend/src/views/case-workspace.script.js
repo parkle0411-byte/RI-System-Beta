@@ -1571,7 +1571,7 @@ export function useCaseWorkspace() {
         draft.productRecall = initialRecall()
         draft.currency = currencyEdited ? draft.currency : 'USD'
         draft.newOrRenew ||= 'New'
-        draft.cglInformation.policyForm ||= 'Claims-Made Form'
+        draft.cglInformation.policyForm ||= 'Occurrence Form'
         draft.cglInformation.territorialLimits ||= 'Worldwide including USA/Canada'
         draft.reinsuredRetention = 'Advice of Reinsured’s retention waived'
         draft.reinsurers.forEach(row => { row.paymentTermsDays ??= 90; row.taxPct ??= 1 })

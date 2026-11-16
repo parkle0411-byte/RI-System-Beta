@@ -167,10 +167,10 @@ try:
         sn = EntitySnapshot.objects.get(entity_type="master_record", entity_id=str(rec.id), entity_version=1)
         check("create snapshot v1 reason master_created", sn.snapshot_reason == "master_created" and sn.created_by == f"personnel:{sp.pk}")
 
-        r = call(sales, "put", "/api/master-data", {"id": rec.id, "entityType": "class", "name": "ZZ Audit Class 2", "rowVersion": 1, "isActive": True})
+        r = call(sales, "put", "/api/master-data", {"id": rec.id, "entityType": "class", "name": "ZZ Audit Class 2", "rowVersion": 1, "isActive": True, "changeReason": "Test update"})
         e = AuditLog.objects.filter(entity_type="master_record", entity_id=str(rec.id)).order_by("-id").first()
         check("update master -> update_master with before/after", r.status_code == 200 and e.action == "update_master" and e.before_data["name"] == "ZZ Audit Class" and e.after_data["name"] == "ZZ Audit Class 2" and e.before_data["rowVersion"] == 1 and e.after_data["rowVersion"] == 2)
-        r = call(sales, "put", "/api/master-data", {"id": rec.id, "entityType": "class", "name": "ZZ Audit Class 2", "rowVersion": 2, "isActive": False})
+        r = call(sales, "put", "/api/master-data", {"id": rec.id, "entityType": "class", "name": "ZZ Audit Class 2", "rowVersion": 2, "isActive": False, "changeReason": "Test deactivate"})
         e = AuditLog.objects.filter(entity_type="master_record", entity_id=str(rec.id)).order_by("-id").first()
         check("deactivate -> deactivate_master", e.action == "deactivate_master" and e.after_data["isActive"] is False)
         r = call(sales, "put", "/api/master-data", {"id": rec.id, "entityType": "class", "name": "ZZ Audit Class 2", "rowVersion": 3, "isActive": True})

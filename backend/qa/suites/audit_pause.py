@@ -38,7 +38,7 @@ with transaction.atomic():
         master = MasterRecord.objects.get(name="ZZ Pause Class " + tag)
         check("snapshot retained while paused", EntitySnapshot.objects.filter(entity_type="master_record", entity_id=str(master.pk), entity_version=1).exists())
         check("business API writes no Audit", AuditLog.objects.count() == initial)
-        result = invoke(MasterDataView, "put", "/api/master-data", user, {"id": master.pk, "entityType": "class", "name": master.name + " updated", "rowVersion": 1, "isActive": True})
+        result = invoke(MasterDataView, "put", "/api/master-data", user, {"id": master.pk, "entityType": "class", "name": master.name + " updated", "rowVersion": 1, "isActive": True, "changeReason": "Test update"})
         check("business update while paused", result.status_code == 200)
         check("update snapshot retained", EntitySnapshot.objects.filter(entity_type="master_record", entity_id=str(master.pk), entity_version=2).exists())
         check("update writes no Audit", AuditLog.objects.count() == initial)

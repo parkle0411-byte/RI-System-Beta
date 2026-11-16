@@ -29,6 +29,7 @@ try:
   Personnel.objects.create(name='ZZ Rating Agency',department='admin',role_code='admin',auth_user_id=str(u.pk),account_status='active',created_by='t',updated_by='t')
   c=Client(enforce_csrf_checks=True,HTTP_HOST='localhost');c.force_login(u);c.get('/api/auth/csrf')
   def call(method,body,url='/api/master-data'):
+   if method == 'put' and url == '/api/master-data': body = {'changeReason':'Test update', **body}
    return getattr(c,method)(url,data=json.dumps(body),content_type='application/json',HTTP_X_CSRFTOKEN=c.cookies['csrftoken'].value)
   for agency in allowed:
    response=call('post',dict(entityType='reinsurer',name='ZZ Agency '+agency,payload=dict(ratings=[{**base,'agency':agency}])));check('POST accepts '+agency,response.status_code==201 and response.json()['record']['payload']['ratings'][0]['agency']==agency)

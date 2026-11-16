@@ -32,6 +32,7 @@ try:
   Personnel.objects.create(name='ZZ Rating Fields',department='admin',role_code='admin',auth_user_id=str(u.pk),account_status='active',created_by='t',updated_by='t')
   c=Client(enforce_csrf_checks=True,HTTP_HOST='localhost');c.force_login(u);c.get('/api/auth/csrf')
   def call(method,body,url='/api/master-data'):
+   if method == 'put' and url == '/api/master-data': body = {'changeReason':'Test update', **body}
    return getattr(c,method)(url,data=json.dumps(body),content_type='application/json',HTTP_X_CSRFTOKEN=c.cookies['csrftoken'].value)
   before=MasterRecord.objects.count();snapshots=EntitySnapshot.objects.count()
   response=call('post',dict(entityType='reinsurer',name='ZZ Missing As-of',payload=dict(ratings=[dict(agency='S&P Global',grade='A')])));check('Ordinary POST rejects missing date without writes',response.status_code==400 and MasterRecord.objects.count()==before and EntitySnapshot.objects.count()==snapshots)

@@ -555,6 +555,9 @@ def phase_b(page):
     row = page.locator(".el-table__row", has_text="UI Re Gamma")
     check("reinsurer row shows abbreviation and 1 fixed clause", "URG" in row.inner_text() and re.search(r"\b1\b", row.inner_text()) is not None, row.inner_text())
     row.get_by_role("button", name="Deactivate").click()
+    reason = page.locator('.el-message-box:visible')
+    reason.locator('input').fill('UI test deactivation')
+    reason.get_by_role('button', name='OK', exact=True).click()
     check("deactivate", message(page, "deactivated"))
     page.locator(".el-table__row", has_text="UI Re Gamma").get_by_role("button", name="Reactivate").click()
     check("reactivate", message(page, "reactivated"))
@@ -1177,6 +1180,9 @@ def phase_k(page):
     check("a newly added reinsurer clause defaults to Property", "Property" in new_scope and "All classes" not in new_scope, new_scope)
     snap(page, "mdm-reinsurer-applies-to")
     dlg.locator(".el-dialog__footer button", has_text="Save changes").click()
+    reason = page.locator('.el-message-box:visible')
+    reason.locator('input').fill('UI test clause update')
+    reason.get_by_role('button', name='OK', exact=True).click()
     check("reinsurer saved with a class-scoped clause", message(page, "Reinsurer updated"))
     page.wait_for_timeout(500)
     page.locator(".mdm-tab", has_text="Clauses").click()
@@ -1229,8 +1235,16 @@ def phase_pr(page):
     editor.wait_for()
     check('Product Recall is selectable with USD as the default', selected_label(risk, page, 'Currency') == 'USD')
     events, losses = editor.locator('section').nth(0), editor.locator('section').nth(1)
+    check('Covered Events and Covered Loss have no ordering controls', events.get_by_role('button', name='↑').count() == 0 and losses.get_by_role('button', name='↑').count() == 0)
+    check('Choice of Law is hidden from the case form', page.locator('.case-form').get_by_text('Choice of Law and Jurisdiction').count() == 0)
+    check('Product Recall defaults to Occurrence Form', selected_label(section(page, 'Information'), page, 'Policy Form') == 'Occurrence Form')
     check('four template Covered Events and Covered Losses default to selected', events.locator('.repeat-row').count() == 4 and losses.locator('.repeat-row').count() == 4
           and events.locator('input[type=checkbox]:checked').count() == 4 and losses.locator('input[type=checkbox]:checked').count() == 4)
+    events.get_by_role('button', name='Add item').click()
+    extra = events.locator('.repeat-row').last
+    extra.locator('input:not([type=checkbox])').fill('Custom event')
+    check('custom Covered Event is appended after standard items', events.locator('.repeat-row').first.inner_text().strip().startswith('Defect') and extra.locator('input:not([type=checkbox])').input_value() == 'Custom event')
+    extra.get_by_role('button', name='Remove').click()
     first = losses.locator('.repeat-row').filter(has_text='First Party Recall Costs').first
     amount = first.locator('input:not([type=checkbox])').first
     amount.fill('123'); amount.press('Tab')

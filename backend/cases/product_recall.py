@@ -7,6 +7,14 @@ from decimal import Decimal, InvalidOperation
 
 EVENTS = ('Defect', 'Malicious Product Tampering', 'Product Extortion', 'Government Recall')
 LOSSES = ('First Party Recall Costs', 'Third Party Recall Costs', 'Consultant and Advisor Costs', 'Extortion Costs')
+CHOICE_OF_LAW = 'This (re)insurance shall be governed by and construed in according with the law of Republic of China, Taiwan and the each party agrees to submit to the exclusive jurisdiction of the Courts of the Republic of China, Taiwan.'
+
+
+def ordered_rows(rows, group):
+    """Put standard rows in template order; preserve the relative custom order."""
+    prefix = 'event' if group == 'events' else 'loss'
+    ranks = {f'{prefix}-{i}': i for i in range(1, 5)}
+    return sorted(rows or [], key=lambda row: ranks.get(row.get('id'), 5) if isinstance(row, dict) else 5)
 
 
 def scope(payload):
@@ -15,7 +23,7 @@ def scope(payload):
 
 def initial():
     return {
-        'choiceOfLaw': 'This (re)insurance shall be governed by and construed in according with the law of Republic of China, Taiwan and the each party agrees to submit to the exclusive jurisdiction of the Courts of the Republic of China, Taiwan.',
+        'choiceOfLaw': CHOICE_OF_LAW,
         'events': [{'id': f'event-{i}', 'name': name, 'selected': True, 'fixed': True} for i, name in enumerate(EVENTS, 1)],
         'losses': [{'id': f'loss-{i}', 'name': name, 'selected': True, 'fixed': True, 'amount': None} for i, name in enumerate(LOSSES, 1)],
         'additionalSublimits': [],
@@ -91,8 +99,6 @@ def issues(payload, *, ready=False):
                            ('conditionsPrecedent', 'Conditions Precedent'), ('subjectivities', 'Subjectivities')):
             if not _text(payload.get(key)):
                 add(key, label + ' is required')
-        if not _text(risk.get('choiceOfLaw')):
-            add('productRecall.choiceOfLaw', 'Choice of Law and Jurisdiction is required')
     def amount_issue(field, raw, *, required=False, cap=True):
         if raw is None or str(raw).strip() == '':
             if required:

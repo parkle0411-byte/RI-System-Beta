@@ -66,7 +66,7 @@ try:
   check('CSRF protection is enforced',c.put(URL,data=json.dumps(dict(rowVersion=2,ratings=default)),content_type='application/json').status_code==403)
   check('Common update never changes existing masters or cases',list(MasterRecord.objects.order_by('pk').values())==before and Case.objects.count()==case_count)
   member=members[0]
-  response=put(c,dict(id=member['id'],rowVersion=member['rowVersion'],entityType='reinsurer',name=member['name'],payload=dict(ratings=default,fixedClauses=[])),path='/api/master-data')
+  response=put(c,dict(id=member['id'],rowVersion=member['rowVersion'],entityType='reinsurer',name=member['name'],payload=dict(ratings=default,fixedClauses=[]),changeReason='Test update'),path='/api/master-data')
   check('Individual member editing cannot override the shared ratings',response.status_code==200 and response.json()['record']['payload']['ratings']==updated['ratings'] and market_profile()==updated)
   check('New common snapshots retain each saved version',EntitySnapshot.objects.get(entity_type='market_rating_profile',entity_id='lloyds',entity_version=1).snapshot_data['ratings']==saved['ratings'] and EntitySnapshot.objects.get(entity_type='market_rating_profile',entity_id='lloyds',entity_version=2).snapshot_data['ratings']==updated['ratings'])
   raise Rollback()

@@ -14,6 +14,8 @@ def check(n, ok, d=""): results.append((n, bool(ok), d))
 class Rollback(Exception): pass
 def call(c, m, body):
     c.get("/api/auth/csrf")
+    if m == 'put':
+        body = {'changeReason': 'Test update', **body}
     return getattr(c, m)("/api/master-data", data=json.dumps(body), content_type="application/json", HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value)
 def msg(r):
     try: return r.json().get("message")

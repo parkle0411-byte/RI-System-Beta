@@ -6,7 +6,7 @@ from django.db import transaction
 from django.test import Client
 from cases.draft import normalize_draft, validate_announce_ready
 from cases.draft_input import normalize as draft_normalize
-from cases.product_recall import initial
+from cases.product_recall import initial, ordered_rows
 
 assert os.environ.get('RI_DISPOSABLE_QA') == 'true'
 checks = []
@@ -18,6 +18,8 @@ risk = initial()
 risk['choiceOfLaw'] = 'QA bespoke jurisdiction'
 for item in risk['losses']:
     item['amount'] = 100
+risk['events'].reverse()
+risk['losses'].reverse()
 case = {'classOfBusiness': 'Product Recall', 'classCode': 'PR', 'reinsuranceStructure': 'QS', 'newOrRenew': 'New', 'currency': 'USD',
         'ownerPersonnelId': 1, 'ae': 'QA', 'originalInsured': 'Test', 'originalInsuredCn': '測試', 'reinsured': 'Cedant',
         'policyFrom': '2026-01-01', 'policyTo': '2027-01-01', 'situations': [], 'interest': '',
@@ -39,6 +41,13 @@ with transaction.atomic():
     check('Product Recall incomplete draft retains risk details', not draft['errors'] and draft['value']['productRecall']['losses'][0]['amount'] == 100, draft.get('errors'))
     result = normalize_draft(case)
     check('Product Recall normalizes without errors', not result['errors'], result['errors'])
+    no_form = copy.deepcopy(case); no_form['cglInformation'].pop('policyForm')
+    normal_new = normalize_draft(no_form); relaxed_new = draft_normalize(no_form)
+    check('new Product Recall defaults Policy Form in normal and draft inputs', normal_new['value']['cglInformation']['policyForm'] == 'Occurrence Form' and relaxed_new['value']['draftInput']['cglInformation']['policyForm'] == 'Occurrence Form')
+    blank_form = copy.deepcopy(case); blank_form['cglInformation']['policyForm'] = ''
+    check('explicitly cleared Policy Form remains blank', normalize_draft(blank_form)['value']['cglInformation']['policyForm'] == '')
+    renewal_no_form = copy.deepcopy(no_form); renewal_no_form['newOrRenew'] = 'Renew'; renewal_no_form['renewedFromTwRef'] = 'TWPR2601001'
+    check('renewal missing Policy Form is not silently defaulted', normalize_draft(renewal_no_form, existing_premiums=case)['value']['cglInformation']['policyForm'] == '')
     extra_clause = {**case, 'manualClauses':[{'code':'LMA9999','title':'Not applicable'}], 'clauseDetails':[{'code':'LMA9999','title':'Not applicable'}]}
     fixed = draft_normalize(extra_clause)
     check('Product Recall keeps only its two fixed reinsurance clauses', not fixed['errors'] and fixed['value']['clauses'] == ['LMA3333','INTERMEDIARY']
@@ -48,6 +57,10 @@ with transaction.atomic():
     check('Product Recall fixed Interest is retained', value.get('interest') == 'Reinsurance of the Reinsured’s liability under the original policy.')
     ready = validate_announce_ready(value, allow_zero_loss_years=True)
     check('complete Product Recall is ready', not ready, ready)
+    without_law = copy.deepcopy(value); without_law['productRecall']['choiceOfLaw'] = ''
+    check('fixed jurisdiction is not an editable required field', not any(i['field'] == 'productRecall.choiceOfLaw' for i in validate_announce_ready(without_law, allow_zero_loss_years=True)))
+    sample = [{'id':'event-3'}, {'id':'custom-b'}, {'id':'event-1'}, {'id':'custom-a'}, {'id':'event-2'}]
+    check('standard order precedes custom items in their existing relative order', [x['id'] for x in ordered_rows(sample, 'events')] == ['event-1', 'event-2', 'event-3', 'custom-b', 'custom-a'])
     from cases.placing_word import render
     doc = render(case, 'qa@example.com')
     xml = zipfile.ZipFile(io.BytesIO(doc)).read('word/document.xml')
@@ -57,9 +70,10 @@ with transaction.atomic():
                 'LIMIT OF INDEMNITY', 'each occurrence and in the aggregate', 'in respect of',
                 'each and every Insured Event', 'No previous recalls or product withdrawals since start selling.',
                 'LSW3001 Premium Payment Clause', 'All other terms and conditions are as per the original policy wordings.',
-                'QA bespoke jurisdiction']
+                'exclusive jurisdiction of the Courts of the Republic of China, Taiwan']
     check('Product Recall Placing Slip contains its risk details and wording', all(s in content for s in expected) and 'BREAKDOWN OF SUM INSURED' not in content, content[:1000])
     check('Product Recall Placing Slip keeps risk order', content.index('COVERED EVENTS') < content.index('COVERED LOSS') < content.index('LIMIT OF INDEMNITY'))
+    check('Placing Slip fixes standard event and loss order, and ignores saved jurisdiction', content.index('Defect') < content.index('Malicious Product Tampering') < content.index('Product Extortion') < content.index('Government Recall') and content.index('First Party Recall Costs') < content.index('Third Party Recall Costs') < content.index('Consultant and Advisor Costs') < content.index('Extortion Costs') and 'QA bespoke jurisdiction' not in content)
     from cases import placing_rules
     from cases.placing_views import signature
     placing_case = placing_rules.promote(copy.deepcopy(case))
