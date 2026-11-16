@@ -31,7 +31,7 @@ def append_preview(preview,month):
             result['rows'].append(dict(id=f'{key}:{i}',key=key,reinsurerKey='legacy-party',caseId=key,
                 caseUid=uid,caseRowVersion=t.version,legacyTransactionId=uid,installmentId='FULL',month=month,
                 originalInsured=d.get('insured',''),reinsured=d.get('cedant',''),reinsurer=d.get('party',''),
-                classCode='PD',type=d.get('newRenew',''),currency=t.currency,rate=fx.get('rate'),missingRate=pending,
+                classCode=d.get('classCode') or 'PD',type=d.get('newRenew',''),currency=t.currency,rate=fx.get('rate'),missingRate=pending,
                 ae=person['name'],effDate=d.get('effectiveDate',''),expDate=d.get('expiryDate',''),
                 comm=d.get('commissionRate',0),premium=person.get('premium'),income=person.get('income'),
                 policyNo=d.get('policyNo',''),firstPolicyNo=t.reference,endorseNo=d.get('endorsementNo',''),

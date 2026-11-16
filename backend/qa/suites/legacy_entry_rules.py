@@ -102,6 +102,9 @@ def workbook(rows):
         z.writestr('xl/worksheets/sheet1.xml',f'<?xml version="1.0"?><worksheet xmlns="{ns}"><sheetData>'+''.join(lines)+'</sheetData></worksheet>')
     return out.getvalue()
 keys=[]
+# 2026-11-16: the importer looks Register Class codes up in MDM Class (PD = PF Property).
+if not MasterRecord.objects.filter(entity_type='class',code='PF',is_active=True).exists():
+    MasterRecord.objects.create(entity_type='class',code='PF',name='Property',payload={},created_by='qa',updated_by='qa')
 def upload(rows):
     r=admin.post('/api/legacy/imports',{'file':SimpleUploadedFile('rules.xlsx',workbook(rows))});b=r.json()
     check('import preview accepted',r.status_code==201,b)

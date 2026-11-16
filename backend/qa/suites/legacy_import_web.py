@@ -1,7 +1,7 @@
 """Web import of reinsurer Registers (owner decisions 2026-11-11). Synthetic workbook, disposable MySQL only.
 
 Covers: admin-only two-step import; errors and warnings block the commit; PD + GL; owner corrections and
-exclusions; per-side settlement from the Register receipt/payment numbers (Accounting Dept. Ref.);
+exclusions; Class codes from MDM (PD = PF, inactive and non-Property Facility warn); per-side settlement from the Register receipt/payment numbers (Accounting Dept. Ref.);
 claim settlement on the last day of Closed Month; fully settled rows stay historical; rows with an open
 side continue in the native Finance workflow; settled-before-import receipts cannot be reversed; imported
 rows never feed Production, cannot be retracted, and native records stay unchanged; duplicates are skipped.
@@ -95,6 +95,11 @@ keys = []
 try:
     with transaction.atomic():
         MasterRecord.objects.create(entity_type='reinsurer', name=ORD, payload={}, created_by='qa', updated_by='qa')
+        # 2026-11-16: Register Class codes come from MDM Class (PD = PF Property).
+        for code, name, active in (('PF', 'Property', True), ('GL', 'Commercial General Liability', True),
+                                   ('QE', 'QA Engineering', True), ('QZ', 'QA Retired Class', False)):
+            if not MasterRecord.objects.filter(entity_type='class', code=code, is_active=True).exists():
+                MasterRecord.objects.create(entity_type='class', code=code, name=name, is_active=active, payload={}, created_by='qa', updated_by='qa')
         Personnel.objects.create(name='QA AE', department='reinsurance', role_code='sales', created_by='qa', updated_by='qa')
         clients = {}
         for role in ('admin', 'sales', 'accounting'):
@@ -114,7 +119,7 @@ try:
         check('anonymous cannot preview an import', upload(Client(HTTP_HOST='localhost'), good).status_code in (401, 403))
 
         r = upload(admin, workbook([row('QA9101', Class='XX')])); bad = r.json(); keys.append(ImportBatch.objects.get(pk=bad['id']).storage_key)
-        check('row errors are listed', r.status_code == 201 and bad['manifest']['errors'][0]['message'] == 'Class must be PD or GL.', bad)
+        check('row errors are listed', r.status_code == 201 and bad['manifest']['errors'][0]['message'].startswith('Class must be a Class code in Master Data Management'), bad)
         check('errors block the import', commit(admin, bad).status_code == 409)
         r = upload(admin, workbook([row('QA9102', Reinsurer='QA Unknown Reinsurer')])); warn = r.json(); keys.append(ImportBatch.objects.get(pk=warn['id']).storage_key)
         check('warnings are listed', warn['manifest']['warnings'] and not warn['manifest']['errors'], warn['manifest'])
@@ -126,6 +131,12 @@ try:
         check('an open claim without Issue Date of Claim is a blocking warning', 'Issue Date of Claim is required' in noissue['manifest']['warnings'][0]['message'], noissue['manifest'])
         r = upload(admin, workbook([row('QA9105', **{'R/I Comm.': ('ROUND(U2*0.1,0)', '1500')})])); badrate = r.json(); keys.append(ImportBatch.objects.get(pk=badrate['id']).storage_key)
         check('a commission amount that is not premium x formula rate is a blocking warning', 'R/I Comm. does not equal' in badrate['manifest']['warnings'][0]['message'], badrate['manifest'])
+        r = upload(admin, workbook([row('QA9108', Class='QZ', Reinsurer=ORD)])); inactive = r.json(); keys.append(ImportBatch.objects.get(pk=inactive['id']).storage_key)
+        check('an inactive MDM Class is a blocking warning', not inactive['manifest']['errors'] and 'is inactive in Master Data Management' in inactive['manifest']['warnings'][0]['message']
+              and commit(admin, inactive).status_code == 409, inactive['manifest'])
+        r = upload(admin, workbook([row('QA9107', Class='GL')])); nonprop = r.json(); keys.append(ImportBatch.objects.get(pk=nonprop['id']).storage_key)
+        check('a non-Property row with the Allianz Facility is a blocking warning', not nonprop['manifest']['errors']
+              and any('Allianz Facility payment rule applies to Property only' in w['message'] for w in nonprop['manifest']['warnings']), nonprop['manifest'])
         r = upload(admin, workbook([row('QA9103', **{' Cedant Receipt No': 'CR', 'Receive Date': 'Claim'})])); nodate = r.json(); keys.append(ImportBatch.objects.get(pk=nodate['id']).storage_key)
         check('a settled premium side needs its Receive Date', 'Receive Date is required' in nodate['manifest']['errors'][0]['message'], nodate['manifest'])
 
@@ -134,7 +145,7 @@ try:
               and m['settlement'] == {'fully': 3, 'open': 5} and not m['errors'] and not m['warnings'], m)
         check('owner exclusion F13333 is listed and skipped', [x['serial'] for x in m['excluded']] == ['F13333'])
         check('owner correction F2898 is listed', m['corrections'][0]['serial'] == 'F2898' and m['corrections'][0]['changes']['Fac / Claim']['after'] == 'Fac')
-        check('preview writes no transactions', not LegacyTransaction.objects.exists() and LegacyAudit.objects.filter(action='import_preview').count() == 6)
+        check('preview writes no transactions', not LegacyTransaction.objects.exists() and LegacyAudit.objects.filter(action='import_preview').count() == 8)
         check('a stale SHA256 is refused', commit(admin, b, 'f' * 64).status_code == 409)
         check('non-admin cannot commit', commit(fin, b).status_code == 403)
         r = commit(admin, b); done = r.json()
@@ -150,6 +161,7 @@ try:
         check('rates from typed amounts (15% / 1%) are stored', t['QA9001'].data['commissionRate'] == 15 and t['QA9001'].data['taxRate'] == 1
               and t['QA9001'].data['rateSource'] == {'commissionRate': 'amount', 'taxRate': 'amount'})
         check('claims carry no premium rates', 'commissionRate' not in t['QA9004'].data)
+        check('PD row stored as MDM PF Property with its Register code', t['QA9001'].data['classOfBusiness'] == 'Property' and t['QA9001'].data['classCode'] == 'PD')
         check('GL row stored as CGL', t['QA9003'].data['classOfBusiness'] == 'Commercial General Liability' and t['QA9003'].data['classCode'] == 'GL')
         check('import audit lists every transaction', set(LegacyAudit.objects.get(entity=b['id'], action='batch_imported').after['transactions']) == {str(x.uid) for x in t.values()})
 
@@ -236,6 +248,17 @@ try:
         r = upload(admin, good); again = r.json(); keys.append(ImportBatch.objects.get(pk=again['id']).storage_key)
         check('re-uploading skips already imported serials', again['manifest']['eligible'] == 0 and len(again['manifest']['duplicates']) == 8)
         check('nothing to import cannot be committed', commit(admin, again).status_code == 409 and LegacyTransaction.objects.filter(batch_id=again['id']).count() == 0)
+        # 2026-11-16: any MDM Class code imports; Production and Dashboard follow the stored class.
+        mar = admin.get('/api/production-report?month=2026-03').json()
+        pr = {x.get('legacyTransactionId'): x.get('classCode') for x in mar['rows'] if x.get('legacyTransactionId')}
+        check('Production shows the GL import as GL and PD as PD', pr.get(str(t['QA9003'].uid)) == 'GL' and pr.get(str(t['QA9001'].uid)) == 'PD', pr)
+        r = upload(admin, workbook([row('QA9106', Class='qe', Reinsurer=ORD)])); qe = r.json(); keys.append(ImportBatch.objects.get(pk=qe['id']).storage_key)
+        check('another MDM Class code (lower case) previews without errors or warnings', not qe['manifest']['errors'] and not qe['manifest']['warnings'], qe['manifest'])
+        check('it imports with the MDM Class name', commit(admin, qe).status_code == 200
+              and (lambda d: d['classOfBusiness'] == 'QA Engineering' and d['classCode'] == 'QE')(LegacyTransaction.objects.get(number='QA9106').data))
+        from legacy.dashboard import dashboard_inputs
+        names = {x['className'] for p in dashboard_inputs()['policies'] for x in p['items']}
+        check('Dashboard groups legacy premium by the stored Class name', {'Property', 'Commercial General Liability', 'QA Engineering'} <= names, names)
         raise Rollback()
 except Rollback:
     pass

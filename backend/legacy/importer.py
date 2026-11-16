@@ -2,7 +2,7 @@
 
 2026-11-11 (owner decisions): System Administrators import through the web in two steps
 (preview, then commit with the reviewed SHA256). Any error or warning blocks the commit.
-PD and GL rows are accepted. Settled and unsettled rows are both imported:
+Class codes come from Master Data Management (PD = PF Property; 2026-11-16). Settled and unsettled rows are both imported:
 - a cash leg is settled when its Register receipt/payment number is filled
   (Cedant Receipt No / Cedant Payment No for the Cedant leg; Reinsurer Receipt No /
   Reinsurer Payment No. for the reinsurer leg); its number becomes the Accounting Dept. Ref.
@@ -32,7 +32,21 @@ from .ledger import detect_rule
 
 APPROVED_EXCLUSIONS=json.loads(Path(__file__).with_name('import_exclusions.json').read_text(encoding='utf-8'))
 APPROVED_CORRECTIONS=json.loads(Path(__file__).with_name('import_corrections.json').read_text(encoding='utf-8'))
-CLASSES={'PD':'Property','GL':'Commercial General Liability'}
+# 2026-11-16 (owner): the Register Class code is looked up in Master Data Management (Class).
+# PD is the Register's code for MDM PF (Property). An inactive Class is a blocking warning.
+CLASS_ALIASES={'PD':'PF'}
+PROPERTY_ONLY_RULES={'allianz':'Allianz','great_american':'Great American','qbe':'QBE'}
+
+
+def class_lookup():
+    """MDM Class code -> (name, active); an active record wins over an inactive one with the same code."""
+    from masterdata.models import MasterRecord
+    out={}
+    for code,name,active in (MasterRecord.objects.filter(entity_type='class').exclude(code__isnull=True)
+                             .order_by('is_active','-display_order','-id').values_list('code','name','is_active')):
+        key=label(code).upper()
+        if key:out[key]=(name,active)
+    return out
 CURRENCIES=('TWD','USD','MYR','EUR','JPY','GBP','HKD')
 SETTLEMENT_COLUMNS={'cedant':('Cedant Receipt No','Cedant Payment No'),
                     'reinsurer':('Reinsurer Receipt No','Reinsurer Payment No.')}
@@ -94,7 +108,7 @@ def _date(v,key):
     return value if len(value)==10 and value[4]=='-' else ''
 
 
-def converted(row, rule_cache):
+def converted(row, rule_cache, classes=None):
     values,_=corrected_values(row)
     v=values; notes=[]
     def money(key, required=True):
@@ -107,7 +121,11 @@ def converted(row, rule_cache):
     if not serial or len(serial)>80 or not reference or len(reference)>192:
         raise ValueError('A valid original serial and old reference are required.')
     code=label(v.get('Class')).upper()
-    if code not in CLASSES:raise ValueError('Class must be PD or GL.')
+    if classes is None:classes=class_lookup()
+    master=classes.get(CLASS_ALIASES.get(code,code)) if code else None
+    if master is None:raise ValueError('Class must be a Class code in Master Data Management (PD = PF Property).')
+    class_name,class_active=master
+    if not class_active:notes.append(f'Class {code} ({class_name}) is inactive in Master Data Management; reactivate it before importing.')
     if v.get('Fac / Claim') not in ('Fac','Claim'):raise ValueError('Fac / Claim must be Fac or Claim.')
     currency=label(v.get('Currency')).upper()
     if currency not in CURRENCIES:raise ValueError('Unsupported currency.')
@@ -120,7 +138,7 @@ def converted(row, rule_cache):
     if party not in rule_cache:rule_cache[party]=detect_rule(party)
     claim=v.get('Fac / Claim')=='Claim'
     data=dict(reference=reference,currency=currency,party=party,cedant=cedant,
-        classOfBusiness=CLASSES[code],classCode=code,
+        classOfBusiness=class_name,classCode=code,
         insured=insured,insuredCn=v.get('Insured (in Chinese)',''),
         effectiveDate=effective,expiryDate=expiry,
         revenueMonth=date_value(v.get('Revenue Month'))[:7] if _date(v,'Revenue Month') else '',
@@ -186,6 +204,9 @@ def converted(row, rule_cache):
     m=LOSS_NOTE.match(str(data.get('claimNote') or ''))
     data['lossNo']=m.group(1).strip()[:160] if (claim and m) else ''
     if not data['rule']:notes.append('Payment rule awaiting confirmation for future entries.')
+    # Native Allianz / Great American / QBE Facility rules apply to Property only (owner 2026-11-16: warn).
+    if data['rule'] in PROPERTY_ONLY_RULES and class_name.strip().casefold()!='property':
+        notes.append(f'{PROPERTY_ONLY_RULES[data["rule"]]} Facility payment rule applies to Property only; this row is {class_name}. Check the Class or the Reinsurer.')
     # Cash legs (claims reverse the parties): settled when the Register number is filled.
     # Settlement dates: premium rows use Receive Date / Pay Date; claim rows (whose Register
     # dates read "Claim") use the last day of Closed Month (owner 2026-11-11).
@@ -216,7 +237,7 @@ def _manifest_row(item):
 
 def scan(content):
     """Read and convert every row without writing anything (used by preview and commit)."""
-    parsed=read_workbook(content);rules={};errors=[];warnings=[];seen=set();duplicates=[];items=[]
+    parsed=read_workbook(content);rules={};class_codes=class_lookup();errors=[];warnings=[];seen=set();duplicates=[];items=[]
     existing=set(LegacyTransaction.objects.filter(original_serial__isnull=False).values_list('original_serial',flat=True))
     totals={};excluded=[];corrections=[];classes={};settled=dict(fully=0,open=0)
     for row in parsed['rows']:
@@ -229,7 +250,7 @@ def scan(content):
         seen.add(serial)
         _,fix=corrected_values(row)
         if fix:corrections.append(fix)
-        try:item,notes=converted(row,rules)
+        try:item,notes=converted(row,rules,class_codes)
         except ValueError as exc:
             errors.append(dict(row=row['row'],serial=serial,message=str(exc)));continue
         items.append((row,item))

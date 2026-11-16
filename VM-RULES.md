@@ -492,7 +492,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - **網頁匯入 Register（2026-11-11 業主決定）**：
   - 限 System Administrator，在 Legacy 分頁 Import Batches 上傳 Register（工作表 `Facultative`）→ 預覽 → 確認匯入（核對 SHA256）。預覽有任何錯誤或警告都不能匯入；沒有新交易可匯入時也不能確認。不提供網頁撤回；匯錯以業主授權維護程序處理。可分批匯入各再保人的 Register；已匯入的流水號自動略過。
-  - 接受 Class PD 與 GL（GL 以 CGL 舊資料呈現）；Fac / Claim 必填；不再限定已結清。業主指定的排除（`import_exclusions.json`，F13333）與更正（`import_corrections.json`，F2898：Fac / Claim＝Fac、New / Renew＝New）在預覽列出，原始 Excel 值保留。
+  - Class 依 Master Data Management 的 Class 代碼比對（2026-11-16 業主決定；不分大小寫），險種名稱用 MDM 名稱，Register 原代碼照存；Register 的 PD 視同 MDM 的 PF（Property）；MDM 沒有的代碼為錯誤；已停用的 Class 為警告（須先在 MDM 重新啟用）；非 Property 列的再保人若為 Allianz／Great American／QBE Facility（新系統這三種 Facility 規則只適用 Property）為警告，不設放行清單；Legacy Dashboard 與 Production 依每筆存的險種顯示；Fac / Claim 必填；不再限定已結清。業主指定的排除（`import_exclusions.json`，F13333）與更正（`import_corrections.json`，F2898：Fac / Claim＝Fac、New / Renew＝New）在預覽列出，原始 Excel 值保留。
   - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（2026-11-15 起：保費列與批單列依此月份列入 Production；起始月 2026-11 以前視為已認列的歷史月份，理賠不列入）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
   - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
   - 匯入列不建立 Case、不能退回草稿或編輯業務資料；保費列與批單列依 Revenue Month 列入 Production 與 Dashboard（2026-11-15，見 §9 起始月）。
@@ -687,6 +687,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | 11-13 | 舊資料量優化：匯入加速、未結清舊資料每筆只算一次＋逐筆快取、Accounting 畫面處理大量資料 | `backups/legacy_scale_20261113_144820` | `ri-backend:before-legacy-scale-20261113_144820`／`ri-frontend:before-legacy-scale-20261113_144820` | 候選映像 122 組 API（含 `legacy_open_cache` 192 項）、329 項畫面；正式資料 520 個 GET 回應部署前後逐位元組相同；1 萬筆舊資料上正式版與候選版回應逐位元組相同；無 migration、無資料寫入 |
 
 | 11-13 | Oversea Performance Month 獨立設定；新案必填，既有月份保留 | `backups/oversea_performance_20261113_163724` | `ri-backend:before-oversea-performance-20261113_163724`／`ri-frontend:before-oversea-performance-20261113_163724` | 候選映像完整 API 與畫面回歸；無 migration、無正式資料修改 |
+| 11-16 | 舊資料匯入 Class 改讀 MDM（PD＝PF；停用 Class、非 Property 的 Allianz／GA／QBE Facility 為警告）；Legacy Dashboard／Production 依存的險種（只換後端） | `backups/legacy_class_mdm_20261116_162231` | `ri-backend:before-legacy-class-mdm-20261116_162231` | 候選映像完整 API 131 組（legacy_import_web 63，7 項新行為檢查以舊程式驗證會失敗）、畫面 A＋L＋I＋Y；無 migration、不改資料 |
 
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 

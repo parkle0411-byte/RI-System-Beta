@@ -17,7 +17,8 @@ HEAD = ['流水號', 'Insured (in English)', 'Insured (in Chinese)', 'Class', 'T
         'Net Premium to Reinsurer', 'Revenue Month', 'Exchange Rate', 'New / Renew', 'Fac / Claim', 'Receive Date', 'Pay Date',
         'Cedant Receipt No', 'Reinsurer Payment No.', 'Full-closed']
 def row(serial, **kw):
-    v = {'流水號': serial, 'Insured (in English)': 'UI Import Insured ' + serial, 'Insured (in Chinese)': '匯入' + serial, 'Class': 'PD',
+    v = {'流水號': serial, 'Insured (in English)': 'UI Import Insured ' + serial, 'Insured (in Chinese)': '匯入' + serial, 'Class': 'PAR',  # 2026-11-16: an MDM Class code of the UI seed (Property = PAR); PD = PF is covered by the API suite
+        
          'TW Ref. No.': 'TWUI-' + serial, 'Reinsurer': FAC, 'Cedant': 'UI Cedant', "Cedant's Policy No.": 'SOA-' + serial,
          'Effective Date': D('2026-03-01'), 'Expiry Date': D('2027-03-01'), 'AE': 'UI Sales', 'Currency': 'TWD', '100%Premium': '20000',
          'Share': '0.5', 'Our Share Premium': '10000', 'R/I Comm.': '1500', 'Claim': '0', 'Tax': '100', 'Bkg.(%)': '0.2',
@@ -53,7 +54,7 @@ with sync_playwright() as p:
         panel.get_by_role("button", name="Preview").click(); panel.get_by_text("Rows in file").wait_for()
     preview(BAD, "UI Bad Register.xlsx")
     page.get_by_test_id("legacy-import-errors").wait_for()
-    check("preview lists row errors", "Class must be PD or GL." in page.get_by_test_id("legacy-import-errors").inner_text())
+    check("preview lists row errors", "Class must be a Class code in Master Data Management" in page.get_by_test_id("legacy-import-errors").inner_text())
     check("errors disable the import button", page.get_by_test_id("legacy-import-commit").is_disabled())
     panel.get_by_role("button", name="Clear").click()
     preview(GOOD, "UI Register.xlsx")

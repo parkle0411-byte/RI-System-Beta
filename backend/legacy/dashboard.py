@@ -46,7 +46,7 @@ def dashboard_inputs():
                 policy['expiry'] = expiry
             amounts = d.get('amounts') if isinstance(d.get('amounts'), dict) else {}
             policy['items'].append({'currency': t.currency, 'premium': amounts.get('premium') or 0,
-                                    'className': CLASS_NAMES.get(str(d.get('classCode') or ''), 'Property'),
+                                    'className': d.get('classOfBusiness') or CLASS_NAMES.get(str(d.get('classCode') or ''), 'Property'),
                                     'party': str(d.get('party') or '')})
         if kind in ('premium', 'endorsement') and t.revenue_month:
             # 2026-11-15: imported and new legacy premium/endorsement rows are Production by
