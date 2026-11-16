@@ -6,7 +6,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import InsuredMaster from './InsuredMaster.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiFetch } from '../api'
 import { can } from '../auth'
 import { RATING_AGENCIES, UNIVERSAL_CLAUSES, compareClauses, normalizeClauseCode, normalizeClauseList, normalizeRatingList } from '../alpha/constants'
@@ -200,6 +200,7 @@ async function loadMasterData() {
 function openMasterDialog(row = null) {
   editingMasterId.value = row ? Number(row.id) : null
   editingMasterRowVersion.value = row ? Number(row.rowVersion) : null
+  mdmForm.isActive = row ? row.isActive : true
   Object.assign(mdmForm, row
     ? {
         entityType: row.entityType, code: row.code || '', name: row.name || '',
@@ -253,6 +254,14 @@ function masterPayloadFromForm() {
   return payload
 }
 
+const reasonTypes = ['reinsurer', 'reinsured', 'foreign_broker', 'class', 'clause']
+async function requestMasterReason() {
+  try {
+    const result = await ElMessageBox.prompt('Enter the reason for this change.', 'Change reason', { inputValidator: value => Boolean(String(value || '').trim()) || 'Reason is required.' })
+    return result.value.trim()
+  } catch { return null }
+}
+
 async function saveMasterRecord() {
   if (!mdmForm.name.trim()) {
     ElMessage.error('Name is required')
@@ -272,12 +281,14 @@ async function saveMasterRecord() {
     ElMessage.error(`Select All classes or at least one Class for ${unscoped.code}`)
     return
   }
+  const changeReason = editingMasterId.value && reasonTypes.includes(mdmForm.entityType) ? await requestMasterReason() : ''
+  if (editingMasterId.value && reasonTypes.includes(mdmForm.entityType) && !changeReason) return
   mdmSaving.value = true; shell.error = ''
   try {
     const body = await jsonOrThrow(await apiFetch('/api/master-data', {
       method: editingMasterId.value ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(editingMasterId.value
-        ? { entityType: mdmForm.entityType, code: mdmForm.code, name: mdmForm.name, payload: JSON.stringify(masterPayloadFromForm()), id: editingMasterId.value, rowVersion: editingMasterRowVersion.value }
+        ? { entityType: mdmForm.entityType, code: mdmForm.code, name: mdmForm.name, payload: JSON.stringify(masterPayloadFromForm()), id: editingMasterId.value, rowVersion: editingMasterRowVersion.value, isActive: mdmForm.isActive, changeReason }
         : { entityType: mdmForm.entityType, code: mdmForm.code, name: mdmForm.name, payload: JSON.stringify(masterPayloadFromForm()) })
     }))
     mdmDialogVisible.value = false
@@ -291,13 +302,15 @@ async function saveMasterRecord() {
 }
 
 async function toggleMasterStatus(row) {
+  const changeReason = row.isActive && reasonTypes.includes(row.entityType) ? await requestMasterReason() : ''
+  if (row.isActive && reasonTypes.includes(row.entityType) && !changeReason) return
   mdmSaving.value = true; shell.error = ''
   try {
     const body = await jsonOrThrow(await apiFetch('/api/master-data', {
       method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         id: row.id, rowVersion: row.rowVersion, entityType: row.entityType,
-        code: row.code, name: row.name, payload: JSON.stringify(row.payload || {}), isActive: !row.isActive
+        code: row.code, name: row.name, payload: JSON.stringify(row.payload || {}), isActive: !row.isActive, changeReason
       })
     }))
     await loadMasterData()

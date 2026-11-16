@@ -539,6 +539,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ---
 
+- **Master Data 修改理由（2026-11-16）**：Reinsurer、Cedant、Foreign RI Broker、Class 與一般 Clause 的編輯及停用必須填寫非空理由；新增與單純重新啟用不要求。理由保存在版本快照；Audit 暫停時不寫 Audit。
+
 ## 部署與回復紀錄
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
@@ -688,6 +690,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | 11-13 | 舊資料量優化：匯入加速、未結清舊資料每筆只算一次＋逐筆快取、Accounting 畫面處理大量資料 | `backups/legacy_scale_20261113_144820` | `ri-backend:before-legacy-scale-20261113_144820`／`ri-frontend:before-legacy-scale-20261113_144820` | 候選映像 122 組 API（含 `legacy_open_cache` 192 項）、329 項畫面；正式資料 520 個 GET 回應部署前後逐位元組相同；1 萬筆舊資料上正式版與候選版回應逐位元組相同；無 migration、無資料寫入 |
 
 | 11-13 | Oversea Performance Month 獨立設定；新案必填，既有月份保留 | `backups/oversea_performance_20261113_163724` | `ri-backend:before-oversea-performance-20261113_163724`／`ri-frontend:before-oversea-performance-20261113_163724` | 候選映像完整 API 與畫面回歸；無 migration、無正式資料修改 |
+| 11-16 | Master Data 編輯及停用必填理由 | `backups/mdm_reason_20261116_092729` | `ri-backend:before-mdm-reason-20261116_092729`／`ri-frontend:before-mdm-reason-20261116_092729` | 候選 API 40/40、五類畫面操作與基本畫面測試；無 migration |
 | 11-16 | 舊資料匯入 Class 改讀 MDM（PD＝PF；停用 Class、非 Property 的 Allianz／GA／QBE Facility 為警告）；Legacy Dashboard／Production 依存的險種（只換後端） | `backups/legacy_class_mdm_20261116_162231` | `ri-backend:before-legacy-class-mdm-20261116_162231` | 候選映像完整 API 131 組（legacy_import_web 63，7 項新行為檢查以舊程式驗證會失敗）、畫面 A＋L＋I＋Y；無 migration、不改資料 |
 | 11-16 | Production Report 的 Property 一律顯示 PD；已存報表版本 PF→PD（2026-10 一列，正式資料寫入，前後內容存備份；只換後端） | `backups/production_pd_20261116_173040` | `ri-backend:before-production-pd-20261116_173040` | 候選映像完整 API 131 組（production_api 84，3 項新行為檢查以舊程式驗證會失敗）；基礎版本中途換成 00f7eb21（指南更新）後重建，重跑相關 11 組 API 與畫面 A＋P1＋P2；正式資料副本演練（其他資料表 CHECKSUM 不變）；無 migration |
 
@@ -702,6 +705,8 @@ Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別�
 ## 近期變更
 
 - 2026-11-16：依業主確認部署 Product Recall 的固定 Covered Events／Loss 順序、固定法律管轄條文及新案預設 Occurrence Form。
+
+- 2026-11-16：Master Data 編輯及停用必填理由，理由保存於版本快照。
 
 - 2026-11-15：依業主同意部署財會規則統一第二批（交易編號重整，§8.1）：分期 I 放在 T 前（`-R1-I2-T1`）、整件 Reverse 重建改 `-V{輪次}`、財會更正沖回改 `{原編號}-ADJ{次數}-OLD`（同次更正與新帳共用次數）；C 只代表理賠。正式資料沒有舊寫法帳款，不需轉換；理賠、批單、無分期保費與舊資料編號不變。
 

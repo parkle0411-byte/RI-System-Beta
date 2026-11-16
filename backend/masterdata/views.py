@@ -383,6 +383,7 @@ class MasterDataView(NoStoreMixin, APIView):
 
             if current.entity_type != entity_type:
                 return Response({"error": "type_immutable", "message": "Master-data type cannot be changed."}, status=400)
+
             if current.entity_type == 'ae':
                 return Response({'error':'ae_master_read_only', 'message':'Account Executive master data is historical. Select Personnel in the Case instead.'}, status=409)
 
@@ -429,6 +430,11 @@ class MasterDataView(NoStoreMixin, APIView):
                     status=409,
                 )
 
+            change_reason = clean_text(body.get("changeReason"), 2000)
+            requires_reason = entity_type in {"reinsurer", "reinsured", "foreign_broker", "class", "clause"} and not (not current.is_active and is_active and code == (current.code or "") and name == current.name and payload == (current.payload or {}))
+            if requires_reason and not change_reason:
+                return Response({"error": "reason_required", "message": "A change reason is required."}, status=400)
+
             before = master_state(current, blank_code=True)
             was_active = current.is_active
             current.code = code or None
@@ -440,7 +446,7 @@ class MasterDataView(NoStoreMixin, APIView):
             if is_active:
                 current.deactivated_by = None
                 current.deactivated_at = None
-            else:
+            elif was_active:
                 current.deactivated_by = actor
                 current.deactivated_at = timezone.now()
             try:
@@ -461,12 +467,12 @@ class MasterDataView(NoStoreMixin, APIView):
                 action, reason = "deactivate_master", "master_deactivated"
             record_snapshot(
                 entity_type="master_record", entity_id=current.id, version=current.row_version,
-                reason=reason, data=after, created_by=actor,
+                reason=reason, data={**after, "changeReason": change_reason}, created_by=actor,
             )
             record_audit(
                 entity_type="master_record", entity_id=current.id, action=action,
                 before=before, after=after, actor=actor_info,
-                request_id=request_id_from(request), metadata=AUDIT_METADATA,
+                request_id=request_id_from(request), metadata={**AUDIT_METADATA, "changeReason": change_reason},
             )
 
         return Response({"ok": True, "displayVersion": "V 0.003", "record": serialize_record(current)})
