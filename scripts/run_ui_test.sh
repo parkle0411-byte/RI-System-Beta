@@ -4,7 +4,7 @@
 #
 #   scripts/run_ui_test.sh            執行（截圖放在 qa/ui/out/）
 #   PHASES="A H" scripts/run_ui_test.sh   只跑列出的階段（除錯用；階段之間有先後依賴，要從 A 開始）
-#   預設全部：A H R B0 B K C D E F G P1 P2，加上 Oversea（O）、舊案（L）、Accounting 載入失敗（X）等專項與主資料重新啟用（M）
+#   預設全部：A H R B0 B K C D E F G P1 P2，加上 Oversea（O）、舊案（L）、Accounting 載入失敗（X）、伺服器分頁（Y）等專項與主資料重新啟用（M）
 #   KEEP=1 scripts/run_ui_test.sh     測完先不刪環境（除錯用；之後手動 docker compose -p ri-uitest down -v）
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -138,8 +138,10 @@ case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" I "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 legacy_import_ui.py || STATUS=1
 esac
-# Y: Accounting 分段載入——預設 Unreconciled、已結清舊資料歷史背景載入後合併（2026-11-13；需在 L、I 之後，沿用其舊資料）。
+# Y: Accounting 伺服器分頁（2026-11-17；取代 11-13 的背景合併）——All Accounts／Settled/Closed／Brokerage 每頁 100 列由伺服器篩選排序，
+#    先準備 160 筆合成的已結清舊資料歷史（需在 L、I 之後）。
 case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" Y "*)
+  docker exec -i ri-ut-backend python manage.py shell < qa/ui/accounting_paging_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 accounting_history_ui.py || STATUS=1
 esac

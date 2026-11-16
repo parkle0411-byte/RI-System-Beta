@@ -59,9 +59,10 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 2 小時，目前為 132 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 2 小時，目前為 133 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 分段載入 Y 16 項、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16），合計 356 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **Accounting 伺服器分頁一致性**（2026-11-17）：`scripts/run_qa.sh pages`——以正式資料（唯讀）取伺服器各分頁，與畫面原本的程式（`accountingRows.js`、`accountingList.js`，node 執行）逐頁比對；約 2 分鐘。`PAGES_BACKEND=<容器>` 改用其他後端（例：壓測環境）。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16），合計 364 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
@@ -362,7 +363,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 原收付登錄歷史由帳款明細查看（History主分頁已改為Settled/Closed）。整筆登錄保留有效／已沖回狀態及實際收付款日期。分三欄：應收沖銷合計、應付沖銷合計、實收付淨額（新登錄按幣別及方向分開，淨額僅供參考；純抵銷只限既有歷史）。可查會計參考號、TW Ref、對象與日期，展開逐筆現金／抵銷、沖回與替代關係。
 - 明細 Applied amount 改 Receipt / Payment Amount；一般歷史不顯示 Swiss period，Swiss需要時列 Swiss settlement due date。T3按鈕 Brokerage settlement details。
 - 移除舊人工結清、取消結清、直接更改付款金額及 Offset with original 入口。Complete missing days 只補歷史缺漏，有效天數與新公告帳款不能用此入口更改。
-- **分段載入（2026-11-13 業主決定）**：Accounting 預設開在 Unreconciled Accounts。畫面先讀 `?view=list&legacy=open`——全部新系統案件、匯入時尚未收付完的舊資料（只要任一方未結清，整筆交易都在此）與舊資料上新增的批單／理賠——即可對帳與收付；「匯入時雙方都已結清」的舊資料歷史（唯讀）另以 `?view=list&legacy=history` 在背景載入，載好後自動併入 All Accounts／Settled/Closed／Brokerage，不清除已勾選的帳款。背景未完成時這三個分頁顯示載入提示；失敗時顯示警告與 Retry，其餘帳款不受影響。沒有舊資料歷史時不發第二個請求；歷史已載入且筆數未變時，寫入後的重新整理不重讀歷史，按 Refresh 才重讀。兩段合起來與 `?view=list` 完全相同（測試 `accounting_segments`），不帶 `legacy` 參數的回應不變。
+- **伺服器分頁（2026-11-17 業主決定；取代 2026-11-13 的背景合併）**：Accounting 預設開在 Unreconciled Accounts，畫面讀 `?view=list&legacy=open`（全部新系統案件、匯入時尚未收付完的舊資料與舊資料上新增的批單／理賠），Unreconciled／Reconciled 在瀏覽器篩選、勾選、審核與收付，與以前相同。**All Accounts／Settled/Closed／Brokerage** 改由伺服器篩選、排序、分頁：`GET /api/accounting?view=page&tab=all|settled|brokerage&page=N` 加同名篩選條件（reference、insured、cedant、reinsurer、currency、direction、settlement（逗號分隔）、source、origin、due），**固定每頁 100 列**，包含匯入時已結清的舊資料歷史；標題數字＝符合條件的帳款列總數（全系統，不是案件數）。文字欄停止輸入 0.3 秒後才查詢；換頁或改條件時短暫顯示載入中；失敗時顯示錯誤與 Retry。下拉選單（Cedant、Reinsurer、幣別）由 `?view=options` 提供，含只出現在歷史中的名稱（打開時與 Refresh 時讀取）。伺服器的轉換、篩選與排序逐行移植自畫面程式（`backend/cases/accounting_pages.py` ↔ `frontend/src/alpha/accountingRows.js`、`frontend/src/views/accountingList.js`，兩邊要一起改），以 `run_qa.sh pages` 逐頁比對。已結清歷史整份不再下載到瀏覽器；`?view=list`、`legacy=open`／`history` 回應不變。
 - 每頁預設100列（50／100／200／500）；?view=list精簡資料，返回頁面先顯示快取並背景更新，更新前財務操作停用。載入失敗（伺服器錯誤、連線中斷）時在表格上方常駐紅色提示與 Retry，不顯示「No matching accounts」；已有上次載入的清單時保留並註明載入時間，財務操作停用到重新載入成功（2026-11-10）。窄螢幕表格橫向捲動，不以左固定欄遮擋操作。
 
 - 所有新收付金額及合計以 ISO 幣別代碼顯示（例 USD 1,000.00、TWD 30,000），各幣別分列應收、應付、參考淨額；待登錄與已登錄合計分開。彈窗已完成列唯讀，失敗列可更正／移出後重試。
@@ -469,14 +470,14 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 每件案件結果快取：以「資料內容指紋＋台北日期」記住付款排程與交易明細；每 worker 最多 30,000 筆（約多 210 MB）。
 - Dashboard／Production 結果快取：先取資料變更指紋再讀資料；每 worker 32 筆、TTL 5 分鐘；Generate／Close／Exclude 不用快取。
 - 2026-11-02 量測：Accounting 精簡清單第二次打開約 10.2 秒（剩餘主要是讀全部案件約 4 秒）；Production 未快取約 9 秒；Dashboard 第二次約 8 秒。
-- 業主決定不做：Production 連結表只讀 3 個欄位、跨 worker 共用快取、每件案件整列結果快取、伺服器分頁。
+- 業主決定不做：Production 連結表只讀 3 個欄位、跨 worker 共用快取、每件案件整列結果快取（伺服器分頁原列在此，2026-11-16 業主改為只對 Accounting 三個分頁做，見 §8.7）；理賠交易不再每筆複製再保人名單（2026-11-16 先不做：每筆理賠付款約 7 KB、其中約六成是重複名單，正式目前只有 1 筆）。
 - Accounting 舊案歷史結果快取（2026-11-10）：只快取匯入的歷史交易（唯讀、已結清），以「歷史資料指紋（除 original 外全部欄位）＋台北日期」為鑰匙，每 worker 一份；新增的舊案批單／理賠每次重算。回應逐位元組相同；正式 Accounting 第二次打開約 4 秒 → 1.6 秒（每天或歷史資料變動後第一次仍需重算）。`RI_LEGACY_RESULT_CACHE=false` 可關閉。測試 `legacy_accounting_cache`。
-- Accounting 分段載入（2026-11-13，§8.7）：打開時不等已結清的舊資料歷史；歷史由伺服器快取（上一條）在背景提供。
+- Accounting 伺服器分頁（2026-11-17，§8.7）：已結清歷史在伺服器轉成清單列後快取（每 worker 一份；以台北日期＋歷史的變更指紋（筆數、最大鍵、版本加總、最後更新時間）為準，另每 60 秒最多以完整內容指紋（MD5）複驗一次，直接改資料庫而沒有更新時間的修改最多 1 分鐘後出現；`RI_LEGACY_RESULT_CACHE=false` 時每次重算）；未結清部分每次重算，寫入後下一頁立即反映。量測：正式資料（4,262 列）每頁約 0.2–0.3 秒，當天第一次約 4 秒；1 萬筆舊資料（3 萬列）每頁約 1.6–3 秒（主要是未結清部分重算約 1 秒、資料轉換、篩選排序），當天第一次約 22 秒；仍可再優化（快取歷史部分的篩選排序結果、略過整份轉換），需重跑全部測試。
 - 舊資料量優化（2026-11-13，1 萬筆舊資料實測後；回應內容不變）：
   - **匯入**：Insured 主檔整批只讀一次（`legacy.policy.insured_lookup`，比對規則與逐筆查詢相同）。確認匯入 2,500 筆約 5 分鐘 → 約 10 秒；1 萬筆約 1 分鐘。單一請求上限 60 秒，**每個 Register 檔案建議不超過 5,000 筆**。
   - **未結清舊資料**：帳款與付款排程同一次計算共用（`legacy.ledger.accounting_bundle`），並逐筆快取，鑰匙為「該列內容 MD5＋台北日期」（比照每件案件結果快取）；對帳狀態即時套用、不進快取；每 worker 最多 `RI_LEGACY_OPEN_CACHE_SIZE` 筆（預設 20,000），`RI_LEGACY_OPEN_CACHE=false` 關閉。2,000 筆未結清時 Accounting 打開的請求約 9 秒 → 首次約 7 秒、之後約 1.3 秒。測試 `legacy_open_cache`。
   - **Accounting 畫面**：清單改為整份替換（不逐欄追蹤）、排序比較值每列只算一次；清單超過 2,000 列時文字篩選等 0.3 秒沒有再輸入才套用（列數少時立即）。2 萬列時切換分頁約 20 秒 → 約 2 秒。
-  - 1 萬筆（8,000 已結清＋2,000 未結清）實測：打開到可操作約 38 秒 → 約 5 秒；剩餘時間主要是資料量（6,000 列約 21 MB）。已結清歷史約 79 MB、背景載入；舊資料持續增加時的長期做法是歷史改為伺服器查詢／分頁（尚未做，需業主決定畫面規則）。
+  - 1 萬筆（8,000 已結清＋2,000 未結清）實測：打開到可操作約 38 秒 → 約 5 秒；剩餘時間主要是資料量（6,000 列約 21 MB）。已結清歷史約 79 MB，原為背景載入；2026-11-17 起改為伺服器分頁（上一條）。
 - **單筆很大的資料（2026-11-16 業主決定）**：MySQL 排序時會把查詢讀到的每個欄位（含篩選條件用到的 JSON）放進排序緩衝區，單筆超過緩衝區就整個查詢失敗（Out of sort memory），例如一件案件超過 256 KB 時 Accounting、Account List、Production Report 對所有人打不開。對大型 JSON 表的排序查詢一律用 `ri_system/sorted_fetch.py`（先篩選出編號、只用編號排序、再依編號讀整筆，結果順序相同）：案件、財會審核批次、Audit、草稿回收桶、Placing Slip 版本、舊資料交易／稽核／匯入批次，共 16 處；另把 `sort_buffer_size` 調為 2 MB 作為備援。量測：每筆理賠付款約讓案件增加 7 KB（3 家再保人；每筆交易各複製一份再保人名單），2026-11-16 正式最大案件 18 KB；1 萬筆舊資料時打開 Accounting 的伺服器時間約多 0.1–0.25 秒。新增查詢時沿用此做法，`large_rows` 測試組會把每種資料灌到超過緩衝區檢查。
 - nginx 日誌行尾記錄回應時間：`rt`＝整個請求、`urt`＝後端處理（秒）；例：`docker logs ri-nginx 2>/dev/null | grep -o 'urt=[0-9.]*'`（容器重建時清空）。
 
@@ -703,6 +704,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-16 21:35 | 大型資料排序（先排序編號再讀整筆，16 處）＋MySQL `sort_buffer_size` 2 MB（SET PERSIST，不重啟）；舊資料已結清理賠列 paymentStatus settled；Reactivate 需要理由時跳出填理由視窗；每週健檢跳過須改密碼帳號 | `backups/large_rows_20261116_213535`；回復用 `perf-work/stage-g-20261116/rollback.sh 20261116_213535`（含還原 MySQL 設定） | `ri-backend:before-large-rows-20261116_213535`／`ri-frontend:before-large-rows-20261116_213535` | 候選 API 132 組全通過（新 `large_rows` 50 項，舊程式驗證會失敗）；畫面 356 項（新 M 11 項，舊前端驗證會失敗）；正式資料 766 個回應僅 24 筆舊資料理賠列狀態不同，部署後與候選逐位元組相同；1 萬筆舊資料計時；無 migration、無業務資料寫入 |
 
+| 11-17 00:54 | Accounting 伺服器分頁：All Accounts／Settled/Closed／Brokerage 每頁 100 列由伺服器篩選排序（含已結清舊資料歷史，不再背景下載）；下拉選單由伺服器提供；新增 `run_qa.sh pages` | `backups/accounting_pages_20261117_005406`；回復用 `perf-work/stage-h-20261117/rollback.sh 20261117_005406` | `ri-backend:before-accounting-pages-20261117_005406`／`ri-frontend:before-accounting-pages-20261117_005406` | 候選 API 133 組全通過（新 `accounting_pages` 39 項，2 個變異版本會失敗）；畫面 364 項（Y 改寫 24 項；D 階段 1 項改為等待伺服器回應後檢查）；與畫面原本程式逐頁比對：正式 342 頁／20,137 列、1 萬筆壓測 266 頁／15,504 列全部一致；部署後原有 766 個回應與舊映像相同；無 migration、無資料寫入 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -712,6 +715,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-17：依業主確認部署 Accounting 伺服器分頁（§8.7、§15）：All Accounts／Settled/Closed／Brokerage 每頁 100 列由伺服器篩選排序並含已結清舊資料歷史，打開時不再下載整份歷史；理賠交易瘦身先不做；11-16 依業主指示提前執行 Docker 清理（映像 209→106 個，釋放約 4 GB）。
 
 - 2026-11-16：依業主確認部署大型資料排序保護（§2 MySQL、§15）、舊資料已結清理賠列狀態、主資料重新啟用流程（§12）、每週健檢帳號選擇；刪除 10-30 的 5 份舊備份（§3 備份保留）。
 

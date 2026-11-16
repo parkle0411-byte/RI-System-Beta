@@ -8,6 +8,7 @@ import { apiFetch } from '../api'
 import { can } from '../auth'
 import { recall, remember } from './accountingMemory'
 import { accountingRows } from '../alpha/accountingRows'
+import { SERVER_TABS, SERVER_PAGE_SIZE, rowTitle, actualDue, listRows, partyOptions } from './accountingList'
 import { formatMoney, formatMoneyInput, parseMoneyInput, reportWriteError } from '../alpha/format'
 import { displayTwRef } from '../alpha/manualTwRef'
 import { transactionNumber } from '../alpha/transactionNumber'
@@ -17,10 +18,12 @@ import ReconciliationReferences from '../components/ReconciliationReferences.vue
 import AccountingEntryActions from '../components/AccountingEntryActions.vue'
 const tableViewportHeight=ref(Math.max(240,Math.min(720,Math.round(window.innerHeight*.65))))
 const wideScreen=ref(window.innerWidth>760), resize=()=>{wideScreen.value=window.innerWidth>760;tableViewportHeight.value=Math.max(240,Math.min(720,Math.round(window.innerHeight*.65)))};window.addEventListener('resize',resize);onUnmounted(()=>window.removeEventListener('resize',resize))
-// 2026-11-13：預設開在 Unreconciled；已結清的舊資料歷史（legacy history）在背景另外載入後合併，不擋住對帳與收付。
+// 2026-11-13：預設開在 Unreconciled。2026-11-17 起已結清的舊資料歷史不再下載到瀏覽器，只在伺服器分頁的三個分頁出現。
 const router=useRouter(), tab=ref('unreconciled'), loading=ref(false), refreshing=ref(false), shownAt=ref(''), saving=ref(false), loadError=ref('')
-const historyState=ref('none'), historyCount=ref(0), historyError=ref(''), historyTabs=['all','settled','brokerage']
-let loadSeq=0, historyBody=null
+// 2026-11-17：All Accounts／Settled/Closed／Brokerage 由伺服器篩選、排序、分頁（每頁 100 列，含已結清的舊資料歷史，不再背景下載整份歷史）；
+// Unreconciled／Reconciled 照舊在瀏覽器處理（accountingList.js）。下拉選單名單由伺服器提供（含歷史）。
+let loadSeq=0, pageSeq=0, pageTimer=null
+const serverPage=shallowRef({rows:[],total:0,cashBatches:[],caseHistories:{}}), serverLoading=ref(false), serverError=ref(''), serverOptions=shallowRef(null)
 // 2026-11-13：帳款與登錄清單可達數萬列，整份替換、不逐欄追蹤（shallowRef）；列物件本身不會被就地修改。
 const rows=shallowRef([]), batches=shallowRef([]), reviewBatches=ref([]), currencies=ref([]), warnings=ref([]), canEdit=ref(false), selected=ref([]), caseHistories=ref({})
 const filters=reactive({reference:'',insured:'',cedant:'',reinsurer:'',currency:'',direction:'',settlement:['open'],source:'',origin:'',due:''})
@@ -29,7 +32,6 @@ const entryActions=ref(null),referenceEditor=ref(null),historyRow=ref(null),acti
 const review=reactive({date:today(),reference:'',note:''}),payment=reactive({date:today(),reference:'',note:'',replacement:'',submissionId:'',allocations:[]}),terms=reactive({days:null,reason:''})
 function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
 const money=(v,c)=>formatMoney(v,c), cents=v=>Math.round(Number(v||0)*100), label=s=>({open:'Open',partial:'Open',settled:'Settled',pending_confirmation:'Open',not_tracked:'Not tracked'})[s]||s
-const rowTitle=r=>r.scheduleOnly?'Historical schedule · '+r.installmentLabel:transactionNumber(r.txNo)
 const statusLabel=r=>r.reversed?'Reversed':r.isReversalEntry?'Reversal entry':label(r.settlement)
 const isBrokerage=computed(()=>tab.value==='brokerage')
 const canSelect=computed(()=>canEdit.value&&['unreconciled','reconciled'].includes(tab.value))
@@ -39,13 +41,13 @@ const compatible=r=>!selected.value.length||group(selected.value[0])===group(r)
 const active=activeAccount
 const selectable=r=>!r.legacyHistorical&&canSelect.value&&active(r)&&(tab.value==='unreconciled'?!r.financeReviewed:r.financeReviewed&&r.canRecord&&r.paymentAllowed!==false&&!r.statementNeedsRevision)
 const eligible=r=>selectable(r)&&compatible(r)
-const matches=(values,q)=>!q||values.some(v=>String(v||'').toLowerCase().includes(q.trim().toLowerCase()))
 const isT3=r=>r.cashTracking==='derived'||String(r.legType||'').startsWith('Leg 3')
 const soa=r=>r.reconciliationRef||'Missing'
-const actualDue=r=>r.contractDueDate||r.schedules?.find(x=>x.contractDueDate)?.contractDueDate||r.dueDate||''
-const normalizedSettlement=r=>r.settlement==='partial'?'open':r.settlement
-const cedantOptions=computed(()=>[...new Set(rows.value.filter(r=>isCedantAccount(r)&&!isDerivedBrokerage(r)).map(row=>transactionParty(row)).filter(Boolean))].sort())
-const reinsurerOptions=computed(()=>[...new Set(rows.value.filter(r=>!isCedantAccount(r)&&!isDerivedBrokerage(r)).map(row=>transactionParty(row)).filter(Boolean))].sort())
+const localOptions=computed(()=>partyOptions(rows.value))
+const cedantOptions=computed(()=>serverOptions.value?.cedants||localOptions.value.cedants)
+const reinsurerOptions=computed(()=>serverOptions.value?.reinsurers||localOptions.value.reinsurers)
+const currencyOptions=computed(()=>serverOptions.value?.currencies||currencies.value)
+const serverTab=computed(()=>SERVER_TABS.includes(tab.value))
 watch(()=>filters.cedant,value=>{if(value)filters.reinsurer=''})
 watch(()=>filters.reinsurer,value=>{if(value)filters.cedant=''})
 // 2026-11-13（大量資料）：文字篩選在清單超過 2,000 列時等 0.3 秒沒有再輸入才套用（列數少時立即套用，與原本相同）；
@@ -55,29 +57,12 @@ let textFilterTimer=null
 watch(()=>[filters.reference,filters.insured],([reference,insured])=>{
  clearTimeout(textFilterTimer)
  const apply=()=>{textFilter.reference=reference;textFilter.insured=insured}
- if(rows.value.length>2000)textFilterTimer=setTimeout(apply,300);else apply()
+ if(rows.value.length>2000||serverTab.value)textFilterTimer=setTimeout(apply,300);else apply()
 },{flush:'sync'})
 const collator=new Intl.Collator()
-const filtered=computed(()=>{
- const now=today(),brokerage=isBrokerage.value
- const list=rows.value.filter(r=>{
- if(!visibleAccount(r,tab.value))return false
- if(filters.settlement.length&&(r.reversed||r.isReversalEntry||!filters.settlement.includes(normalizedSettlement(r))))return false
- return matches([r.twRef,r.manualTwRef,displayTwRef(r)],textFilter.reference)&&matches([r.originalInsured,r.originalInsuredCn],textFilter.insured)&&(!filters.cedant||isCedantAccount(r)&&transactionParty(r)===filters.cedant)&&(!filters.reinsurer||!isCedantAccount(r)&&transactionParty(r)===filters.reinsurer)&&(!filters.currency||filters.currency===r.currency)&&(!filters.direction||r.paymentDirection===filters.direction)&&(!filters.source||accountSource(r)===filters.source)&&(!filters.origin||(r.origin||'native')===filters.origin)&&(!filters.due||!!actualDue(r)&&actualDue(r)<=filters.due)
-})
- if(brokerage){
-  const keyed=list.map(r=>({r,settled:Number(r.settlement==='settled'),tw:displayTwRef(r)}))
-  keyed.sort((a,b)=>a.settled-b.settled||collator.compare(a.tw,b.tw))
-  return keyed.map(x=>x.r)
- }
- const keyed=list.map(r=>{
-  const due=actualDue(r),overdue=r.settlement!=='settled'&&due&&due<now
-  return {r,overdue:Number(!!overdue),date:overdue?due:(r.dueDate||r.schedules?.find(x=>x.dueDate)?.dueDate||due||'9999-12-31'),tw:displayTwRef(r),title:rowTitle(r)}
- })
- keyed.sort((a,b)=>b.overdue-a.overdue||collator.compare(a.date,b.date)||collator.compare(a.tw,b.tw)||collator.compare(a.title,b.title))
- return keyed.map(x=>x.r)
-})
-const pagedRows=computed(()=>filtered.value.slice((page.value-1)*pageSize.value,page.value*pageSize.value))
+const filtered=computed(()=>serverTab.value?serverPage.value.rows:listRows(rows.value,tab.value,filters,textFilter,today(),collator))
+const listCount=computed(()=>serverTab.value?serverPage.value.total:filtered.value.length)
+const pagedRows=computed(()=>serverTab.value?serverPage.value.rows:filtered.value.slice((page.value-1)*pageSize.value,page.value*pageSize.value))
 const selectedGroup=computed(()=>selected.value.length?transactionParty(selected.value[0])+' · '+[...new Set(selected.value.map(r=>r.currency))].join(', '):'')
 const selectionAvailable=computed(()=>filtered.value.some(eligible)&&(selected.value.length>0||new Set(filtered.value.filter(selectable).map(group)).size===1))
 function selectAll(){
@@ -112,13 +97,15 @@ function removeReview(row){reviewTargets.value=reviewTargets.value.filter(r=>r.k
 function removeAllocation(row){if(row.status==='recorded'||saving.value)return;payment.allocations=payment.allocations.filter(a=>a.row.key!==row.row.key);selected.value=selected.value.filter(r=>r.key!==row.row.key)}
 // 2026-11-10：載入失敗時顯示常駐錯誤＋Retry，不再只閃一下提示後顯示「0 筆」；伺服器錯誤頁（非 JSON）也轉成白話訊息。
 function loadFailure(response,body){if(body&&(body.message||body.error))return body.message||body.error;return response?`The server could not finish loading Accounting (HTTP ${response.status}).`:'The connection to the server failed.'}
-async function load(options){const seq=++loadSeq;loading.value=!refreshing.value;try{let response=null,b=null;try{response=await apiFetch('/api/accounting?view=list&legacy=open');b=await response.json().catch(()=>null)}catch{throw new Error(loadFailure(null,null))}if(!response.ok||!b)throw new Error(loadFailure(response,b));if(seq!==loadSeq)return;apply(b);remember(b);syncHistory(b,seq,options?.history===true);loadError.value='';shownAt.value=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}catch(e){loadError.value=e.message||loadFailure(null,null);canEdit.value=false}finally{loading.value=false;refreshing.value=false}}
+async function load(options){const seq=++loadSeq;loading.value=!refreshing.value;try{let response=null,b=null;try{response=await apiFetch('/api/accounting?view=list&legacy=open');b=await response.json().catch(()=>null)}catch{throw new Error(loadFailure(null,null))}if(!response.ok||!b)throw new Error(loadFailure(response,b));if(seq!==loadSeq)return;apply(b);remember(b);if(serverTab.value)loadPage();if(!serverOptions.value||options?.refresh)loadOptions();loadError.value='';shownAt.value=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}catch(e){loadError.value=e.message||loadFailure(null,null);canEdit.value=false}finally{loading.value=false;refreshing.value=false}}
 // 舊資料歷史：筆數為 0 不另外請求；已載入且筆數沒變就沿用（歷史是唯讀的），按 Refresh 才重新讀。
-function syncHistory(b,seq,force){const count=b.legacyHistory?.pendingTransactions||0;historyCount.value=count;if(!count){historyBody=null;historyState.value='none';historyError.value='';return}if(!force&&historyState.value==='loaded'&&historyBody?.legacyHistory?.transactions===count)return;loadHistory(seq)}
-async function loadHistory(seq){historyState.value='loading';historyError.value='';try{let response=null,h=null;try{response=await apiFetch('/api/accounting?view=list&legacy=history');h=await response.json().catch(()=>null)}catch{throw new Error(loadFailure(null,null))}if(!response.ok||!h)throw new Error(loadFailure(response,h));if(seq!==loadSeq)return;historyBody=h;mergeHistory();historyState.value='loaded'}catch(e){if(seq!==loadSeq)return;historyState.value='failed';historyError.value=e.message||loadFailure(null,null)}}
-// 合併時不重建既有的列、不清除勾選，也不動開啟中的對話框。
-function mergeHistory(){if(!historyBody)return;const ids=new Set((historyBody.cashBatches||[]).map(x=>x.batchId));rows.value=[...rows.value.filter(r=>!r.legacyHistorical),...accountingRows({transactionRows:historyBody.transactionRows||[]})];batches.value=[...batches.value.filter(x=>!ids.has(x.batchId)),...(historyBody.cashBatches||[])];caseHistories.value={...caseHistories.value,...(historyBody.caseHistories||{})};currencies.value=[...new Set([...currencies.value,...(historyBody.currencies||[])])].sort()}
-function apply(b){rows.value=accountingRows(b);batches.value=b.cashBatches||[];reviewBatches.value=b.reviewBatches||[];currencies.value=b.currencies||[];canEdit.value=!!b.scope?.canEdit;warnings.value=(b.warnings||[]).filter(w=>w.dataError);caseHistories.value=b.caseHistories||{};mergeHistory();selected.value=[];if(historyRow.value)historyRow.value=rows.value.find(r=>r.caseUid===historyRow.value.caseUid&&r.txNo===historyRow.value.txNo)||null;if(activeBatch.value)activeBatch.value=batches.value.find(x=>x.batchId===activeBatch.value.batchId)||null;refreshPaymentRows()}
+function pageQuery(){if(!serverTab.value)return '';const q=new URLSearchParams({view:'page',tab:tab.value,page:String(page.value)});for(const k of ['cedant','reinsurer','currency','direction','source','origin','due'])if(filters[k])q.set(k,filters[k]);if(filters.settlement.length)q.set('settlement',filters.settlement.join(','));if(textFilter.reference)q.set('reference',textFilter.reference);if(textFilter.insured)q.set('insured',textFilter.insured);return q.toString()}
+async function loadPage(){const query=pageQuery();if(!query)return;const seq=++pageSeq;serverLoading.value=true;serverError.value='';try{let response=null,b=null;try{response=await apiFetch('/api/accounting?'+query);b=await response.json().catch(()=>null)}catch{throw new Error(loadFailure(null,null))}if(!response.ok||!b)throw new Error(loadFailure(response,b));if(seq!==pageSeq)return;serverPage.value=b;if(b.options)serverOptions.value=b.options;resolveHistoryRow()}catch(e){if(seq===pageSeq)serverError.value=e.message||loadFailure(null,null)}finally{if(seq===pageSeq)serverLoading.value=false}}
+async function loadOptions(){try{const response=await apiFetch('/api/accounting?view=options');const b=await response.json().catch(()=>null);if(response.ok&&b?.options)serverOptions.value=b.options}catch{/* 名單沿用目前載入的帳款 */}}
+watch(pageQuery,query=>{clearTimeout(pageTimer);if(query)pageTimer=setTimeout(loadPage,0)})
+function findRow(list,row){return list.find(r=>r.caseUid===row.caseUid&&r.txNo===row.txNo&&!!r.scheduleOnly===!!row.scheduleOnly&&(!r.scheduleOnly||r.key===row.key))}
+function resolveHistoryRow(){if(!historyRow.value)return;historyRow.value=findRow(rows.value,historyRow.value)||findRow(serverPage.value.rows||[],historyRow.value)||(historyRow.value.legacyHistorical?historyRow.value:null)}
+function apply(b){rows.value=accountingRows(b);batches.value=b.cashBatches||[];reviewBatches.value=b.reviewBatches||[];currencies.value=b.currencies||[];canEdit.value=!!b.scope?.canEdit;warnings.value=(b.warnings||[]).filter(w=>w.dataError);caseHistories.value=b.caseHistories||{};selected.value=[];resolveHistoryRow();if(activeBatch.value)activeBatch.value=batches.value.find(x=>x.batchId===activeBatch.value.batchId)||null;refreshPaymentRows()}
 async function post(body){const r=await apiFetch('/api/accounting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const b=await r.json();if(!r.ok){const e=new Error(b.message||b.error);e.status=r.status;throw e}return b}
 async function write(body,done){saving.value=true;try{const result=await post(body);done?.(result);ElMessage.success('Accounting updated');await load()}catch(e){reportWriteError(e,()=>load());await load()}finally{saving.value=false}}
 function members(targets){return targets.map(r=>({caseUid:r.caseUid,txNo:r.txNo,rowVersion:r.caseRowVersion}))}
@@ -156,7 +143,8 @@ async function savePayment(){
   await load()
  }finally{saving.value=false}
 }
-function showBatch(id){activeBatch.value=batches.value.find(b=>b.batchId===id)||null}
+function showBatch(id){activeBatch.value=batches.value.find(b=>b.batchId===id)||(serverPage.value.cashBatches||[]).find(b=>b.batchId===id)||null}
+const caseHistoryOf=uid=>caseHistories.value[uid]||serverPage.value.caseHistories?.[uid]
 async function reverseBatch(){const b=activeBatch.value;if(!b?.canReverse||!canEdit.value)return;let reason;try{const r=await ElMessageBox.prompt('Reverse every cash and offset allocation in this registration. Downstream payment prerequisites must remain valid.','Reverse entire registration',{inputValidator:v=>!!v?.trim()||'A reason is required.'});reason=r.value}catch{return};const versions=[...new Map(b.allocations.map(a=>[a.caseUid,{caseUid:a.caseUid,rowVersion:a.caseRowVersion}])).values()];await write({action:'reverse_batch_payment',batchId:b.batchId,cases:versions,paymentDate:today(),note:reason})}
 function replaceBatch(){const b=activeBatch.value;const keys=new Set(b.allocations.map(a=>a.caseUid+':'+a.txNo));const targets=rows.value.filter(r=>keys.has(r.caseUid+':'+r.txNo));if(!targets.length||targets.some(r=>!r.financeReviewed||!r.canRecord))return ElMessage.warning('Review the current accounts and their balances before re-registering.');activeBatch.value=null;openPayment(targets,b.batchId)}
 async function recordFollowup(row){let note;try{note=(await ElMessageBox.prompt('Enter the claim follow-up record.','Claim follow-up',{inputValidator:v=>!!v?.trim()||'A follow-up record is required.'})).value}catch{return};await write({action:'record_claim_followup',caseUid:row.caseUid,rowVersion:row.caseRowVersion,txNo:row.txNo,note})}
@@ -171,12 +159,11 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
 <template>
 <div class="overview-stack">
  <el-alert data-testid="accounting-refreshing" v-if="refreshing" type="info" :closable="false" :title="'Showing the list loaded at '+shownAt+'. Updating… Operations are available after the update.'" />
- <el-alert data-testid="accounting-history-loading" v-if="historyState==='loading'&&historyTabs.includes(tab)" type="info" :closable="false" :title="'Loading settled legacy history ('+historyCount.toLocaleString('en-US')+' transactions) in the background…'" description="Native cases and open legacy accounts are already complete below. Settled legacy history is added automatically when it finishes loading." />
- <el-alert data-testid="accounting-history-error" v-if="historyState==='failed'&&historyTabs.includes(tab)" type="warning" :closable="false" show-icon title="Settled legacy history could not be loaded"><p>{{ historyError }} The list below does not include settled legacy history. Other accounts are complete.</p><el-button data-testid="accounting-history-retry" size="small" type="warning" plain @click="loadHistory(loadSeq)">Retry</el-button></el-alert>
+ <el-alert data-testid="accounting-page-error" v-if="serverTab&&serverError&&!serverLoading" type="error" :closable="false" show-icon title="This list could not be loaded"><p>{{ serverError }}</p><el-button data-testid="accounting-page-retry" size="small" type="danger" plain @click="loadPage">Retry</el-button></el-alert>
  <el-alert data-testid="accounting-load-error" v-if="loadError&&!loading" type="error" :closable="false" show-icon title="Accounting data could not be loaded"><p>{{ loadError }} {{ rows.length ? 'Showing the list loaded at '+(shownAt||'an earlier time')+'. Receipt, payment and review operations are disabled until Accounting reloads.' : 'Please retry. If it keeps failing, contact the System Administrator.' }}</p><el-button data-testid="accounting-retry" size="small" type="danger" plain :loading="loading" @click="load">Retry</el-button></el-alert>
  <el-alert v-if="warnings.length" type="error" :closable="false" title="Some cases could not be read and are not shown" :description="warnings.map(w=>w.twRef||w.caseUid).join(', ')+'. Contact the System Administrator.'" />
  <section class="table-card">
-  <div class="section-heading"><div><h2>Accounting</h2><p>Finance reviews each account before recording receipts or payments. All cash accounts allow partial receipts and payments.</p></div><el-button :loading="loading" @click="load({history:true})">Refresh</el-button></div>
+  <div class="section-heading"><div><h2>Accounting</h2><p>Finance reviews each account before recording receipts or payments. All cash accounts allow partial receipts and payments.</p></div><el-button :loading="loading" @click="load({refresh:true})">Refresh</el-button></div>
   <el-tabs v-model="tab" class="accounting-tabs" data-testid="accounting-tabs">
    <el-tab-pane label="All Accounts" name="all"/><el-tab-pane label="Unreconciled Accounts" name="unreconciled"/><el-tab-pane label="Reconciled Accounts" name="reconciled"/><el-tab-pane label="Settled/Closed" name="settled"/><el-tab-pane label="Brokerage" name="brokerage"/>
   </el-tabs>
@@ -185,7 +172,7 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
    <el-form-item label="Original Insured (EN / CN)"><el-input v-model="filters.insured" clearable/></el-form-item>
    <el-form-item label="Cedant"><el-select v-model="filters.cedant" filterable clearable placeholder="All"><el-option v-for="name in cedantOptions" :key="name" :label="name" :value="name"/></el-select></el-form-item>
    <el-form-item label="Reinsurer / R/I Broker"><el-select v-model="filters.reinsurer" filterable clearable placeholder="All"><el-option v-for="name in reinsurerOptions" :key="name" :label="name" :value="name"/></el-select></el-form-item>
-   <el-form-item label="Currency"><el-select v-model="filters.currency" clearable placeholder="All"><el-option v-for="c in currencies" :key="c" :label="c" :value="c"/></el-select></el-form-item>
+   <el-form-item label="Currency"><el-select v-model="filters.currency" clearable placeholder="All"><el-option v-for="c in currencyOptions" :key="c" :label="c" :value="c"/></el-select></el-form-item>
    <el-form-item v-if="!isBrokerage" label="Direction"><el-select v-model="filters.direction" clearable placeholder="All"><el-option label="Payable" value="payable"/><el-option label="Receivable" value="receivable"/></el-select></el-form-item>
    <el-form-item label="Settlement"><el-select v-model="filters.settlement" :disabled="tab==='settled'" multiple clearable placeholder="All"><el-option v-for="s in ['open','settled']" :key="s" :label="label(s)" :value="s"/></el-select></el-form-item>
    <el-form-item label="Origin"><el-select v-model="filters.origin" clearable placeholder="All"><el-option label="Native" value="native"/><el-option label="Legacy" value="legacy"/></el-select></el-form-item>
@@ -193,8 +180,8 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
    <el-form-item label="Due date"><el-date-picker v-model="filters.due" type="date" value-format="YYYY-MM-DD" placeholder="Due on or before" clearable/></el-form-item>
   </div>
  </section>
- <section class="table-card" v-loading="loading">
-  <div class="section-heading"><div><h2>{{ accountTitle }} ({{ filtered.length }})</h2><p>{{ isBrokerage?'Retained brokerage settles after premium receipts and payments complete. Oversea cash accounts appear here once fully settled.':tab==='all'?'All premium, claim and Oversea cash accounts, including open and fully settled accounts.':tab==='settled'?'Fully settled T1 and T2 accounts. Open an account history to inspect its registrations.':tab==='unreconciled'?'Finance checks the account; counterparty confirmation is not required.':'Accounts for the same counterparty share one review batch across currencies. Receipts and payments are recorded separately.' }}</p></div>
+ <section class="table-card" v-loading="loading||serverTab&&serverLoading" data-testid="accounting-list">
+  <div class="section-heading"><div><h2>{{ accountTitle }} ({{ listCount }})</h2><p>{{ isBrokerage?'Retained brokerage settles after premium receipts and payments complete. Oversea cash accounts appear here once fully settled.':tab==='all'?'All premium, claim and Oversea cash accounts, including open and fully settled accounts.':tab==='settled'?'Fully settled T1 and T2 accounts. Open an account history to inspect its registrations.':tab==='unreconciled'?'Finance checks the account; counterparty confirmation is not required.':'Accounts for the same counterparty share one review batch across currencies. Receipts and payments are recorded separately.' }}</p></div>
    <div v-if="canSelect" class="selection-actions"><el-button :disabled="!selectionAvailable" @click="selectAll">Select all</el-button><el-button :disabled="!selected.length" @click="selected=[]">Deselect all</el-button><el-button class="primary-button" :disabled="!selected.length" @click="tab==='unreconciled'?openReview(selected):openPayment(selected)">{{ tab==='unreconciled'?'Mark reviewed':'Record selected' }} ({{ selected.length }})</el-button></div>
   </div>
   <p v-if="canSelect" class="selection-hint">Select all includes matching selectable accounts across currencies and pages{{selectedGroup?' · '+selectedGroup:''}}. When several counterparties match, select one account first or narrow the filters.</p>
@@ -231,7 +218,8 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
     <el-button text @click="historyRow=row">{{isBrokerage?'Brokerage settlement details':'History'}}</el-button>
    </template></el-table-column>
   </el-table>
-  <div v-if="filtered.length>50" class="table-pagination"><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[50,100,200,500]" :total="filtered.length" layout="total, sizes, prev, pager, next" background/></div>
+  <div v-if="serverTab&&serverPage.total>SERVER_PAGE_SIZE" class="table-pagination" data-testid="accounting-server-pagination"><el-pagination v-model:current-page="page" :page-size="SERVER_PAGE_SIZE" :total="serverPage.total" layout="total, slot, prev, pager, next" background><span class="page-size-note">· {{ SERVER_PAGE_SIZE }} rows per page</span></el-pagination></div>
+  <div v-if="!serverTab&&filtered.length>50" class="table-pagination"><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[50,100,200,500]" :total="filtered.length" layout="total, sizes, prev, pager, next" background/></div>
  </section>
  <ReconciliationReferences ref="referenceEditor" @saved="load" @refresh="load"/>
  <AccountingEntryActions ref="entryActions" :rows="swissRows" :can-edit="canEdit" @refresh="load"/>
@@ -285,7 +273,7 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
    <template v-if="historyRow.cashTracking==='derived'"><p>Brokerage settles automatically after its own T1 and T2 complete. This creates no bank remittance.</p><p v-for="d in historyRow.settlementDependencies" :key="d.txNo">{{transactionNumber(d.txNo)}} · {{label(d.settlement)}}</p></template>
    <el-table v-else :data="historyRow.entries||[]"><el-table-column prop="paymentDate" label="Date"/><el-table-column prop="entryType" label="Type"/><el-table-column label="Receipt / Payment Amount"><template #default="{row}">{{row.nonCash?'—':historyRow.currency+' '+money(row.appliedAmount,historyRow.currency)}}</template></el-table-column><el-table-column v-if="historyRow.entries?.some(e=>e.nonCash)" label="Historical offset"><template #default="{row}">{{row.nonCash?historyRow.currency+' '+money(row.appliedAmount,historyRow.currency):'—'}}</template></el-table-column><el-table-column prop="reference" label="Accounting Dept. Ref."/><el-table-column prop="note" label="Note"/><el-table-column label="Action"><template #default="{row}"><el-button v-if="row.entryType==='payment'&&row.entryKind!=='legacy-import'" text @click="showBatch(row.batchId||row.offsetId||'legacy:'+row.id)">View registration</el-button><small v-else-if="row.entryKind==='legacy-import'">Settled before import</small></template></el-table-column></el-table>
    <template v-if="accountReviews.length"><h3>Finance review history</h3><el-table :data="accountReviews"><el-table-column prop="date" label="Review date"/><el-table-column prop="reference" label="Review reference"/><el-table-column prop="note" label="Explanation"/><el-table-column prop="createdByName" label="Finance"/><el-table-column prop="status" label="Status"/><el-table-column prop="cancelReason" label="Cancellation reason"/></el-table></template>
-   <template v-if="caseHistories[historyRow.caseUid]?.length"><h3>Account correction history</h3><el-table :data="caseHistories[historyRow.caseUid]"><el-table-column prop="at" label="Changed at"/><el-table-column prop="byName" label="Operator"/><el-table-column prop="reason" label="Reason"/><el-table-column label="Changes"><template #default="{row}"><div v-for="(c,i) in row.ledgerChanges||[]" :key="i">{{transactionNumber(c.before.txNo)}}: {{money(c.before.amount,historyRow.currency)}} → {{c.after?money(c.after.amount,historyRow.currency):'Removed'}}</div></template></el-table-column><el-table-column prop="productionMonth" label="Production correction month"/></el-table></template>
+   <template v-if="caseHistoryOf(historyRow.caseUid)?.length"><h3>Account correction history</h3><el-table :data="caseHistoryOf(historyRow.caseUid)"><el-table-column prop="at" label="Changed at"/><el-table-column prop="byName" label="Operator"/><el-table-column prop="reason" label="Reason"/><el-table-column label="Changes"><template #default="{row}"><div v-for="(c,i) in row.ledgerChanges||[]" :key="i">{{transactionNumber(c.before.txNo)}}: {{money(c.before.amount,historyRow.currency)}} → {{c.after?money(c.after.amount,historyRow.currency):'Removed'}}</div></template></el-table-column><el-table-column prop="productionMonth" label="Production correction month"/></el-table></template>
    <el-table v-if="historyRow.paymentEditHistory?.length" :data="historyRow.paymentEditHistory"><el-table-column prop="changedAt" label="Historical change time"/><el-table-column prop="reason" label="Reason"/><el-table-column prop="changedByName" label="Operator"/></el-table>
    <el-table v-if="historyRow.settlementHistory?.length" :data="historyRow.settlementHistory"><el-table-column prop="confirmedAt" label="Historical settlement time"/><el-table-column prop="confirmedByName" label="Operator"/><el-table-column prop="note" label="Reference / reason"/></el-table>
   </template>

@@ -5,6 +5,8 @@
 #   scripts/run_qa.sh suites     只跑資料庫／API 測試組
 #   scripts/run_qa.sh parity     只跑「前後端密碼規則一致」
 #   scripts/run_qa.sh totals     只跑「畫面上的案件合計（前端 JS）與後端 totals.py 一致」
+#   scripts/run_qa.sh pages      只跑「Accounting 伺服器分頁與畫面原本的篩選／排序逐頁一致」（正式資料，唯讀；約 3 分鐘）
+#                                PAGES_BACKEND=<容器> 改用其他後端容器（例如壓測環境 ri-stress-backend）
 #
 # 所有測試組都在交易內執行、最後回滾，不會在資料庫留下任何測試資料，也不依賴真實人員或案件資料
 # （需要的人員由測試自己建立）。需要 ri-backend 容器正在執行。
@@ -60,11 +62,25 @@ run_totals() {
   esac
 }
 
+run_pages() {
+  echo "== Accounting 伺服器分頁：與畫面原本的程式（accountingRows.js、accountingList.js）逐頁比對 =="
+  out=$(mktemp); trap 'rm -f "$out"' RETURN
+  docker exec -i "${PAGES_BACKEND:-ri-backend}" python manage.py shell < backend/qa/accounting_pages_backend.py 2>/dev/null > "$out"
+  res=$(docker run --rm -i --user "$(id -u):$(id -g)" -v "$PWD/frontend/src:/src:ro" -v "$PWD/backend/qa:/qa:ro" node:22-alpine \
+        node --max-old-space-size=4096 /qa/accounting_pages_frontend.mjs < "$out" 2>&1)
+  line=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print("%d 列、%d 種條件、%d 頁、%d 列逐列比對" % (d["rows"], d["checks"], d["pagesCompared"], d["rowsCompared"]) if d["problems"] == 0 else "BAD " + json.dumps(d, ensure_ascii=False)[:800])' "$res" 2>&1)
+  case "$line" in
+    BAD*|*rror*) bad "伺服器分頁與畫面程式不一致（或執行失敗）: $line" ;;
+    *) ok "伺服器分頁與畫面程式完全一致：$line" ;;
+  esac
+}
+
 case "$WHAT" in
   suites) run_suites ;;
   parity) run_parity ;;
   totals) run_totals ;;
-  all)    run_suites; run_parity; run_totals ;;
+  pages)  run_pages ;;
+  all)    run_suites; run_parity; run_totals; run_pages ;;
   *) echo "用法: $0 [all|suites|parity|totals]"; exit 2 ;;
 esac
 

@@ -705,6 +705,8 @@ def phase_d(page):
     page.get_by_role('tab',name='Reconciled Accounts',exact=True).click()
     check('reversed receipt reopens balance and retains Finance review','Open' in row_cells(page,'TWPAR2603001-R1-T1'))
     page.get_by_role('tab',name='Brokerage',exact=True).click()
+    # 2026-11-17：Brokerage 由伺服器分頁，列在伺服器回應後才出現
+    page.get_by_role('button',name='Brokerage settlement details',exact=True).first.wait_for(timeout=15000)
     check('Brokerage has independent dependency details',page.get_by_role('button',name='Brokerage settlement details',exact=True).count()>0)
     snap(page,'accounting-brokerage')
     nav(page,'Dashboard');held=[];page.route('**/api/accounting?view=list*',lambda route:held.append(route));nav(page,'Accounting')

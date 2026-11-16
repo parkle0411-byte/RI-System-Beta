@@ -96,6 +96,14 @@ class AccountingView(NoStoreMixin, APIView):
     permission_map = {"GET": "accounting.read", "POST": "accounting.read"}
 
     def get(self, request):
+        # 2026-11-17：All Accounts／Settled/Closed／Brokerage 由伺服器分頁（?view=page）；下拉選單名單（?view=options）。
+        if request.query_params.get("view") in ("page", "options"):
+            from .accounting_pages import page_response
+            return page_response(self, request)
+        return Response(json_roundtrip(self.list_body(request)))
+
+    def list_body(self, request, legacy_override=None):
+        """GET 的完整內容（尚未 json_roundtrip）。legacy_override='open'／'history' 等同 ?view=list&legacy=…（分頁使用）。"""
         cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").defer("parent_case__payload")
         # 2026-11-02：上層案件只用到 case_uid，不讀它的整份 payload
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示
@@ -103,11 +111,11 @@ class AccountingView(NoStoreMixin, APIView):
         now = datetime.now(dt_timezone.utc)   # 整個請求用同一個時間
         # ?view=list（Accounting 畫面用）：付款排程列（rows）只有 Swiss Facility 案件會顯示，其他案件不產生這些列
         # （約 1.5 萬列、17 MB），但 warnings 與 currencies 照常計算；不帶參數時輸出與以前完全相同。2026-10-16
-        lean = request.query_params.get("view") == "list"
+        lean = request.query_params.get("view") == "list" or legacy_override is not None
         # 2026-11-13 分段載入（只在 ?view=list 時有效；不帶 legacy 參數時輸出與以前完全相同）：
         #   legacy=open     不含「匯入時已全部結清」的舊資料歷史，其餘全部照常；另回 legacyHistory.pendingTransactions。
         #   legacy=history  只回舊資料歷史的 transactionRows／cashBatches／caseHistories／currencies，供畫面在背景合併。
-        legacy_scope = request.query_params.get("legacy") if lean else None
+        legacy_scope = legacy_override or (request.query_params.get("legacy") if lean else None)
         if legacy_scope not in ("open", "history"):
             legacy_scope = None
         if legacy_scope == "history":
@@ -215,22 +223,22 @@ class AccountingView(NoStoreMixin, APIView):
             'members': [{**m, 'rowVersion': versions.get(m['caseUid'])} for m in b.members],
         } for b in grouped_review_batches()]
         if legacy_scope == "history":
-            return Response(json_roundtrip({
+            return {
                 "ok": True, "transactionRows": transactions, "currencies": currencies,
                 "caseHistories": {uid: p.get("financeCorrectionHistory", []) for uid,p in payload_by_uid.items() if p.get("financeCorrectionHistory")},
                 "cashBatches": payment_batches(case_views),
                 "legacyHistory": {"scope": "history", "transactions": len(legacy_views)},
-            }))
+            }
         segment = {}
         if legacy_scope == "open":
             from legacy.ledger import historical_queryset
             segment = {"legacyHistory": {"scope": "open", "pendingTransactions": historical_queryset().count()}}
-        return Response(json_roundtrip({
+        return {
             **segment,
             "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,
             "scope": {"canEdit": _can_edit(request.ri_principal)},
             "caseHistories": {uid: p.get("financeCorrectionHistory", []) for uid,p in payload_by_uid.items() if p.get("financeCorrectionHistory")}, "reviewBatches": review_batches, "cashBatches": payment_batches(case_views), "swissRows": swiss_rows, "scheduleRows": schedule_rows,
-        }))
+        }
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
