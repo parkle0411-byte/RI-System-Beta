@@ -11,6 +11,12 @@ Class codes come from Master Data Management (PD = PF Property; 2026-11-16). Set
 - rows with an unsettled leg become trackable Accounting balances with the native payment
   rules; their settled legs are marked as reconciled before import.
 Imported rows never create Cases or Production rows. No row is ever changed after import.
+
+2026-11-17 (owner): no upload records are kept. After a commit the stored workbook is deleted and
+the batch keeps only its import counts; it stays as a hidden marker of imported transactions.
+A preview that is not imported is discarded (workbook deleted, contents cleared) when the admin
+clears it, closes the dialog, or starts another preview; previews older than one day are discarded too.
+There is no upload list or download.
 """
 import copy
 import hashlib
@@ -22,6 +28,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from datetime import timedelta
+from django.db import transaction
 from cases import storage
 from coordination.services import serialized, PRODUCTION_SOURCES
 from .excel import read_workbook, date_value, label
@@ -271,11 +279,48 @@ def _admin(person):
     if person.role_code!='admin':fail('Only System Administrators may import.',403)
 
 
+def _strip(batch,status,manifest):
+    """Keep no upload record: delete the workbook once the transaction commits and clear the contents."""
+    key=batch.storage_key
+    batch.status=status;batch.manifest=manifest;batch.filename='';batch.storage_key=''
+    fields=['status','manifest','filename','storage_key']
+    if status=='withdrawn':  # a discarded preview (the status CHECK allows preview / imported / withdrawn)
+        batch.withdrawn_at=timezone.now();batch.withdrawal={'reason':'Preview discarded; no upload record is kept.'}
+        fields+=['withdrawn_at','withdrawal']
+    batch.save(update_fields=fields)
+    if key:
+        def remove(key=key):
+            try:storage.delete(key)
+            except Exception:pass
+        transaction.on_commit(remove)
+
+
+def _discard_previews(person,keep=None):
+    """Discard this admin's earlier previews and any preview older than one day."""
+    from django.db.models import Q
+    stale=timezone.now()-timedelta(days=1)
+    actor=f'personnel:{person.pk}' if person.pk is not None else 'system:owner-authorized-deployment'
+    for b in ImportBatch.objects.select_for_update().filter(Q(created_by=actor)|Q(created_at__lt=stale),status='preview').exclude(pk=keep):
+        _strip(b,'withdrawn',{})
+
+
+def discard(person,batch_id):
+    _admin(person)
+    with serialized(PRODUCTION_SOURCES):
+        try:batch=ImportBatch.objects.select_for_update().get(pk=batch_id)
+        except (ImportBatch.DoesNotExist,ValueError,ValidationError):fail('Import batch not found.',404)
+        if batch.status!='preview':return batch
+        _strip(batch,'withdrawn',{})
+        audit(person,batch.pk,'import_discarded',after={'sha256':batch.sha256})
+        return batch
+
+
 def preview(person, filename, content):
     _admin(person)
     try:parsed,_,manifest=scan(content)
     except ValueError as exc:fail(str(exc))
     with serialized(PRODUCTION_SOURCES):
+        _discard_previews(person)
         bid=uuid.uuid4();key=f'legacy-imports/{bid}/original.xlsx'
         storage.put(key,content)
         batch=ImportBatch.objects.create(id=bid,filename=str(filename or 'register.xlsx')[:255],sha256=parsed['sha256'],storage_key=key,
@@ -349,10 +394,9 @@ def commit(person,batch_id,sha256):
             if master:t.data['insuredMasterId']=master
             records.append(t)
         LegacyTransaction.objects.bulk_create(records,batch_size=250)
-        batch.status='imported';batch.imported_at=now
-        batch.manifest.update(imported=len(records),historical=sum(t.historical for t in records),
-            open=sum(not t.historical for t in records))
-        batch.save(update_fields=['status','imported_at','manifest'])
+        batch.imported_at=now;batch.save(update_fields=['imported_at'])
+        _strip(batch,'imported',dict(imported=len(records),historical=sum(t.historical for t in records),
+            open=sum(not t.historical for t in records)))
         # One permanent batch event plus the original immutable workbook identifies every row.
         audit(person,batch.pk,'batch_imported',after={'sha256':batch.sha256,'count':len(records),
             'excluded':manifest['excluded'],'corrections':manifest['corrections'],

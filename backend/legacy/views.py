@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Q,F,Case,When,Value,Func,IntegerField,BigIntegerField,CharField,DateTimeField
+from django.db.models.functions import Cast
 from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -36,7 +37,7 @@ class TransactionsView(NoStoreMixin,APIView):
         try:page=min(1000000,max(1,int(request.query_params.get('page',1))));size=min(100,max(1,int(request.query_params.get('size',25))))  # 2026-11-10：頁碼上限，超大頁碼回空白頁而非資料庫錯誤
         except ValueError:fail('Invalid pagination.')
         return Response(dict(count=qs.count(),page=page,role=request.ri_principal.role_code,readOnly=request.ri_principal.role_code not in ('sales','general_manager','admin'),
-            rows=[representation(t,request.ri_principal) for t in sorted_rows(qs,'-created_at','uid',start=(page-1)*size,stop=page*size)]))
+            rows=[representation(t,request.ri_principal) for t in sorted_rows(qs,*LIST_ORDER,start=(page-1)*size,stop=page*size)]))
 
 
     def post(self,request):
@@ -54,6 +55,19 @@ class TransactionsView(NoStoreMixin,APIView):
             return Response(representation(t,request.ri_principal))
 
 
+# 2026-11-17 owner: the list is ordered by Transaction No., largest first. Drafts without a number come first
+# (newest first), then web numbers LTX-YYYY-NNNNNN (largest first), then imported Register serials by their
+# numeric part (F18329, F17763, F2898; the text breaks ties); the uid keeps the order stable.
+_NO_NUMBER=Q(number__isnull=True)|Q(number='')
+LIST_ORDER=(
+    Case(When(_NO_NUMBER,then=Value(0)),When(number__startswith='LTX-',then=Value(1)),default=Value(2),output_field=IntegerField()).asc(),
+    Case(When(_NO_NUMBER,then=F('created_at')),default=Value(None),output_field=DateTimeField()).desc(),
+    Cast(Func(F('number'),Value('[0-9]+'),function='REGEXP_SUBSTR',output_field=CharField()),BigIntegerField()).desc(),
+    F('number').desc(),
+    F('uid').asc(),
+)
+
+
 class ImportView(NoStoreMixin,APIView):
     permission_classes=[RIPermission]
     permission_map={'GET':'accounts.manage','POST':'accounts.manage'}
@@ -67,19 +81,13 @@ class ImportView(NoStoreMixin,APIView):
             batch=preview(request.ri_principal,upload.name,upload.read())
             return Response(_batch(batch),status=201)
         body=object_body(request)
+        # 2026-11-17 owner: no upload records are kept (no list, no download); an unused preview is discarded.
+        if body.get('action')=='discard' and isinstance(body.get('id'),str):
+            from .importer import discard
+            return Response(_batch(discard(request.ri_principal,body['id'])))
         if body.get('action')!='commit' or not isinstance(body.get('id'),str) or not isinstance(body.get('sha256'),str):
             fail('Upload an XLSX file to preview, or commit a reviewed batch.')
         return Response(_batch(commit(request.ri_principal,body['id'],body['sha256'])))
-
-    def get(self,request):
-        if request.query_params.get('download'):
-            try:b=ImportBatch.objects.get(pk=request.query_params['download'])
-            except (ImportBatch.DoesNotExist,ValueError,ValidationError):fail('Import batch not found.',404)
-            from cases.documents import content_disposition
-            r=FileResponse(storage.open_read(b.storage_key),content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            r['Content-Disposition']=content_disposition(b.filename)
-            return r
-        return Response(dict(readOnly=False,batches=[_batch(b) for b in sorted_rows(ImportBatch.objects.all(),'-created_at',stop=100)]))
 
 
 def _batch(b):

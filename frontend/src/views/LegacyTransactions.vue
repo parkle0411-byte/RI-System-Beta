@@ -7,7 +7,7 @@ import { can } from '../auth'
 import LegacyEntryEditor from './LegacyEntryEditor.vue'
 
 const route=useRoute(),loading=ref(false),error=ref(''),rows=ref([]),total=ref(0),q=ref(''),page=ref(1)
-const dialog=ref(false),selected=ref(null),batchOpen=ref(false),batches=ref([])
+const dialog=ref(false),selected=ref(null),batchOpen=ref(false)
 const importFile=ref(null),importList=ref([]),importPreview=ref(null),importing=ref(false)
 const transferOpen=ref(false),transferTarget=ref(null),transferReason=ref('')
 const reasonOpen=ref(false),reason=ref({code:'',label:'',active:true})
@@ -67,13 +67,15 @@ async function edit(){
   catch(e){error.value=e.message}
 }
 async function saved(t){selected.value=t;await load()}
-async function showBatches(){
-  try{batches.value=(await api('/api/legacy/imports')).batches;batchOpen.value=true}
-  catch(e){error.value=e.message}
-}
+// 2026-11-17：不保留上傳記錄——只有匯入對話框，沒有上傳清單與下載；未匯入的預覽在 Clear／關閉時丟棄。
+function showImport(){clearImport();batchOpen.value=true}
 // 2026-11-11：系統管理員網頁匯入（先預覽，無錯誤與警告才可確認匯入）。
-function chooseImport(file){importFile.value=file.raw;importList.value=[file];importPreview.value=null}
-function clearImport(){importFile.value=null;importList.value=[];importPreview.value=null}
+function chooseImport(file){clearImport();importFile.value=file.raw;importList.value=[file]}
+function clearImport(){
+  const b=importPreview.value
+  if(b&&b.status==='preview')api('/api/legacy/imports',{method:'POST',body:{action:'discard',id:b.id}}).catch(()=>{})
+  importFile.value=null;importList.value=[];importPreview.value=null
+}
 async function previewImport(){
   if(!importFile.value)return ElMessage.error('Select a Register XLSX file first.')
   if(importFile.value.size>30*1024*1024)return ElMessage.error('The file must be no larger than 30 MiB.')
@@ -82,7 +84,7 @@ async function previewImport(){
     const body=new FormData();body.append('file',importFile.value)
     const response=await apiFetch('/api/legacy/imports',{method:'POST',body});const data=await response.json()
     if(!response.ok)throw new Error(data.message||data.detail||'Preview failed.')
-    importPreview.value=data;batches.value=(await api('/api/legacy/imports')).batches
+    importPreview.value=data
   }catch(e){ElMessage.error(e.message)}finally{importing.value=false}
 }
 const importBlocked=computed(()=>!importPreview.value||importPreview.value.status!=='preview'||!importPreview.value.manifest.eligible||importPreview.value.manifest.errors.length>0||importPreview.value.manifest.warnings.length>0)
@@ -93,7 +95,7 @@ async function commitImport(){
   try{
     const done=await api('/api/legacy/imports',{method:'POST',body:{action:'commit',id:b.id,sha256:b.sha256}})
     ElMessage.success(`Imported ${done.manifest.imported} transactions.`)
-    clearImport();batches.value=(await api('/api/legacy/imports')).batches;page.value=1;await load()
+    importFile.value=null;importList.value=[];importPreview.value=null;page.value=1;await load()
   }catch(e){ElMessage.error(e.message)}finally{importing.value=false}
 }
 watch(()=>route.query.id,id=>{if(id)open(id)})
@@ -106,7 +108,7 @@ onMounted(async()=>{await load();if(route.query.id)await open(route.query.id)})
     <el-alert title="Imported transactions are read-only. Accounts settled in the Register are shown as reconciled and settled; unsettled imported balances continue in Accounting." type="info" :closable="false" show-icon/>
     <div class="legacy-toolbar">
       <el-input v-model="q" placeholder="Search old reference, transaction number, Statement No., insured or settlement party" clearable @keyup.enter="page=1;load()"/>
-      <el-button @click="page=1;load()">Search</el-button><el-button v-if="can('accounts.manage')" @click="showBatches">Import Batches</el-button><el-button v-if="can('accounts.manage')" @click="showReasons">Endorsement Reasons</el-button>
+      <el-button @click="page=1;load()">Search</el-button><el-button v-if="can('accounts.manage')" @click="showImport">Import Register</el-button><el-button v-if="can('accounts.manage')" @click="showReasons">Endorsement Reasons</el-button>
     </div>
     <el-table v-loading="loading" :data="rows" row-key="uid" @row-dblclick="r=>open(r.uid)">
       <el-table-column label="Transaction No." min-width="125"><template #default="{row}"><el-button link type="primary" @click="open(row.uid)">{{row.number || 'Draft'}}</el-button></template></el-table-column>
@@ -131,10 +133,10 @@ onMounted(async()=>{await load();if(route.query.id)await open(route.query.id)})
     <el-dialog v-model="entryOpen" :title="entry?.data.kind==='claim'?'Claim Draft':'Endorsement Draft'" width="min(1100px,96vw)" :close-on-click-modal="false" :close-on-press-escape="false"><LegacyEntryEditor v-if="entryOpen" :transaction="entry" :options="options" @saved="saved" @close="entryOpen=false"/></el-dialog>
     <el-dialog v-model="transferOpen" title="Transfer Draft" width="min(600px,96vw)"><el-form label-position="top"><el-form-item label="New Owner"><el-select v-model="transferTarget" filterable><el-option v-for="p in options.people.filter(p=>['sales','general_manager','admin'].includes(p.role_code))" :key="p.id" :label="p.name" :value="p.id"/></el-select></el-form-item><el-form-item label="Transfer Reason"><el-input v-model="transferReason" type="textarea"/></el-form-item></el-form><template #footer><el-button @click="transferOpen=false">Close</el-button><el-button type="primary" @click="transfer">Transfer Draft</el-button></template></el-dialog>
     <el-dialog v-model="reasonOpen" title="Configure Endorsement Reasons" width="min(600px,96vw)"><el-select :model-value="reason.code" placeholder="Select a reason to edit" @change="chooseReason"><el-option v-for="r in options.reasons" :key="r.code" :label="r.label+(r.active?'':' (Inactive)')" :value="r.code"/></el-select><el-button @click="newReason">Add New Reason</el-button><el-form label-position="top"><el-form-item label="English Label"><el-input v-model="reason.label"/></el-form-item><el-form-item label="Active"><el-switch v-model="reason.active"/></el-form-item></el-form><template #footer><el-button @click="reasonOpen=false">Close</el-button><el-button type="primary" :disabled="!reason.code" @click="saveReason">Save Reason</el-button></template></el-dialog>
-    <el-dialog v-model="batchOpen" title="Import Batches" width="min(1100px,96vw)">
+    <el-dialog v-model="batchOpen" title="Import Register" width="min(1100px,96vw)" @closed="clearImport">
       <section class="legacy-import" data-testid="legacy-import">
         <h3>Import a Register</h3>
-        <p>Upload the reinsurer's Register (Facultative worksheet). Preview first; import is available only when the preview has no errors or warnings. Serial numbers already imported are skipped.</p>
+        <p>Upload the reinsurer's Register (Facultative worksheet). Preview first; import is available only when the preview has no errors or warnings. Serial numbers already imported are skipped. The uploaded file is not kept.</p>
         <div class="legacy-import-actions"><el-upload :auto-upload="false" :limit="1" :file-list="importList" accept=".xlsx" :on-change="chooseImport" :on-remove="clearImport"><el-button>Select XLSX</el-button></el-upload>
           <el-button type="primary" :loading="importing" :disabled="!importFile" @click="previewImport">Preview</el-button></div>
         <template v-if="importPreview">
@@ -157,8 +159,6 @@ onMounted(async()=>{await load();if(route.query.id)await open(route.query.id)})
           <div class="legacy-import-actions"><el-button type="primary" :loading="importing" :disabled="importBlocked" data-testid="legacy-import-commit" @click="commitImport">Import {{importPreview.manifest.eligible}} Transactions</el-button><el-button @click="clearImport">Clear</el-button></div>
         </template>
       </section>
-      <h3>Import History</h3>
-      <el-collapse><el-collapse-item v-for="b in batches" :key="b.id" :name="b.id" :title="b.filename+' · '+b.status+' · '+b.createdAt"><p>SHA256：{{b.sha256}}</p><pre class="legacy-manifest">{{JSON.stringify(b.manifest,null,2)}}</pre><el-button tag="a" :href="'/api/legacy/imports?download='+encodeURIComponent(b.id)">Download Original File</el-button></el-collapse-item></el-collapse>
     </el-dialog>
   </section>
 </template>

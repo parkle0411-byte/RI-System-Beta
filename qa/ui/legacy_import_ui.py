@@ -47,8 +47,9 @@ with sync_playwright() as p:
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
     page.goto(BASE + "/login"); page.get_by_label("Username").fill("ui.admin"); page.get_by_label("Password").fill(PASSWORD)
     page.get_by_role("button", name="Sign in").click(); page.wait_for_selector(".app-shell")
-    page.goto(BASE + "/legacy"); page.get_by_role("button", name="Import Batches").click()
+    page.goto(BASE + "/legacy"); page.get_by_role("button", name="Import Register").click()
     panel = page.get_by_test_id("legacy-import"); panel.wait_for()
+    check("no upload history or download in the import dialog (2026-11-17)", page.get_by_text("Import History").count() == 0 and page.get_by_text("Download Original File").count() == 0)
     def preview(content, name):
         panel.locator("input[type=file]").set_input_files({"name": name, "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "buffer": content})
         panel.get_by_role("button", name="Preview").click(); panel.get_by_text("Rows in file").wait_for()
@@ -68,6 +69,8 @@ with sync_playwright() as p:
     page.keyboard.press("Escape"); page.wait_for_timeout(500)
     page.get_by_placeholder("Search old reference").fill("TWUI-UI900"); page.get_by_role("button", name="Search").click()
     page.get_by_text("UI9002").first.wait_for()
+    listed = [x.strip() for x in page.locator(".legacy-page .el-table__body tr td:first-child").all_inner_texts()]
+    check("list is ordered by Transaction No., largest first", listed.index("UI9002") < listed.index("UI9001"))
     body = page.inner_text(".legacy-page")
     check("Legacy list shows settled and open imported rows", "Historically Reconciled / Settled" in body and "Imported · Open in Accounting" in body)
     # 2026-11-13：Accounting 預設開在 Unreconciled；已結清的舊資料歷史在背景載入後出現在 All Accounts。

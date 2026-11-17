@@ -260,6 +260,60 @@ try:
         from legacy.dashboard import dashboard_inputs
         names = {x['className'] for p in dashboard_inputs()['policies'] for x in p['items']}
         check('Dashboard groups legacy premium by the stored Class name', {'Property', 'Commercial General Liability', 'QA Engineering'} <= names, names)
+        # ================= 2026-11-17：不保留上傳記錄；清單依 Transaction No. 由大到小 =================
+        from datetime import timedelta
+        from django.test import TestCase
+        from django.utils import timezone
+        check('no upload list or download (GET is not offered)', admin.get('/api/legacy/imports').status_code == 405
+              and admin.get('/api/legacy/imports?download=' + b['id']).status_code == 405)
+        done_batch = ImportBatch.objects.get(pk=b['id'])
+        check('an imported batch keeps only its counts: no file name, workbook or preview contents',
+              done_batch.status == 'imported' and done_batch.filename == '' and done_batch.storage_key == ''
+              and done_batch.manifest == {'imported': 8, 'historical': 3, 'open': 5}, (done_batch.filename, done_batch.storage_key, done_batch.manifest))
+        check('imported transactions still know they were imported', all(x.batch_id == done_batch.pk for x in t.values()))
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            p1 = upload(admin, workbook([row('QA9201', Reinsurer=ORD)])).json()
+        k1 = ImportBatch.objects.get(pk=p1['id']).storage_key
+        check('a preview stores its workbook until it is imported or discarded', p1['status'] == 'preview' and storage.exists(k1))
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            p2 = upload(admin, workbook([row('QA9202', Reinsurer=ORD)])).json()
+        x1 = ImportBatch.objects.get(pk=p1['id'])
+        check("a new preview discards the admin's earlier preview (workbook deleted, contents cleared)",
+              x1.status == 'withdrawn' and x1.manifest == {} and x1.filename == '' and x1.storage_key == '' and not storage.exists(k1))
+        check('a discarded preview cannot be imported', commit(admin, p1).status_code == 409)
+        k2 = ImportBatch.objects.get(pk=p2['id']).storage_key
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            r = admin.post('/api/legacy/imports', json.dumps({'action': 'discard', 'id': p2['id']}), content_type='application/json')
+        x2 = ImportBatch.objects.get(pk=p2['id'])
+        check('Clear / close discards the preview', r.status_code == 200 and x2.status == 'withdrawn' and not storage.exists(k2)
+              and LegacyAudit.objects.filter(entity=p2['id'], action='import_discarded').exists(), r.content[:200])
+        check('only admins may discard', fin.post('/api/legacy/imports', json.dumps({'action': 'discard', 'id': p2['id']}), content_type='application/json').status_code == 403)
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            p3 = upload(admin, workbook([row('QA9203', Reinsurer=ORD)])).json()
+            p4 = upload(admin, workbook([row('QA9204', Reinsurer=ORD)])).json()
+        ImportBatch.objects.filter(pk=p3['id']).update(created_by='personnel:999999', status='preview', created_at=timezone.now() - timedelta(days=2))
+        ImportBatch.objects.filter(pk=p4['id']).update(created_by='personnel:999998', status='preview')
+        keys.append(ImportBatch.objects.get(pk=p4['id']).storage_key)
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            p5 = upload(admin, workbook([row('QA9205', Reinsurer=ORD)])).json()
+        check("another admin's preview older than one day is discarded; a recent one is kept",
+              ImportBatch.objects.get(pk=p3['id']).status == 'withdrawn' and ImportBatch.objects.get(pk=p4['id']).status == 'preview')
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            r = commit(admin, p5)
+        x5 = ImportBatch.objects.get(pk=p5['id'])
+        check('the workbook is deleted after a successful import', r.status_code == 200 and x5.storage_key == '' and x5.filename == ''
+              and not storage.exists(f"legacy-imports/{p5['id']}/original.xlsx"), r.content[:200])
+        rows = admin.get('/api/legacy?size=100').json()['rows']
+        nums = [x['number'] for x in rows]
+        import re as _re
+        grp = lambda n: 0 if not n else 1 if n.startswith('LTX-') else 2
+        drafts = [x for x in rows if not x['number']]
+        rest = [n for n in nums if n and not n.startswith('LTX-')]
+        check('list order: drafts first, then LTX numbers, then Register serials largest first (numeric)',
+              [grp(n) for n in nums] == sorted(grp(n) for n in nums) and len(drafts) >= 1
+              and [n for n in nums if n and n.startswith('LTX-')] == sorted([n for n in nums if n and n.startswith('LTX-')], reverse=True)
+              and [int(_re.search(r'[0-9]+', n).group()) for n in rest] == sorted((int(_re.search(r'[0-9]+', n).group()) for n in rest), reverse=True)
+              and rest[-1] == 'F2898' and rest[0] == 'QA9205', nums)
         raise Rollback()
 except Rollback:
     pass

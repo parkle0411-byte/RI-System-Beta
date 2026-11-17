@@ -495,7 +495,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **2026-11-11 業主要求清空、之後重新匯入**：以維護者身分刪除全部 3,694 筆交易（匯入 3,693 筆＋草稿 TWPF241010 1 筆）；匯入批次標記 `withdrawn`（保留紀錄與原始 Excel），Legacy Audit 新增 `register_cleared` 一筆並保留既有紀錄，原因選項 4 筆保留。清空前演練確認 Accounting（扣除 Legacy 項目）、Dashboard、Production（含已凍結 2026-08／10）逐位元組不變。備份 `backups/legacy_clear_20261111_155937`。下方 3,693 筆等描述為清空前狀態；重新匯入沿用業主授權維護程序（HTTP 匯入仍不開放）。
 
 - **網頁匯入 Register（2026-11-11 業主決定）**：
-  - 限 System Administrator，在 Legacy 分頁 Import Batches 上傳 Register（工作表 `Facultative`）→ 預覽 → 確認匯入（核對 SHA256）。預覽有任何錯誤或警告都不能匯入；沒有新交易可匯入時也不能確認。不提供網頁撤回；匯錯以業主授權維護程序處理。可分批匯入各再保人的 Register；已匯入的流水號自動略過。
+  - 限 System Administrator，在 Legacy 分頁 Import Register 上傳 Register（工作表 `Facultative`）→ 預覽 → 確認匯入（核對 SHA256）。**不保留上傳記錄**（2026-11-17 業主決定）：沒有上傳清單與原始檔下載；匯入成功後刪除暫存 Excel、清空預覽內容，批次只留匯入筆數作為「匯入交易」的內部標記；未匯入的預覽在 Clear／關閉對話框／同一人重新預覽時丟棄（狀態 withdrawn、刪檔），他人超過一天的預覽也會丟棄。每筆交易的 Original Excel Data 照舊保留。預覽有任何錯誤或警告都不能匯入；沒有新交易可匯入時也不能確認。不提供網頁撤回；匯錯以業主授權維護程序處理。可分批匯入各再保人的 Register；已匯入的流水號自動略過。
+  - **清單排序**（2026-11-17 業主決定）：依 Transaction No. 由大到小——沒有編號的草稿最前（新的在前），再來網頁新增的 LTX 編號（大到小），最後是匯入的 Register 流水號（依數字部分大到小，例如 F18329、F17763、F2898）。
   - Class 依 Master Data Management 的 Class 代碼比對（2026-11-16 業主決定；不分大小寫），險種名稱用 MDM 名稱，Register 原代碼照存；Register 的 PD 視同 MDM 的 PF（Property）；MDM 沒有的代碼為錯誤；已停用的 Class 為警告（須先在 MDM 重新啟用）；非 Property 列的再保人若為 Allianz／Great American／QBE Facility（新系統這三種 Facility 規則只適用 Property）為警告，不設放行清單；Legacy Dashboard 依每筆存的險種顯示，Production 的 Class 依 §9（Property 一律 PD）；Fac / Claim 必填；不再限定已結清。業主指定的排除（`import_exclusions.json`，F13333）與更正（`import_corrections.json`，F2898：Fac / Claim＝Fac、New / Renew＝New）在預覽列出，原始 Excel 值保留。
   - 欄位：Reinsurer's Ref. No.＝Reinsurer Ref.；Effective Date 顯示在 Accounting「Transaction / SoA / TW Ref」日期位置（理賠用 DOL），與新系統邏輯相同；Revenue Month＝Production 月份（2026-11-15 起：保費列與批單列依此月份列入 Production；起始月 2026-11 以前視為已認列的歷史月份，理賠不列入）；Cedant／Reinsurer Receipt／Payment No.＝Accounting Dept. Ref.；New / Renew＝新案／續保；Installment No.＝分期（顯示，不改交易編號）；Issue Date 不匯入；未使用欄位保留在原始資料。
   - 收付：Cedant Receipt No／Cedant Payment No 有填＝Cedant 方已收付；Reinsurer Receipt No／Reinsurer Payment No. 有填＝再保人方已收付（理賠方向相反）。已收付方建立收付登錄（Accounting Dept. Ref.＝該編號；保費列日期＝Receive Date／Pay Date，理賠列＝Closed Month 月底），標示 Settled before import，不可沖回。全部已收付的列為歷史已對帳／結清；仍有未收付方的列成為可追蹤帳款，已收付方視為匯入前已對帳，未收付方依新系統各再保人規則計算到期日（理賠以 Issue Date of Claim 為理賠建立日，到期日＝其後 15 天、提醒日提前 7 天，與新案相同；未收付理賠缺 Issue Date of Claim 時預覽警告、不能匯入），走一般對帳與收付流程。
@@ -713,6 +714,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-17 | 清空舊資料（含上傳紀錄與 Excel、對舊資料的 Finance 對帳 2 筆、只被舊資料連結的 Insured 699 筆、Legacy 操作紀錄 17 筆；業主同意的正式資料刪除） | `backups/legacy_clear_20261117_102008` | —（程式未變） | 正式資料副本演練：其他資料表 CHECKSUM、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
 
+| 11-17 | 舊資料不保留上傳記錄（拿掉 Import History／下載，匯入或放棄預覽後刪檔）；Legacy 清單依 Transaction No. 由大到小 | `backups/legacy_no_batch_20261117_115347` | `ri-backend:before-legacy-no-batch-20261117_115347`／`ri-frontend:before-legacy-no-batch-20261117_115347` | 候選映像完整 API（legacy_import_web 74，8 項新行為檢查以舊程式驗證會失敗）、畫面 A＋L＋I＋Y；前端以原始碼重建與正式逐檔核對；無 migration |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -722,6 +725,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-17：舊資料不保留上傳記錄；Legacy 清單依 Transaction No. 由大到小（§17）；部署前已匯入的 AGCS、GAIC 兩批只留筆數、2 筆未匯入的預覽改為丟棄，4 個 Excel 刪除（業主同意；備份 `backups/legacy_strip_batches_20261117_115639`，交易 1,236 筆不變）。
 
 - 2026-11-17：依業主要求清空舊資料（含上傳紀錄），見 §17 資料清理。
 
