@@ -28,7 +28,6 @@ from .authz import NoStoreMixin, RIPermission, AuthError, object_body
 log = logging.getLogger(__name__)
 MAX_BYTES = 10 * 1024 * 1024
 MANUALS = {
-    'insured-list': 'Insured_List_2026-11-03.xlsx',
     'mdm': 'MDM_主檔管理說明.docx',
     'schema': 'Schema_資料庫結構說明.docx',
     'swiss-pd': 'Swiss_Re_Facility_PD_Exclusive_Rules_2026-10-29.docx',
@@ -63,7 +62,6 @@ def validated_type(filename, data):
 
 
 MANUAL_DOWNLOAD_NAMES = {
-    'insured-list': 'Insured 清單_2026-11-03.xlsx',
     'mdm': 'MDM_Master_Data_Management.docx',
     'schema': 'Schema_Database_Structure.docx',
     'swiss-pd': 'Swiss Re Facility - PD 專屬規則_2026-10-29.docx',
@@ -75,7 +73,7 @@ MANUAL_DOWNLOAD_NAMES = {
 }
 
 
-MANUAL_RELEASE_DATES = {'insured-list': '2026-11-03', 'mdm': '2026-11-16', 'schema': '2026-11-16', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
+MANUAL_RELEASE_DATES = {'mdm': '2026-11-16', 'schema': '2026-11-16', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
 
 def manual_row(key):
     return {'id': key, 'filename': MANUAL_DOWNLOAD_NAMES[key], 'release_date': MANUAL_RELEASE_DATES[key], 'kind': 'manual'}

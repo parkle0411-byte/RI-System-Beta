@@ -462,7 +462,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - **共用拖拉排序（2026-11-04）**：System Guides 與 Document Templates 各自排序；沿用 System Administrator 權限，拖拉把手或鍵盤上下鍵調整後自動保存，所有使用者與重新登入共用。順序原子寫入文件 volume 的 `system-reference/.orders/`，備份須包含文件 volume；不需 migration。並行修改以排序版本檢查拒絕覆寫；未排序的新檔列在已存順序之後，彼此依上傳時間由新到舊顯示；更名保留位置，回收筒還原保留已存排序位置。
 
-- Insured 清單（2026-11-03）：以使用者人工整理的 1,752 筆為基礎，依明確選定的 15 組名稱統一寫法，並去除完全重複的力山工業，整理為 1,736 筆。寶結企業／寶結實業、台耀科技／台燿科技各自保留；勇信貿易／勇信物流組合及天后闆妹的江X諺／江効諺兩版待查原文件，這次不合併。其餘未確認候選繼續分開。System Guides 的 `insured-list` 提供 Excel、來源核對明細及整理說明；僅參考清單，未更動正式主檔或 Case。
+- Insured 清單（2026-11-03）：以使用者人工整理的 1,752 筆為基礎，依明確選定的 15 組名稱統一寫法，並去除完全重複的力山工業，整理為 1,736 筆。寶結企業／寶結實業、台耀科技／台燿科技各自保留；勇信貿易／勇信物流組合及天后闆妹的江X諺／江効諺兩版待查原文件，這次不合併。其餘未確認候選繼續分開。該 Excel 參考指南已依業主 2026-11-17 決定自 System Reference 回收桶永久清除；未更動正式主檔或 Case。
 
 現行指南（Word）：完整 MDM 指南、完整 Schema 指南（2026-11-16 版）；Swiss Re Facility PD、Swiss Re Facility CGL、Great American Facility PD、QBE Facility PD、Allianz Facility PD（10-30 改提醒日）、Syndicate 609 AUW Facility PD 專屬規則（皆 2026-10-29 版）。舊問卷與舊版隨備份保留。
 
@@ -726,6 +726,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-17 | 第三次清空舊資料（交易 6,102、內部標記 4、Insured 全部 1,681、Legacy 操作紀錄 8；業主同意的正式資料刪除） | `backups/legacy_clear_20261117_143435` | —（程式未變） | 正式資料副本演練：其他資料表、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
 
+| 11-17 15:50 | 依業主指定清空 System Reference Data 回收桶 10 項（9 份上傳文件與 1 份 Insured 清單指南）；不改案件及舊資料 | `backups/reference_trash_20261117_155007` | `ri-backend:before-ref-trash-20261117` | 獨立容器 System Reference 排序／回收／權限 34 項通過，已移除指南不可存取；正式網站 200、回收桶 0、10 份共用文件及 8 份指南下載通過，資料庫與其餘文件比對一致；無 migration |
+
 | 11-17 | 已結清舊資料歷史：共用快照檔＋每個 worker 背景預建；不再隨台北日期重算（只換後端） | `backups/legacy_history_snapshot_20261117_164156`（原始碼） | `ri-backend:before-legacy-history-snapshot-20261117_164156` | 候選映像完整 API（legacy_accounting_cache 191，新檢查以舊程式驗證會失敗）、畫面 A＋L＋Y；正式資料副本 API 回應逐位元組相同；gunicorn 實測最慢 13→2 秒；無 migration、不改資料 |
 
 | 11-17 | 舊資料匯入：理賠列不做 AE / Sub AE 拆分檢查（只換後端） | `backups/legacy_claim_split_20261117_174953`（原始碼） | `ri-backend:before-legacy-claim-split-20261117_174953` | 候選映像完整 API（legacy_import_web 新檢查以舊程式驗證會失敗）、畫面 L；當日 Register 4,880 列以新程式預覽：0 錯誤、0 警告；無 migration、不改資料 |
@@ -742,6 +744,8 @@ Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別�
 
 - 2026-11-17：舊資料匯入的理賠列不再做 AE / Sub AE 拆分檢查（理賠沒有佣金）。
 - 2026-11-17：All Accounts 載入加速——已結清舊資料歷史改共用快照＋背景預建（§8.7 效能）。
+
+- 2026-11-17：依業主指定清空 System Reference 回收桶全部 10 項，含 Insured 清單指南與舊資料試算表；已備份，舊資料表及其他共用文件維持。
 
 - 2026-11-17：依業主要求第三次清空舊資料（含全部 Insured），見 §17 資料清理。
 
