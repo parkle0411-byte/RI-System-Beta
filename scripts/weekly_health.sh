@@ -3,7 +3,7 @@
 #   scripts/weekly_health.sh            印出報告並附加到 logs/weekly-health.log
 #   scripts/weekly_health.sh --no-log   只印出
 # 內容：主機記憶體／swap／硬碟、容器狀態、Docker 映像與備份數量、最慢的頁面（nginx 的 urt，容器重建後重新累計）、
-#       資料量（案件、舊資料、快照）、Accounting 各段回應的大小與時間（在交易內讀取後回復，不寫入）。
+#       資料量（案件、舊資料、快照）、Accounting 畫面實際使用的請求（打開清單、伺服器分頁、下拉名單）的大小與時間（在交易內讀取後回復，不寫入）。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 LOG=1; [[ "${1:-}" == "--no-log" ]] && LOG=0
@@ -36,7 +36,8 @@ for line in sys.stdin:
     if not path.startswith("/api/"): continue
     query = m.group(2).partition("?")[2]
     if path == "/api/accounting" and m.group(1) == "GET":
-        path += " [history]" if "legacy=history" in query else " [open]" if "legacy=open" in query else " [full]"
+        path += (" [page]" if "view=page" in query else " [options]" if "view=options" in query else " [history]" if "legacy=history" in query
+                 else " [open]" if "legacy=open" in query else " [full]")   # 2026-11-17：畫面用 open、page、options
     stats[(m.group(1), path)].append(float(m.group(4)))
 if not stats:
     print("（沒有紀錄：容器剛重建，或這段期間沒有人使用）")
@@ -79,14 +80,21 @@ if person is None:
     print('Accounting 回應：沒有可用的財會／管理員帳號，略過')
 else:
     user = get_user_model().objects.get(pk=person.auth_user_id); rf = RequestFactory(HTTP_HOST='localhost')
-    for label, url in (('打開時（不含已結清舊資料歷史）', '/api/accounting?view=list&legacy=open'),
-                       ('背景載入的舊資料歷史', '/api/accounting?view=list&legacy=history'), ('完整清單', '/api/accounting?view=list')):
+    # 2026-11-17：量畫面實際使用的請求（伺服器分頁上線後不再下載整份舊資料歷史）。這裡是另一個程式、快取是空的，
+    # 所以每項量兩次：第一次＝當天或部署後第一位使用者的等待，第二次＝之後一般的等待。
+    def measure(url):
+        m = resolve('/api/accounting'); req = rf.get(url); req.user = user; req.session = SessionStore()
+        started = time.perf_counter()
+        with transaction.atomic():
+            r = m.func(req); r.render(); transaction.set_rollback(True)
+        return time.perf_counter() - started, len(r.content), r.status_code
+    for label, url in (('打開時（Unreconciled／Reconciled 的清單）', '/api/accounting?view=list&legacy=open'),
+                       ('All Accounts 第 1 頁', '/api/accounting?view=page&tab=all&page=1'),
+                       ('Settled/Closed 第 1 頁', '/api/accounting?view=page&tab=settled&page=1&settlement=settled'),
+                       ('下拉選單名單', '/api/accounting?view=options')):
         try:
-            m = resolve('/api/accounting'); req = rf.get(url); req.user = user; req.session = SessionStore()
-            started = time.perf_counter()
-            with transaction.atomic():
-                r = m.func(req); r.render(); transaction.set_rollback(True)
-            print('Accounting %s：%.2f 秒，%.1f MB（HTTP %d）' % (label, time.perf_counter() - started, len(r.content) / 1048576, r.status_code))
+            (a, size, status), (b, _, _) = measure(url), measure(url)
+            print('Accounting %s：第一次 %.2f 秒、第二次 %.2f 秒，%s（HTTP %d）' % (label, a, b, '%.1f MB' % (size / 1048576) if size >= 104858 else '%d KB' % (size // 1024), status))
         except Exception as exc:
             print('Accounting %s：無法量測（%s）' % (label, type(exc).__name__))
 print('HEALTH-END')
