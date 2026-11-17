@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from django.db import transaction
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """AUW month-end settlement dates, cash matching and reminder dates in disposable QA."""
@@ -148,7 +149,7 @@ case.tw_ref = 'TWADP2601001'
 case.payload['transactions'] = build_premium_transactions({**case.payload, 'twRef':case.tw_ref})
 case.save()
 def ledger():
-    return next(row for row in call('get', '/api/accounting').json()['rows']
+    return next(row for row in accounting_get(client, '').json()['rows']
                 if row['caseUid']==str(case.case_uid) and row['partyType']=='reinsurer')
 before = copy.deepcopy(case.payload)
 item = ledger()
@@ -181,7 +182,7 @@ def pay(key, amount):
     no=next(n for n,d in details.items() if any(p['scheduleKey']==key for p in d.get('cashParts',[])))
     return reviewed_cash(client,{'action':'record_transaction_payments','paymentDate':'2026-05-31','amount':amount,'note':'QA synthetic registration',
       'allocations':[{'caseUid':str(case.case_uid),'txNo':no,'rowVersion':case.row_version,'amount':amount}]})
-cedant_row = next(row for row in call('get', '/api/accounting').json()['rows']
+cedant_row = next(row for row in accounting_get(client, '').json()['rows']
                   if row['caseUid']==str(case.case_uid) and row['partyType']=='cedant')
 # 2026-10-20 四類統一：AUW 付款前須先登錄整期 Cedant 全額收款並逐筆人工銷帳
 response = pay(item['scheduleKey'], 7000)

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """President sees business data across owners; every business mutation stays denied."""
 import hashlib
 import json
@@ -117,13 +118,13 @@ try:
             check('read other owner ' + row.status + ' detail', r.status_code == 200)
         posted = rows[1]
         uid = str(posted.case_uid)
-        for path in ['/api/dashboard', '/api/master-data', '/api/fx-rates', '/api/accounting',
+        for path in ['/api/dashboard', '/api/master-data', '/api/fx-rates', '/api/accounting?view=list&legacy=open',
                      '/api/production-report?month=2026-10', '/api/case-workflow?caseUid=' + uid,
                      '/api/claims?caseUid=' + uid,
                      '/api/case-reminders?caseUid=' + uid]:
             r = president.get(path)
             check('business read allowed: ' + path, r.status_code == 200)
-        check('Accounting advertises no editing', president.get('/api/accounting').json()['scope']['canEdit'] is False)
+        check('Accounting advertises no editing', accounting_get(president, '?view=list&legacy=open').json()['scope']['canEdit'] is False)
         scope = president.get('/api/production-report?month=2026-10').json()['scope']
         check('Production cannot operate, generate or close', not any(scope[k] for k in
               ['canOperate', 'canClose', 'canGenerate', 'canCloseLatest']))
@@ -153,10 +154,10 @@ try:
             attempts.append((method, '/api/case-documents', {'caseUid': uid}))
         for path, methods in [('/api/master-data', ['post', 'put']), ('/api/fx-rates', ['post']),
                 ('/api/personnel', ['post', 'put']), ('/api/dashboard-targets', ['post', 'put']),
-                ('/api/draft-recycle-bin', ['post']), ('/api/personnel-accounts', ['post']),
-                ('/api/personnel-accounts/disable', ['post']), ('/api/personnel-accounts/enable', ['post']),
-                ('/api/personnel-accounts/reset-password', ['post'])]:
+                ('/api/draft-recycle-bin', ['post']), ('/api/personnel-accounts', ['post'])]:
             attempts.extend((method, path, {}) for method in methods)
+        for action in ['create', 'disable', 'enable', 'reset_password']:   # 2026-11-17：帳號網址合一，以 action 區分
+            attempts.append(('post', '/api/personnel-accounts', {'action': action}))
         for method, path, body in attempts:
             resp = call(president, method, path, body)
             check('mutation denied: ' + method.upper() + ' ' + path + ' ' + str(body.get('action', '')),

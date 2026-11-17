@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from masterdata.market_views import LloydsRatingsView
 
-from personnel.account_views import CreateAccountView, DisableAccountView, EnableAccountView, ResetPasswordView
+from personnel.account_views import AccountView
 from cases.accounting_views import AccountingView
 from cases.claims_views import ClaimsView
 from cases.claim_loss_snapshot_views import ClaimLossSnapshotView
@@ -64,8 +64,6 @@ urlpatterns = [
     path("api/dashboard-targets", DashboardTargetsView.as_view(), name="dashboard-targets"),
     path("api/personnel", PersonnelView.as_view(), name="personnel"),
     path("api/personnel-options", PersonnelOptionsView.as_view(), name="personnel-options"),
-    path("api/personnel-accounts", CreateAccountView.as_view(), name="personnel-account-create"),
-    path("api/personnel-accounts/disable", DisableAccountView.as_view(), name="personnel-account-disable"),
-    path("api/personnel-accounts/enable", EnableAccountView.as_view(), name="personnel-account-enable"),
-    path("api/personnel-accounts/reset-password", ResetPasswordView.as_view(), name="personnel-account-reset"),
+    # 2026-11-17：帳號的建立／停用／啟用／重設密碼合為一個網址，以 action 區分（personnel/account_views.py）
+    path("api/personnel-accounts", AccountView.as_view(), name="personnel-accounts"),
 ]

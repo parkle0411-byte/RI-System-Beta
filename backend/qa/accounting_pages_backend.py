@@ -32,7 +32,16 @@ def fetch(url):
 
 now = taipei_date(None)
 open_body = fetch('/api/accounting?view=list&legacy=open')
-history = fetch('/api/accounting?view=list&legacy=history')
+from qa.accounting_full import accounting_get   # the history read is internal since 2026-11-17
+
+
+class _ReadOnlyCaller:
+    """Identifies the user without logging in (no session row, no last-login update on production data)."""
+    session = {'_auth_user_id': str(user.pk)}
+
+
+with transaction.atomic():
+    history = accounting_get(_ReadOnlyCaller(), '?view=list&legacy=history').json(); transaction.set_rollback(True)
 options = fetch('/api/accounting?view=options')['options']
 MAX_PAGES = int(os.environ.get('PAGES_MAX', '6'))
 

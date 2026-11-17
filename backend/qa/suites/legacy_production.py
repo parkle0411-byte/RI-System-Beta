@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """FX arrival/correction, original currency independence and immutable closed reports."""
 from pathlib import Path
 exec(Path('/app/qa/suites/legacy_entries.py').read_text().replace("print(f'{len(checks)}/{len(checks)} passed')",'pass'))
@@ -13,7 +14,7 @@ t=create(src=psrc);t=save(t,dict(gross=100.03,commissionRate=15,taxRate=1,broker
 check('automatic Revenue Month follows the later effective month',t['revenueMonth']==month,t['revenueMonth'])
 preview=prod();check('missing monthly FX is visible',preview['summary']['missingRateCurrencies']==['USD'],preview)
 prod('generate',400,sourceSignature=preview['sourceSignature'])
-rows=admin.get('/api/accounting?view=list').json()['transactionRows']
+rows=accounting_get(admin, '?view=list').json()['transactionRows']
 check('missing FX does not hide original currency accounts',len([r for r in rows if r.get('caseUid')==t['uid']])==3)
 fx=FxRate.objects.create(year_month=month,currency='USD',rate='31.2',created_by='qa',updated_by='qa')
 p=prod();ours=[r for r in p['rows'] if r.get('legacyTransactionId')==t['uid']]

@@ -4,7 +4,7 @@
 #
 #   scripts/run_ui_test.sh            執行（截圖放在 qa/ui/out/）
 #   PHASES="A H" scripts/run_ui_test.sh   只跑列出的階段（除錯用；階段之間有先後依賴，要從 A 開始）
-#   預設全部：A H R B0 B K C D E F G P1 P2，加上 Oversea（O）、舊案（L）、Accounting 載入失敗（X）、伺服器分頁（Y）等專項與主資料重新啟用（M）
+#   預設全部：A H R B0 B K C D E F G P1 P2，加上 Oversea（O）、舊案（L）、Accounting 載入失敗（X）、伺服器分頁（Y）等專項、主資料重新啟用（M）與帳號操作（U）
 #   KEEP=1 scripts/run_ui_test.sh     測完先不刪環境（除錯用；之後手動 docker compose -p ri-uitest down -v）
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -44,7 +44,7 @@ run_phase PR || STATUS=1
 run_phase CL || STATUS=1
 # 提醒信採不寄信模式；測試資料的 AE 已關聯 Personnel，確認聯絡資料完整並檢查提醒畫面。
 reminders() { docker exec ri-ut-backend python manage.py "$1"; echo; }
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" H "*|*" R "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" H "*|*" R "*)
   reminders run_signed_slip_reminders >/dev/null
   docker exec ri-ut-backend python manage.py shell -c "
 from personnel.models import Personnel
@@ -54,7 +54,7 @@ Personnel.objects.filter(name='UI Finance').update(email='ui.fin@tw-insure.com')
 esac
 run_phase H || STATUS=1
 # 階段 H：每次 Word 下載都記錄 Audit，PDF 引擎已退役。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" H "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" H "*)
 docker exec ri-ut-backend python manage.py shell -c "
 from audit.models import AuditLog
 q = AuditLog.objects.filter(action='generate_document')
@@ -66,7 +66,7 @@ esac
 # 畫面上要到 Production close 才會變成 Confirmed（尚未移植）：在測試環境直接把案件設成 Confirmed，才能測 Reverse／Renewal／修正
 docker exec ri-ut-backend python manage.py shell -c "from cases.models import Case; print('confirmed', Case.objects.filter(tw_ref='TWPAR2603001').update(status='closed'))" 2>&1 | grep confirmed
 
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" R "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" R "*)
   echo "signed slip: $(reminders run_signed_slip_reminders)"
   echo "payment:     $(reminders run_payment_reminders)"
 esac
@@ -100,7 +100,7 @@ run_phase F || STATUS=1
 run_phase D || STATUS=1
 run_phase G || STATUS=1
 # 忘記密碼（階段 P1／P2）：打開測試環境的寄信（寫成檔案），P1 在畫面申請，腳本從信件取出連結，P2 打開連結設定新密碼
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" P1 "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" P1 "*)
   UT_EMAIL_ENABLED=true "${COMPOSE[@]}" up -d backend >/dev/null 2>&1
   for i in $(seq 1 30); do docker exec ri-ut-backend python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/auth/password-reset')" >/dev/null 2>&1 && break; sleep 1; done
   docker exec ri-ut-backend python manage.py shell -c "
@@ -118,40 +118,40 @@ print(msg['To']); print(re.search(r'http://nginx/reset-password\\?uid=\\S+', tex
   run_phase P2 || STATUS=1
 esac
 # O: Overseas brokerage uses its own six-field form and cash T3 dates.
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" O "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" O "*)
   docker exec -i ri-ut-backend python manage.py shell < qa/ui/oversea_business_seed.py || STATUS=1
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 oversea_business.py || STATUS=1
 esac
 # L: Legacy Data (Old Register) 新增批單／理賠與 Accounting（2026-11-10 起併入完整執行）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" L "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" L "*)
   docker exec -i ri-ut-backend python manage.py shell < qa/ui/legacy_entry_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
   run_phase L || STATUS=1
 esac
 # X: Accounting 載入失敗時顯示常駐錯誤與 Retry（2026-11-10；模擬伺服器 502，不改資料）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" X "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" X "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 accounting_load_error.py || STATUS=1
 esac
 # I: Legacy 網頁匯入（2026-11-11；系統管理員上傳 Register → 預覽 → 匯入 → Accounting）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" I "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" I "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 legacy_import_ui.py || STATUS=1
 esac
 # Y: Accounting 伺服器分頁（2026-11-17；取代 11-13 的背景合併）——All Accounts／Settled/Closed／Brokerage 每頁 100 列由伺服器篩選排序，
 #    先準備 160 筆合成的已結清舊資料歷史（需在 L、I 之後）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" Y "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" Y "*)
   docker exec -i ri-ut-backend python manage.py shell < qa/ui/accounting_paging_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 accounting_history_ui.py || STATUS=1
 esac
 # Z: 前端拆檔與 Word 產生程式快取（2026-11-13；頁面按需載入、頁面檔失效時自動重新載入、快取標頭）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" Z "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" Z "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 frontend_chunks_ui.py || STATUS=1
 esac
 # M: Master Data 重新啟用（2026-11-16）：儲存內容不變時直接啟用；畫面補上市場資料而會一併改變內容時，跳出填理由視窗。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M} " in *" M "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" M "*)
   docker exec -i ri-ut-backend python manage.py shell < qa/ui/mdm_reactivate_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 mdm_reactivate_ui.py || STATUS=1
@@ -164,5 +164,11 @@ ok=r.is_active and s is not None and s.snapshot_data.get('changeReason')=='UI re
 print('PASS the reactivation reason is kept in the version snapshot' if ok else 'FAIL reactivation reason not in snapshot')
 " 2>&1 | grep -E '^(PASS|FAIL)')
   echo "$result"; [[ "$result" == PASS* ]] || STATUS=1
+esac
+# U: 人員頁的帳號操作（2026-11-17；四個帳號網址合為一個，以 action 區分）——重設密碼、停用、重新啟用。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" U "*)
+  docker exec -i ri-ut-backend python manage.py shell < qa/ui/personnel_accounts_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 personnel_accounts_ui.py || STATUS=1
 esac
 exit $STATUS

@@ -8,7 +8,7 @@ from django.test.utils import CaptureQueriesContext
 
 c = Client(HTTP_HOST="localhost")
 c.force_login(get_user_model().objects.get(username="stress.finmgr"))
-for path in ["/api/accounting", "/api/dashboard", "/api/production-report?month=2026-09", "/api/cases"]:
+for path in ["/api/accounting?view=list&legacy=open", "/api/dashboard", "/api/production-report?month=2026-09", "/api/cases"]:
     c.get(path)  # 暖機
     with CaptureQueriesContext(connection) as q:
         pr = cProfile.Profile()

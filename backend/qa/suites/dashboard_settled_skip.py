@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """2026-10-29 業主：Dashboard 跳過「帳款標記為整件已銷帳」的案件；Accounting 每次核對標記與實際收付款，不一致就列入警告。
 只在拋棄式 QA 資料庫執行；所有變更在交易內回滾。"""
 import copy
@@ -68,8 +69,8 @@ with transaction.atomic():
     made = {}
     for ref, p in (('QASKIP001', open_p), ('QASKIP002', partly), ('QASKIP003', flagged)):
         made[ref] = Case.objects.create(status='closed', tw_ref=ref, payload=p, currency='TWD', created_by='qa', updated_by='qa')
-    for path in ('/api/accounting', '/api/accounting?view=list'):
-        body = c.get(path).json()
+    for path in ('', '?view=list'):   # retired reads (2026-11-17) are checked through qa.accounting_full
+        body = accounting_get(c, path).json()
         mine = {w['twRef']: w for w in body['warnings'] if SETTLED_FLAG_WARNING in (w.get('issues') or [])}
         check(f'{path}: the mismatched case is listed in warnings', set(mine) == {'QASKIP003'}, sorted(mine))
         check(f'{path}: its rows are still shown in full (nothing hidden in Accounting)',

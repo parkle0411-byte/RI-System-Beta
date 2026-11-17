@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Accounting 列表「同一件案件的付款排程與交易明細只算一次、三處共用」(CaseCompute) 必須和「各自重算」的結果完全相同。
 2026-10-15 壓力測試後加入。只在拋棄式 QA 資料庫執行；所有變更在交易內回滾。"""
@@ -75,7 +76,7 @@ try:
         check('shared computation gives exactly the same ledger and transaction rows as recomputing', not shared_mismatch)
 
         # 整個 API 回應 = 逐案用「不共用」的函式組出來的結果
-        response = fin.get('/api/accounting').json()
+        response = accounting_get(fin, '').json()
         mine = {str(c.case_uid) for c in cases}
         expected_rows, expected_tx = [], []
         for case in sorted(cases, key=lambda x: x.tw_ref):
@@ -93,13 +94,13 @@ try:
         check('every fixture case that has transactions is present in the response', {r['caseUid'] for r in got_tx} == {str(c.case_uid) for c in cases if Case.objects.get(pk=c.pk).payload['transactions']} and len(got_tx) == len(expected_tx))
 
         # 2026-10-16 畫面用的精簡模式（?view=list）：這些都不是 Swiss 案件，所以付款排程列不出現，其餘完全相同
-        lean = fin.get('/api/accounting?view=list').json()
+        lean = accounting_get(fin, '?view=list').json()
         check('screen list mode: same transactions, batches, warnings and currencies as the full response',
               all(lean[k] == response[k] for k in ('transactionRows', 'swissRows', 'cashBatches', 'warnings', 'currencies', 'scope')))
         check('screen list mode: no schedule rows for non-Swiss cases', not [r for r in lean['rows'] if r['caseUid'] in mine] and got_rows)
         # 只讀路徑不得改到資料庫裡的案件內容
         fresh = {c.pk: copy.deepcopy(Case.objects.get(pk=c.pk).payload) for c in cases}
-        fin.get('/api/accounting')
+        accounting_get(fin, '')
         check('reading Accounting does not change any stored case', all(Case.objects.get(pk=pk).payload == p for pk, p in fresh.items()))
 
         # 排序鍵快取：與未快取的排序鍵一致

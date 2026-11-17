@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Swiss Property: B+90 quarter, actual operation date, full cash and immutable history.
 
 Swiss CGL's separate month-end formula is covered by CGL suites; this suite uses
@@ -35,7 +36,7 @@ try:
    @classmethod
    def now(cls,tz=None):return stamp if tz else stamp.replace(tzinfo=None)
   with patch('cases.accounting_views.datetime',Frozen):
-   rows=fin.get('/api/accounting').json()['swissRows'];mine=[r for r in rows if r['caseUid']==str(case.case_uid)]
+   rows=accounting_get(fin, '').json()['swissRows'];mine=[r for r in rows if r['caseUid']==str(case.case_uid)]
    check('API original date uses Aug14 and the complete frozen clock',any(r.get('originalDueDate')=='2026-08-14' and r['dueDate']=='2026-08-14' for r in mine),mine)
   t1=nos(case,'Leg 1');t2=nos(case,'Leg 2');t3=nos(case,'Leg 3')
   check('Swiss payment cannot precede full Cedant cash',pay(fin,case,t2).status_code==409)
@@ -96,7 +97,7 @@ try:
   reversal={**original,'id':'old-bank-return','entryType':'reversal','reversalOf':'old-paid','paymentDate':'2026-05-16'}
   historic.payload['paymentEntries']=[original,reversal];historic.save();before=copy.deepcopy(historic.payload)
   item=swiss(historic,datetime(2026,11,1,tzinfo=timezone.utc));check('old returned remittance retains its original overdue period',item['dueDate']=='2026-05-14' and item['outstanding']==800 and item['status']=='overdue',item)
-  fin.get('/api/accounting');historic.refresh_from_db();check('reading preserves both immutable original and bank-return records',historic.payload==before)
+  accounting_get(fin, '');historic.refresh_from_db();check('reading preserves both immutable original and bank-return records',historic.payload==before)
   raise Rollback()
 except Rollback:pass
 print(f'{len(checks)}/{len(checks)} current Swiss Property checks passed; writes rolled back')

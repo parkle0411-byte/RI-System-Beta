@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Allianz calendar, finance APIs, claim follow-ups and isolation regression."""
 import copy,json,os
@@ -168,7 +169,7 @@ root.refresh_from_db();new=next(t for t in root.payload['transactions'] if t.get
 check('new request has independent announcement and due date',transaction_details(root.payload)[new['txNo']]['contractDueDate']=='2026-11-17' and transaction_details(root.payload)[no]['contractDueDate']=='2026-11-03')
 from reminders.messages import due_kind
 check('screen-only reminders do not introduce email flow',due_kind(d,'2026-10-26',{})=='')
-listing=fin.get('/api/accounting?view=list')
+listing=accounting_get(fin, '?view=list')
 check('lean Accounting includes Allianz metadata',listing.status_code==200 and any(r.get('allianzFacility') and r.get('offsetAllowed') is False for r in listing.json()['scheduleRows']))
 check('Allianz historical follow-up metadata reaches transaction rows',any(r.get('txNo')==no and r.get('trackingHistory') and 'nextTrackingDate' in r for r in listing.json()['transactionRows']))
 print(f'{len(checks)}/{len(checks)} Allianz accounting checks passed',flush=True)

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Real API cash-only submissions: currency/direction isolation and safe retries."""
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])
@@ -11,7 +12,7 @@ def cash_request(targets,submission=None,**over):
  body.update(over);return body
 
 def cancel_group(bid):
- group=next(b for b in fin.get('/api/accounting?view=list').json()['reviewBatches'] if b['id']==bid)
+ group=next(b for b in accounting_get(fin, '?view=list').json()['reviewBatches'] if b['id']==bid)
  return api(fin,{'action':'cancel_review_batch','reviewBatchId':bid,'reason':'QA group cancellation','members':group['members']})
 def unchanged(c):
  c.refresh_from_db();return copy.deepcopy(c.payload)
@@ -23,7 +24,7 @@ try:
   a1=leg(a,'Leg 1');c1=leg(c,'Leg 1');bi,bo=add_claim(b,200)
   check('claim prerequisite receipt setup',review([(b,bi)]).status_code==200 and register([(b,bi,200,0)],200).status_code==200)
   r=review([(a,a1),(b,bo),(c,c1)]);check('same counterparty can review currencies and directions in one operation',r.status_code==200,r.content);bid=r.json()['reviewBatchId']
-  groups=fin.get('/api/accounting?view=list').json()['reviewBatches'];g=next(g for g in groups if g['id']==bid)
+  groups=accounting_get(fin, '?view=list').json()['reviewBatches'];g=next(g for g in groups if g['id']==bid)
   check('logical review exposes all currencies without adding unlike amounts',set(g['currencies'])=={'USD','TWD'} and g['currency']=='' and len(g['members'])==3)
   body=cash_request([(a,a1,600),(b,bo,50),(c,c1,800)])
   r=api(fin,body);check('multi-currency opposite-direction actual cash accepted',r.status_code==200 and r.json()['succeeded']==3 and r.json()['failed']==0,r.content);res=r.json()['results']
@@ -55,7 +56,7 @@ try:
   multi=cash_request([(f,f1[0],100),(f,f1[1],150)]);before=f.row_version;r=api(fin,multi).json()
   check('two allocations of one case both succeed despite internal version increments',r['succeeded']==2,r)
   check('same currency/direction successful rows form one registration',len({x['batchId'] for x in r['results']})==1)
-  bank=next(x for x in fin.get('/api/accounting?view=list').json()['cashBatches'] if x['batchId']==r['results'][0]['batchId'])
+  bank=next(x for x in accounting_get(fin, '?view=list').json()['cashBatches'] if x['batchId']==r['results'][0]['batchId'])
   check('bank history uses the actual gross receipt and no offset',bank['netCash']==250 and bank['receivableSettled']==250 and bank['payableSettled']==0 and all(x['offsetAmount']==0 for x in bank['allocations']))
   bad=copy.deepcopy(multi);bad['allocations'][1]['cashItemId']=bad['allocations'][0]['cashItemId'];check('duplicate client identifiers rejected',api(fin,bad).status_code==400)
   bad=copy.deepcopy(multi);bad['allocations'][1]['txNo']=bad['allocations'][0]['txNo'];check('same account cannot be allocated twice in one submission',api(fin,bad).status_code==400)

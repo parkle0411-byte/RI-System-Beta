@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 import json
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -114,7 +115,7 @@ try:
             check(f"[{role}] PUT master-data {'allowed' if mw else 'denied'}", expect(put, mw, (400,)))
             # 2026-09-27 調整後的權限（刻意與 Alpha 不同）
             check(f"[{role}] Audit Log {'allowed' if role == 'admin' else 'denied'}", c.get("/api/audit-log").status_code == (200 if role == "admin" else 403))
-            acc = c.get("/api/accounting")
+            acc = accounting_get(c, '?view=list&legacy=open')
             check(f"[{role}] Accounting ledger {'readable' if role != 'viewer' else 'denied'}", acc.status_code == (403 if role == "viewer" else 200))
             if acc.status_code == 200:
                 check(f"[{role}] Accounting write {'allowed' if role in ('admin', 'accounting', 'accounting_manager') else 'read-only'}",

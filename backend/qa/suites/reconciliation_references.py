@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from django.db import transaction
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Reference-only edits; run solely in the disposable reference QA database."""
@@ -52,7 +53,7 @@ try:
    response=write(sales,case,statementNo='000123 / 新號',reinsurers=[{'index':0,'settlementRef':'A-NEW'},{'index':1,'settlementRef':'B-NEW'}]);check(old_status+' accepts both reference changes',response.status_code==200)
    case.refresh_from_db();check(old_status+' preserves complete non-reference payload and status',strip_refs(case.payload)==strip_refs(original) and case.status==old_status and case.row_version==old_version+1)
    check(old_status+' preserves computed cash and settlement',ledger_before==transaction_details(case.payload))
-   rows=[r for r in sales.get('/api/accounting').json()['transactionRows'] if r['caseUid']==str(case.case_uid)]
+   rows=[r for r in accounting_get(sales, '').json()['transactionRows'] if r['caseUid']==str(case.case_uid)]
    check(old_status+' Accounting Cedant premium and claim refs update',len(rows)==8 and all(r['reconciliationRef']=='000123 / 新號' for r in rows if r['legType'] in ('Leg 1','Claim Leg 2')))
    check(old_status+' Accounting RI premium and claim refs update',all(r['reconciliationRef']==('A-NEW' if r.get('reinsurerIdx')==0 else 'B-NEW') for r in rows if r['legType'] in ('Leg 2','Claim Leg 1')))
    check(old_status+' Case SoA reads the new reference',sales.get('/api/cases?caseUid='+str(case.case_uid)).json()['case']['payload']['statementNo']=='000123 / 新號')
@@ -83,7 +84,7 @@ try:
   swiss=make('REF-QA-SCHEDULE','posted',reinsurers=[{'name':'Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)','sharePct':100,'premium':1000,'riCommPct':20,'taxPct':1,'settlementRef':'SWISS-OLD'}])
   swiss.payload['transactions']=[];swiss.announced_at=__import__('django.utils.timezone',fromlist=['now']).now();swiss.save()
   check('schedule-only references can update before Production close',write(sales,swiss,statementNo='SWISS-CED',reinsurers=[{'index':0,'settlementRef':'SWISS-RI'}]).status_code==200)
-  schedules=[row for row in sales.get('/api/accounting').json()['swissRows'] if row['caseUid']==str(swiss.case_uid)]
+  schedules=[row for row in accounting_get(sales, '').json()['swissRows'] if row['caseUid']==str(swiss.case_uid)]
   check('schedule-only Accounting uses current refs and names',len(schedules)>=2 and all(row['reconciliationRef']==('SWISS-CED' if row['partyType']=='cedant' else 'SWISS-RI') and row['originalInsured']=='Reference Test Insured' and row['caseStatus']=='posted' for row in schedules))
   snap=EntitySnapshot.objects.filter(entity_id=str(closed.case_uid),snapshot_reason='reconciliation_references_updated').last()
   check('snapshot and audit record the edit',snap is not None and AuditLog.objects.filter(entity_id=str(closed.case_uid),action='update_reconciliation_references').exists())

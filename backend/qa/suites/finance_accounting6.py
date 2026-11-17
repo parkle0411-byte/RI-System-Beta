@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Accounting 2026-11-06: merged review groups, optional evidence, real date metadata."""
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])
@@ -5,7 +6,7 @@ from cases.finance_workflow import active_reviews, review_batches
 from cases.transaction_ledger import transaction_rows
 
 def whole(bid):
- b=next(b for b in fin.get('/api/accounting?view=list').json()['reviewBatches'] if b['id']==bid)
+ b=next(b for b in accounting_get(fin, '?view=list').json()['reviewBatches'] if b['id']==bid)
  return b['members']
 def cancel_group(bid,members=None):
  return api(fin,{'action':'cancel_review_batch','reviewBatchId':bid,'reason':'QA whole group','members':members if members is not None else whole(bid)})
@@ -19,14 +20,14 @@ try:
   stale=whole(bid)
   r=review([(b,bn)],date='2026-11-04',reference='SECOND',note='Second review event')
   check('later same-party same-currency review joins existing logical batch',r.status_code==200 and r.json()['reviewBatchId']==bid,r.content)
-  q=fin.get('/api/accounting?view=list').json();rs={x['txNo']:x for x in q['transactionRows']}
+  q=accounting_get(fin, '?view=list').json();rs={x['txNo']:x for x in q['transactionRows']}
   check('individual review dates and references retained after merging',rs[an]['reviewDate']=='2026-11-03' and rs[an]['reviewReference']=='' and rs[bn]['reviewDate']=='2026-11-04' and rs[bn]['reviewReference']=='SECOND')
   check('merged batch exposes all accounts',len(whole(bid))==2)
   check('original review event records retained',FinanceReconciliationBatch.objects.filter(status='active').count()==2)
   check('stale cancellation cannot omit later review event',cancel_group(bid,stale).status_code==409)
   check('same-party different-currency joins whole group',review([(c,cn)]).json()['reviewBatchId']==bid)
   check('different counterparty remains separate',review([(d,dn)]).json()['reviewBatchId']!=bid)
-  before=FinanceReconciliationBatch.objects.count();fin.get('/api/accounting?view=list')
+  before=FinanceReconciliationBatch.objects.count();accounting_get(fin, '?view=list')
   check('reading merged batches does not rewrite historical records',FinanceReconciliationBatch.objects.count()==before)
   r=register([(b,bn,1000,0)],1000);check('one merged group member can receive cash',r.status_code==200,r.content);cashid=r.json()['batchId']
   check('cash on peer member blocks cancellation of entire merged group',cancel_group(bid).json().get('error')=='review_payment_locked')
@@ -36,7 +37,7 @@ try:
   check('reverse registration before group cancellation',reverse(cashid,[b]).status_code==200)
   check('whole merged group cancellation succeeds',cancel_group(bid).status_code==200)
   check('all original events marked cancelled with history retained',FinanceReconciliationBatch.objects.filter(status='cancelled').count()==3)
-  q=fin.get('/api/accounting?view=list').json();rs={x['txNo']:x for x in q['transactionRows']}
+  q=accounting_get(fin, '?view=list').json();rs={x['txNo']:x for x in q['transactionRows']}
   check('all cancelled members return to unreviewed while other groups remain reviewed',not rs[an]['financeReviewed'] and not rs[bn]['financeReviewed'] and not rs[cn]['financeReviewed'] and rs[dn]['financeReviewed'])
   check('review still requires date',review([(a,an)],date='',reference='',note='').status_code==400)
   check('optional evidence still enforces field lengths',review([(a,an)],reference='x'*201).status_code==400)

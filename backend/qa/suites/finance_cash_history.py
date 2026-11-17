@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Immutable preexisting offsets remain visible, affect balances and reverse safely."""
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])
@@ -21,7 +22,7 @@ try:
   a=fixture('QA-LEGACY-MIX',party='Legacy Cedant');a1=leg(a,'Leg 1');a2=leg(a,'Leg 2');ci,co=add_claim(a,200)
   review([(a,ci)]);assert register([(a,ci,200,0)],200).status_code==200
   review([(a,a1),(a,co)]);bid=legacy_batch(a,[(a1,800,200),(co,0,200)],800);original=copy.deepcopy(a.payload['paymentEntries'])
-  q=fin.get('/api/accounting?view=list').json();bank=next(x for x in q['cashBatches'] if x['batchId']==bid)
+  q=accounting_get(fin, '?view=list').json();bank=next(x for x in q['cashBatches'] if x['batchId']==bid)
   check('preexisting mixed offsets retain gross receipt/payment/net totals',bank['receivableSettled']==1000 and bank['payableSettled']==200 and bank['netCash']==800)
   a.refresh_from_db();d=transaction_details(a.payload)
   check('preexisting offsets still reduce outstanding balances',d[a1]['cashPaid']==800 and d[a1]['nonCashPaid']==200 and d[a1]['outstanding']==0 and d[co]['outstanding']==0)
@@ -33,11 +34,11 @@ try:
   a.refresh_from_db();d=transaction_details(a.payload)
   check('legacy cash and offset originals remain unchanged after reversal',a.payload['paymentEntries'][:len(original)]==original)
   check('whole reversal restores each original balance',d[a1]['outstanding']==1000 and d[co]['outstanding']==200)
-  q=fin.get('/api/accounting?view=list').json();bank=next(x for x in q['cashBatches'] if x['batchId']==bid)
+  q=accounting_get(fin, '?view=list').json();bank=next(x for x in q['cashBatches'] if x['batchId']==bid)
   check('history marks reversed legacy registration and keeps allocations',bank['status']=='reversed' and len(bank['allocations'])==3)
   z=fixture('QA-LEGACY-PURE',value=200,party='Legacy Pure Cedant');z1=leg(z,'Leg 1');zi,zo=add_claim(z,200)
   review([(z,zi)]);register([(z,zi,200,0)],200);review([(z,z1),(z,zo)]);pure=legacy_batch(z,[(z1,0,200),(zo,0,200)],0)
-  q=fin.get('/api/accounting?view=list').json();bank=next(x for x in q['cashBatches'] if x['batchId']==pure)
+  q=accounting_get(fin, '?view=list').json();bank=next(x for x in q['cashBatches'] if x['batchId']==pure)
   check('preexisting pure offset creates no fictional cash',bank['pureOffset'] and bank['netCash']==0 and all(x['cashAmount']==0 for x in bank['allocations']))
   check('preexisting pure offset remains reversible',reverse(pure,[z]).status_code==200)
   z.refresh_from_db()

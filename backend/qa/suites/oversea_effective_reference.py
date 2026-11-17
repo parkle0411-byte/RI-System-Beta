@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Effective-date allocation and guarded historical reference correction."""
 from pathlib import Path
 exec(Path('/app/qa/suites/oversea_business.py').read_text().split('try:\n with transaction.atomic():')[0])
@@ -111,7 +112,7 @@ try:
   check('Draft API returns corrected root reference',detail['payload']['parentTwRef']==new)
   workflow=sales.get('/api/case-workflow?caseUid='+str(child.case_uid)).json()['workflow']
   check('Endorsement chain uses corrected root reference',workflow['root']['twRef']==new and workflow['chain'][0]['twRef']==new)
-  accounting=finance.get('/api/accounting?view=list').json()['transactionRows'];own=[r for r in accounting if r['caseUid']==str(root.case_uid)]
+  accounting=accounting_get(finance, '?view=list').json()['transactionRows'];own=[r for r in accounting if r['caseUid']==str(root.case_uid)]
   check('Accounting uses corrected root and T3 numbers without duplicating accounts',len(own)==2 and all(r['twRef']==new and r['txNo'].startswith(new+'-') for r in own))
   print(str(len(checks))+' passed Oversea Effective Date and reference correction checks',flush=True)
   raise Done()

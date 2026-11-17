@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Phase-one read-only API/SQL guards. Synthetic data in disposable MySQL only."""
 import copy,json,os,uuid
 from pathlib import Path
@@ -65,7 +66,7 @@ try:
                 r=post(c,'/api/legacy/imports',{'action':'commit','id':str(batch.pk),'sha256':batch.sha256})
                 # 2026-11-11: System Administrators import on the web; an imported batch cannot be committed again.
                 check(role+(' cannot re-import an imported batch' if role=='admin' else ' cannot import through HTTP'),r.status_code==(409 if role=='admin' else 403),r.content[:200])
-        c=clients['admin'];rows=c.get('/api/accounting?view=list').json()['transactionRows']
+        c=clients['admin'];rows=accounting_get(c, '?view=list').json()['transactionRows']
         old=[r for r in rows if r.get('origin')=='legacy']
         check('one old transaction renders three native-style legs',len(old)==3)
         check('historical rows already reconciled without fabricated review identity',all(r['financeReviewed'] and not r['reviewDate'] and not r['reviewedByName'] and not r['reviewBatchId'] for r in old))

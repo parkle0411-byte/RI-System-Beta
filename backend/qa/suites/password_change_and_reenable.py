@@ -69,7 +69,7 @@ try:
         check("changing the password did not touch row_version / audit", tgt.row_version == 2 and not AuditLog.objects.filter(entity_type="personnel", entity_id=str(tgt.pk), action="change_password").exists())
 
         # --- 重設密碼 → 再次強制 ---
-        r = call(admin, "post", "/api/personnel-accounts/reset-password", {"personnelId": tgt.pk}); j = r.json(); tgt.refresh_from_db()
+        r = call(admin, "post", "/api/personnel-accounts", {"action": "reset_password", "personnelId": tgt.pk}); j = r.json(); tgt.refresh_from_db()
         check("reset password marks mustChangePassword again", r.status_code == 200 and tgt.must_change_password)
         check("reset ended the old session", call(user, "get", "/api/app-context").status_code == 401)
         u2, r = login("zz.pw2.user", j["newPassword"])
@@ -79,10 +79,10 @@ try:
         check("audit of the reset records mustChangePassword, never the password", ev.metadata.get("mustChangePassword") is True and j["newPassword"] not in json.dumps([ev.metadata, ev.after_data]))
 
         # --- 停用 → 重新啟用 ---
-        r = call(admin, "post", "/api/personnel-accounts/disable", {"personnelId": tgt.pk}); check("disable works", r.status_code == 200)
+        r = call(admin, "post", "/api/personnel-accounts", {"action": "disable", "personnelId": tgt.pk}); check("disable works", r.status_code == 200)
         tgt.refresh_from_db(); v_before = tgt.row_version
         check("disabled: cannot log in", login("zz.pw2.user", NEWER)[1].status_code == 401)
-        r = call(admin, "post", "/api/personnel-accounts/enable", {"personnelId": tgt.pk}); j = r.json(); tgt.refresh_from_db(); usr = User.objects.get(pk=int(tgt.auth_user_id))
+        r = call(admin, "post", "/api/personnel-accounts", {"action": "enable", "personnelId": tgt.pk}); j = r.json(); tgt.refresh_from_db(); usr = User.objects.get(pk=int(tgt.auth_user_id))
         check("enable -> 200, status active, flag set, disabled_* cleared, Django user active again, row_version +1",
               r.status_code == 200 and tgt.account_status == "active" and tgt.must_change_password and tgt.account_disabled_at is None and tgt.account_disabled_by is None
               and usr.is_active and tgt.row_version == v_before + 1 and j["person"]["accountStatus"] == "active" and j["person"]["accountMustChangePassword"] is True, (r.status_code, j))
@@ -96,22 +96,22 @@ try:
         r = call(u3, "post", "/api/auth/change-password", {"currentPassword": NEWER, "newPassword": OLD + "x"}); check("...and after changing the password it is usable again", r.status_code == 200 and call(u3, "get", "/api/cases").status_code == 200)
 
         # --- 啟用的限制 ---
-        def enable(pid): return call(admin, "post", "/api/personnel-accounts/enable", {"personnelId": pid})
+        def enable(pid): return call(admin, "post", "/api/personnel-accounts", {"action": "enable", "personnelId": pid})
         r = enable(tgt.pk); check("enable an already-active account -> 409 not_disabled", r.status_code == 409 and code(r) == "not_disabled")
         none = person("viewer", "business_1"); r = enable(none.pk); check("enable a person without an account -> 409 no_account", r.status_code == 409 and code(r) == "no_account")
         gone = person("viewer", "business_1"); direct_account(gone, "zz.pw2.gone", "Gone-Pass-1234")
-        call(admin, "post", "/api/personnel-accounts/disable", {"personnelId": gone.pk}); Personnel.objects.filter(pk=gone.pk).update(is_active=False, deactivated_by="t", deactivated_at="2026-01-01T00:00:00Z")
+        call(admin, "post", "/api/personnel-accounts", {"action": "disable", "personnelId": gone.pk}); Personnel.objects.filter(pk=gone.pk).update(is_active=False, deactivated_by="t", deactivated_at="2026-01-01T00:00:00Z")
         r = enable(gone.pk); check("enable while the Personnel record is inactive -> 409 personnel_inactive", r.status_code == 409 and code(r) == "personnel_inactive")
         check("...and nothing changed for them", Personnel.objects.get(pk=gone.pk).account_status == "disabled" and not User.objects.get(username="zz.pw2.gone").is_active)
         check("enable unknown person -> 404", enable(99999999).status_code == 404 and code(enable(99999999)) == "personnel_not_found")
-        r = call(admin, "post", "/api/personnel-accounts/enable", {}); check("enable without personnelId -> 400", r.status_code == 400)
-        check("enable requires login (401)", call(new_client(), "post", "/api/personnel-accounts/enable", {"personnelId": tgt.pk}).status_code == 401)
-        r = call(u3, "post", "/api/personnel-accounts/enable", {"personnelId": tgt.pk}); check("enable requires accounts.manage (sales -> 403)", r.status_code == 403 and code(r) == "PERMISSION_DENIED")
+        r = call(admin, "post", "/api/personnel-accounts", {"action": "enable"}); check("enable without personnelId -> 400", r.status_code == 400)
+        check("enable requires login (401)", call(new_client(), "post", "/api/personnel-accounts", {"action": "enable", "personnelId": tgt.pk}).status_code == 401)
+        r = call(u3, "post", "/api/personnel-accounts", {"action": "enable", "personnelId": tgt.pk}); check("enable requires accounts.manage (sales -> 403)", r.status_code == 403 and code(r) == "PERMISSION_DENIED")
         gm = person("general_manager", "reinsurance"); direct_account(gm, "zz.pw2.gm", "Gm-Long-Pass-123"); gmc, _ = login("zz.pw2.gm", "Gm-Long-Pass-123")
         rows = call(gmc, "get", "/api/personnel").json()["personnel"]
         check("accountMustChangePassword visible only with accounts.manage", all("accountMustChangePassword" not in x for x in rows)
               and all("accountMustChangePassword" in x for x in call(admin, "get", "/api/personnel").json()["personnel"]))
-        check("General Manager cannot enable (403)", call(gmc, "post", "/api/personnel-accounts/enable", {"personnelId": tgt.pk}).status_code == 403)
+        check("General Manager cannot enable (403)", call(gmc, "post", "/api/personnel-accounts", {"action": "enable", "personnelId": tgt.pk}).status_code == 403)
 
         # --- CLI ---
         def cli(name, **kw):

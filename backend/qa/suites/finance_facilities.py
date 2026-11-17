@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Each Facility accepts partial actual cash without losing date/statement gates."""
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])
@@ -40,7 +41,7 @@ try:
    check(name+' partial cash retains original due dates',da[t2]['contractDueDate']==due_a and dr[rt2]['contractDueDate']==due_ref)
    review([(refund,rt1)]);r=register([(refund,rt1,200,0)],-200)
    check(name+' Cedant refund after actual receipt accepted',r.status_code==200,r.content)
-   history=fin.get('/api/accounting?view=list').json()['cashBatches'];batch=next(b for b in history if b['batchId']==r.json()['batchId'])
+   history=accounting_get(fin, '?view=list').json()['cashBatches'];batch=next(b for b in history if b['batchId']==r.json()['batchId'])
    check(name+' bank history shows actual signed payment',batch['netCash']==-200 and batch['payableSettled']==200)
    # Whole reversal must not undo the RI recovery once Cedant refund relies on it.
    prior=next(e['batchId'] for e in refund.payload['paymentEntries'] if e.get('transactionNo')==rt2)

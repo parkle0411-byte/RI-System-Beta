@@ -77,7 +77,7 @@ try:
         before=state()
         check(role+' cannot create duplicate account',create(c,old).status_code==403)
         for action in ['enable','disable','reset-password']:
-            check(role+' cannot '+action+' subordinate account',post(c,'/api/personnel-accounts/'+action,{'personnelId':old.pk}).status_code==403)
+            check(role+' cannot '+action+' subordinate account',post(c,'/api/personnel-accounts',{'action':action.replace('-','_'),'personnelId':old.pk}).status_code==403)
         check(role+' denied lifecycle changes no records',before==state())
         signed=Client(HTTP_HOST='localhost');signed.force_login(u)
         check(role+' new account cannot access business data before password change',signed.get('/api/cases').status_code==403)

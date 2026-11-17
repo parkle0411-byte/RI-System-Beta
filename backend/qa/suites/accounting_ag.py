@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """A–G business-rule regression. Synthetic records in a disposable database only."""
 import os
@@ -153,7 +154,7 @@ with transaction.atomic():
   Case.objects.exclude(pk=final.pk).update(is_archived=True,archived_at=timezone.now(),archived_by='qa')
   FxRate.objects.create(year_month=month,currency='USD',rate=32,created_by='qa',updated_by='qa')
   FxRate.objects.create(year_month='2026-12',currency='USD',rate=35,created_by='qa',updated_by='qa')
-  r=call(fin,'get','/api/accounting?view=list');rows_=[x for x in r.json()['transactionRows'] if x['caseUid']==str(final.case_uid)]
+  r=accounting_get(fin, '?view=list');rows_=[x for x in r.json()['transactionRows'] if x['caseUid']==str(final.case_uid)]
   check('Accounting estimates with the latest month at or before the current month (future rate ignored, 2026-11-14)',r.status_code==200 and bool(rows_) and all(x['fxEstimated'] and x['fxRate']==32 and x['fxMonth']==month for x in rows_),rows_[:1])
   preview_=call(finm,'get','/api/production-report?month='+month).json();sig=preview_['sourceSignature']
   g=call(finm,'post','/api/production-report',dict(action='generate',month=month,sourceSignature=sig));check('Production Generate succeeds',g.status_code in (200,201),g.content[:500])
@@ -163,7 +164,7 @@ with transaction.atomic():
    final.refresh_from_db();check('Production close succeeds',r.status_code==200,r.content[:700])
    check('Production close preserves all transaction IDs and amounts',[(t['txNo'],t['amount']) for t in final.payload['transactions']]==[(t['txNo'],t['amount']) for t in before])
    check('Only recognized period fixes posting-month FX',all((t.get('postedMonth')==month and t.get('postingFxRate')==32) if t['installmentId']=='I1' else not t.get('postedMonth') for t in final.payload['transactions']))
-   rows_=call(fin,'get','/api/accounting?view=list').json()['transactionRows']
+   rows_=accounting_get(fin, '?view=list').json()['transactionRows']
    own=[x for x in rows_ if x['caseUid']==str(final.case_uid)]
    check('Accounting separates fixed and estimated FX after partial recognition',all((not x['fxEstimated'] and x['fxRate']==32) if x['installmentId']=='I1' else x['fxEstimated'] and x['fxRate']==32 and x['fxMonth']==month for x in own))
   # All six premium categories run due-7, due-day, weekly and suppress duplicates.

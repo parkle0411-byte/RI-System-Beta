@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Legacy endorsement/claim rules and Insured links (owner decisions 2026-11-12). Disposable MySQL only."""
 import io, json, os, zipfile
 from pathlib import Path
@@ -47,7 +48,7 @@ check('claim DOL inside the extended period confirms',cl['status']=='confirmed')
 cl2=create('claim',src=pol);cl2=save(cl2,dict(lossNo='l-77',lossDate='2026-02-10',claim=300));cl2=confirm(cl2)
 group=detail(cl2['uid']).get('lossGroup') or {}
 check('claim detail lists all claims with the same Loss No. and the total',len(group.get('rows',[]))==2 and group.get('total')==1500 and group.get('currency')=='TWD',group)
-rows=admin.get('/api/accounting?view=list').json()['transactionRows']
+rows=accounting_get(admin, '?view=list').json()['transactionRows']
 check('Accounting shows the Loss No.',any(r.get('caseUid')==cl['uid'] and r.get('legacyLossNo')=='L-77' for r in rows))
 
 # --- Facility days locked; ordinary days editable ---

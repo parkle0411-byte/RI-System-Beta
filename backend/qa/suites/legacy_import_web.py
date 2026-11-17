@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Web import of reinsurer Registers (owner decisions 2026-11-11). Synthetic workbook, disposable MySQL only.
 
 Covers: admin-only two-step import; errors and warnings block the commit; PD + GL; owner corrections and
@@ -165,7 +166,7 @@ try:
         check('GL row stored as CGL', t['QA9003'].data['classOfBusiness'] == 'Commercial General Liability' and t['QA9003'].data['classCode'] == 'GL')
         check('import audit lists every transaction', set(LegacyAudit.objects.get(entity=b['id'], action='batch_imported').after['transactions']) == {str(x.uid) for x in t.values()})
 
-        acc = admin.get('/api/accounting?view=list').json()
+        acc = accounting_get(admin, '?view=list').json()
         legs = {x['txNo']: x for x in acc['transactionRows'] if x.get('origin') == 'legacy'}
         check('Accounting has every imported leg without warnings', len(legs) == 22 and not acc['warnings'], (len(legs), acc['warnings'][:2]))
         a = legs['QA9001-T1']
@@ -206,7 +207,7 @@ try:
         imported_bid = next(e['batchId'] for e in x.financial['paymentEntries'] if e.get('entryKind') == 'legacy-import')
         fpost(dict(action='reverse_batch_payment', batchId=imported_bid, paymentDate='2026-11-11', note='QA',
                    cases=[dict(caseUid=str(x.uid), rowVersion=x.version)]), 409)
-        bat = next(x for x in admin.get('/api/accounting?view=list').json()['cashBatches'] if x['batchId'] == imported_bid)
+        bat = next(x for x in accounting_get(admin, '?view=list').json()['cashBatches'] if x['batchId'] == imported_bid)
         check('settled-before-import registration is flagged and not reversible', bat.get('importedSettlement') and not bat['canReverse'] and bat['reference'] == 'CR-9002')
         check('settled-before-import receipt still in place', LegacyTransaction.objects.get(number='QA9002').financial['paymentEntries'] == x.financial['paymentEntries'])
         fpost(dict(action='record_transaction_payments', paymentDate='2026-11-11', reference='QA', amount=-6400,
@@ -214,7 +215,7 @@ try:
         fpost(dict(action='review_accounts', date='2026-11-11', members=[mem('QA9002-T2')]), 200)
         fpost(dict(action='record_transaction_payments', paymentDate='2026-11-11', reference='QA-PAY', amount=-6400,
                    allocations=[dict(**mem('QA9002-T2'), cashAmount=6400, offsetAmount=0)]), 200)
-        legs = {x['txNo']: x for x in admin.get('/api/accounting?view=list').json()['transactionRows'] if x.get('origin') == 'legacy'}
+        legs = {x['txNo']: x for x in accounting_get(admin, '?view=list').json()['transactionRows'] if x.get('origin') == 'legacy'}
         check('open side settles through Finance and T3 follows', legs['QA9002-T2']['settlement'] == 'settled' and legs['QA9002-T3']['settlement'] == 'settled')
         hist = LegacyTransaction.objects.get(number='QA9001')
         fpost(dict(action='review_accounts', date='2026-11-11', members=[mem('QA9001-T1')]), 403)

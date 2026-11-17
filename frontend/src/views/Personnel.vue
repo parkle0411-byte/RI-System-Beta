@@ -206,7 +206,7 @@ async function createAccount() {
     const body = await api('/api/personnel-accounts', {
       method: 'POST',
       body: {
-        personnelId: accountDialog.person.id, username: accountDialog.username, email: accountDialog.email,
+        action: 'create', personnelId: accountDialog.person.id, username: accountDialog.username, email: accountDialog.email,
         // 留空 = 由系統隨機產生；有填 = 管理員或主管指定的初始密碼
         ...(password ? { initialPassword: password } : {})
       }
@@ -239,7 +239,7 @@ async function resetPassword(row) {
   if (!await confirmAction(`Resetting the password of “${row.name}” signs them out everywhere immediately. Continue?`, 'Reset password', 'Reset')) return
   personnelSaving.value = true
   try {
-    const body = await api('/api/personnel-accounts/reset-password', { method: 'POST', body: { personnelId: row.id } })
+    const body = await api('/api/personnel-accounts', { method: 'POST', body: { action: 'reset_password', personnelId: row.id } })
     showSecret('Password reset', body.username, body.newPassword)
     await loadPersonnel()
   } catch (e) {
@@ -253,7 +253,7 @@ async function disableAccount(row) {
   if (!await confirmAction(`After the account of “${row.name}” is disabled they cannot sign in, and current sessions end immediately. Continue?`, 'Disable account', 'Disable account')) return
   personnelSaving.value = true
   try {
-    await api('/api/personnel-accounts/disable', { method: 'POST', body: { personnelId: row.id } })
+    await api('/api/personnel-accounts', { method: 'POST', body: { action: 'disable', personnelId: row.id } })
     ElMessage.success('Account disabled')
     await loadPersonnel()
   } catch (e) {
@@ -269,7 +269,7 @@ async function enableAccount(row) {
     'Re-enable account', 'Re-enable')) return
   personnelSaving.value = true
   try {
-    await api('/api/personnel-accounts/enable', { method: 'POST', body: { personnelId: row.id } })
+    await api('/api/personnel-accounts', { method: 'POST', body: { action: 'enable', personnelId: row.id } })
     ElMessage.success('Account re-enabled (password change required at first sign-in)')
     await loadPersonnel()
   } catch (e) {

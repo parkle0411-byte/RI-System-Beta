@@ -100,10 +100,16 @@ class AccountingView(NoStoreMixin, APIView):
         if request.query_params.get("view") in ("page", "options"):
             from .accounting_pages import page_response
             return page_response(self, request)
-        return Response(json_roundtrip(self.list_body(request)))
+        # 2026-11-17 業主決定：只保留畫面使用的讀取方式。不帶參數、?view=list 與 ?view=list&legacy=history 已退役
+        # （完整計算仍由 list_body 提供給伺服器分頁與測試：backend/qa/accounting_full.py）。
+        if request.query_params.get("view") == "list" and request.query_params.get("legacy") == "open":
+            return Response(json_roundtrip(self.list_body(request)))
+        return Response({"error": "unsupported_view",
+                         "message": "Read Accounting with ?view=list&legacy=open, ?view=page or ?view=options."}, status=400)
 
     def list_body(self, request, legacy_override=None):
-        """GET 的完整內容（尚未 json_roundtrip）。legacy_override='open'／'history' 等同 ?view=list&legacy=…（分頁使用）。"""
+        """Accounting 的完整內容（尚未 json_roundtrip），依 request 的 view／legacy 參數；legacy_override='open'／'history'
+        等同 ?view=list&legacy=…（伺服器分頁使用）。對外只開放 legacy=open，其餘讀法只供內部與測試。"""
         cases = _live(Case.objects.filter(status__in=(*LEDGER_STATUSES, "reversed"))).select_related("parent_case").defer("parent_case__payload")
         # 2026-11-02：上層案件只用到 case_uid，不讀它的整份 payload
         # 2026-10-14：逐案計算；某一案的資料無法解讀時只略過該案並列入 warnings，其他案件照常顯示

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Finance Staff Production reads / mutation denial and President Personnel scope."""
 import json
 import os
@@ -44,7 +45,7 @@ try:
             r=post(c,'/api/production-report',{'action':action,'month':'2032-01','scope':'case','reason':'QA','rowId':'missing','reportUid':str(report.report_uid),'rowVersion':1,'sourceSignature':'qa'})
             check('Finance Staff direct '+action+' denied before acquiring locks',r.status_code==403)
     check('Finance Staff rejected Production writes change nothing',before==state())
-    check('Finance Staff retains Accounting writes and all-case reads',c.get('/api/accounting').json()['scope']['canEdit'] and 'cases.read.all' in c.get('/api/app-context').json()['principal']['permissions'])
+    check('Finance Staff retains Accounting writes and all-case reads',accounting_get(c, '?view=list&legacy=open').json()['scope']['canEdit'] and 'cases.read.all' in c.get('/api/app-context').json()['principal']['permissions'])
     for tag,cc in [('Finance Manager',mc),('Administrator',ac)]:
         scope=cc.get('/api/production-report?month=2032-01').json()['scope']
         check(tag+' retains generate exclude and close capability',not scope['readOnly'] and scope['canOperate'] and scope['canClose'])
@@ -65,8 +66,8 @@ try:
         check('President cannot edit or promote Personnel '+str(assigned),r.status_code==403)
         check('President forbidden Personnel writes leave records unchanged '+str(assigned),before==state())
         check('President receives no Supervisor write grants '+str(assigned),not any(p in ctx['permissions'] for p in ['accounts.manage','accounts.create.subordinate','personnel.create.subordinate']))
-        for action in ['', '/enable','/disable','/reset-password']:
-            r=post(pc,'/api/personnel-accounts'+action,{'personnelId':peer.pk,'username':'qa.denied.president'})
+        for action in ['', 'enable','disable','reset_password']:   # 2026-11-17：同一網址以 action 區分；'' 為建立
+            r=post(pc,'/api/personnel-accounts',{'personnelId':peer.pk,'username':'qa.denied.president',**({'action':action} if action else {})})
             check('President cannot manage accounts '+action+' '+str(assigned),r.status_code==403)
         check('President roster never offers account creation '+str(assigned),all(not p['canCreateAccount'] for p in roster.json()['personnel']))
         if assigned:

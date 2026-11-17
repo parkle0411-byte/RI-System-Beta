@@ -249,21 +249,29 @@ try:
         check("inactive person cannot get an account -> 409", code(call(admin, "post", "/api/personnel-accounts", {"personnelId": inactive.pk, "username": "zz.inactive"})) == "personnel_inactive")
 
         # 重設密碼
-        r = call(admin, "post", "/api/personnel-accounts/reset-password", {"personnelId": acct.pk})
+        r = call(admin, "post", "/api/personnel-accounts", {"action": "reset_password", "personnelId": acct.pk})
         newpw = r.json().get("newPassword", "")
         check("reset -> new one-time password and the live session is ended", r.status_code == 200 and newpw and newpw != initial and r.json()["sessionsEnded"] >= 1, r.status_code)
         check("the user's old session no longer works", ucl.get("/api/app-context").status_code == 401)
         check("old password rejected, new password accepted", login("zz.acct@example.com", initial)[1].status_code == 401 and login("zz.acct@example.com", newpw)[1].status_code == 200)
-        check("admin cannot reset their own password here", code(call(admin, "post", "/api/personnel-accounts/reset-password", {"personnelId": admin_p.pk})) == "cannot_reset_own_password")
-        check("reset for a person without an account -> 409", code(call(admin, "post", "/api/personnel-accounts/reset-password", {"personnelId": other.pk})) == "no_active_account")
+        check("admin cannot reset their own password here", code(call(admin, "post", "/api/personnel-accounts", {"action": "reset_password", "personnelId": admin_p.pk})) == "cannot_reset_own_password")
+        check("reset for a person without an account -> 409", code(call(admin, "post", "/api/personnel-accounts", {"action": "reset_password", "personnelId": other.pk})) == "no_active_account")
 
         # 停用
         ucl2, _ = login("zz.acct@example.com", newpw)
-        r = call(admin, "post", "/api/personnel-accounts/disable", {"personnelId": acct.pk})
+        r = call(admin, "post", "/api/personnel-accounts", {"action": "disable", "personnelId": acct.pk})
         check("disable -> status disabled, sessions ended", r.status_code == 200 and r.json()["person"]["accountStatus"] == "disabled" and r.json()["sessionsEnded"] >= 1)
         check("disabled user's session is dead and login is refused", ucl2.get("/api/app-context").status_code == 401 and login("zz.acct@example.com", newpw)[1].status_code == 401)
-        check("disabling twice -> 409", code(call(admin, "post", "/api/personnel-accounts/disable", {"personnelId": acct.pk})) == "already_disabled")
-        check("admin cannot disable their own account", code(call(admin, "post", "/api/personnel-accounts/disable", {"personnelId": admin_p.pk})) == "cannot_disable_own_account")
+        check("disabling twice -> 409", code(call(admin, "post", "/api/personnel-accounts", {"action": "disable", "personnelId": acct.pk})) == "already_disabled")
+        check("admin cannot disable their own account", code(call(admin, "post", "/api/personnel-accounts", {"action": "disable", "personnelId": admin_p.pk})) == "cannot_disable_own_account")
+        # 2026-11-17：四個帳號網址合一
+        bad = call(admin, "post", "/api/personnel-accounts", {"action": "delete", "personnelId": acct.pk})
+        check("an unknown account action -> 400 invalid_action", bad.status_code == 400 and code(bad) == "invalid_action")
+        check("a non-text action -> 400 invalid_action", code(call(admin, "post", "/api/personnel-accounts", {"action": ["disable"], "personnelId": acct.pk})) == "invalid_action")
+        for old in ("disable", "enable", "reset-password"):
+            check("the retired sub-address /api/personnel-accounts/" + old + " no longer exists (404)",
+                  call(admin, "post", "/api/personnel-accounts/" + old, {"personnelId": acct.pk}).status_code == 404)
+        check("action create behaves as the default", code(call(admin, "post", "/api/personnel-accounts", {"action": "create", "personnelId": 999999, "username": "zz.nobody2"})) == code(call(admin, "post", "/api/personnel-accounts", {"personnelId": 999999, "username": "zz.nobody2"})))
 
         # Email 變更規則
         acct.refresh_from_db()

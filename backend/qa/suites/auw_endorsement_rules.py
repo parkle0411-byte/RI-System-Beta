@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Real API, calendar arithmetic, accounting and atomic legacy deferral coverage."""
 import copy,json,os,uuid
 from datetime import date,datetime,timedelta,timezone as tz
@@ -104,7 +105,7 @@ with patch('cases.workflow_views.timezone',SimpleNamespace(now=lambda:stamp)):
  r=call('post','/api/case-announce',dict(caseUid=str(child.case_uid),rowVersion=child.row_version,confirmed=True,documentIds=[str(d.pk) for d in docs]))
 assert r.status_code==200,r.content;child.refresh_from_db()
 check('successful Announce stores the exact authoritative time once',child.announced_at==stamp and child.payload['endorsementAnnouncedAt']==stamp.isoformat())
-rows=[row for row in call('get','/api/accounting').json()['rows'] if row['caseUid']==str(child.case_uid)]
+rows=[row for row in accounting_get(client, '').json()['rows'] if row['caseUid']==str(child.case_uid)]
 c=next(row for row in rows if row['partyType']=='cedant');r=next(row for row in rows if row['partyType']=='reinsurer')
 check('Accounting uses the effective date for Cedant and Feb month end (later Announce) for AUW',c['baseDate']=='2050-01-15' and c['termsDays']==90 and c['dueDate']==plus('2050-01-15',75) and r['baseDate']=='2050-02-28' and r['dueDate']==plus('2050-02-28',110))
 check('AUW reminder uses internal date, not contract date',reminder_kind(r,r['dueDate'])=='due_today' and reminder_kind(r,r['contractDueDate'])!='due_today')
@@ -135,7 +136,7 @@ normal_docs=[CaseDocument.objects.create(case=normal_child,kind=k,reinsurers=['Q
 with patch('cases.workflow_views.timezone',SimpleNamespace(now=lambda:stamp)):
  r=call('post','/api/case-announce',dict(caseUid=str(normal_child.case_uid),rowVersion=normal_child.row_version,confirmed=True,documentIds=[str(d.pk) for d in normal_docs]))
 assert r.status_code==200,r.content;normal_child.refresh_from_db()
-normal_rows=[row for row in call('get','/api/accounting').json()['rows'] if row['caseUid']==str(normal_child.case_uid)]
+normal_rows=[row for row in accounting_get(client, '').json()['rows'] if row['caseUid']==str(normal_child.case_uid)]
 normal_ri=next(row for row in normal_rows if row['partyType']=='reinsurer')
 check('Announce API and Accounting use actual later date for ordinary RI payable',normal_ri['baseDate']=='2050-02-01' and normal_ri['dueDate']==plus('2050-02-01',110))
 # User-authorized legacy shape: an unbooked, already Announced endorsement, with 2

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Synthetic API checks for consolidated SoA rows; run only in disposable QA."""
 import copy
 import json
@@ -83,8 +84,8 @@ try:
         no_transactions.payload = {**fixture(), 'transactions': []}
         no_transactions.save()
         before = (copy.deepcopy(posted.payload), posted.row_version, AuditLog.objects.count(), EntitySnapshot.objects.count())
-        response = client.get('/api/accounting')
-        check('finance can read the consolidated SoA with no-store', response.status_code == 200 and response['Cache-Control'] == 'no-store, max-age=0')
+        response = accounting_get(client, '')
+        check('finance can read the consolidated SoA with no-store', response.status_code == 200 and client.get('/api/accounting?view=list&legacy=open')['Cache-Control'] == 'no-store, max-age=0')
         body = response.json()
         rows = [row for row in body['transactionRows'] if row['caseUid'] == str(posted.case_uid)]
         check('all stored premium, claim and reversal entries are returned; null is skipped', len(rows) == 9)
@@ -106,8 +107,8 @@ try:
         posted.refresh_from_db()
         check('GET does not alter payload, version, audit or snapshots', before == (posted.payload, posted.row_version, AuditLog.objects.count(), EntitySnapshot.objects.count()))
         viewer = make_client('viewer', 'viewer', 'business_1')
-        check('a role without accounting.read still cannot access transactions', viewer.get('/api/accounting').status_code == 403)
-        check('anonymous accounting access remains denied', Client(HTTP_HOST='localhost').get('/api/accounting').status_code == 401)
+        check('a role without accounting.read still cannot access transactions', accounting_get(viewer, '?view=list&legacy=open').status_code == 403)
+        check('anonymous accounting access remains denied', accounting_get(Client(HTTP_HOST='localhost'), '?view=list&legacy=open').status_code == 401)
         raise Rollback()
 except Rollback:
     pass

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Exercise manual reference persistence and conditional announcement through real APIs."""
 import copy
 import json
@@ -105,7 +106,7 @@ check('Announced case cannot be saved with required reference missing',response.
 response=save(row,row.payload,version=1)
 check('manual reference edit obeys existing optimistic concurrency',response.status_code==409 and response.json()['error']=='version_conflict')
 row.refresh_from_db();row.payload['transactions']=build_premium_transactions({**row.payload,'twRef':row.tw_ref});row.save()
-accounting=call('get','/api/accounting').json()
+accounting=accounting_get(client, '').json()
 payments=[item for item in accounting['rows'] if item['caseUid']==str(row.case_uid)]
 tx=[item for item in accounting['transactionRows'] if item['caseUid']==str(row.case_uid)]
 check('Accounting payment schedule exposes both references',len(payments)==3 and all(item['manualTwRef']=='000609/TW-EDIT-39' and item['twRef']==row.tw_ref for item in payments))

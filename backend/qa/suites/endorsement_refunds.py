@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from django.db import transaction
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Endorsement premium deltas, signed schedules, real close and refund/recovery APIs.
@@ -109,7 +110,7 @@ check('refund direction labels reverse T1 and T2',__import__('cases.cash_ledger'
 check('zero-brokerage refund closes with valid T1 T2 and zero T3',zero.status=='closed' and [t['amount'] for t in zero.payload['transactions']]==[-445,-445,0])
 check('refund settles as one full premium entry',split.status=='closed' and [t['amount'] for t in split.payload['transactions']]==[-890,-752,-138])
 def rows(case):
-    return [r for r in call('get','/api/accounting').json()['rows'] if r['caseUid']==str(case.case_uid)]
+    return [r for r in accounting_get(c, '').json()['rows'] if r['caseUid']==str(case.case_uid)]
 ledger=rows(child);cedant=next(r for r in ledger if r['partyType']=='cedant');ri=next(r for r in ledger if r['partyType']=='reinsurer')
 check('signed refund balances are open, not clipped or falsely settled',cedant['amount']==-890 and cedant['outstanding']==-890 and cedant['settlement']=='open' and ri['amount']==-752)
 check('cedant is payable, RI broker is receivable',cedant['partyName']=='QA Refund Cedant' and cedant['paymentDirection']=='payable' and ri['partyName']=='QA Refund RI Broker' and ri['paymentDirection']=='receivable')
@@ -155,7 +156,7 @@ ledger=rows(child)
 # 2026-10-14：餘額歸零後等待會計人工確認
 check('full refund and recovery automatically settle to zero',all(r['outstanding']==0 for r in ledger)
       and [r['settlement'] for r in ledger if r['partyType']=='cedant']==['settled'] and [r['settlement'] for r in ledger if r['partyType']=='reinsurer']==['settled'])
-txrows=[r for r in call('get','/api/accounting').json()['transactionRows'] if r['caseUid']==str(child.case_uid)]
+txrows=[r for r in accounting_get(c, '').json()['transactionRows'] if r['caseUid']==str(child.case_uid)]
 check('SoA T1 reflects automatic full-refund settlement',next(r for r in txrows if r['legType']=='Leg 1')['settlement']=='settled')
 child.refresh_from_db()
 # 2026-10-16：record_payment 改為單筆匯款批次，更正須整筆沖回該匯款

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """AUW editable deductions, fixed zero tax, persistence and posting in disposable QA."""
 import copy
 import json
@@ -138,7 +139,7 @@ response = call('post', '/api/production-report', {'action':'close', 'month':'20
 row.refresh_from_db()
 check('Production closing succeeds with the custom AUW rate', response.status_code==200 and row.status=='closed')
 check('persisted SoA posting uses 7000 for reinsurer Leg 2', row.payload['transactions'][1]['amount']==7000)
-accounting = call('get', '/api/accounting').json()
+accounting = accounting_get(client, '').json()
 payments = [item for item in accounting['rows'] if item['caseUid']==str(row.case_uid) and item['partyType']=='reinsurer']
 check('Accounting payment row uses the posted custom rate', len(payments)==1 and payments[0]['amount']==7000)
 tx = [item for item in accounting['transactionRows'] if item['caseUid']==str(row.case_uid) and item['legType']=='Leg 2']

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Accounting legacy historical-result cache (2026-11-10). Synthetic data in disposable MySQL only.
 
 The cache must be invisible: every Accounting response is byte-identical to the uncached
@@ -42,7 +43,7 @@ L._accounting_one=counted
 saved_flag=os.environ.get('RI_LEGACY_RESULT_CACHE')
 
 def get(view='?view=list'):
-    r=admin.get('/api/accounting'+view)
+    r=accounting_get(admin, view)
     assert r.status_code==200,r.content[:300]
     return r.content
 def uncached(view='?view=list'):

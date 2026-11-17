@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from qa.finance_fixtures import review_case
 import copy
 import json
@@ -60,7 +61,7 @@ def make_case(c, status="posted", **over):
     review_case(case,globals().get('fin'))
     return case
 def ledger(c, case=None):
-    r = call(c, "get", "/api/accounting"); j = r.json()
+    r = accounting_get(c, ''); j = r.json()
     rows = [x for x in j.get("rows", []) if case is None or x["caseUid"] == str(case.case_uid)]
     return r, j, rows
 def post(c, action, case, **extra):

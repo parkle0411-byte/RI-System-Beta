@@ -151,8 +151,15 @@ finally:
     L._CACHE.clear(); P._HISTORY.clear()
 check('the cached pages equal the uncached ones', get(fin, 'view=page&tab=all')['rows'] == off['rows'])
 
-# ---- the former list responses are unchanged in shape ----
-full, open_, hist = get(fin, 'view=list'), get(fin, 'view=list&legacy=open'), get(fin, 'view=list&legacy=history')
-check('?view=list, legacy=open and legacy=history still answer as before', 'legacyHistory' not in full and open_['legacyHistory']['scope'] == 'open'
+# ---- only the reads the screen uses are served (2026-11-17 owner decision) ----
+from qa.accounting_full import accounting_get
+for query in ('', '?view=list', '?view=list&legacy=history', '?view=list&legacy=zzz', '?legacy=open', '?view=detail'):
+    r = fin.get('/api/accounting' + query)
+    check(f'the retired read {query or "(no parameters)"} is refused', r.status_code == 400 and r.json().get('error') == 'unsupported_view', (r.status_code, r.content[:120]))
+check('viewers are still refused before the read is examined', R['viewer'][0].get('/api/accounting').status_code == 403)
+check('anonymous requests are still refused', Client(HTTP_HOST='localhost').get('/api/accounting').status_code == 401)
+open_ = get(fin, 'view=list&legacy=open')
+full, hist = accounting_get(fin, '?view=list').json(), accounting_get(fin, '?view=list&legacy=history').json()
+check('the open list still answers, and with the internal reads still equals the complete list', 'legacyHistory' not in full and open_['legacyHistory']['scope'] == 'open'
       and hist['legacyHistory']['scope'] == 'history' and len(open_['transactionRows']) + len(hist['transactionRows']) == len(full['transactionRows']))
 print(f'{len(checks)}/{len(checks)} passed')

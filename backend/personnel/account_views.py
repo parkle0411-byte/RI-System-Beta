@@ -2,11 +2,14 @@
 帳號管理 API（VM 專有；Alpha 沒有，因為 Alpha 的登入由 Hatchable 代管）。
 建立帳號另允許 accounts.create.subordinate（限主管同部門、一般角色的直屬下屬）。其餘生命週期需要 accounts.manage。
 
-  POST /api/personnel-accounts                 建立帳號   {personnelId, username, email?, initialPassword?}
-                                               initialPassword 留空 → 系統產生並回傳一次；有填 → 管理員或主管指定，不回傳
-  POST /api/personnel-accounts/disable         停用帳號   {personnelId}
-  POST /api/personnel-accounts/enable          重新啟用帳號 {personnelId}（沿用原密碼，但第一次登入須改密碼）
-  POST /api/personnel-accounts/reset-password  重設密碼   {personnelId} → 回傳一次性新密碼
+  POST /api/personnel-accounts  一個網址，以 action 區分（2026-11-17 業主決定，原本四個網址合一；舊的子網址已停用）
+    action=create（省略 action 也是建立）  {personnelId, username, email?, initialPassword?}
+                                         initialPassword 留空 → 系統產生並回傳一次；有填 → 管理員或主管指定，不回傳
+    action=disable                       停用帳號 {personnelId}
+    action=enable                        重新啟用帳號 {personnelId}（沿用原密碼，但第一次登入須改密碼）
+    action=reset_password                重設密碼 {personnelId} → 回傳一次性新密碼
+  權限：網址允許 accounts.manage 或 accounts.create.subordinate；disable／enable／reset_password 另外在程式內
+  要求 accounts.manage（主管只能建立直屬下屬的帳號），不符合時回與原本相同的 403 PERMISSION_DENIED。
 
 密碼只出現在這一次回應（Cache-Control: no-store），不會寫進資料庫明文、日誌或 Audit。
 邏輯與 CLI 共用 personnel/accounts.py。
@@ -15,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.services import request_id_from
-from ri_system.authz import NoStoreMixin, RIPermission, actor_from, has_permission
+from ri_system.authz import AuthError, NoStoreMixin, RIPermission, actor_from, has_permission
 
 from . import accounts
 from .views import serialize
@@ -97,3 +100,20 @@ class ResetPasswordView(AccountBase):
             {"ok": True, "person": serialize_with_username(person, user.username),
              "username": user.username, "newPassword": password, "sessionsEnded": ended}
         )
+
+
+class AccountView(NoStoreMixin, APIView):
+    """POST /api/personnel-accounts {action, personnelId, ...}（見檔案開頭）。"""
+    permission_classes = [RIPermission]
+    permission_map = {"POST": ("accounts.manage", "accounts.create.subordinate")}
+    ACTIONS = {"create": CreateAccountView, "disable": DisableAccountView, "enable": EnableAccountView, "reset_password": ResetPasswordView}
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        action = data.get("action", "create")
+        handler = self.ACTIONS.get(action) if isinstance(action, str) else None
+        if handler is None:
+            return Response({"error": "invalid_action", "message": "action must be create, disable, enable or reset_password."}, status=400)
+        if action != "create" and not has_permission(request.ri_principal, "accounts.manage"):
+            raise AuthError(403, "PERMISSION_DENIED", "You do not have permission for this operation.")
+        return handler.post(handler(), request)

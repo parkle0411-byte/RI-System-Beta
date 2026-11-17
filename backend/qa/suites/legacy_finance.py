@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Real shared Finance workflow on new standalone obligations, no dummy Cases."""
 from pathlib import Path
 exec(Path('/app/qa/suites/legacy_entries.py').read_text().replace("print(f'{len(checks)}/{len(checks)} passed')",'pass'))
@@ -41,7 +42,7 @@ pay(e,1,50,50)
 pay(e,2,1,-1,409)
 pay(e,1,50,50)
 pay(e,2,90,-90)
-rows=admin.get('/api/accounting?view=list').json()['transactionRows']
+rows=accounting_get(admin, '?view=list').json()['transactionRows']
 ours=[r for r in rows if r.get('caseUid')==e['uid']]
 check('premium and brokerage automatically settle',len(ours)==3 and all(r['settlement']=='settled' and r['outstanding']==0 for r in ours),ours)
 check('historical source remains settled with no bank events',LegacyTransaction.objects.get(pk=source.pk).financial=={})
@@ -123,7 +124,7 @@ finance(dict(action='record_transaction_payments',paymentDate='2026-11-09',refer
 response=finance(dict(action='record_transaction_payments',cashSubmissionId=str(uuid.uuid4()),paymentDate='2026-11-09',reference='NATIVE-LEGACY-SWISS-CASH',
     allocations=[dict(**swr_member(2),cashAmount=80,cashItemId=str(uuid.uuid4())),dict(**member(swc,1),cashAmount=80,cashItemId=str(uuid.uuid4()))]))
 check('same Swiss counterparty supports native/Legacy separate actual cash',response['succeeded']==2,response)
-account_rows=admin.get('/api/accounting?view=list').json()['transactionRows']
+account_rows=accounting_get(admin, '?view=list').json()['transactionRows']
 claim_ri=next(row for row in account_rows if row.get('caseUid')==swc['uid'] and row['legType']=='Claim Leg 1')
 check('same Swiss counterparty preserves settlement identity',claim_ri['partyName']=='Swiss Re Asia Pte. Ltd., Hong Kong Branch' and claim_ri['settlement']=='settled',claim_ri)
 check('new RI statement references reach Accounting',claim_ri['reconciliationRef']=='SWISS-CLAIM-REF')

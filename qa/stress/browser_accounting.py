@@ -34,8 +34,8 @@ def main():
         page.wait_for_selector(".app-shell")
 
         api = {}
-        page.on("request", lambda r: api.setdefault("start", time.perf_counter()) if r.url.endswith("/api/accounting") else None)
-        page.on("requestfinished", lambda r: api.setdefault("end", time.perf_counter()) if r.url.endswith("/api/accounting") else None)
+        page.on("request", lambda r: api.setdefault("start", time.perf_counter()) if "/api/accounting?view=list&legacy=open" in r.url else None)
+        page.on("requestfinished", lambda r: api.setdefault("end", time.perf_counter()) if "/api/accounting?view=list&legacy=open" in r.url else None)
 
         t0 = time.perf_counter()
         page.goto(BASE + "/accounting", wait_until="commit")

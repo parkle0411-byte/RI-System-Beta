@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Unreadable financial data: visible pending amounts, unchanged raw data, blocked writes."""
 import copy,json,os
 from datetime import datetime,timezone
@@ -59,7 +60,7 @@ try:
   check('single-case GET preserves original malformed data and reports issues',single['payload']==bad and single['dataError'] and single['dataIssues'])
   rows=client.get('/api/cases').json()['cases'];item=next(r for r in rows if r['caseUid']==str(c.case_uid))
   check('case-list financial amounts are pending, not zero',item['ourSharePremium'] is None and item['brokerage'] is None and item['dataError'])
-  body=client.get('/api/accounting').json()
+  body=accounting_get(client, '').json()
   check('Accounting flags only bad case and still displays valid case',any(w['caseUid']==str(c.case_uid) and w.get('dataError') for w in body['warnings']) and any(r['caseUid']==str(safe.case_uid) for r in body['transactionRows']) and not any(r['caseUid']==str(c.case_uid) for r in body['transactionRows']))
   dashboard=client.get('/api/dashboard')
   check('Dashboard remains readable and explicitly marks incomplete amounts',dashboard.status_code==200 and dashboard.json()['metrics']['accountingTotalIncomplete'] and any(w['caseId']==c.pk for w in dashboard.json()['metrics']['dataErrors']))

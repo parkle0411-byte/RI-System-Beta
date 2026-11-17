@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Oversized rows never break a page (owner decision 2026-11-16). Disposable MySQL only.
 
 MySQL refuses to sort a row larger than sort_buffer_size ("Out of sort memory"). One very large case,
@@ -69,7 +70,7 @@ for case in (A, B):
     check(f'{case.tw_ref}: claim created', claim(case, {'action': 'create_claim', 'claim': {'dateOfLoss': '2026-11-05', 'outstandingReserve': 50000}}).status_code == 200)
     for _ in range(2):
         check(f'{case.tw_ref}: claim payment recorded', claim(case, {'action': 'record_payment', 'claimId': 1, 'payment': {'amount': 1000, 'date': '2026-11-10'}}).status_code == 200)
-mine = [x for x in fin.get('/api/accounting?view=list').json()['transactionRows'] if x.get('caseUid') in {str(c.case_uid) for c in cases}]
+mine = [x for x in accounting_get(fin, '?view=list').json()['transactionRows'] if x.get('caseUid') in {str(c.case_uid) for c in cases}]
 def member(x): return dict(caseUid=x['caseUid'], rowVersion=Case.objects.get(case_uid=x['caseUid']).row_version, txNo=x['txNo'])
 rA = [x for x in mine if x['caseUid'] == str(A.case_uid)]; rB = [x for x in mine if x['caseUid'] == str(B.case_uid)]
 check('review batch recorded', post(fin, '/api/accounting', dict(action='review_accounts', date='2026-11-16', members=[member(rA[0])])).status_code == 200)
@@ -183,10 +184,10 @@ LegacyTransaction.objects.using('lr_owner').filter(pk=claim_tx.pk).update(data={
     'amounts': dict(premium=0, commission=0, tax=0, brokerage=0, claim=5000, cedantNet=5000, reinsurerNet=5000)})
 import legacy.ledger as ledger
 ledger._CACHE.clear()
-rows = [x for x in fin.get('/api/accounting?view=list').json()['transactionRows'] if x.get('legacyTransactionId') == str(claim_tx.uid)]
+rows = [x for x in accounting_get(fin, '?view=list').json()['transactionRows'] if x.get('legacyTransactionId') == str(claim_tx.uid)]
 cash = [x for x in rows if x.get('cashTracking') == 'cash']
 check('settled legacy claim rows exist', bool(cash) and all(x['settlement'] == 'settled' for x in cash), rows)
 check('settled legacy claim cash rows report paymentStatus settled', all(x['paymentStatus'] == 'settled' for x in cash), [(x['txNo'], x['paymentStatus']) for x in cash])
-derived = [x for x in fin.get('/api/accounting?view=list').json()['transactionRows'] if x.get('legacyTransactionId') == str(L_hist.uid) and x.get('cashTracking') == 'derived']
+derived = [x for x in accounting_get(fin, '?view=list').json()['transactionRows'] if x.get('legacyTransactionId') == str(L_hist.uid) and x.get('cashTracking') == 'derived']
 check('derived T3 rows keep their previous status', all(x['paymentStatus'] == 'pending_review' for x in derived) and bool(derived), [(x['txNo'], x['paymentStatus']) for x in derived])
 print(f'{len(checks)}/{len(checks)} passed')

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Oversea installments and signed endorsements; disposable DB only."""
 from pathlib import Path
 exec(Path('/app/qa/suites/oversea_business.py').read_text().split('try:\n with transaction.atomic():')[0])
@@ -32,7 +33,7 @@ try:
   check('Announce creates three distinct T3s only',len(txs)==3 and len({t['txNo'] for t in txs})==3 and all(t['legType']=='Leg 3' for t in txs))
   no=txs[0]['txNo'];details=transaction_details(case.payload);check('ledger preserves dates per T3',[details[t['txNo']]['actualPaymentDate'] for t in txs]==['2050-01-05','2050-02-05','2050-03-05'])
   review=call(finance,'/api/accounting',dict(action='review_accounts',date='2050-01-05',reference='period one review',members=[member(case,no)]));check('Finance reviews one period independently',review.status_code==200,review.content[:1000]);case.refresh_from_db();details=transaction_details(case.payload)
-  accounting=finance.get('/api/accounting?view=list');reviews={r['txNo']:r for r in accounting.json()['transactionRows'] if r['caseUid']==uid}
+  accounting=accounting_get(finance, '?view=list');reviews={r['txNo']:r for r in accounting.json()['transactionRows'] if r['caseUid']==uid}
   check('date signature preserves period review and does not review others',reviews[no]['financeReviewed'] and not reviews[txs[1]['txNo']]['financeReviewed'])
   payment=dict(action='record_transaction_payments',paymentDate='2050-02-05',reference='period one receipt',amount=33.34,allocations=[{**member(case,no),'cashAmount':33.34,'offsetAmount':0}])
   with transaction.atomic():

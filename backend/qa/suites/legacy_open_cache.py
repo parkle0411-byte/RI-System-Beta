@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Unsettled legacy rows: computed once per request and cached per transaction (2026-11-13).
 Batch import: Insured masters read once. Synthetic data in disposable MySQL only.
 
@@ -26,7 +27,7 @@ def restore():
         if v is None:os.environ.pop(k,None)
         else:os.environ[k]=v
 def get(q='?view=list',client=None):
-    r=(client or admin).get('/api/accounting'+q);assert r.status_code==200,(q,r.status_code,r.content[:300]);return r.content
+    r=accounting_get((client or admin), q);assert r.status_code==200,(q,r.status_code,r.content[:300]);return r.content
 def uncached(q='?view=list'):
     for k in flags:os.environ[k]='false'
     try:return get(q)

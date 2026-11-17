@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """2026-10-07 Finance case reads, President document denial and Supervisor creation boundaries."""
 import hashlib
 import json
@@ -73,7 +74,7 @@ try:
                 for path in ['/api/cases?caseUid=' + uid, '/api/case-workflow?caseUid=' + uid,
                              '/api/claims?caseUid=' + uid, '/api/case-reminders?caseUid=' + uid]:
                     check(role + ' reads ' + case.status + ' ' + path, c.get(path).status_code == 200)
-            check(role + ' retains Accounting writes', c.get('/api/accounting').json()['scope']['canEdit'])
+            check(role + ' retains Accounting writes', accounting_get(c, '?view=list&legacy=open').json()['scope']['canEdit'])
             production = c.get('/api/production-report?month=2026-10').json()['scope']
             check(role + ' retains Production responsibilities', production['canOperate'] is (role == 'accounting_manager')
                   and production['canClose'] is (role == 'accounting_manager'))
@@ -135,10 +136,9 @@ try:
                   {'id': subordinate.pk, 'rowVersion': subordinate.row_version, 'name': 'Changed'}).status_code == 403)
             check(p.name + ' account creation validates Username for an eligible subordinate',
                   call(c, 'post', '/api/personnel-accounts', {'personnelId': subordinate.pk}).status_code == 400)
-            for path in ['/api/personnel-accounts/enable',
-                         '/api/personnel-accounts/disable', '/api/personnel-accounts/reset-password']:
-                check(p.name + ' account management denied ' + path,
-                      call(c, 'post', path, {'personnelId': subordinate.pk}).status_code == 403)
+            for action in ['enable', 'disable', 'reset_password']:   # 2026-11-17：同一網址以 action 區分
+                check(p.name + ' account management denied ' + action,
+                      call(c, 'post', '/api/personnel-accounts', {'action': action, 'personnelId': subordinate.pk}).status_code == 403)
             check(p.name + ' rejected writes change no records', before == fingerprint())
             created = call(c, 'post', '/api/personnel', {'name': 'QA New Team ' + str(p.pk),
                 'department': dept, 'roleCode': staff_role, 'supervisorName': p.name.upper(),
@@ -177,7 +177,7 @@ try:
         check('cross-department GM assignment is recognized independently', is_supervisor(twin_gm))
         viewer_client = client(twin_viewer)
         check('Supervisor status does not grant other business privileges',
-              viewer_client.get('/api/accounting').status_code == 403 and
+              accounting_get(viewer_client, '?view=list&legacy=open').status_code == 403 and
               call(viewer_client, 'post', '/api/cases', {}).status_code == 403)
         direct.supervisor_name = None
         direct.save()

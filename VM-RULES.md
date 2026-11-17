@@ -62,7 +62,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 2 小時，目前為 133 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **Accounting 伺服器分頁一致性**（2026-11-17）：`scripts/run_qa.sh pages`——以正式資料（唯讀）取伺服器各分頁，與畫面原本的程式（`accountingRows.js`、`accountingList.js`，node 執行）逐頁比對；約 2 分鐘。`PAGES_BACKEND=<容器>` 改用其他後端（例：壓測環境）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16），合計 364 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16）、人員頁帳號操作 U 10 項（2026-11-17），合計 374 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
@@ -363,7 +363,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 原收付登錄歷史由帳款明細查看（History主分頁已改為Settled/Closed）。整筆登錄保留有效／已沖回狀態及實際收付款日期。分三欄：應收沖銷合計、應付沖銷合計、實收付淨額（新登錄按幣別及方向分開，淨額僅供參考；純抵銷只限既有歷史）。可查會計參考號、TW Ref、對象與日期，展開逐筆現金／抵銷、沖回與替代關係。
 - 明細 Applied amount 改 Receipt / Payment Amount；一般歷史不顯示 Swiss period，Swiss需要時列 Swiss settlement due date。T3按鈕 Brokerage settlement details。
 - 移除舊人工結清、取消結清、直接更改付款金額及 Offset with original 入口。Complete missing days 只補歷史缺漏，有效天數與新公告帳款不能用此入口更改。
-- **伺服器分頁（2026-11-17 業主決定；取代 2026-11-13 的背景合併）**：Accounting 預設開在 Unreconciled Accounts，畫面讀 `?view=list&legacy=open`（全部新系統案件、匯入時尚未收付完的舊資料與舊資料上新增的批單／理賠），Unreconciled／Reconciled 在瀏覽器篩選、勾選、審核與收付，與以前相同。**All Accounts／Settled/Closed／Brokerage** 改由伺服器篩選、排序、分頁：`GET /api/accounting?view=page&tab=all|settled|brokerage&page=N` 加同名篩選條件（reference、insured、cedant、reinsurer、currency、direction、settlement（逗號分隔）、source、origin、due），**固定每頁 100 列**，包含匯入時已結清的舊資料歷史；標題數字＝符合條件的帳款列總數（全系統，不是案件數）。文字欄停止輸入 0.3 秒後才查詢；換頁或改條件時短暫顯示載入中；失敗時顯示錯誤與 Retry。下拉選單（Cedant、Reinsurer、幣別）由 `?view=options` 提供，含只出現在歷史中的名稱（打開時與 Refresh 時讀取）。伺服器的轉換、篩選與排序逐行移植自畫面程式（`backend/cases/accounting_pages.py` ↔ `frontend/src/alpha/accountingRows.js`、`frontend/src/views/accountingList.js`，兩邊要一起改），以 `run_qa.sh pages` 逐頁比對。已結清歷史整份不再下載到瀏覽器；`?view=list`、`legacy=open`／`history` 回應不變。
+- **伺服器分頁（2026-11-17 業主決定；取代 2026-11-13 的背景合併）**：Accounting 預設開在 Unreconciled Accounts，畫面讀 `?view=list&legacy=open`（全部新系統案件、匯入時尚未收付完的舊資料與舊資料上新增的批單／理賠），Unreconciled／Reconciled 在瀏覽器篩選、勾選、審核與收付，與以前相同。**All Accounts／Settled/Closed／Brokerage** 改由伺服器篩選、排序、分頁：`GET /api/accounting?view=page&tab=all|settled|brokerage&page=N` 加同名篩選條件（reference、insured、cedant、reinsurer、currency、direction、settlement（逗號分隔）、source、origin、due），**固定每頁 100 列**，包含匯入時已結清的舊資料歷史；標題數字＝符合條件的帳款列總數（全系統，不是案件數）。**讀取方式只保留三種**（2026-11-17 業主決定）：`?view=list&legacy=open`、`?view=page`、`?view=options`；不帶參數、`?view=list` 與 `?view=list&legacy=history` 已退役（回 400 `unsupported_view`），完整計算只在伺服器內部使用，測試以 `backend/qa/accounting_full.py` 讀取（相同權限檢查與內容）。文字欄停止輸入 0.3 秒後才查詢；換頁或改條件時短暫顯示載入中；失敗時顯示錯誤與 Retry。下拉選單（Cedant、Reinsurer、幣別）由 `?view=options` 提供，含只出現在歷史中的名稱（打開時與 Refresh 時讀取）。伺服器的轉換、篩選與排序逐行移植自畫面程式（`backend/cases/accounting_pages.py` ↔ `frontend/src/alpha/accountingRows.js`、`frontend/src/views/accountingList.js`，兩邊要一起改），以 `run_qa.sh pages` 逐頁比對。已結清歷史整份不再下載到瀏覽器。
 - 每頁預設100列（50／100／200／500）；?view=list精簡資料，返回頁面先顯示快取並背景更新，更新前財務操作停用。載入失敗（伺服器錯誤、連線中斷）時在表格上方常駐紅色提示與 Retry，不顯示「No matching accounts」；已有上次載入的清單時保留並註明載入時間，財務操作停用到重新載入成功（2026-11-10）。窄螢幕表格橫向捲動，不以左固定欄遮擋操作。
 
 - 所有新收付金額及合計以 ISO 幣別代碼顯示（例 USD 1,000.00、TWD 30,000），各幣別分列應收、應付、參考淨額；待登錄與已登錄合計分開。彈窗已完成列唯讀，失敗列可更正／移出後重試。
@@ -409,6 +409,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
   - **主管**（有人把他設為 Supervisor 即成立）：可看本人及同部門直屬下屬，可新增同部門下屬（角色固定：再保部 sales、財務部 accounting、其他 viewer）並為一般角色直屬下屬建立帳號；不能改既有人員。
   - 能編輯案件的人（業務、主管、管理員）可新增、更名、合併被保險人主檔。
 - 帳號：管理員建立／重設／重新啟用後首次登入須改密碼；帳號停用、降權與離職共用交易鎖，不能移除最後一位啟用的管理員。
+- 帳號 API（2026-11-17 業主決定，四個網址合一）：`POST /api/personnel-accounts`，以 `action` 區分 `create`（省略 action 也是建立）／`disable`／`enable`／`reset_password`；原 `/disable`、`/enable`、`/reset-password` 子網址停用（404）。網址允許 `accounts.manage` 或 `accounts.create.subordinate`，停用／啟用／重設密碼另在程式內要求 `accounts.manage`（主管只能建立直屬下屬的帳號），不符回 403 `PERMISSION_DENIED`；未知 action 回 400 `invalid_action`。指令列工具（`create_ri_account` 等）不變。
 - 閒置 3 小時自動登出（真實點擊、鍵盤、捲動才續期；背景 API 不續期；多分頁同步）。
 - 忘記密碼：可輸入帳號或 e-mail；token 一次性；目前寄信關閉所以入口隱藏。
 - System status 與 `/health/` 只有 System Administrator（`/health/` 未登入回 401）。
@@ -706,6 +707,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-17 00:54 | Accounting 伺服器分頁：All Accounts／Settled/Closed／Brokerage 每頁 100 列由伺服器篩選排序（含已結清舊資料歷史，不再背景下載）；下拉選單由伺服器提供；新增 `run_qa.sh pages` | `backups/accounting_pages_20261117_005406`；回復用 `perf-work/stage-h-20261117/rollback.sh 20261117_005406` | `ri-backend:before-accounting-pages-20261117_005406`／`ri-frontend:before-accounting-pages-20261117_005406` | 候選 API 133 組全通過（新 `accounting_pages` 39 項，2 個變異版本會失敗）；畫面 364 項（Y 改寫 24 項；D 階段 1 項改為等待伺服器回應後檢查）；與畫面原本程式逐頁比對：正式 342 頁／20,137 列、1 萬筆壓測 266 頁／15,504 列全部一致；部署後原有 766 個回應與舊映像相同；無 migration、無資料寫入 |
 
+| 11-17 09:39 | API 整合：Accounting 只保留畫面使用的三種讀取（舊三種退役回 400，測試改用 `qa/accounting_full.py`）；帳號四個網址合為 `POST /api/personnel-accounts`（action 區分，停用／啟用／重設限 `accounts.manage`）；人員頁、壓測工具、畫面測試 U 項；每週健檢改量畫面實際請求 | `backups/api_merge_20261117_093947`；回復用 `perf-work/stage-i-20261117/rollback.sh 20261117_093947` | `ri-backend:before-api-merge-20261117_093947`／`ri-frontend:before-api-merge-20261117_093947` | 候選 API 133 組全通過（約 40 組測試改用內部讀取；新增退役讀取 400、帳號 action 與舊子網址 404 等檢查；拿掉權限判斷或放行舊讀取的變異版本會失敗）；畫面 374 項（新 U 10 項）；部署後 `run_qa.sh pages` 342 頁一致；同時間新舊映像 766 個回應僅退役讀取 12 個變為 400；無 migration、無資料寫入 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -715,6 +718,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-17：依業主確認部署 API 整合（§8.7、§11）：Accounting 不帶參數、`?view=list`、`legacy=history` 三種讀取退役；帳號建立／停用／啟用／重設密碼合為一個網址；網址數 41 → 38。
 
 - 2026-11-17：依業主確認部署 Accounting 伺服器分頁（§8.7、§15）：All Accounts／Settled/Closed／Brokerage 每頁 100 列由伺服器篩選排序並含已結清舊資料歷史，打開時不再下載整份歷史；理賠交易瘦身先不做；11-16 依業主指示提前執行 Docker 清理（映像 209→106 個，釋放約 4 GB）。
 

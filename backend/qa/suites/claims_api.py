@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 import copy
 import json
 import uuid
@@ -52,7 +53,7 @@ def make_case(c, status="posted", **over):
         Case.objects.filter(pk=case.pk).update(status=status, tw_ref=f"ZZ-CLM-{_ref[0]:04d}", announced_at=timezone.now())
     case.refresh_from_db(); return case
 def ledger(c, case):
-    return [x for x in call(c, "get", "/api/accounting").json().get("rows", []) if x["caseUid"] == str(case.case_uid)]
+    return [x for x in accounting_get(c, '').json().get("rows", []) if x["caseUid"] == str(case.case_uid)]
 def claims(c, case):
     return call(c, "get", f"/api/claims?caseUid={case.case_uid}")
 def act(c, action, case, root=None, **extra):
@@ -256,7 +257,7 @@ try:
         r = act(sales, 'record_payment', multi, claimId=1, payment={'date':'2026-06-01', 'amount':101}); multi.refresh_from_db()
         multi_tx = [t for t in multi.payload.get('transactions', []) if t.get('source') == 'claim']
         check('claim obligations use claim currency and integer TWD shares', r.status_code == 200 and len(multi_tx) == 4 and all(t.get('currency') == 'TWD' and t['amount'] == int(t['amount']) for t in multi_tx), multi_tx)
-        accounting = call(fin, 'get', '/api/accounting').json()
+        accounting = accounting_get(fin, '').json()
         original_rows = [row for row in accounting.get('transactionRows', []) if row.get('caseUid') == str(multi.case_uid) and row.get('source') == 'claim']
         check('multi-currency Claim Accounting rows do not display FX conversions', len(original_rows) == 4 and all(row.get('currency') == 'TWD' and row.get('amountNtd') is None and row.get('outstandingNtd') is None and row.get('fxNotApplicable') is True for row in original_rows), original_rows)
         from dashboard.calc import build_dashboard
@@ -281,7 +282,7 @@ try:
         fx_rows = [{'year_month': timezone.localtime().strftime('%Y-%m'), 'currency': cur, 'rate': rate} for cur, rate in (('USD', 30.0), ('EUR', 35.0))]
         metrics = build_dashboard([case_source(multi)], [], fx_rows, timezone.now(), production_rules=True)['metrics']
         check('with FX, Claim receivables convert at each Claim currency (USD 101 x 30 + EUR 25 x 35)', round(metrics['outstandingLeg1Ntd'], 2) == 101 * 30 + 25 * 35, metrics['outstandingLeg1Ntd'])
-        compact = call(fin, 'get', '/api/accounting?view=list').json()
+        compact = accounting_get(fin, '?view=list').json()
         check('Accounting currency filter includes each Claim transaction currency', {'USD','EUR'} <= set(compact.get('currencies') or []), compact.get('currencies'))
         raise Rollback()
 except Rollback:

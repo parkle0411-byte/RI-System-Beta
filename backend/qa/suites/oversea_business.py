@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Oversea Business: six-field draft, independent cash T3, actual date minus 10."""
 import copy,json,os
 from datetime import date,timedelta
@@ -105,7 +106,7 @@ try:
   check('Accounting Date crosses year correctly',d['dueDate']==d['accountingDate']=='2049-12-26' and d['actualPaymentDate']=='2050-01-05',d)
   check('T3 is independent receivable cash account',d['cashTracking']=='cash' and d['canRecord'] and d['paymentDirection']=='receivable' and d['partyName']=='Oversea QA Broker' and not d.get('settlementDependencies'),d)
   check('key-in actual date does not fabricate a Finance receipt',d['paid']==0 and d['outstanding']==2500 and case.payload['paymentEntries']==[])
-  r=finance.get('/api/accounting?view=list');row=next(x for x in r.json()['transactionRows'] if x['caseUid']==uid)
+  r=accounting_get(finance, '?view=list');row=next(x for x in r.json()['transactionRows'] if x['caseUid']==uid)
   check('Accounting list exposes direct amount and exact dates',row['amount']==2500 and row['accountingDate']=='2049-12-26' and row['actualPaymentDate']=='2050-01-05' and row['overseaBusiness'],row)
   for kind in ['cover','debit','credit','endorsement']:
    r=call(sales,'/api/document-generation-log',dict(caseUid=uid,kind=kind,format='docx'));check('server blocks document generation '+kind,r.status_code==409 and r.json()['error']=='oversea_documents_unavailable',r.content[:800])

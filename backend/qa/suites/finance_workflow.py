@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Owner-approved Finance workflow: real API, isolated MySQL, adversarial rollback checks."""
 import copy,json,os,uuid
 from django.db import transaction
@@ -38,7 +39,7 @@ def reverse(bid,cases,**over):
  body={'action':'reverse_batch_payment','batchId':bid,'paymentDate':'2026-11-03','note':'Correction of test registration',
  'cases':[{'caseUid':str(c.case_uid),'rowVersion':(c.refresh_from_db() or c.row_version)} for c in cases]};body.update(over);return api(fin,body)
 def cancel(bid,cases):
- group=next(b for b in fin.get('/api/accounting?view=list').json()['reviewBatches'] if b['id']==bid)
+ group=next(b for b in accounting_get(fin, '?view=list').json()['reviewBatches'] if b['id']==bid)
  return api(fin,{'action':'cancel_review_batch','reviewBatchId':bid,'reason':'Review correction','members':group['members']})
 
 def add_claim(c,value=200,pid=1):
@@ -51,13 +52,13 @@ try:
  with transaction.atomic():
   fin=client('fin','accounting');manager=client('manager','accounting_manager');sales=client('sales','sales');president=client('president','president')
   a=fixture('QA-FIN-A');b=fixture('QA-FIN-B',500);t1a=leg(a,'Leg 1');t1b=leg(b,'Leg 1')
-  r=fin.get('/api/accounting?view=list');check('legacy accounts start unreviewed without writes',r.status_code==200 and not any(x['financeReviewed'] for x in r.json()['transactionRows']) and FinanceReconciliationBatch.objects.count()==0,r.content[:500])
+  r=accounting_get(fin, '?view=list');check('legacy accounts start unreviewed without writes',r.status_code==200 and not any(x['financeReviewed'] for x in r.json()['transactionRows']) and FinanceReconciliationBatch.objects.count()==0,r.content[:500])
   check('unreviewed cash is blocked',register([(a,t1a,1000,0)],1000).json().get('error')=='finance_review_required')
   check('sales cannot mark Finance review',review([(a,t1a)],sales).status_code==403)
   check('President cannot mark Finance review',review([(a,t1a)],president).status_code==403)
   check('review date remains required',review([(a,t1a)],date='',reference='',note='').status_code==400)
   r=review([(a,t1a),(b,t1b)]);check('same-party/currency cross-case review accepted',r.status_code==200,r.content);review_id=r.json()['reviewBatchId']
-  r=fin.get('/api/accounting?view=list');check('reviewed rows expose date/reference/batch',all(x['reviewBatchId']==review_id and x['reviewDate']=='2026-11-03' for x in r.json()['transactionRows'] if x['txNo'] in (t1a,t1b)))
+  r=accounting_get(fin, '?view=list');check('reviewed rows expose date/reference/batch',all(x['reviewBatchId']==review_id and x['reviewDate']=='2026-11-03' for x in r.json()['transactionRows'] if x['txNo'] in (t1a,t1b)))
   check('duplicate review rejected',review([(a,t1a)]).status_code==409)
   c=fixture('QA-FIN-C',100,currency='TWD');d=fixture('QA-FIN-D',100,party='Other Cedant')
   check('mixed currency review blocked atomically',review([(c,leg(c,'Leg 1')),(d,leg(d,'Leg 1'))]).status_code==400)
@@ -101,10 +102,10 @@ try:
   f=fixture('QA-FIN-F');fin1,fin2=add_claim(f,300);r=api(fin,{'action':'record_claim_followup',**member(f,fin1),'note':'Await response'})
   check('follow-up available on every outstanding claim',r.status_code==200,r.content)
   f.refresh_from_db();check('claim follow-up leaves amounts unchanged',transaction_details(f.payload)[fin1]['outstanding']==300 and transaction_details(f.payload)[fin1]['trackingHistory'][-1]['note']=='Await response')
-  history=fin.get('/api/accounting?view=list').json()['cashBatches'];n=next(x for x in history if x['batchId']==cashbid)
+  history=accounting_get(fin, '?view=list').json()['cashBatches'];n=next(x for x in history if x['batchId']==cashbid)
   check('History shows actual gross cash without invented offsets',n['receivableSettled']==1000 and n['payableSettled']==0 and n['netCash']==1000 and not n['pureOffset'])
   check('History links replacement registrations',replacement in next(x for x in history if x['batchId']==receipt)['replacementBatchIds'])
-  check('read-only roles can inspect Finance workflow',president.get('/api/accounting?view=list').status_code==200 and sales.get('/api/accounting?view=list').status_code==200)
+  check('read-only roles can inspect Finance workflow',accounting_get(president, '?view=list').status_code==200 and accounting_get(sales, '?view=list').status_code==200)
   print(str(len(checks))+' passed Finance workflow checks',flush=True)
   raise Done()
 except Done:pass

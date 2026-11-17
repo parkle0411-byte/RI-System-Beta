@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Accounting segmented loading (2026-11-13). Synthetic data in disposable MySQL only.
 
 `?view=list&legacy=open` (everything except settled-before-import legacy history) plus
@@ -36,7 +37,7 @@ def history(n,currency='TWD',receipts=True):
 
 fin=clients['accounting'];admin=clients['admin']
 def get(q='?view=list',client=admin):
-    r=client.get('/api/accounting'+q); assert r.status_code==200,(q,r.status_code,r.content[:300]); return r
+    r=accounting_get(client, q); assert r.status_code==200,(q,r.status_code,r.content[:300]); return r
 def body(q): return get(q).json()
 def finance(payload,want=200):
     r=fin.post('/api/accounting',json.dumps(payload),content_type='application/json')
@@ -122,7 +123,7 @@ try:
     # Permissions are those of Accounting itself.
     for role,want in (('accounting',200),('sales',200),('viewer',403)):
         for q in ('?view=list&legacy=open','?view=list&legacy=history'):
-            check(f'{role} {q} -> {want}',clients[role].get('/api/accounting'+q).status_code==want)
+            check(f'{role} {q} -> {want}',accounting_get(clients[role], q).status_code==want)
     check('non-Finance users cannot edit through a segment',body('?view=list&legacy=open')['scope']['canEdit'] is True
           and clients['sales'].get('/api/accounting?view=list&legacy=open').json()['scope']['canEdit'] is False)
 finally:

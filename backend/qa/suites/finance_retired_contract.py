@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Removed API contracts fail safely; immutable legacy records remain readable."""
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])
@@ -31,7 +32,7 @@ try:
   check('stale reviewed allocation rejected before writes',r.status_code==409 and r.json()['error']=='version_conflict',r.content)
   with override_settings(AUDIT_LOG_PAUSED=True):
    prior=AuditLog.objects.count();r=register([(a,no,1000,0)],1000);check('Finance receipt persists without enabling paused Audit',r.status_code==200 and AuditLog.objects.count()==prior,r.content)
-  a.refresh_from_db();before=copy.deepcopy(a.payload);r=fin.get('/api/accounting?view=list');a.refresh_from_db()
+  a.refresh_from_db();before=copy.deepcopy(a.payload);r=accounting_get(fin, '?view=list');a.refresh_from_db()
   check('GET does not rewrite cash, offsets, amounts or history',r.status_code==200 and a.payload==before)
   check('new review metadata can be read independently of settlement',any(x['txNo']==no and x['financeReviewed'] and x['settlement']=='settled' for x in r.json()['transactionRows']))
   print(str(len(checks))+' passed retired-action and immutable-history checks',flush=True)

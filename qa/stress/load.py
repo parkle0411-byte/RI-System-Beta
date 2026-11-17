@@ -137,7 +137,7 @@ def baseline(reps):
     gm = Session("stress.gm", "general_manager").login()
     uid = random.choice(SAMPLES["ledger"])
     calls = [(fin, "/api/app-context"), (sales, "/api/cases"), (sales, f"/api/cases?caseUid={uid}"), (sales, f"/api/case-workflow?caseUid={uid}"),
-             (sales, f"/api/claims?caseUid={uid}"), (sales, f"/api/case-reminders?caseUid={uid}"), (fin, "/api/accounting"),
+             (sales, f"/api/claims?caseUid={uid}"), (sales, f"/api/case-reminders?caseUid={uid}"), (fin, "/api/accounting?view=list&legacy=open"),
              (fin, f"/api/production-report?month={SAMPLES['months'][1]}"), (fin, "/api/dashboard"), (gm, "/api/dashboard-targets"),
              (sales, "/api/master-data"), (sales, "/api/personnel-options")]
     for sess, path in calls:
@@ -233,7 +233,7 @@ def make_actions(sess, idx):
         page("案件的 Claims 分頁", lambda: [("GET", f"/api/claims?caseUid={uid}", None)])
 
     def accounting():
-        page("Accounting 頁", lambda: [("GET", "/api/accounting", None)])
+        page("Accounting 頁", lambda: [("GET", "/api/accounting?view=list&legacy=open", None)])
 
     def dashboard():
         page("Dashboard", lambda: [("GET", "/api/dashboard", None)] + ([("GET", "/api/dashboard-targets", None)] if sess.role in ("general_manager", "admin") else []))
@@ -329,7 +329,7 @@ if __name__ == "__main__":
     elif a.scenario == "gzip":
         gzip_check(a.paths[0])
     elif a.scenario == "burst":
-        burst(a.paths or ["/api/accounting"], a.rounds)
+        burst(a.paths or ["/api/accounting?view=list&legacy=open"], a.rounds)
     elif a.scenario == "mixed":
         lo, hi = (float(x) for x in a.think.split(","))
         mixed(a.minutes, lo, hi)

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 from qa.finance_fixtures import review_case, cash as reviewed_cash
 """Owner-confirmed QBE Property dates, full manual collection gates and API isolation."""
 import copy,json,os
@@ -243,7 +244,7 @@ check('claim request2 may use shared external reference',pay(root,newno,referenc
 check('claim request3 may reuse shared external reference',pay(root,third,reference='EXT-CLAIM').status_code==200)
 from reminders.messages import due_kind
 check('settled QBE claim no longer emits reminders',due_kind(d,'2026-11-09',{})=='')
-listing=fin.get('/api/accounting?view=list');check('lean accounting returns QBE schedules',listing.status_code==200 and any(i.get('qbeFacility') for i in listing.json()['scheduleRows']))
+listing=accounting_get(fin, '?view=list');check('lean accounting returns QBE schedules',listing.status_code==200 and any(i.get('qbeFacility') for i in listing.json()['scheduleRows']))
 check('claim tracking reaches transaction rows',any(i.get('source')=='claim' and i.get('claimId')==1 and 'nextTrackingDate' in i for i in listing.json()['transactionRows']))
 root.refresh_from_db()
 check('completed claim cannot receive further follow-up',api('record_qbe_claim_followup',caseUid=str(root.case_uid),rowVersion=root.row_version,txNo=no,note='already complete').status_code==410)

@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Real API checks for pure-AUW identity, reservations and retained evidence rules."""
 import copy,json,os,uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -159,7 +160,7 @@ try:
 except ValueError:
  check('booked history blocks the unbooked conversion helper',True)
 pure.payload['transactions']=build_premium_transactions({**pure.payload,'twRef':pure.tw_ref});pure.save()
-accounting=call('get','/api/accounting').json();tx=[x for x in accounting['transactionRows'] if x['caseUid']==str(pure.case_uid)]
+accounting=accounting_get(client, '').json();tx=[x for x in accounting['transactionRows'] if x['caseUid']==str(pure.case_uid)]
 check('Accounting transactions keep manual primary as identity and transaction prefix',len(tx)==3 and all(x['twRef']==pure.tw_ref and x['txNo'].startswith(pure.tw_ref) for x in tx))
 check('normalization does not alter editable AUW deduction or fixed tax',pure.payload['reinsurers'][0]['riCommPct']==12.5 and pure.payload['reinsurers'][0]['taxPct']==0)
 print(f'{len(checks)}/{len(checks)} AUW primary reference API checks passed',flush=True)

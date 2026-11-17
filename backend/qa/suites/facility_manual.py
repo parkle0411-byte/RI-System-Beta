@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Manual bank registration with automatic settlement; owner decisions 2026-10-22/24.
 
 Replaces the retired manual-confirmation story while retaining permission,
@@ -58,7 +59,7 @@ try:
    check(name+' receipt cannot be reversed after downstream T2',r.status_code==409 and r.json()['error']=='downstream_payment_locked')
    case.refresh_from_db();check(name+' refused reversal retains raw cash and version',case.payload['paymentEntries']==saved and case.row_version==version)
    before=(copy.deepcopy(case.payload),AuditLog.objects.count(),EntitySnapshot.objects.count())
-   response=read.get('/api/accounting');case.refresh_from_db()
+   response=accounting_get(read, '');case.refresh_from_db()
    check(name+' readonly GET preserves history and amounts',response.status_code==200 and before==(case.payload,AuditLog.objects.count(),EntitySnapshot.objects.count()))
   raise Rollback()
 except Rollback:pass

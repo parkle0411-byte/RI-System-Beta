@@ -1,3 +1,4 @@
+from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting reads are internal in tests
 """Amount limits and malformed-list guards (owner decision 2026-11-12). Disposable MySQL only.
 
 1. Premium / brokerage amounts are limited to +-999,999,999,999 on save (sum insured and limits are not).
@@ -102,7 +103,7 @@ for bad in (1e30, 1e27):   # written directly, as legacy rows or a direct databa
     check(f'only the damaged case is flagged ({bad:g})', rows_[str(row.case_uid)].get('dataError') is True
           and not rows_[good.json()['case']['caseUid']].get('dataError') and rows_[good.json()['case']['caseUid']]['ourSharePremium'] is not None)
     for url in (f'/api/cases?caseUid={row.case_uid}', f'/api/case-workflow?caseUid={row.case_uid}', f'/api/case-documents?caseUid={row.case_uid}',
-                '/api/dashboard', '/api/accounting?view=list'):
+                '/api/dashboard', '/api/accounting?view=list&legacy=open', '/api/accounting?view=page&tab=all'):
         res = c.get(url)
         check(f'{url.split("?")[0]} does not fail with a damaged draft ({bad:g})', res.status_code < 500, (url, res.status_code))
     row.refresh_from_db()
