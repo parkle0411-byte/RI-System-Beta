@@ -540,6 +540,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **Insured 主檔**：匯入與確認新交易時，依中文名以與 Case 相同規則比對（含 / 組合與曾用名），沒有才新建，並標為正式、連結到該交易（`insuredMasterId`）；中文名空白不建。
 - **資料清理（2026-11-12 業主要求）**：清空舊資料 182 筆（AGSC 181＋草稿 1；批次標記 withdrawn、稽核保留）；刪除未被任何 Case 使用的 MDM Insured 1,729 筆（保留 5 筆）。備份 `backups/legacy_entry_rules_20261112_123024`。
 
+- **資料清理（2026-11-17 業主要求）**：舊資料全部清空，含上傳紀錄：交易 1,415 筆（匯入 1,414＋批單草稿 1）、上傳紀錄 6 筆及其原始 Excel、對舊資料的 Finance 對帳紀錄 2 筆、只被舊資料連結的 MDM Insured 699 筆（新系統案子使用的 Insured 保留）、Legacy 操作紀錄 17 筆（只能新增的保護暫時移除、刪除後原樣補回）。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_102008`（database.sql、legacy-imports.tar）。之後依 §17 網頁匯入重新匯入。
+
 ---
 
 - **Master Data 修改理由（2026-11-16）**：Reinsurer、Cedant、Foreign RI Broker、Class 與一般 Clause 的編輯及停用必須填寫非空理由；新增與單純重新啟用不要求。理由保存在版本快照；Audit 暫停時不寫 Audit。
@@ -709,6 +711,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-17 09:39 | API 整合：Accounting 只保留畫面使用的三種讀取（舊三種退役回 400，測試改用 `qa/accounting_full.py`）；帳號四個網址合為 `POST /api/personnel-accounts`（action 區分，停用／啟用／重設限 `accounts.manage`）；人員頁、壓測工具、畫面測試 U 項；每週健檢改量畫面實際請求 | `backups/api_merge_20261117_093947`；回復用 `perf-work/stage-i-20261117/rollback.sh 20261117_093947` | `ri-backend:before-api-merge-20261117_093947`／`ri-frontend:before-api-merge-20261117_093947` | 候選 API 133 組全通過（約 40 組測試改用內部讀取；新增退役讀取 400、帳號 action 與舊子網址 404 等檢查；拿掉權限判斷或放行舊讀取的變異版本會失敗）；畫面 374 項（新 U 10 項）；部署後 `run_qa.sh pages` 342 頁一致；同時間新舊映像 766 個回應僅退役讀取 12 個變為 400；無 migration、無資料寫入 |
 
+| 11-17 | 清空舊資料（含上傳紀錄與 Excel、對舊資料的 Finance 對帳 2 筆、只被舊資料連結的 Insured 699 筆、Legacy 操作紀錄 17 筆；業主同意的正式資料刪除） | `backups/legacy_clear_20261117_102008` | —（程式未變） | 正式資料副本演練：其他資料表 CHECKSUM、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -718,6 +722,8 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-17：依業主要求清空舊資料（含上傳紀錄），見 §17 資料清理。
 
 - 2026-11-17：依業主確認部署 API 整合（§8.7、§11）：Accounting 不帶參數、`?view=list`、`legacy=history` 三種讀取退役；帳號建立／停用／啟用／重設密碼合為一個網址；網址數 41 → 38。
 
