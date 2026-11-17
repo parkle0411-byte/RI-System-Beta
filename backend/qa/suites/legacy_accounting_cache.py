@@ -4,8 +4,10 @@ from qa.accounting_full import accounting_get   # 2026-11-17: retired Accounting
 The cache must be invisible: every Accounting response is byte-identical to the uncached
 computation. Only imported historical transactions are cached; new legacy endorsements/claims
 are recomputed on every request, so reviews and cash registrations show immediately. Any change
-to historical rows (ORM, raw SQL without version bump, status, new rows) or the Taipei date
-forces a recompute.
+to historical rows (ORM, raw SQL without version bump, status, new rows) forces a recompute.
+2026-11-17 (owner): the settled history no longer depends on the Taipei date (verified on production data);
+its result is shared between workers through one snapshot file (calculation-version + content key), and a
+background thread in every web worker builds the Accounting history part before the first request.
 """
 import copy
 from pathlib import Path
@@ -138,11 +140,43 @@ try:
 
     real_today=L._today
     try:
-        L._today=lambda:'2099-01-01';n=calls[0];get();get()
-        check('Taipei date change recomputes once, then caches again',calls[0]==n+H)
+        L._today=lambda:'2099-01-01';n=calls[0];later=get()
+        check('a Taipei date change no longer recomputes the settled history (2026-11-17)',calls[0]==n and later==uncached())
     finally:L._today=real_today
-    n=calls[0];back=get()
-    check('returning to today recomputes and matches uncached',calls[0]==n+H and back==uncached())
+
+    # ---- 2026-11-17 shared snapshot file ----
+    path=L._snapshot_file(L._fingerprint(L.historical_queryset()))
+    check('the result is kept in one snapshot file for the current content and calculation version',
+        path.exists() and [p.name for p in path.parent.glob('*.pickle.z')]==[path.name])
+    L._CACHE.clear();n=calls[0];other=get()
+    check('another worker (empty memory) reads the snapshot without recomputing',calls[0]==n and other==uncached())
+    path.write_bytes(b'not a snapshot');L._CACHE.clear();n=calls[0];fixed=get()
+    check('an unreadable snapshot is recomputed and rewritten',calls[0]==n+H and fixed==uncached() and L._read_snapshot(path) is not None)
+    real_logic=L._LOGIC
+    try:
+        L._LOGIC='changed-code';L._CACHE.clear();n=calls[0];newcode=get()
+        check('a calculation code change recomputes once (new file, old one removed)',calls[0]==n+H and newcode==uncached()
+            and L._snapshot_file(L._fingerprint(L.historical_queryset())).exists() and not path.exists())
+    finally:L._LOGIC=real_logic
+    L._CACHE.clear();get()
+    os.environ['RI_LEGACY_HISTORY_SNAPSHOT']='false'
+    try:
+        L._CACHE.clear();n=calls[0];off=get();get()
+        check('snapshot switched off: an empty-memory worker recomputes, then remembers in memory',calls[0]==n+H and off==uncached())
+    finally:os.environ.pop('RI_LEGACY_HISTORY_SNAPSHOT',None)
+
+    # ---- 2026-11-17 background warm-up (every web worker) ----
+    from legacy import warm
+    from cases import accounting_pages as P
+    check('the warm-up thread starts only in web workers (not in manage.py)',not warm.in_web_worker() and (warm.start() or not warm._started))
+    P._HISTORY.clear();L._CACHE.clear();warm.warm_once()
+    check('warm-up builds the Accounting history part without a user',bool(P._HISTORY.get('value')) and P._HISTORY.get('today')==L._today())
+    n=calls[0];page=admin.get('/api/accounting?view=page&tab=all&page=1');opts=admin.get('/api/accounting?view=options')
+    check('the first page and options after warm-up use it (no recompute)',page.status_code==200 and opts.status_code==200 and calls[0]==n)
+    warmed=(page.content,opts.content);P._HISTORY.clear();L._CACHE.clear();os.environ['RI_LEGACY_HISTORY_SNAPSHOT']='false'
+    try:cold=(admin.get('/api/accounting?view=page&tab=all&page=1').content,admin.get('/api/accounting?view=options').content)
+    finally:os.environ.pop('RI_LEGACY_HISTORY_SNAPSHOT',None)
+    check('warmed responses are byte-identical to a cold rebuild',warmed==cold)
 
     real_fingerprint=L._fingerprint;seq=iter([(1,1),(1,2)])
     try:

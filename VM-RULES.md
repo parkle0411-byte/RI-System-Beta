@@ -474,6 +474,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 業主決定不做：Production 連結表只讀 3 個欄位、跨 worker 共用快取、每件案件整列結果快取（伺服器分頁原列在此，2026-11-16 業主改為只對 Accounting 三個分頁做，見 §8.7）；理賠交易不再每筆複製再保人名單（2026-11-16 先不做：每筆理賠付款約 7 KB、其中約六成是重複名單，正式目前只有 1 筆）。
 - Accounting 舊案歷史結果快取（2026-11-10）：只快取匯入的歷史交易（唯讀、已結清），以「歷史資料指紋（除 original 外全部欄位）＋台北日期」為鑰匙，每 worker 一份；新增的舊案批單／理賠每次重算。回應逐位元組相同；正式 Accounting 第二次打開約 4 秒 → 1.6 秒（每天或歷史資料變動後第一次仍需重算）。`RI_LEGACY_RESULT_CACHE=false` 可關閉。測試 `legacy_accounting_cache`。
 - Accounting 伺服器分頁（2026-11-17，§8.7）：已結清歷史在伺服器轉成清單列後快取（每 worker 一份；以台北日期＋歷史的變更指紋（筆數、最大鍵、版本加總、最後更新時間）為準，另每 60 秒最多以完整內容指紋（MD5）複驗一次，直接改資料庫而沒有更新時間的修改最多 1 分鐘後出現；`RI_LEGACY_RESULT_CACHE=false` 時每次重算）；未結清部分每次重算，寫入後下一頁立即反映。量測：正式資料（4,262 列）每頁約 0.2–0.3 秒，當天第一次約 4 秒；1 萬筆舊資料（3 萬列）每頁約 1.6–3 秒（主要是未結清部分重算約 1 秒、資料轉換、篩選排序），當天第一次約 22 秒；仍可再優化（快取歷史部分的篩選排序結果、略過整份轉換），需重跑全部測試。
+- **已結清舊資料歷史的共用快照與背景預建（2026-11-17 業主決定）**：All Accounts 第一次載入原本要在請求中重算全部已結清舊資料（6,094 筆約 11–13 秒，每個 worker、每次重啟、匯入或過台北午夜各一次）。改為：(1) 計算結果存成一份共用快照檔（容器 `/tmp/ri-legacy-history`，pickle＋zlib，只有後端自己寫；鑰匙＝計算程式版本（legacy／cases 原始碼雜湊）＋歷史內容指紋），一個 worker 計算、其他讀檔；(2) 已結清歷史**不再隨台北日期重算**（正式資料實測日期往後推 1／400／3,000 天結果全部相同）；(3) 每個 web worker 一條背景執行緒（`legacy/warm.py`），啟動時、歷史有變（每 30 秒檢查輕量指紋）或換日時先把 Accounting 歷史部分建好。回應內容不變。關閉：`RI_LEGACY_HISTORY_SNAPSHOT=false`、`RI_LEGACY_HISTORY_WARM=false`。正式資料副本實測（gunicorn 4 workers）：最慢約 13 秒 → 約 2 秒。「匯入時逐筆存進資料庫」方案實測讀取與重算差不多（6.0 秒對 6.7 秒），不採用。
 - 舊資料量優化（2026-11-13，1 萬筆舊資料實測後；回應內容不變）：
   - **匯入**：Insured 主檔整批只讀一次（`legacy.policy.insured_lookup`，比對規則與逐筆查詢相同）。確認匯入 2,500 筆約 5 分鐘 → 約 10 秒；1 萬筆約 1 分鐘。單一請求上限 60 秒，**每個 Register 檔案建議不超過 5,000 筆**。
   - **未結清舊資料**：帳款與付款排程同一次計算共用（`legacy.ledger.accounting_bundle`），並逐筆快取，鑰匙為「該列內容 MD5＋台北日期」（比照每件案件結果快取）；對帳狀態即時套用、不進快取；每 worker 最多 `RI_LEGACY_OPEN_CACHE_SIZE` 筆（預設 20,000），`RI_LEGACY_OPEN_CACHE=false` 關閉。2,000 筆未結清時 Accounting 打開的請求約 9 秒 → 首次約 7 秒、之後約 1.3 秒。測試 `legacy_open_cache`。
@@ -538,10 +539,15 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **理賠**：新增 **Loss No.（必填）**與 **Cause of Loss（選填）**，Note for Claim 保留；DOL 須在最新期間內；到期日＝確認日 +15 天（Swiss 季結）；AE 須在職；先收再付。每筆理賠是獨立 SoA；理賠明細列出同一 Old Reference＋同一 Loss No. 的所有理賠與累計（僅顯示）；Accounting 交易編號下顯示 Loss No.。
 - **金額**：TWD 只准整數、其他幣別最多兩位小數，不自動取整（100% Premium、Brokerage、理賠金額）。Installment No.、Statement No.、Reinsurer's Ref. No. 帶入來源可改。
 - **匯入配套**：Note for Claim 以「Claim No:」／「Loss No:」開頭者拆出 Loss No.（原文保留，沒有不擋）；Sub AE 依 Bkg. 金額換算為 40 或 70（±1%），否則預覽警告；保費／批單列缺 Share 為錯誤。
+- **理賠列不拆分（2026-11-17 業主確認）**：理賠沒有 Brokerage，匯入時理賠列不做 AE / Sub AE 40/60、70/30 檢查，比例存 100（與系統內建理賠相同），Register 的 Sub AE 名字保留；保費／批單列照舊檢查。原因：有 Sub AE 的理賠列 Bkg. 為 0，0÷0 算不出比例而全數被擋（當日 Register 34 筆：USD 26、TWD 8）。
 - **Insured 主檔**：匯入與確認新交易時，依中文名以與 Case 相同規則比對（含 / 組合與曾用名），沒有才新建，並標為正式、連結到該交易（`insuredMasterId`）；中文名空白不建。
 - **資料清理（2026-11-12 業主要求）**：清空舊資料 182 筆（AGSC 181＋草稿 1；批次標記 withdrawn、稽核保留）；刪除未被任何 Case 使用的 MDM Insured 1,729 筆（保留 5 筆）。備份 `backups/legacy_entry_rules_20261112_123024`。
 
 - **資料清理（2026-11-17 業主要求）**：舊資料全部清空，含上傳紀錄：交易 1,415 筆（匯入 1,414＋批單草稿 1）、上傳紀錄 6 筆及其原始 Excel、對舊資料的 Finance 對帳紀錄 2 筆、只被舊資料連結的 MDM Insured 699 筆（新系統案子使用的 Insured 保留）、Legacy 操作紀錄 17 筆（只能新增的保護暫時移除、刪除後原樣補回）。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_102008`（database.sql、legacy-imports.tar）。之後依 §17 網頁匯入重新匯入。
+
+- **資料清理（2026-11-17 第二次，業主要求）**：清空 11-17 重新匯入的 AGCS／GAIC 舊資料：交易 1,236 筆、上傳內部標記 4 筆（Excel 先前已刪）、對舊資料的 Finance 對帳紀錄 2 筆（6 筆交易已有的收付登錄隨交易刪除）、MDM Insured 全部 412 筆（新系統案子已於 11-17 清空，沒有任何 Insured 被使用；業主要求一併刪除）、Legacy 操作紀錄 20 筆（保護暫時移除後原樣補回）。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_120204`。
+
+- **資料清理（2026-11-17 第三次，業主要求）**：清空再次匯入的舊資料：交易 6,102 筆（3 批）、上傳內部標記 4 筆、MDM Insured 全部 1,681 筆（沒有案子使用）、Legacy 操作紀錄 8 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳或收付登錄。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_143435`。
 
 ---
 
@@ -716,6 +722,14 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 11-17 | 舊資料不保留上傳記錄（拿掉 Import History／下載，匯入或放棄預覽後刪檔）；Legacy 清單依 Transaction No. 由大到小 | `backups/legacy_no_batch_20261117_115347` | `ri-backend:before-legacy-no-batch-20261117_115347`／`ri-frontend:before-legacy-no-batch-20261117_115347` | 候選映像完整 API（legacy_import_web 74，8 項新行為檢查以舊程式驗證會失敗）、畫面 A＋L＋I＋Y；前端以原始碼重建與正式逐檔核對；無 migration |
 
+| 11-17 | 第二次清空舊資料（AGCS／GAIC 1,236 筆、內部標記 4、Finance 對帳 2、Insured 全部 412、Legacy 操作紀錄 20 筆；業主同意的正式資料刪除） | `backups/legacy_clear_20261117_120204` | —（程式未變） | 正式資料副本演練兩次：其他資料表、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
+
+| 11-17 | 第三次清空舊資料（交易 6,102、內部標記 4、Insured 全部 1,681、Legacy 操作紀錄 8；業主同意的正式資料刪除） | `backups/legacy_clear_20261117_143435` | —（程式未變） | 正式資料副本演練：其他資料表、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
+
+| 11-17 | 已結清舊資料歷史：共用快照檔＋每個 worker 背景預建；不再隨台北日期重算（只換後端） | `backups/legacy_history_snapshot_20261117_164156`（原始碼） | `ri-backend:before-legacy-history-snapshot-20261117_164156` | 候選映像完整 API（legacy_accounting_cache 191，新檢查以舊程式驗證會失敗）、畫面 A＋L＋Y；正式資料副本 API 回應逐位元組相同；gunicorn 實測最慢 13→2 秒；無 migration、不改資料 |
+
+| 11-17 | 舊資料匯入：理賠列不做 AE / Sub AE 拆分檢查（只換後端） | `backups/legacy_claim_split_20261117_174953`（原始碼） | `ri-backend:before-legacy-claim-split-20261117_174953` | 候選映像完整 API（legacy_import_web 新檢查以舊程式驗證會失敗）、畫面 L；當日 Register 4,880 列以新程式預覽：0 錯誤、0 警告；無 migration、不改資料 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。）
 
 **STP 規則（2026-11-12）**：Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -725,6 +739,13 @@ STP 專有必填多行文字為 Conveyance、Voyage；Attachment and Termination
 Estimated Turnover 必填至少一筆，採 Combined（同一合計可分幣別）或 By company（公司名稱必填且大小寫與前後空白不區分重複）；幣別及金額必填，金額大於 0。維持可調整順序；多筆按幣別計 Total，單筆不印 Total、不印公司名稱。HUB 至少一筆，各筆名稱、完整地址、幣別、正數保額必填；不設獨立郵遞區號、不計合計。Cover Note 於 Information 後獨立起頁，跨頁重複標題。Renewal 及 Endorsement 沿用 STP 資料供修改。
 
 ## 近期變更
+
+- 2026-11-17：舊資料匯入的理賠列不再做 AE / Sub AE 拆分檢查（理賠沒有佣金）。
+- 2026-11-17：All Accounts 載入加速——已結清舊資料歷史改共用快照＋背景預建（§8.7 效能）。
+
+- 2026-11-17：依業主要求第三次清空舊資料（含全部 Insured），見 §17 資料清理。
+
+- 2026-11-17：依業主要求第二次清空舊資料（含全部 Insured），見 §17 資料清理。
 
 - 2026-11-17：舊資料不保留上傳記錄；Legacy 清單依 Transaction No. 由大到小（§17）；部署前已匯入的 AGCS、GAIC 兩批只留筆數、2 筆未匯入的預覽改為丟棄，4 個 Excel 刪除（業主同意；備份 `backups/legacy_strip_batches_20261117_115639`，交易 1,236 筆不變）。
 

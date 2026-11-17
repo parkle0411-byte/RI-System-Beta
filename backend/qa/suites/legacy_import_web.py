@@ -260,6 +260,22 @@ try:
         from legacy.dashboard import dashboard_inputs
         names = {x['className'] for p in dashboard_inputs()['policies'] for x in p['items']}
         check('Dashboard groups legacy premium by the stored Class name', {'Property', 'Commercial General Liability', 'QA Engineering'} <= names, names)
+        # 2026-11-17: claims carry no brokerage, so a claim with a Sub AE is not split (no 40/60 or 70/30 warning).
+        cl = dict(**{'Fac / Claim': 'Claim', 'Claim': '1237.76', 'Our Share Premium': '0', 'R/I Comm.': '0', 'Tax': '0',
+              'Bkg.\n(Original Currency)': '0', 'Bkg. (in TWD)': '0', 'Re Dept. Bkg.\n(in TWD)': ('ROUND(AJ2*AQ2,0)*0.4', '0'), 'Bkg.(%)': '0',
+              'Net Premium from Cedant': '-1237.76', 'Net Premium to Reinsurer': '-1237.76', 'Revenue Month': 'N/A', 'Receive Date': 'Claim',
+              'Pay Date': 'Claim', 'DOL': D('2026-04-15'), 'Issue Date of Claim': D('2026-10-13'), 'Currency': 'USD', 'Exchange Rate': '30',
+              'Sub AE': 'QA Sub AE'})
+        r = upload(admin, workbook([row('QA9109', Reinsurer=ORD, **cl)])); sc = r.json(); keys.append(ImportBatch.objects.get(pk=sc['id']).storage_key)
+        check('a USD claim with a Sub AE and no brokerage previews without errors or warnings', not sc['manifest']['errors'] and not sc['manifest']['warnings'], sc['manifest'])
+        check('it imports unsplit (100) and keeps the Sub AE name', commit(admin, sc).status_code == 200
+              and (lambda d: d['aePct'] == 100 and d['subAe'] == 'QA Sub AE' and d['kind'] == 'claim')(LegacyTransaction.objects.get(number='QA9109').data))
+        r = upload(admin, workbook([row('QA9110', Reinsurer=ORD, **{'Sub AE': 'QA Sub AE', 'Re Dept. Bkg.\n(in TWD)': '1000'})])); sp = r.json(); keys.append(ImportBatch.objects.get(pk=sp['id']).storage_key)
+        check('a premium row with a 50/50 Sub AE split is still a blocking warning',
+              [w['message'] for w in sp['manifest']['warnings']] == ['AE / Sub AE brokerage split is not 40/60 or 70/30.'] and commit(admin, sp).status_code == 409, sp['manifest'])
+        r = upload(admin, workbook([row('QA9111', Reinsurer=ORD, **{'Sub AE': 'QA Sub AE', 'Re Dept. Bkg.\n(in TWD)': '1400'})])); s70 = r.json(); keys.append(ImportBatch.objects.get(pk=s70['id']).storage_key)
+        check('a premium row with a 70/30 Sub AE split still imports as 70', not s70['manifest']['warnings'] and commit(admin, s70).status_code == 200
+              and LegacyTransaction.objects.get(number='QA9111').data['aePct'] == 70, s70['manifest'])
         # ================= 2026-11-17：不保留上傳記錄；清單依 Transaction No. 由大到小 =================
         from datetime import timedelta
         from django.test import TestCase

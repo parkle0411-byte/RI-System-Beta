@@ -202,8 +202,9 @@ def converted(row, rule_cache, classes=None):
     if not claim and data.get('share') is None:raise ValueError('Share is required for premium and endorsement rows.')
     if data.get('gross') is None:notes.append('Missing gross; stored historical amounts preserved.')
     # AE / Sub AE split: imported amounts are converted to the 40/60 or 70/30 split (within 1%).
+    # Claims carry no brokerage, so they are not split (owner 2026-11-17): 100, as native claims; Sub AE name kept.
     data['aePct']=100
-    if data['subAe']:
+    if data['subAe'] and not claim:
         pct=float(Decimal(str(v['Re Dept. Bkg. (in TWD)']))/Decimal(str(v['Bkg. (in TWD)']))*100) if float(v.get('Bkg. (in TWD)') or 0) else None
         match=next((p for p in (40,70) if pct is not None and abs(pct-p)<=1),None)
         if match is None:notes.append('AE / Sub AE brokerage split is not 40/60 or 70/30.')

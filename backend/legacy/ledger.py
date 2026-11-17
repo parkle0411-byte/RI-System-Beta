@@ -302,16 +302,94 @@ def _fingerprint(qs):
     return (found['rows'],found['digest'])
 
 
+# ---- 2026-11-17 業主決定（All Accounts 第一次載入太慢）：已結清歷史的計算結果存成一份共用快照檔 ----
+# 已結清的匯入歷史不會再變；實測把日期往後推 1／400／3,000 天，6,094 筆結果全部相同，所以快照只看
+# 「歷史內容指紋」與「計算程式版本」（legacy／cases 的 Python 原始碼雜湊），不再隨台北日期重算。
+# 一份檔案（pickle＋zlib，放在容器的 /tmp，只有後端自己寫）給同一容器的 4 個 worker 共用：只有拿到檔案鎖的
+# worker 會計算，其他 worker 等它算完直接讀檔（實測 6,094 筆：計算約 6.7 秒、讀檔約 0.7 秒）。
+# 交易內容或程式任何一邊變了，鑰匙就不同，會重算一次。RI_LEGACY_HISTORY_SNAPSHOT=false 可關掉這一層。
+import fcntl, hashlib, pickle, tempfile, zlib
+from pathlib import Path
+
+_LOGIC=None
+
+
+def _snapshot_dir():
+    return Path(os.environ.get('RI_LEGACY_HISTORY_SNAPSHOT_DIR') or Path(tempfile.gettempdir())/'ri-legacy-history')
+
+
+def _snapshot_enabled():
+    return os.environ.get('RI_LEGACY_HISTORY_SNAPSHOT','true').strip().lower()!='false'
+
+
+def logic_version():
+    """Hash of the calculation's source: the legacy/ and cases/ Python files (migrations and commands excluded)."""
+    global _LOGIC
+    if _LOGIC is None:
+        from django.conf import settings
+        base=Path(settings.BASE_DIR);h=hashlib.sha256(b'legacy-history-snapshot-v1')
+        for app in ('legacy','cases'):
+            for path in sorted((base/app).rglob('*.py')):
+                rel=path.relative_to(base).as_posix()
+                if '/migrations/' in rel or '/management/' in rel:continue
+                h.update(rel.encode()+b'\0'+path.read_bytes()+b'\0')
+        _LOGIC=h.hexdigest()[:24]
+    return _LOGIC
+
+
+def _snapshot_file(fingerprint):
+    return _snapshot_dir()/f'{logic_version()}-{fingerprint[0]}-{fingerprint[1]}.pickle.z'
+
+
+def _read_snapshot(path):
+    try:
+        with open(path,'rb') as f:return pickle.loads(zlib.decompress(f.read()))
+    except (OSError,zlib.error,pickle.UnpicklingError,EOFError,ValueError):
+        return None
+
+
+def _write_snapshot(path,value):
+    """Atomic write (temporary file, then rename); older snapshots are removed."""
+    tmp=path.with_name(path.name+f'.{os.getpid()}.tmp')
+    with open(tmp,'wb') as f:f.write(zlib.compress(pickle.dumps(value,protocol=5),1))
+    os.replace(tmp,path)
+    for old in path.parent.glob('*.pickle.z'):
+        if old!=path:
+            try:old.unlink()
+            except OSError:pass
+
+
+def _computed(qs):
+    return {str(t.uid):_accounting_one(t) for t in sorted_rows(qs,'reference','uid')}
+
+
 def _historical_results():
     qs=historical_queryset()
-    key=(_today(),_fingerprint(qs))
+    fingerprint=_fingerprint(qs);key=fingerprint
     with _CACHE_LOCK:
         hit=_CACHE.get('value') if _CACHE.get('key')==key else None
+    if hit is not None:return hit
+    if not _snapshot_enabled():
+        hit=_computed(qs)
+        if _fingerprint(qs)==key:
+            with _CACHE_LOCK:_CACHE.clear();_CACHE.update(key=key,value=hit)
+        return hit
+    folder=_snapshot_dir();folder.mkdir(mode=0o700,parents=True,exist_ok=True)
+    path=_snapshot_file(fingerprint)
+    hit=_read_snapshot(path) if path.exists() else None
     if hit is None:
-        hit={str(t.uid):_accounting_one(t) for t in sorted_rows(qs,'reference','uid')}
-        if (_today(),_fingerprint(qs))==key:
-            with _CACHE_LOCK:
-                _CACHE.clear();_CACHE.update(key=key,value=hit)
+        with open(folder/'.lock','a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX)   # one worker computes; the others wait and then read its file
+            try:
+                hit=_read_snapshot(path) if path.exists() else None
+                if hit is None:
+                    hit=_computed(qs)
+                    if _fingerprint(qs)!=key:return hit   # changed while computing: use it, keep nothing
+                    _write_snapshot(path,hit)
+            finally:
+                fcntl.flock(lock,fcntl.LOCK_UN)
+    with _CACHE_LOCK:
+        _CACHE.clear();_CACHE.update(key=key,value=hit)
     return hit
 
 
