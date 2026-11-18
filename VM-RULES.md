@@ -453,6 +453,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ## 14. System Reference Data／System Guides
 
+- **逐筆永久刪除（2026-11-18）**：System Administrator 可於本頁 Recycle Bin 逐筆永久刪除，需確認檔名；只允許回收桶項目。Document Template 的正式檔案與中繼資料刪除；若中途失敗，保留待重試狀態、禁止還原缺少內容的檔案。System Guide 留刪除標記，避免系統更新後重現；系統映像及既有備份中的副本仍保留。
+
 - **共用拖拉排序（2026-11-04）**：System Guides 與 Document Templates 各自排序；沿用 System Administrator 權限，拖拉把手或鍵盤上下鍵調整後自動保存，所有使用者與重新登入共用。順序原子寫入文件 volume 的 `system-reference/.orders/`，備份須包含文件 volume；不需 migration。並行修改以排序版本檢查拒絕覆寫；未排序的新檔列在已存順序之後，彼此依上傳時間由新到舊顯示；更名保留位置，回收筒還原保留已存排序位置。
 
 現行指南（Word）：完整 MDM 指南、完整 Schema 指南（2026-11-16 版）；Swiss Re Facility PD、Swiss Re Facility CGL、Great American Facility PD、QBE Facility PD、Allianz Facility PD（10-30 改提醒日）、Syndicate 609 AUW Facility PD 專屬規則（皆 2026-10-29 版）。舊問卷與舊版隨備份保留。
@@ -537,6 +539,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-18 11:00 | System Reference 回收桶逐筆永久刪除 | `backups/reference_purge_20261118_105939` | `ri-backend:before-reference-purge-20261118_105939`／`ri-frontend:before-reference-purge-20261118_105939` | 局部 API、畫面 A＋專項；部署前後資料與文件指紋一致 |
 | 11-17 | 舊資料匯入：理賠列不做 AE / Sub AE 拆分檢查（只換後端） | `backups/legacy_claim_split_20261117_174953`（原始碼） | `ri-backend:before-legacy-claim-split-20261117_174953` | 候選映像完整 API（legacy_import_web 新檢查以舊程式驗證會失敗）、畫面 L；當日 Register 4,880 列以新程式預覽：0 錯誤、0 警告；無 migration、不改資料 |
 | 11-17 | 已結清舊資料歷史：共用快照檔＋每個 worker 背景預建；不再隨台北日期重算（只換後端） | `backups/legacy_history_snapshot_20261117_164156`（原始碼） | `ri-backend:before-legacy-history-snapshot-20261117_164156` | 候選映像完整 API（legacy_accounting_cache 191，新檢查以舊程式驗證會失敗）、畫面 A＋L＋Y；正式資料副本 API 回應逐位元組相同；gunicorn 實測最慢 13→2 秒；無 migration、不改資料 |
 | 11-17 15:50 | 依業主指定清空 System Reference Data 回收桶 10 項（9 份上傳文件與 1 份 Insured 清單指南）；不改案件及舊資料 | `backups/reference_trash_20261117_155007` | `ri-backend:before-ref-trash-20261117` | 獨立容器 System Reference 排序／回收／權限 34 項通過，已移除指南不可存取；正式網站 200、回收桶 0、10 份共用文件及 8 份指南下載通過，資料庫與其餘文件比對一致；無 migration |
@@ -589,6 +592,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-17 第三次，業主要求）**：清空再次匯入的舊資料：交易 6,102 筆（3 批）、上傳內部標記 4 筆、MDM Insured 全部 1,681 筆（沒有案子使用）、Legacy 操作紀錄 8 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳或收付登錄。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_143435`。
 
 ## 近期變更
+
+- 2026-11-18：System Reference Data 回收桶新增逐筆永久刪除，保留備份；僅對使用者確認的項目執行。
 
 - 2026-11-17：依業主決定整併本文件：修正過時與互相矛盾的說法（§2 PDF 網址、§3 部署流程與每週健檢、§8.7 分頁、§15 舊資料歷史快取、§16 網址合併）；STP 規則移到 §5.2b、Master Data 修改理由移到 §12、純 Facility 共通規則併入 §5.3、理賠節改為 §7.3、舊資料 §17.1／§17.2 合一（匯入規則集中在 §17.1）、舊資料清空紀錄移到「部署與回復紀錄」；2026-11-10 以前的部署紀錄與近期變更、已失效的歷史說明移到 `docs/archive/VM-RULES-HISTORY-2026-11.md`；部署紀錄表修好空行並依時間由新到舊排列。規則內容不變。
 - 2026-11-17：舊資料匯入的理賠列不再做 AE / Sub AE 拆分檢查（理賠沒有佣金）。

@@ -119,6 +119,27 @@ async function restore(row) {
   } catch (error) { ElMessage.error(error.message || 'Restore failed.') }
   finally { managing.value = false }
 }
+async function purge(row) {
+  const detail = row.kind === 'manual'
+    ? 'The guide will no longer be available or restorable in the system. Copies may remain in system images and backups.'
+    : 'The uploaded file will be removed and cannot be restored in the system. Copies may remain in backups.'
+  try {
+    await ElMessageBox.confirm(`Permanently delete "${row.filename}"? ${detail}`, 'Permanently delete file', {
+      type: 'warning', confirmButtonText: 'Permanently delete', cancelButtonText: 'Cancel',
+      confirmButtonClass: 'el-button--danger',
+    })
+    managing.value = true
+    await api(endpoint, { method: 'PATCH', body: { ...target(row), action: 'purge' } })
+    ElMessage.success('File permanently deleted.')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error.message || 'Permanent deletion failed.')
+      await load()
+    }
+  } finally { managing.value = false }
+}
+
 onMounted(load)
 </script>
 
@@ -157,11 +178,11 @@ onMounted(load)
       <h2>Recycle Bin ({{ trash.length }})</h2>
       <p>Deleted files are kept here. Restoring a file returns it to its original category.</p>
       <el-table :data="trash" empty-text="The Recycle Bin is empty." :row-key="row => `${row.kind}:${row.id}`">
-        <el-table-column prop="filename" label="Filename" min-width="240" />
+        <el-table-column label="Filename" min-width="240"><template #default="{ row }">{{ row.filename }} <span v-if="row.purging_at">(Deletion pending; retry)</span></template></el-table-column>
         <el-table-column label="Category" width="130"><template #default="{ row }">{{ row.kind === 'manual' ? 'System Guides' : 'Document Templates' }}</template></el-table-column>
         <el-table-column prop="deleted_by" label="Deleted by" min-width="130" />
         <el-table-column label="Deleted at (Taipei)" min-width="220"><template #default="{ row }">{{ date(row.deleted_at) }}</template></el-table-column>
-        <el-table-column label="Actions" width="100"><template #default="{ row }"><el-button :disabled="managing || ordering" @click="restore(row)">Restore</el-button></template></el-table-column>
+        <el-table-column label="Actions" width="240"><template #default="{ row }"><div class="reference-actions"><el-button :disabled="managing || ordering || !!row.purging_at" @click="restore(row)">Restore</el-button><el-button type="danger" plain :disabled="managing || ordering" @click="purge(row)">Permanently Delete</el-button></div></template></el-table-column>
       </el-table>
     </section>
   </div>

@@ -92,14 +92,17 @@ def target(values):
     return canonical, None
 
 
-def read_row(key, manual=None):
+def read_row(key, manual=None, include_purged=False):
     try:
         with storage.open_read(f'system-reference/{key}.json') as metadata:
-            return json.load(metadata)
+            row = json.load(metadata)
     except FileNotFoundError:
         if manual:
             return manual_row(manual)
         raise AuthError(404, 'reference_not_found', 'Document template not found.')
+    if row.get('purged_at') and not include_purged:
+        raise AuthError(404, 'reference_not_found', 'This file has been permanently deleted.')
+    return row
 
 
 @contextmanager
@@ -136,7 +139,7 @@ def reference_rows():
                     continue
                 rows.append({**row, 'kind': 'template'})
     rows.sort(key=lambda row: (str(row['uploaded_at']), str(row['id'])), reverse=True)
-    manuals = [read_row('manual-' + key, key) for key in MANUALS]
+    manuals = [row for key in MANUALS if not (row := read_row('manual-' + key, key, include_purged=True)).get('purged_at')]
     trash = [row for row in rows + manuals if row.get('deleted_at')]
     trash.sort(key=lambda row: str(row['deleted_at']), reverse=True)
     return rows, manuals, trash, unreadable
@@ -214,10 +217,33 @@ class SystemReferenceView(NoStoreMixin, APIView):
         if action == 'reorder':
             return reorder(body)
         key, manual = target(body)
-        if action not in ('rename', 'restore'):
+        if action not in ('rename', 'restore', 'purge'):
             raise AuthError(400, 'invalid_action', 'Choose Rename or Restore.')
         with locked(key):
             row = read_row(key, manual)
+            if action == 'purge':
+                if not row.get('deleted_at'):
+                    raise AuthError(409, 'reference_not_in_trash', 'Move this file to the Recycle Bin before permanently deleting it.')
+                if manual:
+                    # Guides are baked into the application image. A persistent tombstone
+                    # prevents automatic recreation or restore after image replacement.
+                    write_row(key, {'id': manual, 'kind': 'manual', 'purged_at': timezone.now().isoformat()})
+                else:
+                    # Mark deletion in progress before removing the content. If a process
+                    # or disk operation fails, the item stays in the bin for retry and
+                    # cannot be restored as a broken file.
+                    if not row.get('purging_at'):
+                        row['purging_at'] = timezone.now().isoformat()
+                        write_row(key, row)
+                    try:
+                        storage.delete(f'system-reference/{key}.bin')
+                        storage.delete(f'system-reference/{key}.json')
+                    except OSError:
+                        log.exception('Permanent deletion incomplete for system reference %s', key)
+                        raise AuthError(503, 'reference_purge_incomplete', 'Permanent deletion is incomplete. Please retry from the Recycle Bin.')
+                return Response({'deleted': True})
+            if row.get('purging_at'):
+                raise AuthError(409, 'reference_purge_incomplete', 'Permanent deletion is incomplete. Please retry from the Recycle Bin.')
             if action == 'rename':
                 if row.get('deleted_at'):
                     raise AuthError(409, 'reference_in_trash', 'Restore this file before renaming it.')
