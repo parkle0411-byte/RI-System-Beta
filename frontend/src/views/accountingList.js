@@ -34,6 +34,18 @@ export function sortRows(list, tab, now, collator) {
     keyed.sort((a, b) => a.settled - b.settled || collator.compare(a.tw, b.tw))
     return keyed.map(x => x.r)
   }
+  if (tab === 'all') {
+    // 2026-11-18 owner: overdue unsettled accounts stay on top (overdue = past the actual due date), oldest
+    // Accounting date first; every other account by Accounting date newest first; accounts without a date last.
+    const keyed = list.map(r => {
+      const due = actualDue(r), overdue = r.settlement !== 'settled' && due && due < now
+      const date = r.dueDate || r.schedules?.find(x => x.dueDate)?.dueDate || due || ''
+      return {r, group: overdue ? 0 : date ? 1 : 2, date, tw: displayTwRef(r), title: rowTitle(r)}
+    })
+    keyed.sort((a, b) => a.group - b.group || (a.group === 1 ? collator.compare(b.date, a.date) : collator.compare(a.date, b.date))
+      || collator.compare(a.tw, b.tw) || collator.compare(a.title, b.title))
+    return keyed.map(x => x.r)
+  }
   const keyed = list.map(r => {
     const due = actualDue(r), overdue = r.settlement !== 'settled' && due && due < now
     return {r, overdue: Number(!!overdue), date: overdue ? due : (r.dueDate || r.schedules?.find(x => x.dueDate)?.dueDate || due || '9999-12-31'), tw: displayTwRef(r), title: rowTitle(r)}

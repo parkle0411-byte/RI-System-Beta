@@ -249,11 +249,28 @@ def _collate(value):
     return js_locale_key_cached(js_to_string(value))
 
 
+def _descending(key):
+    """Reverse the order of a js_locale_key value: negate every weight and end each level with a
+    terminator above them, so that a prefix also sorts after its longer strings."""
+    return tuple([-w for w in level] + [1] for level in key)
+
+
 def sort_key(row, tab, now):
     if tab == "brokerage":
         return (int(get(row, "settlement") == "settled"), _collate(display_tw_ref(row)))
     due = actual_due(row)
     overdue = get(row, "settlement") != "settled" and js_truthy(due) and isinstance(due, str) and due < now
+    if tab == "all":
+        # 2026-11-18 owner: overdue unsettled accounts stay on top (overdue still means past the actual due
+        # date), ordered by Accounting date oldest first; every other account by Accounting date newest first;
+        # accounts without any date last.
+        date = js_or(get(row, "dueDate"), _first_schedule(row, "dueDate"), due, "")
+        tail = (_collate(display_tw_ref(row)), _collate(row_title(row)))
+        if overdue:
+            return (0, _collate(date)) + tail
+        if js_truthy(date):
+            return (1, _descending(_collate(date))) + tail
+        return (2, ()) + tail
     date = due if overdue else js_or(get(row, "dueDate"), _first_schedule(row, "dueDate"), due, "9999-12-31")
     return (-int(bool(overdue)), _collate(date), _collate(display_tw_ref(row)), _collate(row_title(row)))
 

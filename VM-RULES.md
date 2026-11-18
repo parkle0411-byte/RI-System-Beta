@@ -353,7 +353,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - Unreconciled／Reconciled 每頁預設 100 列（可選 50／100／200／500；All Accounts／Settled/Closed／Brokerage 固定 100 列，見上）；打開時的清單（`?view=list&legacy=open`）為精簡資料，返回頁面先顯示快取並背景更新，更新前財務操作停用。載入失敗（伺服器錯誤、連線中斷）時在表格上方常駐紅色提示與 Retry，不顯示「No matching accounts」；已有上次載入的清單時保留並註明載入時間，財務操作停用到重新載入成功（2026-11-10）。窄螢幕表格橫向捲動，不以左固定欄遮擋操作。
 - Transaction / SoA / TW Ref標題維持；SoA編號依Cedant Statement No.或對應再保人Settlement Ref取值，缺漏顯示SoA: Missing；T3不顯示SoA。TW Ref後接YYYY-MM-DD：原單與各分期用Case生效日、批單用批單生效日、理賠用對應Date of Loss；資料缺漏顯示—而不推算。移除獨立Reconciliation Ref欄，Edit references移至Action，原權限與狀態限制維持。
 - Finance account review 與 Record Selected 的 Account 識別資訊均與 List 同序：Transaction → SoA → TW Ref · 日期。日期直接沿用 accountDisplayDate，原單／分期用案件生效日、批單用批單生效日、理賠用出險日；缺漏顯示 —，T3 仍不顯示 SoA。
-- 帳款排序：逾期按實際到期日最舊優先；未逾期按 Accounting 提醒日最早優先。TW Ref搜尋只查系統／AUW編號，另加 Original Insured EN／CN；移除 TWD valuation 與QBE承保年季附註。
+- 帳款排序：逾期（超過實際到期日、未結清）一律置頂；Unreconciled／Reconciled／Settled/Closed 逾期按實際到期日最舊優先、未逾期按 Accounting 提醒日最早優先。**All Accounts（2026-11-18 業主決定）**：逾期置頂、依 Accounting 提醒日最舊優先；其餘帳款（含已結清）依 Accounting 提醒日**由新到舊**；沒有提醒日的用實際到期日，完全沒有日期的放最後。Brokerage 依 TW Ref。TW Ref搜尋只查系統／AUW編號，另加 Original Insured EN／CN；移除 TWD valuation 與QBE承保年季附註。
 - Cedant 與 Reinsurer / R/I Broker 分開下拉選單，互斥選取，僅查實際帳款對象，不因同案 Cedant 而帶出再保人帳款。Leg 改 Direction（Payable／Receivable），主表 Party / Direction，移除 Reinsurer allocation。Due date 為包含當日的單一截至日，空白不限。
 - Select all／Deselect all 包含目前篩選的跨頁可選帳款，限同一實際對象、可跨幣別與收付方向；多對象時先選一筆或縮小篩選，全不選清除全部頁面的勾選。
 - Mark reviewed與Record selected彈窗逐列顯示Insured (EN)、Insured (CN)與SoA，可Remove該列，只移出本次名單，不刪帳款或更動原對帳狀態；名單清空時不可送出。
@@ -539,6 +539,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-18 15:57 | Accounting All Accounts 排序：逾期置頂，其餘依 Accounting 提醒日由新到舊（§8.7） | `backups/accounts_sort_20261118_155725/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounts-sort-work/rollback.sh 20261118_155725` | `ri-backend:before-accounts-sort-20261118_155725`／`ri-frontend:before-accounts-sort-20261118_155725` | 候選映像 API 134/134、畫面 21 階段＋專項 375 項通過；伺服器分頁與畫面程式逐頁一致（測試環境 214 頁、部署後正式資料 549 頁／41,611 列）；正式後端逐檔一致、無 migration、無資料修改 |
 | 11-18 11:00 | System Reference 回收桶逐筆永久刪除 | `backups/reference_purge_20261118_105939` | `ri-backend:before-reference-purge-20261118_105939`／`ri-frontend:before-reference-purge-20261118_105939` | 局部 API、畫面 A＋專項；部署前後資料與文件指紋一致 |
 | 11-17 | 舊資料匯入：理賠列不做 AE / Sub AE 拆分檢查（只換後端） | `backups/legacy_claim_split_20261117_174953`（原始碼） | `ri-backend:before-legacy-claim-split-20261117_174953` | 候選映像完整 API（legacy_import_web 新檢查以舊程式驗證會失敗）、畫面 L；當日 Register 4,880 列以新程式預覽：0 錯誤、0 警告；無 migration、不改資料 |
 | 11-17 | 已結清舊資料歷史：共用快照檔＋每個 worker 背景預建；不再隨台北日期重算（只換後端） | `backups/legacy_history_snapshot_20261117_164156`（原始碼） | `ri-backend:before-legacy-history-snapshot-20261117_164156` | 候選映像完整 API（legacy_accounting_cache 191，新檢查以舊程式驗證會失敗）、畫面 A＋L＋Y；正式資料副本 API 回應逐位元組相同；gunicorn 實測最慢 13→2 秒；無 migration、不改資料 |
@@ -592,6 +593,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-17 第三次，業主要求）**：清空再次匯入的舊資料：交易 6,102 筆（3 批）、上傳內部標記 4 筆、MDM Insured 全部 1,681 筆（沒有案子使用）、Legacy 操作紀錄 8 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳或收付登錄。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_143435`。
 
 ## 近期變更
+
+- 2026-11-18：Accounting All Accounts 改排序：逾期未結清置頂（依 Accounting 提醒日最舊優先），其餘帳款含已結清依 Accounting 提醒日由新到舊，沒有日期的最後；其他分頁排序不變。
 
 - 2026-11-18：System Reference Data 回收桶新增逐筆永久刪除，保留備份；僅對使用者確認的項目執行。
 
