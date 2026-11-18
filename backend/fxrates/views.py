@@ -36,7 +36,7 @@ class FxRatesView(NoStoreMixin, APIView):
     permission_map = {"GET": "fx.read", "POST": "fx.write"}
 
     def get(self, request):
-        # 與 Alpha 相同：月份由新到舊，同月份內依 USD, EUR, JPY, GBP, HKD, MYR 排序
+        # 月份由新到舊，同月份內依 CURRENCIES 的順序（2026-11-18 業主決定的 15 種，見 currencies.py）
         rates = sorted(FxRate.objects.all(), key=lambda r: CURRENCIES.index(r.currency))
         rates.sort(key=lambda r: r.year_month, reverse=True)
         return Response({
@@ -66,7 +66,7 @@ class FxRatesView(NoStoreMixin, APIView):
         rates_input = body.get("rates")
         if not isinstance(rates_input, list) or len(rates_input) != len(CURRENCIES):
             return Response(
-                {"error": "incomplete_rates", "message": "All six currency rates are required."},
+                {"error": "incomplete_rates", "message": f"All {len(CURRENCIES)} currency rates are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -80,7 +80,7 @@ class FxRatesView(NoStoreMixin, APIView):
                 return Response(
                     {
                         "error": "invalid_currency",
-                        "message": "Rates must contain USD, EUR, JPY, GBP, HKD and MYR exactly once.",
+                        "message": "Rates must contain " + ", ".join(CURRENCIES[:-1]) + " and " + CURRENCIES[-1] + " exactly once.",
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
@@ -114,7 +114,7 @@ class FxRatesView(NoStoreMixin, APIView):
 
         if CURRENCIES and any(c not in seen for c in CURRENCIES):
             return Response(
-                {"error": "incomplete_rates", "message": "All six currency rates are required."},
+                {"error": "incomplete_rates", "message": f"All {len(CURRENCIES)} currency rates are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

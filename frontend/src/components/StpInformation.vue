@@ -1,9 +1,10 @@
 <script setup>
+import { ALL_CURRENCIES } from '../alpha/currencies'
 import { computed } from 'vue'
 import DraftNumber from './DraftNumber.vue'
 import { sumStpAmounts } from '../alpha/stp'
 const props = defineProps({ payload: { type: Object, required: true }, relaxed: Boolean })
-const currencies = ['TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR']
+const currencies = ALL_CURRENCIES   // 2026-11-18: TWD + 15 currencies
 const hubs = computed(() => props.payload.stpHubs || [])
 const turnover = computed(() => props.payload.stpTurnover || [])
 function move(rows, index, delta) {

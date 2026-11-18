@@ -6,7 +6,7 @@ from .calc.jsnum import js_is_finite, js_to_number
 POLICY_FORMS = ('Occurrence Form', 'Claims-Made Form')
 APPLICABILITY = ('notApplicable', 'applicable')
 TERRITORIES = ('Worldwide including USA/Canada', 'Worldwide excluding USA/Canada', 'USA/Canada Only', 'Other')
-CURRENCIES = ('TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR')
+from fxrates.currencies import ALL as CURRENCIES   # 2026-11-18: TWD + 15 currencies, owner's order
 
 
 def is_standard_cgl(payload):

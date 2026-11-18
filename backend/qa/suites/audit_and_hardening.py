@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from audit.models import AppendOnlyError, AuditLog, EntitySnapshot
 from audit.services import record_audit
-from fxrates.models import FxRate
+from fxrates.models import FxRate, CURRENCIES
 from masterdata.models import MasterRecord
 from personnel.models import Personnel
 
@@ -191,19 +191,19 @@ try:
 
         # FX
         fm, fp = login_as("accounting_manager", "a_fm")
-        rates = [{"currency": c, "rate": 1.5} for c in ("USD", "EUR", "JPY", "GBP", "HKD", "MYR")]
+        rates = [{"currency": c, "rate": 1.5} for c in CURRENCIES]   # 2026-11-18: all 15
         r = call(fm, "post", "/api/fx-rates", {"yearMonth": "2099-01", "rates": rates})
         ids = list(FxRate.objects.filter(year_month="2099-01").values_list("id", flat=True))
         evs = AuditLog.objects.filter(entity_type="fx_rate", entity_id__in=[str(i) for i in ids])
-        check("FX save -> 6 create_fx_rate events and 6 snapshots",
-              r.status_code == 200 and evs.filter(action="create_fx_rate").count() == 6 and EntitySnapshot.objects.filter(entity_type="fx_rate", entity_id__in=[str(i) for i in ids]).count() == 6)
+        check(f"FX save -> {len(CURRENCIES)} create_fx_rate events and snapshots (one per currency)",
+              r.status_code == 200 and len(CURRENCIES) == 15 and evs.filter(action="create_fx_rate").count() == len(CURRENCIES) and EntitySnapshot.objects.filter(entity_type="fx_rate", entity_id__in=[str(i) for i in ids]).count() == len(CURRENCIES))
         row = FxRate.objects.filter(year_month="2099-01", currency="USD").first()
         e = evs.filter(entity_id=str(row.id)).first()
         check("FX event shape (rate is a number, yearMonth camelCase)", e.after_data["rate"] == 1.5 and e.after_data["yearMonth"] == "2099-01" and e.actor_id == f"personnel:{fp.pk}", e.after_data)
         versions = {x["currency"]: FxRate.objects.get(year_month="2099-01", currency=x["currency"]).row_version for x in rates}
         r = call(fm, "post", "/api/fx-rates", {"yearMonth": "2099-01", "rates": [{"currency": c, "rate": 1.6, "rowVersion": versions[c]} for c in versions]})
         upd = AuditLog.objects.filter(entity_type="fx_rate", action="update_fx_rate", entity_id__in=[str(i) for i in ids])
-        check("FX re-save -> 6 update_fx_rate events with before data", r.status_code == 200 and upd.count() == 6 and all(u.before_data["rate"] == 1.5 and u.after_data["rate"] == 1.6 for u in upd))
+        check(f"FX re-save -> {len(CURRENCIES)} update_fx_rate events with before data", r.status_code == 200 and upd.count() == len(CURRENCIES) and all(u.before_data["rate"] == 1.5 and u.after_data["rate"] == 1.6 for u in upd))
         n0 = AuditLog.objects.count()
         r = call(fm, "post", "/api/fx-rates", {"yearMonth": "2099-01", "rates": [{"currency": c, "rate": 1.7, "rowVersion": 1} for c in versions]})
         check("FX stale version -> 409 and no audit written", r.status_code == 409 and AuditLog.objects.count() == n0)

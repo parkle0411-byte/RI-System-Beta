@@ -6,7 +6,8 @@ This module is intentionally scoped to STP and does not change other classes.
 import math
 import re
 
-CURRENCIES = {'TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR'}
+from fxrates.currencies import ALL as _ALL
+CURRENCIES = set(_ALL)   # 2026-11-18: TWD + 15 currencies
 DEFAULT_WARRANTY = 'None - other than as may exist in this document or in the wording that forms part of this contract.'
 
 

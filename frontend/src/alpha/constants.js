@@ -18,7 +18,7 @@ export const UNIVERSAL_CLAUSES = [
   { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },
   { code: 'INTERMEDIARY', title: 'Intermediary Clause (TW Insurance Brokers Ltd.)' }
 ];
-export const FX_CURRENCIES = ['USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR'];
+export { FX_CURRENCIES, ALL_CURRENCIES } from './currencies'   // 2026-11-18: 15 currencies (currencies.js)
 export const PERSONNEL_DEPARTMENTS = [
   { value: 'board_of_directors', label: 'Board of Directors' },
   { value: 'reinsurance', label: 'Reinsurance Dept.' },

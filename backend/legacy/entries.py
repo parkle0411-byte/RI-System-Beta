@@ -20,6 +20,7 @@ from .models import LegacyTransaction, NumberCounter, LegacyReason
 from .services import audit, state, fail
 from .money import calculate, split_performance
 from . import policy
+from fxrates.currencies import ALL as CURRENCIES   # 2026-11-18: TWD + 15 currencies
 
 BUSINESS={'sales','general_manager','admin'}
 FIELDS={'reference','currency','revenueMonth','kind','insured','insuredCn','cedant','party','statementNo',
@@ -102,7 +103,7 @@ def ready(t,stamp):
     for key,label in [('reference','Old reference'),('insured','Insured'),('cedant','Cedant'),('party','Settlement party'),('ae','AE')]:
         if not isinstance(d.get(key),str) or not d[key].strip():fail(label+' is required.')
         if len(d[key])>(192 if key=='reference' else 240):fail(label+' exceeds the supported length.')
-    if t.currency not in ('TWD','USD','MYR','EUR','JPY','GBP','HKD'):fail('Select a supported currency.')
+    if t.currency not in CURRENCIES:fail('Select a supported currency.')
     start=dates(d.get('effectiveDate'),'Effective Date');end=dates(d.get('expiryDate'),'Expiry Date')
     if start>end:fail('Effective Date must not be later than Expiry Date.')
     if not Personnel.objects.filter(name=d.get('ae'),is_active=True).exists():fail('Select an employed AE.')
@@ -186,7 +187,7 @@ def change(person,body):
         t.data.update({k:copy.deepcopy(v) for k,v in data.items() if k not in locked})
         if t.data.get('kind')=='claim' and str(t.data.get('classOfBusiness') or 'Property')!='Property':
             currency=str(t.data.get('currency') or '').strip().upper()
-            if currency not in ('TWD','USD','MYR','EUR','JPY','GBP','HKD'):fail('Select a supported currency.')
+            if currency not in CURRENCIES:fail('Select a supported currency.')
             t.currency=currency;t.data['currency']=currency
     elif action=='confirm':
         stamp=timezone.now();t.data['amounts']=ready(t,stamp)

@@ -27,6 +27,8 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/swissCgl.js')
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRetroactive.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/productRecall.js'), 'utf8').replace(/export /g, ''), context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/claimLossSnapshots.js'), 'utf8').replace(/export /g, ''), context);
+// 2026-11-18: the shared currency list (cglInformation.js imports it).
+vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/currencies.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{ALL_CURRENCIES,FX_CURRENCIES});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglInformation.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/cglQs.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{cglQsScope,cglQsIssues,draftFormatIssues});})()', context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/propertyQsCurrency.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{propertyQsCurrencyScope,propertyQsCurrencyIssues});})()', context);

@@ -1,4 +1,5 @@
 <script setup>
+import { ALL_CURRENCIES } from '../alpha/currencies'
 import { computed } from 'vue'
 import { overseaPeriods } from '../alpha/oversea'
 import { RICaseCalculations } from '../alpha/caseCalculations'
@@ -26,7 +27,7 @@ function togglePeriods(enabled) {
         <div><span>Effective Date</span><div class="policy-date-time"><DraftDate v-model="payload.policyFrom" :disabled="!!payload.parentTwRef" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" aria-label="Policy effective date" /><el-select v-model="payload.policyFromTime" :disabled="!!payload.parentTwRef" @change="emit('policy-from-time-change',$event)" aria-label="Policy effective time"><el-option label="12:00" value="12:00" /><el-option label="00:00" value="00:00" /></el-select></div></div>
         <div><span>Expiration Date</span><div class="policy-date-time"><DraftDate v-model="payload.policyTo" :disabled="!!payload.parentTwRef" type="date" value-format="YYYY-MM-DD" placeholder="YYYY-MM-DD" aria-label="Policy expiration date" /><el-select v-model="payload.policyToTime" :disabled="!!payload.parentTwRef" aria-label="Policy expiration time"><el-option label="12:00" value="12:00" /><el-option label="00:00" value="00:00" /></el-select></div></div>
       </div></el-form-item>
-      <el-form-item label="100% Premium" required><div style="display:flex;gap:8px;width:100%"><el-select v-model="payload.currency" :disabled="!!payload.parentTwRef" style="width:100px" aria-label="Premium currency"><el-option v-for="c in ['USD','TWD','EUR','JPY','GBP','HKD','MYR']" :key="c" :label="c" :value="c" /></el-select><DraftNumber v-model="payload.originalPremium" :disabled="!!payload.parentTwRef" :min="0" :controls="false" style="flex:1" /></div></el-form-item>
+      <el-form-item label="100% Premium" required><div style="display:flex;gap:8px;width:100%"><el-select v-model="payload.currency" :disabled="!!payload.parentTwRef" style="width:100px" aria-label="Premium currency"><el-option v-for="c in ALL_CURRENCIES" :key="c" :label="c" :value="c" /></el-select><DraftNumber v-model="payload.originalPremium" :disabled="!!payload.parentTwRef" :min="0" :controls="false" style="flex:1" /></div></el-form-item>
       <el-form-item v-if="payload.parentTwRef" label="100% Premium Adjustment" required><DraftNumber v-model="payload.premiumAdjustment" :controls="false" /></el-form-item>
       <el-form-item label="Share (%)" required><DraftNumber v-model="payload.reinsurers[0].sharePct" :disabled="!!payload.parentTwRef" :min="0" :max="100" :precision="8" :controls="false" /></el-form-item>
       <el-form-item :label="payload.parentTwRef ? 'Brokerage Adjustment' : 'Brokerage'" required><DraftNumber v-model="payload.reinsurers[0].brokerageAmount" :controls="false" /></el-form-item>

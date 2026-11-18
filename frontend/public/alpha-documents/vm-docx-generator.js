@@ -1146,7 +1146,7 @@
 
   // Currency spacing is a Cover display rule; saved Case prose stays intact.
   function compactCoverCurrencyAmounts(xml, c) {
-    const codes = ['USD', 'TWD', 'NTD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR', 'CNY', 'AUD', 'CAD', 'CHF', 'SGD', 'NZD', text(c && c.currency).toUpperCase()]
+    const codes = ['USD', 'TWD', 'NTD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR', 'CNY', 'AUD', 'CAD', 'CHF', 'SGD', 'NZD', 'THB', 'IDR', 'VND', 'INR', text(c && c.currency).toUpperCase()]
       .filter(code => /^[A-Z]{3}$/.test(code));
     const pattern = new RegExp(`\\b(${[...new Set(codes)].join('|')})[ \t\u00a0\u202f]+(?=[+-]?\\d)`, 'g');
     const retroactive = (c?.cglInformationRows || []).find(row => row.label === 'Retroactive Date');

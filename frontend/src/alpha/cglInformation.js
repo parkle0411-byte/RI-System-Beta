@@ -1,3 +1,4 @@
+import { ALL_CURRENCIES } from './currencies'
 import { newCgl, businessText, placingExtraIssues } from './placingRules'
 import { swissCglScope } from './swissCgl'
 import { retroactiveIssues, retroactiveText } from './cglRetroactive'
@@ -5,7 +6,7 @@ import { recallScope } from './productRecall'
 
 export const CGL_POLICY_FORMS = ['Occurrence Form', 'Claims-Made Form']
 export const CGL_TERRITORIES = ['Worldwide including USA/Canada', 'Worldwide excluding USA/Canada', 'USA/Canada Only', 'Other']
-export const CGL_CURRENCIES = ['TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR']
+export const CGL_CURRENCIES = ALL_CURRENCIES   // 2026-11-18: TWD + 15 currencies (alpha/currencies.js)
 const APPLICABILITY = ['notApplicable', 'applicable']
 export function emptyCglInformation() {
   return { policyForm: '', retroactiveDate: '', extendedReportingApplies: '', extendedReportingPeriod: '',

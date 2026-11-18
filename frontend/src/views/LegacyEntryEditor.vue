@@ -1,4 +1,5 @@
 <script setup>
+import { ALL_CURRENCIES } from '../alpha/currencies'
 import {computed,ref,watch} from 'vue'
 import {api} from '../api'
 import {premiumMoney} from '../alpha/lib/accounting'
@@ -40,7 +41,7 @@ async function save(confirm=false){
   <el-form-item v-for="(label,key) in texts" :key="key" :label="label"><el-input v-model="form[key]" :disabled="locked(key)" :maxlength="key==='reference'?192:240"/><small v-if="locked(key)">{{lockNote}}</small></el-form-item>
   <el-form-item label="Cedant"><el-input :model-value="form.cedant" disabled/><small>{{lockNote}}</small></el-form-item>
   <el-form-item label="Settlement Party"><el-input :model-value="form.party" disabled/><small>{{lockNote}}</small></el-form-item>
-  <el-form-item label="Currency"><el-select v-model="form.currency" :disabled="locked('currency')"><el-option v-for="c in ['TWD','USD','MYR','EUR','JPY','GBP','HKD']" :key="c" :label="c" :value="c"/></el-select><small v-if="locked('currency')">{{lockNote}}</small></el-form-item>
+  <el-form-item label="Currency"><el-select v-model="form.currency" :disabled="locked('currency')"><el-option v-for="c in ALL_CURRENCIES" :key="c" :label="c" :value="c"/></el-select><small v-if="locked('currency')">{{lockNote}}</small></el-form-item>
   <el-form-item :label="claim?'Effective Date (Policy)':'Endorsement Effective Date'"><el-date-picker v-model="form.effectiveDate" :disabled="locked('effectiveDate')" value-format="YYYY-MM-DD"/><small>Policy period: {{form.sourceEffectiveDate||'—'}} ~ {{form.sourceExpiryDate||'—'}}</small></el-form-item>
   <el-form-item :label="claim?'Expiry Date (Policy)':'Expiry Date (change only to amend the period)'"><el-date-picker v-model="form.expiryDate" :disabled="locked('expiryDate')" value-format="YYYY-MM-DD"/><small v-if="!claim">The policy start stays fixed; the complete period must not exceed 18 months.</small></el-form-item>
   <template v-if="claim">

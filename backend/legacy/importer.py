@@ -55,7 +55,7 @@ def class_lookup():
         key=label(code).upper()
         if key:out[key]=(name,active)
     return out
-CURRENCIES=('TWD','USD','MYR','EUR','JPY','GBP','HKD')
+from fxrates.currencies import ALL as CURRENCIES   # 2026-11-18: TWD + 15 currencies
 SETTLEMENT_COLUMNS={'cedant':('Cedant Receipt No','Cedant Payment No'),
                     'reinsurer':('Reinsurer Receipt No','Reinsurer Payment No.')}
 IMPORT_NOTE='Settled before import (Register receipt/payment number).'

@@ -96,7 +96,7 @@ onMounted(loadFxRates)
 <template>
   <!-- Development presents FX Rates as one operational panel. -->
   <section class="table-card" v-loading="fxLoading">
-    <div class="section-heading"><div><h2>FX Rates</h2><p>Official monthly rates to TWD for USD, EUR, JPY, GBP, HKD and MYR. TWD is always 1; closed months are locked.</p></div><div><el-button v-if="can('fx.write')" class="primary-button" @click="openFxDialog()">+ Set monthly rates</el-button><el-button class="secondary-button" :loading="fxLoading" @click="loadFxRates">Refresh</el-button></div></div>
+    <div class="section-heading"><div><h2>FX Rates</h2><p>Official monthly rates to TWD for {{ FX_CURRENCIES.slice(0, -1).join(', ') }} and {{ FX_CURRENCIES[FX_CURRENCIES.length - 1] }}. TWD is always 1; closed months are locked.</p></div><div><el-button v-if="can('fx.write')" class="primary-button" @click="openFxDialog()">+ Set monthly rates</el-button><el-button class="secondary-button" :loading="fxLoading" @click="loadFxRates">Refresh</el-button></div></div>
     <el-table :data="fxRates" class="case-table" row-key="id" empty-text="No monthly FX rates set yet.">
       <el-table-column prop="yearMonth" label="Performance month" min-width="180"><template #default="{ row }"><span class="case-ref">{{ row.yearMonth }}</span></template></el-table-column>
       <el-table-column prop="currency" label="Currency" width="130"></el-table-column>
@@ -107,7 +107,7 @@ onMounted(loadFxRates)
     </el-table>
   </section>
   <el-dialog v-model="fxDialogVisible" class="master-dialog" width="min(680px, 94vw)" :close-on-click-modal="false">
-    <template #header><div class="review-heading"><span class="pending-badge">{{ fxForm.existingMonth ? 'Versioned monthly update' : 'New monthly rates' }}</span><h2>Performance month FX rates</h2><p>All six Rate to TWD values are required and saved together.</p></div></template>
+    <template #header><div class="review-heading"><span class="pending-badge">{{ fxForm.existingMonth ? 'Versioned monthly update' : 'New monthly rates' }}</span><h2>Performance month FX rates</h2><p>All {{ FX_CURRENCIES.length }} Rate to TWD values are required and saved together.</p></div></template>
     <el-form label-position="top" @submit.prevent>
       <el-form-item label="Performance month" required><el-date-picker v-model="fxForm.yearMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" style="width:100%" @change="onFxMonthChange"></el-date-picker></el-form-item>
       <el-table :data="fxForm.rates" row-key="currency" class="case-table" size="small">
@@ -115,6 +115,6 @@ onMounted(loadFxRates)
         <el-table-column label="Rate to TWD" min-width="280"><template #default="{ row }"><el-input-number v-model="row.rate" :min="0.000001" :max="1000" :precision="6" :controls="false" :disabled="row.isLocked" style="width:100%"></el-input-number></template></el-table-column>
       </el-table>
     </el-form>
-    <template #footer><div class="review-footer"><p>Order: USD, EUR, JPY, GBP, HKD, MYR. Blank rates cannot be saved.</p><div><el-button class="secondary-button" @click="fxDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="fxSaving" :disabled="fxForm.rates.some(row => row.isLocked)" @click="saveFxRate">Save monthly rates</el-button></div></div></template>
+    <template #footer><div class="review-footer"><p>Order: {{ FX_CURRENCIES.join(', ') }}. Blank rates cannot be saved.</p><div><el-button class="secondary-button" @click="fxDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="fxSaving" :disabled="fxForm.rates.some(row => row.isLocked)" @click="saveFxRate">Save monthly rates</el-button></div></div></template>
   </el-dialog>
 </template>

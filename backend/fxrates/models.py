@@ -3,7 +3,9 @@ from decimal import Decimal
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 
-CURRENCIES = ["USD", "EUR", "JPY", "GBP", "HKD", "MYR"]
+from .currencies import FOREIGN
+
+CURRENCIES = list(FOREIGN)   # 2026-11-18: 15 foreign currencies in the owner's order (see currencies.py)
 CURRENCY_CHOICES = [(c, c) for c in CURRENCIES]
 
 year_month_validator = RegexValidator(

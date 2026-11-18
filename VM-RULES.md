@@ -213,7 +213,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - Limit of Indemnity 為案件幣別正數，文件接 each occurrence and in the aggregate。每個已選 Covered Loss 對應必填正數 Sub-limit，可另加項目；取消選擇保留金額但不檢查或輸出。所有輸出 Sub-limit 均不得超過 Limit；額外項目不可與 Covered Loss 同名。TWD 整數、USD 最多兩位小數。Deductibles 與自由文字 Self-Insured Retention 至少一項；Deductibles 有填時大於 0 且不超過 Limit，文件接 each and every Insured Event。
 - Principal Address 選填；Interest 固定原單責任再保句。Retention、Original Exclusions／Conditions 與可修改的 warranties、conditions precedent、subjectivities 依已確認預設與必填規則。Choice of Law and Jurisdiction 在案件畫面隱藏，Cover Note 與 Placing Slip 固定輸出範本條文。Reinsurance Conditions 固定範本文字、LMA3333 與 Intermediary Clause，文件最後附兩項完整條文；Premium Payment Terms 使用 Cedant Collection Days 及 LSW3001 名稱，不附完整 LSW3001。
 - Information 使用 CGL Policy Form、Retroactive Date、Extended Reporting Period、Territorial Limits 及 Insured Business 規則；新案預設 Occurrence Form；續保及批單沿用來源選擇，可再修改。Claims-Made 才顯示從屬資料，切換 Occurrence 隱藏且保留。Products 必填、Website 選填。Turnover 明細按幣別加總且文件保留原幣；單筆只顯示一行，各幣別 Case 幣別優先後按字母排序。CGL QS／Swiss CGL QS 文件也採同一原幣顯示規則；Overview Adj. Rate 仍依生效月匯率計算，缺匯率顯示 N/A。
-- Loss Record 明細可用 TWD、USD、EUR、JPY、GBP、HKD、MYR，各筆保留原幣；New 的 0 年無損失句為 No previous recalls or product withdrawals since start selling.，後接 Broker Advised Date。Cover Note 依 CGL 版面與已確認的 Product Recall 順序；Placing Slip 為獨立生成程式，使用相同 Product Recall 業務資料。
+- Loss Record 明細可用 TWD 及 §8.5 的 15 種外幣，各筆保留原幣；New 的 0 年無損失句為 No previous recalls or product withdrawals since start selling.，後接 Broker Advised Date。Cover Note 依 CGL 版面與已確認的 Product Recall 順序；Placing Slip 為獨立生成程式，使用相同 Product Recall 業務資料。
 
 ### 5.2b Stock Throughput（STP，2026-11-12）
 - Stock Throughput 只開放一般 QS，不開放 Facility；險種／TW Ref 代碼 ST。原單採 Property QS 共通流程；100% Premium 與各再保人保費、佣金、稅率、分期及後續會計比照一般 QS，Ceding Commission 必填（0% 時 Cover Note 省略），Cedant Tax 預填 1% 並用於 T1；再保人扣除及稅率各自處理。不另設總 Sum Insured 或計算分保保額；Limit of Liability 為必填多行文字。
@@ -263,7 +263,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - AUW 續保／批單不沿用來源手動 Ref.；被保險人主檔沿用來源。
 
 ### 7.3 新系統臨分 Claim 與 Loss Record（2026-11-14）
-- Product Recall、一般／Swiss CGL QS 及 STP 每筆 Claim 可選 TWD、USD、EUR、JPY、GBP、HKD、MYR，Reserve 與所有 obligations 同幣別；Case、Accounting、Dashboard／報表依原幣分開顯示及加總，不做跨幣別換算。其他險種仍用案件幣別。
+- Product Recall、一般／Swiss CGL QS 及 STP 每筆 Claim 可選 TWD 及 §8.5 的 15 種外幣，Reserve 與所有 obligations 同幣別；Case、Accounting、Dashboard／報表依原幣分開顯示及加總，不做跨幣別換算。其他險種仍用案件幣別。
 - 無付款時可改 Claim 幣別，數字不換算；已有付款且沒有收付、抵銷、結清或其歷史時，可整筆更正並填原因、留前後紀錄，須先取消相關對帳審核批次，所有付款及交易一併更新並依新幣別精度重算分配；已有收付／抵銷／結清歷史即使沖回仍永久鎖定。新幣別不允許原金額精度時阻擋，不自動取整。
 - 所有新系統臨分 Claim 的 Date of Loss 可改，原因必填並保留前後日期、操作人與時間；既有付款分配及帳務不因改日期自動改動，新增或依原流程更正付款時依當時 Date of Loss 選適用版本。Product Recall Claim 不選 Covered Event／Loss，不依其狀態阻擋付款。
 - 新建 Claim 的 Outstanding Reserve 須大於 0，Cause of Loss 可留空。原保期另顯示 Claim 自動明細、來源 TW Ref／Claim ID；金額為 Reserve 加 obligations 正負合計，最低 0，使用 Claim 幣別。原保期 Cover Note 保留投保時 Loss Record。續保建立時取快照，之後來源變更不覆寫；續保快照修改日期／原因同步來源 Claim，金額／幣別不回寫。同步失敗保留續保並標待同步，允許 Review／Announce，衝突逐欄由使用者決定並留紀錄；日期更正須原因，既有帳務不變。
@@ -341,6 +341,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 賠款與收付款兩位小數。分期尾差集中第一期。
 - 未 Production 認列的保費以最新月匯率暫估台幣並標示 Estimated（「最新月」＝本月或以前最新的月份；提前輸入的未來月份要到該月才使用，完全沒有過去匯率才用未來月份；Accounting 與 Dashboard 相同，2026-11-14）；認列後固定為實際認列月份的正式匯率。賠款用建帳月份匯率。缺匯率不擋原幣作業，顯示 Awaiting FX。
 - 畫面：TWD 整數不補 .00，USD 兩位；12 個金額欄位顯示千分位。
+- **幣別（2026-11-18 業主決定）**：TWD 為本國幣（匯率固定 1），外幣 15 種，所有選單、FX Rates 與檢查一律依此順序：USD、THB、CNY（人民幣用 ISO 代碼 CNY，不用 RMB）、AUD、HKD、EUR、JPY、GBP、CAD、IDR、VND、CHF、SGD、MYR、INR；有 TWD 的選單 TWD 排第一。清單只有一份：後端 `backend/fxrates/currencies.py`、前端 `frontend/src/alpha/constants.js`（Word 產生器的幣別代碼另列）。FX Rates 每月 **15 種都必填**才能儲存；匯率維持小數 6 位（IDR、VND 大額換算接受小誤差）。金額取位不變：TWD 整數，其他外幣兩位。原有限制不變：Property QS、CGL QS、Product Recall 案件幣別仍只開放 TWD／USD；Debit Note 銀行資料仍只有 USD／TWD。
 
 ### 8.6 提醒信（目前未寄出，見 §1）
 - 保費、退保費、賠款全部納入：**首次信在各筆 Accounting 提醒日**，之後在實際到期日及逾期每 7 天，餘額歸零停止；同日同類去重。信件寫真正到期日並附會計提醒日。名稱「會計收付款提醒」。
@@ -539,6 +540,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-18 18:04 | 新增幣別：外幣 15 種依業主順序（RMB 用 CNY）、FX 每月 15 種必填（§8.5）；migration `fxrates 0003`（只改幣別允許值） | `backups/currency_20261118_180446/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `currency-work/rollback.sh 20261118_180446`（已有新幣別匯率時會停止） | `ri-backend:before-currency-20261118_180446`／`ri-frontend:before-currency-20261118_180446` | 候選映像 API 135/135（新增 currency_list 16 項）、畫面 21 階段＋專項 376 項通過；migrate 後權限與 Audit trigger 重新套用；正式後端逐檔一致、makemigrations 無變更、無資料修改 |
+| 11-18 16:33 | 第四次清空舊資料（交易 11,025、內部標記 14、Insured 2,690（案件使用中的 1 筆保留）、Legacy 操作紀錄 28；業主同意的正式資料刪除） | `backups/legacy_clear_20261118_163327` | —（程式未變） | 正式資料副本演練：其他資料表、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
 | 11-18 15:57 | Accounting All Accounts 排序：逾期置頂，其餘依 Accounting 提醒日由新到舊（§8.7） | `backups/accounts_sort_20261118_155725/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounts-sort-work/rollback.sh 20261118_155725` | `ri-backend:before-accounts-sort-20261118_155725`／`ri-frontend:before-accounts-sort-20261118_155725` | 候選映像 API 134/134、畫面 21 階段＋專項 375 項通過；伺服器分頁與畫面程式逐頁一致（測試環境 214 頁、部署後正式資料 549 頁／41,611 列）；正式後端逐檔一致、無 migration、無資料修改 |
 | 11-18 11:00 | System Reference 回收桶逐筆永久刪除 | `backups/reference_purge_20261118_105939` | `ri-backend:before-reference-purge-20261118_105939`／`ri-frontend:before-reference-purge-20261118_105939` | 局部 API、畫面 A＋專項；部署前後資料與文件指紋一致 |
 | 11-17 | 舊資料匯入：理賠列不做 AE / Sub AE 拆分檢查（只換後端） | `backups/legacy_claim_split_20261117_174953`（原始碼） | `ri-backend:before-legacy-claim-split-20261117_174953` | 候選映像完整 API（legacy_import_web 新檢查以舊程式驗證會失敗）、畫面 L；當日 Register 4,880 列以新程式預覽：0 錯誤、0 警告；無 migration、不改資料 |
@@ -591,8 +594,13 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-17 業主要求）**：舊資料全部清空，含上傳紀錄：交易 1,415 筆（匯入 1,414＋批單草稿 1）、上傳紀錄 6 筆及其原始 Excel、對舊資料的 Finance 對帳紀錄 2 筆、只被舊資料連結的 MDM Insured 699 筆（新系統案子使用的 Insured 保留）、Legacy 操作紀錄 17 筆（只能新增的保護暫時移除、刪除後原樣補回）。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_102008`（database.sql、legacy-imports.tar）。之後依 §17 網頁匯入重新匯入。
 - **資料清理（2026-11-17 第二次，業主要求）**：清空 11-17 重新匯入的 AGCS／GAIC 舊資料：交易 1,236 筆、上傳內部標記 4 筆（Excel 先前已刪）、對舊資料的 Finance 對帳紀錄 2 筆（6 筆交易已有的收付登錄隨交易刪除）、MDM Insured 全部 412 筆（新系統案子已於 11-17 清空，沒有任何 Insured 被使用；業主要求一併刪除）、Legacy 操作紀錄 20 筆（保護暫時移除後原樣補回）。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_120204`。
 - **資料清理（2026-11-17 第三次，業主要求）**：清空再次匯入的舊資料：交易 6,102 筆（3 批）、上傳內部標記 4 筆、MDM Insured 全部 1,681 筆（沒有案子使用）、Legacy 操作紀錄 8 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳或收付登錄。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_143435`。
+- **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-18：新增幣別（§8.5）：外幣 15 種，所有選單、FX Rates 與檢查依 USD、THB、CNY、AUD、HKD、EUR、JPY、GBP、CAD、IDR、VND、CHF、SGD、MYR、INR，TWD 排第一；FX 每月 15 種必填；匯率維持 6 位小數；原有 TWD／USD 限制不變。
+
+- 2026-11-18：依業主要求第四次清空舊資料（含未被案件使用的 Insured），見 §17 資料清理。
 
 - 2026-11-18：Accounting All Accounts 改排序：逾期未結清置頂（依 Accounting 提醒日最舊優先），其餘帳款含已結清依 Accounting 提醒日由新到舊，沒有日期的最後；其他分頁排序不變。
 

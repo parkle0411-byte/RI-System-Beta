@@ -568,12 +568,21 @@ def phase_b(page):
     page.get_by_role("button", name="+ Set monthly rates").click()
     fx = page.locator(".master-dialog")
     fx.wait_for()
-    for index, rate in enumerate(["30.5", "33.1", "0.21", "38.9", "3.9", "6.8"]):
-        fx.locator(".el-table__row").nth(index).locator("input").fill(rate)
+    # 2026-11-18: 15 currencies in the owner's order (RMB = CNY); the original six keep their earlier test rates.
+    FX_ORDER = ["USD", "THB", "CNY", "AUD", "HKD", "EUR", "JPY", "GBP", "CAD", "IDR", "VND", "CHF", "SGD", "MYR", "INR"]
+    FX_TEST_RATES = {"USD": "30.5", "THB": "0.9", "CNY": "4.3", "AUD": "20.1", "HKD": "3.9", "EUR": "33.1", "JPY": "0.21", "GBP": "38.9",
+                     "CAD": "22.4", "IDR": "0.00195", "VND": "0.00121", "CHF": "36.2", "SGD": "23.5", "MYR": "6.8", "INR": "0.37"}
+    fx_rows = fx.locator(".el-table__row")
+    check("FX dialog lists the 15 currencies in the owner's order",
+          [fx_rows.nth(i).locator("td").first.inner_text().strip() for i in range(fx_rows.count())] == FX_ORDER)
+    for index, currency in enumerate(FX_ORDER):
+        fx_rows.nth(index).locator("input").fill(FX_TEST_RATES[currency])
     fx.get_by_role("button", name="Save monthly rates").click()
     check("monthly FX rates saved", message(page, "Monthly FX rates saved"))
     page.wait_for_timeout(500)
-    check("six rates listed", page.locator(".table-card .case-table .el-table__row").count() == 6)
+    listed = page.locator(".table-card .case-table .el-table__row")
+    check("15 rates listed in the same order", listed.count() == 15
+          and [listed.nth(i).locator("td").nth(1).inner_text().strip() for i in range(15)] == FX_ORDER)
 
     # ---------------- 人員與帳號 ----------------
     nav(page, "Personnel & Accounts")

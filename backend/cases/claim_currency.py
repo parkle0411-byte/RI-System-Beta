@@ -2,7 +2,7 @@
 from decimal import Decimal, InvalidOperation
 import math
 
-CURRENCIES = ('TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR')
+from fxrates.currencies import ALL as CURRENCIES   # 2026-11-18: TWD + 15 currencies, owner's order
 
 
 def multi_currency_scope(payload):

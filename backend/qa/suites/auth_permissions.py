@@ -140,7 +140,7 @@ try:
                       w.status_code == 201 and rec and rec.created_by == f"personnel:{person.pk}", getattr(rec, "created_by", None))
             if role == "accounting_manager":
                 fxw = post(c, "/api/fx-rates", {"yearMonth": "2099-01", "rates": [
-                    {"currency": cur, "rate": 1.5} for cur in ("USD", "EUR", "JPY", "GBP", "HKD", "MYR")]})
+                    {"currency": cur, "rate": 1.5} for cur in __import__("fxrates.models", fromlist=["CURRENCIES"]).CURRENCIES]})   # 2026-11-18: all 15
                 from fxrates.models import FxRate
                 row = FxRate.objects.filter(year_month="2099-01").first()
                 check("[accounting_manager] real FX write attributed to the logged-in person",
