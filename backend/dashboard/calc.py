@@ -217,6 +217,15 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     renewals_mtd = len([r for r in roots if _live(r) and get(r["payload"], "newOrRenew") == "Renew" and posted_month(r) == current_month])
     expected_renewals_mtd = len([r for r in roots if _live(r) and month(policy_to(r)) == current_month])
     new_business_mtd = len([r for r in roots if _live(r) and get(r["payload"], "newOrRenew") == "New" and posted_month(r) == current_month])
+    # 2026-11-19 owner: legacy policies (company-wide Dashboard) count by Revenue Month and New / Renew.
+    bound = [b for b in (legacy or {}).get("bound", []) if isinstance(b.get("month"), str)]
+    def legacy_ytd(target_year, kind=None):
+        low, high = f"{js_num_str(target_year)}-01", f"{js_num_str(target_year)}-{_pad2(month_number)}"
+        return len([b for b in bound if low <= b["month"][:7] <= high and (kind is None or b["newOrRenew"] == kind)])
+    ytd_current += legacy_ytd(year); ytd_prior += legacy_ytd(year - 1)
+    renewals_ytd += legacy_ytd(year, "Renew")
+    renewals_mtd += len([b for b in bound if b["month"][:7] == current_month and b["newOrRenew"] == "Renew"])
+    new_business_mtd += len([b for b in bound if b["month"][:7] == current_month and b["newOrRenew"] == "New"])
 
     gross = out1 = out2 = 0.0
     class_totals, reinsurer_totals = {}, {}

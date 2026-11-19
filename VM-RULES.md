@@ -385,7 +385,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - Accounting · Receivable / Payable 的缺匯率說明為 Awaiting FX — Past 5 years record only.，不再附加重複起算日期說明；資料仍按每日滾動五年篩選。
 - 缺少上帳月份匯率時，僅在 Accounting · Receivable / Payable 區塊顯示 Awaiting FX；Dashboard 頂端不再重複顯示匯率警告。換算與缺匯率處理維持。
 - 標題：Production & Records Overview。Total Gross Premium、Accounting · Receivable / Payable（依收付方向分：向再保人收的理賠款屬 Receivable、退給 Cedant 的退費屬 Payable）以 TWD 前綴顯示；YTD Brokerage Trend (TWD)；Total Bound YTD；New Business MTD 卡片有 + New Case（需 `cases.write`）。
-- Total Gross Premium（2026-11-13／14）：保期內保單的原單加已 Announce 批單，用與 Accounting 相同的逐步取位分出保費，依「本月或以前最新月份」匯率換算。保期以最新已 Announce 批單的到期日判斷，In-Force Policies 與 Expected Renewals 也用同一判斷。公司全體 Dashboard 含仍在保期內的舊資料：以 Cedant's Policy No. 為一件（未填用 Old Reference），保期為該件已確認保費列與批單的最晚到期日。Total Bound YTD、New Business 等新簽件數只算新系統案件。
+- Total Gross Premium（2026-11-13／14）：保期內保單的原單加已 Announce 批單，用與 Accounting 相同的逐步取位分出保費，依「本月或以前最新月份」匯率換算。保期以最新已 Announce 批單的到期日判斷，In-Force Policies 與 Expected Renewals 也用同一判斷。公司全體 Dashboard 含仍在保期內的舊資料：以 Cedant's Policy No. 為一件（未填用 Old Reference），保期為該件已確認保費列與批單的最晚到期日。Total Bound YTD（含 Prior-Year YTD）、Renewals Bound MTD、New Business MTD 與 Renewal Retention Ratio 的件數含舊資料（2026-11-19 業主決定；原本只算新系統）：舊資料保費列依 **Revenue Month** 計入月份、依 Register 的 New / Renew 分類；一件＝Cedant's Policy No.（未填用 Old Reference）＋Effective Date（各再保人份額合為一件、同號每年續保各算一件），以其保費列最早的 Revenue Month 為成交月份；批單、理賠、草稿與撤回列不計件。只在公司全體 Dashboard；測試 `dashboard_legacy_bound`。
 - 舊資料（公司全體 Dashboard）：Brokerage 趨勢含舊資料保費列與批單列（匯入及新增，依 Revenue Month；歷史月份顯示舊資料已認列業績並標示 closed；已關帳月份與 Production 報表一致，未關帳預估）；起始月前的新系統業績畫在起始月；未收付合計含全部舊資料未結清帳款，5 年判斷對匯入的舊交易用原 Effective Date（理賠用 DOL）、新增批單／理賠用確認日。個人 Dashboard 只看自己的案件。
 - 理賠（2026-11-15）：Dashboard 未收付合計的所有理賠都換算台幣（理賠自己的幣別、建帳月匯率）；Accounting 畫面對 CGL／Product Recall／STP 理賠維持原幣顯示、不換算。
 - 未結清應收應付以 Accounting 實際帳款與上帳月匯率為準，**只算 5 年內建立的帳款**（每天滾動，畫面註明起算日）；跳過「整件已銷帳」的案件，Accounting 若發現標記與實際欠款不符會在 warnings 列出。已關帳業績用正式報表，未關帳標示預估。
@@ -542,6 +542,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-19 | Dashboard 件數（Total Bound YTD、Renewals Bound MTD、New Business MTD、續保率）含舊資料（只換後端） | `backups/dashboard_legacy_bound_20261119_141234`（原始碼） | `ri-backend:before-dashboard-legacy-bound-20261119_141234` | 候選映像 Dashboard 相關 API 10 組（新組 13 項，以舊程式及只看保單號的錯誤版驗證會失敗）、畫面 A＋G；正式資料新舊比對只有 Total Bound YTD 1→636、Prior-Year 0→1,689、續保率 N/A→33.5% 改變；無 migration、不改資料 |
 | 11-19 | 已結清舊資料歷史逐筆快取（匯入只算新的列）、畫面格式與排序鍵共用快照、匯入後立即預建（只換後端） | `backups/legacy_history_rows_20261119_124425`（原始碼） | `ri-backend:before-legacy-history-rows-20261119_124425` | 候選映像全部 API 測試組與全部畫面測試；新檢查以舊程式驗證會失敗；正式資料（11,495 筆）新舊回應 19 個逐位元組相同、`run_qa.sh pages` 通過；無 migration、不改資料 |
 | 11-19 10:30 | 歷史月份（2026-11 以前）匯率可補輸入一次，存檔即鎖定（§9 起始月；取代 11-15 全部鎖定） | `backups/fx_fill_20261119_103043/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `fx-fill-work/rollback.sh 20261119_103043` | `ri-backend:before-fx-fill-20261119_103043`／`ri-frontend:before-fx-fill-20261119_103043` | 候選映像 API 135/135（production_start_month 24 項含補輸入一次、存後鎖定、再存拒絕）、畫面 21 階段＋專項 376 項通過；正式後端逐檔一致、無 migration、無資料修改 |
 | 11-19 09:30 | 清空 FX Rates（業主同意的正式資料刪除）：匯率 60 筆（2026-01～10，每月 6 種）及其版本紀錄 127 筆（只能新增的保護暫時移除後原樣補回）；FX 無 Audit 事件 | `backups/fx_clear_20261119_093059/`（部署前 DB；另存被刪列 `fx_rates_rows.sql`、`fx_snapshot_rows.sql`，可用 `fx-clear-20261119/restore_fx.sh` 單獨放回，FX 已有新資料時會停止） | —（程式未變） | 正式資料副本演練：刪除、二次執行在前置檢查停下、放回 60／127 筆均成功；正式執行後其他資料表、保留的版本紀錄與所有觸發器前後完全相同，保護觸發器實測生效 |
@@ -603,6 +604,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ## 近期變更
 
+- 2026-11-19：Dashboard 新簽件數與續保率含舊資料（依 Revenue Month；保單號＋生效日算一件；§10）。
 - 2026-11-19：All Accounts 加速——已結清舊資料歷史改逐筆快取（匯入只算新的列）、畫面格式與排序鍵共用快照，重啟後第一次約 11 秒 → 約 3 秒（§15）。
 - 2026-11-19：歷史月份（2026-11 以前）的 FX 匯率改為可補輸入一次：該月沒有匯率時可新增 15 種，存檔即鎖定、不能再改；Production 仍視同已關帳。
 
