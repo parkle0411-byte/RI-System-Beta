@@ -261,6 +261,9 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             name = js_or(strip_facility(item.get("party"), production_rules), "Unnamed")
             reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
     expected_renewals_mtd += legacy_renewals
+    # 2026-11-19 owner: legacy endorsements still in force (company-wide Dashboard).
+    legacy_active_endorsements = len([e for e in (legacy or {}).get("endorsements", [])
+                                      if isinstance(e.get("expiry"), str) and e["expiry"] and _ge_text(e["expiry"], today)])
     # Accounting obligations remain outstanding after policy expiry. Convert each
     # at its own posting month; unknown FX stays visibly incomplete, never zero.
     from cases.cash_ledger import transaction_details
@@ -378,7 +381,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         "metrics": {
             "ytdCurrent": ytd_current, "ytdPrior": ytd_prior, "renewalsMtd": renewals_mtd,
             "expectedRenewalsMtd": expected_renewals_mtd, "newBusinessMtd": new_business_mtd,
-            "inForcePolicies": len(in_force) + legacy_in_force, "activeEndorsements": len(active_endorsements),
+            "inForcePolicies": len(in_force) + legacy_in_force, "activeEndorsements": len(active_endorsements) + legacy_active_endorsements,
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
             "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
             "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2, "outstandingSince": outstanding_since,

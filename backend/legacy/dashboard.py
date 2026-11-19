@@ -14,6 +14,9 @@
   Cedant's Policy No. (fallback: Old Reference) and Effective Date, so the reinsurers' shares of
   one policy count once and a policy renewed under the same number counts every year; the
   earliest Revenue Month among its premium rows is the month it was bound.
+- 2026-11-19 owner: Active Endorsements include legacy endorsements whose Expiry Date has not
+  passed. One endorsement = policy (as above) + Endorsement No. + Effective Date, so the
+  reinsurers' shares of one endorsement count once.
 
 Read-only: nothing here writes legacy or Case data.
 """
@@ -38,7 +41,7 @@ def dashboard_inputs():
     from .services import rate_for
     from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆
     records = sorted_rows(LegacyTransaction.objects.filter(status='confirmed'), 'reference', 'uid')
-    policies, trend, bound = {}, [], {}
+    policies, trend, bound, endorsements = {}, [], {}, {}
     by_uid = {}
     for t in records:
         d = t.data if isinstance(t.data, dict) else {}
@@ -54,6 +57,13 @@ def dashboard_inputs():
             policy['items'].append({'currency': t.currency, 'premium': amounts.get('premium') or 0,
                                     'className': d.get('classOfBusiness') or CLASS_NAMES.get(str(d.get('classCode') or ''), 'Property'),
                                     'party': str(d.get('party') or '')})
+        if kind == 'endorsement':
+            slot = (_policy_key(d, t.reference), ' '.join(str(d.get('endorsementNo') or '').split()).casefold(), str(d.get('effectiveDate') or ''))
+            expiry = str(d.get('expiryDate') or '')
+            if expiry > endorsements.get(slot, ''):
+                endorsements[slot] = expiry
+            else:
+                endorsements.setdefault(slot, expiry)
         if kind == 'premium' and t.revenue_month:
             slot = (_policy_key(d, t.reference), str(d.get('effectiveDate') or ''))
             if slot not in bound or t.revenue_month < bound[slot]['month']:
@@ -81,4 +91,5 @@ def dashboard_inputs():
                             'outstanding': abs(float(row['outstanding'])), 'paymentDirection': row.get('paymentDirection'),
                             'ageDate': age[:10], 'postedRate': snapshot.get('rate'),
                             'postedMonth': t.revenue_month or _taipei_day(t.first_confirmed_at)[:7]})
-    return {'policies': list(policies.values()), 'trend': trend, 'outstanding': outstanding, 'bound': list(bound.values())}
+    return {'policies': list(policies.values()), 'trend': trend, 'outstanding': outstanding, 'bound': list(bound.values()),
+            'endorsements': [{'expiry': expiry} for expiry in endorsements.values()]}

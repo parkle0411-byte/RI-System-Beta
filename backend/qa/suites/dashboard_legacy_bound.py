@@ -38,6 +38,9 @@ check('legacy alone: 2 renewals and 1 new this month, 4 bound this year, 2 last 
 check('Retention Ratio uses the legacy renewals (3 this year / 2 last year)', abs(only['retentionRatio'] - 150) < 1e-9, only['retentionRatio'])
 check('Expected Renewals and In-Force are not changed by bound counts', m['expectedRenewalsMtd'] == base['expectedRenewalsMtd'] and m['inForcePolicies'] == base['inForcePolicies'])
 check('without legacy input (personal Dashboard) nothing changes', build_dashboard(rows, [], [], now, legacy=None)['metrics'] == base)
+ends = [{'expiry': '2026-11-19'}, {'expiry': '2027-01-31'}, {'expiry': '2026-11-18'}, {'expiry': ''}]
+e = build_dashboard(rows, [], [], now, legacy={'policies': [], 'trend': [], 'outstanding': [], 'endorsements': ends})['metrics']
+check('Active Endorsements add legacy endorsements whose expiry has not passed (expiring today counts)', e['activeEndorsements'] == base['activeEndorsements'] + 2, (e['activeEndorsements'], base['activeEndorsements']))
 check('legacy input without bound counts behaves as before', build_dashboard(rows, [], [], now, legacy={'policies': [], 'trend': [], 'outstanding': []})['metrics'] == base)
 
 # ---- legacy inputs from the database ----
@@ -62,4 +65,9 @@ check('one policy = policy number + Effective Date, counted in its earliest Reve
 check('the same policy number in another year is another bound policy, with its own New / Renew', ('2025-05', 'New') in got, got)
 check('without a policy number the Old Reference identifies the policy', got.count(('2026-07', 'Renew')) == 1 and ('2026-08', 'Renew') not in got, got)
 check('endorsements, claims, rows without Revenue Month, drafts and withdrawn rows are not bound policies', len(got) == 3, got)
+for n, (endo, eff, exp) in enumerate([('E-01', '2026-06-01', '2027-05-31'), (' e-01 ', '2026-06-01', '2027-05-31'), ('E-01', '2026-09-01', '2027-05-31'), ('E-02', '2026-06-01', '2025-04-30')], start=20):
+    make(n, kind='endorsement', month='2026-06', statement='POL-ENDO', effective=eff)
+    O.filter(number=f'DLB-{n:03d}').update(data={**O.get(number=f'DLB-{n:03d}').data, 'endorsementNo': endo, 'expiryDate': exp})
+ends = sorted(x['expiry'] for x in dashboard_inputs()['endorsements'] if x['expiry'] in ('2027-05-31', '2025-04-30'))
+check('one legacy endorsement = policy + Endorsement No. + Effective Date (reinsurer shares count once)', ends == ['2025-04-30', '2027-05-31', '2027-05-31'], ends)
 print(f'{len(checks)}/{len(checks)} legacy bound-count checks passed')
