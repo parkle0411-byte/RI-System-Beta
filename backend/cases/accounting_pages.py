@@ -290,10 +290,17 @@ def party_options(rows):
     return {"cedants": sorted(cedants, key=_code_units), "reinsurers": sorted(reinsurers, key=_code_units)}
 
 
-# ---- the settled legacy history part, computed once per day and history content ----
+# ---- the settled legacy history part ----
+# 2026-11-17: list rows of the settled legacy history are kept per worker (cheap change signature, full content check
+# at most once a minute). 2026-11-19 owner decision (All Accounts' first load about 11 seconds, 35 seconds right after an
+# import): the part no longer depends on the Taipei date (the history is settled; verified with shifted dates), the full
+# content check is done once per rebuild (the legacy result cache's digests, not a second fingerprint), the converted part
+# and its sort keys are shared between workers through one snapshot file, and the background warm-up builds the sort keys
+# of all three tabs and does the minute check while the screen is in use, so requests do not wait for it.
 _HISTORY = {}
 _HISTORY_LOCK = threading.Lock()
 RECHECK_SECONDS = 60
+TAB_KEYS = ("all", "settled", "brokerage")
 
 
 def _cheap_signature(ledger):
@@ -304,52 +311,144 @@ def _cheap_signature(ledger):
     return tuple(sorted((k, str(v)) for k, v in found.items()))
 
 
-def _history_part(view, request):
+def _part_file(ledger):
+    return ledger._snapshot_dir() / f"{ledger.logic_version()}-part.pickle.z"
+
+
+def _part_to_file(part, cheap):
+    rows = part["rows"]
+    with _HISTORY_LOCK:
+        computed = list(part["sortKeys"].items())
+    keys = {k: [v.get(id(r)) for r in rows] for k, v in computed if len(v) == len(rows)}
+    return {"cheap": cheap, "identity": part["identity"], "rows": rows, "batches": part["batches"], "caseHistories": part["caseHistories"],
+            "currencies": part["currencies"], "dateFree": part["dateFree"], "sortKeys": keys}
+
+
+def _part_from_file(stored, cheap):
+    if not isinstance(stored, dict) or stored.get("cheap") != cheap or not isinstance(stored.get("rows"), list):
+        return None
+    rows = stored["rows"]
+    keys = {k: {id(r): v for r, v in zip(rows, values)} for k, values in (stored.get("sortKeys") or {}).items() if len(values) == len(rows)}
+    return {"rows": rows, "batches": stored["batches"], "caseHistories": stored["caseHistories"], "currencies": stored["currencies"],
+            "identity": stored["identity"], "dateFree": stored["dateFree"], "sortKeys": keys}
+
+
+def _build_part(view, request, ledger):
+    """Convert the settled history (legacy result cache) into list rows; identity is None when the history changed meanwhile."""
+    identity = None
+    if ledger._cache_enabled():
+        _, identity, complete = ledger.history_state()
+        identity = identity if complete else None
+    with ledger.trusting(identity):
+        body = json_roundtrip(view.list_body(request, "history"))
+    rows = account_rows({"transactionRows": body.get("transactionRows") or []})
+    return {"rows": rows, "batches": {b.get("batchId"): b for b in body.get("cashBatches") or []},
+            "caseHistories": body.get("caseHistories") or {}, "currencies": body.get("currencies") or [],
+            "identity": identity, "dateFree": all(get(r, "settlement") == "settled" for r in rows), "sortKeys": {}}
+
+
+def _remember(part, cheap, checked):
+    with _HISTORY_LOCK:
+        used = _HISTORY.get("used")
+        _HISTORY.clear(); _HISTORY.update(cheap=cheap, identity=part["identity"], checked=checked, value=part)
+        if used is not None:
+            _HISTORY["used"] = used
+
+
+def _history_part(view, request, max_age=RECHECK_SECONDS):
     """List rows of the settled legacy history (with sort keys), its registrations, correction histories and currencies.
 
-    The history is read-only and settled, so it changes only with its content or the Taipei date. Each request checks the
-    cheap change signature; at most once a minute the full content fingerprint of the legacy result cache (MD5 of every
-    column) is compared as well, which also catches direct database edits that did not touch the update time. With the
-    legacy result cache switched off (RI_LEGACY_RESULT_CACHE=false) the part is rebuilt on every request."""
+    The history is read-only and settled, so it changes only with its content. Each request checks the cheap change
+    signature; at most once a minute the content digests of every row are compared as well (normally by the background
+    warm-up), which also catches direct database edits that did not touch the update time. With the legacy result cache
+    switched off (RI_LEGACY_RESULT_CACHE=false) the part is rebuilt on every request."""
     import time
     import legacy.ledger as ledger
-    if ledger._cache_enabled():
-        today, cheap = ledger._today(), _cheap_signature(ledger)
-        with _HISTORY_LOCK:
-            hit = _HISTORY.get("value") if _HISTORY.get("today") == today and _HISTORY.get("cheap") == cheap else None
-            fresh = hit is not None and time.monotonic() - _HISTORY.get("checked", 0) < RECHECK_SECONDS
-            digest = _HISTORY.get("digest")
-        if fresh:
-            return hit
-        if hit is not None:
-            if ledger._fingerprint(ledger.historical_queryset()) == digest:
-                with _HISTORY_LOCK:
-                    if _HISTORY.get("value") is hit:
-                        _HISTORY["checked"] = time.monotonic()
-                return hit
-    else:
-        today = cheap = None
+    if not ledger._cache_enabled():
+        return _build_part(view, request, ledger)
+    cheap = _cheap_signature(ledger)
+    with _HISTORY_LOCK:
+        hit = _HISTORY.get("value") if _HISTORY.get("cheap") == cheap else None
+        checked = _HISTORY.get("checked", 0)
+        identity = _HISTORY.get("identity")
+    if hit is not None and time.monotonic() - checked < max_age:
+        return hit
     started = time.monotonic()
-    digest = ledger._fingerprint(ledger.historical_queryset()) if today is not None else None
-    body = json_roundtrip(view.list_body(request, "history"))
-    rows = account_rows({"transactionRows": body.get("transactionRows") or []})
-    part = {"rows": rows, "batches": {b.get("batchId"): b for b in body.get("cashBatches") or []},
-            "caseHistories": body.get("caseHistories") or {}, "currencies": body.get("currencies") or [], "sortKeys": {}}
-    if today is not None and ledger._today() == today and _cheap_signature(ledger) == cheap:
-        with _HISTORY_LOCK:
-            _HISTORY.clear(); _HISTORY.update(today=today, cheap=cheap, digest=digest, checked=started, value=part)
+    current = None   # identity of the history as just read, when this request had to read the digests
+    if hit is not None and identity is not None:
+        current = ledger.history_identity(ledger.history_digests())
+        if current == identity:
+            with _HISTORY_LOCK:
+                if _HISTORY.get("value") is hit:
+                    _HISTORY["checked"] = started
+            return hit
+    shared = ledger._snapshot_enabled()
+    path = _part_file(ledger)
+
+    def stored():
+        part = _part_from_file(ledger._read_snapshot(path), cheap) if path.exists() else None
+        return part if part is not None and (current is None or part["identity"] == current) else None
+    part = stored() if shared else None
+    if part is not None:
+        _remember(part, cheap, 0)   # content check due: the next request or the warm-up compares the digests
+        return part
+    if shared:
+        with ledger.snapshot_lock(".part.lock"):   # one worker converts; the others wait and read its file
+            part = stored()
+            if part is not None:
+                _remember(part, cheap, 0)
+                return part
+            part = _build_part(view, request, ledger)
+            if part["identity"] is not None and _cheap_signature(ledger) == cheap:
+                ledger._write_snapshot(path, _part_to_file(part, cheap))
+    else:
+        part = _build_part(view, request, ledger)
+    if part["identity"] is not None and _cheap_signature(ledger) == cheap:
+        _remember(part, cheap, started)
     return part
 
 
 def _history_keys(part, tab, now):
-    """Sort keys of the history rows for one tab and day (by row identity; the cached rows are never modified)."""
+    """Sort keys of the history rows for one tab (by row identity; the cached rows are never modified). Keys depend on
+    the date only through "overdue", which needs an unsettled row: an all-settled history keeps one set for every day."""
+    slot = (tab, None if part.get("dateFree") else now)
     with _HISTORY_LOCK:
-        keys = part["sortKeys"].get((tab, now))
+        keys = part["sortKeys"].get(slot)
     if keys is None:
         keys = {id(r): sort_key(r, tab, now) for r in part["rows"]}
         with _HISTORY_LOCK:
-            part["sortKeys"][(tab, now)] = keys
+            part["sortKeys"][slot] = keys
     return keys
+
+
+def warm_history(view, request, max_age):
+    """Background warm-up: the part, the sort keys of every tab, and the shared file with those keys."""
+    import legacy.ledger as ledger
+    from .calc.payment_terms import taipei_date
+    part = _history_part(view, request, max_age)
+    with _HISTORY_LOCK:
+        unverified = _HISTORY.get("value") is part and _HISTORY.get("checked") == 0
+    if unverified:   # read from the shared file: compare the content digests now, not in a user's request
+        part = _history_part(view, request, max_age)
+    now = taipei_date(None)
+    missing = [tab for tab in TAB_KEYS if (tab, None if part.get("dateFree") else now) not in part["sortKeys"]]
+    for tab in missing:
+        _history_keys(part, tab, now)
+    if missing and part["identity"] is not None and ledger._cache_enabled() and ledger._snapshot_enabled():
+        cheap = _cheap_signature(ledger)
+        with _HISTORY_LOCK:
+            current = _HISTORY.get("value") is part and _HISTORY.get("cheap") == cheap
+        if current:
+            with ledger.snapshot_lock(".part.lock"):
+                ledger._write_snapshot(_part_file(ledger), _part_to_file(part, cheap))
+    return part
+
+
+def recently_used(seconds):
+    import time
+    with _HISTORY_LOCK:
+        used = _HISTORY.get("used")
+    return used is not None and time.monotonic() - used < seconds
 
 
 def _merged(view, request):
@@ -380,6 +479,9 @@ def page_response(view, request):
     from .calc.payment_terms import taipei_date
     params = request.query_params
     rows, currencies, batches, case_histories, history = _merged(view, request)
+    import time
+    with _HISTORY_LOCK:
+        _HISTORY["used"] = time.monotonic()   # the warm-up does the minute content check while the screen is in use
     options = {**party_options(rows), "currencies": currencies}
     if params.get("view") == "options":
         return Response(json_roundtrip({"ok": True, "options": options}))

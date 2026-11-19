@@ -87,7 +87,11 @@ class ImportView(NoStoreMixin,APIView):
             return Response(_batch(discard(request.ri_principal,body['id'])))
         if body.get('action')!='commit' or not isinstance(body.get('id'),str) or not isinstance(body.get('sha256'),str):
             fail('Upload an XLSX file to preview, or commit a reviewed batch.')
-        return Response(_batch(commit(request.ri_principal,body['id'],body['sha256'])))
+        result=Response(_batch(commit(request.ri_principal,body['id'],body['sha256'])))
+        from django.db import transaction
+        from .warm import poke   # 2026-11-19: rebuild the Accounting history at once (only the new rows are computed)
+        transaction.on_commit(poke)
+        return result
 
 
 def _batch(b):

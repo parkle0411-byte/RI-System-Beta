@@ -269,11 +269,11 @@ def _compute_accounting_data():
 
 # ---- 2026-11-10 效能：Accounting 舊案歷史結果快取（業主同意；小改，回應逐位元組相同） ----
 # 歷史交易（3,693 筆 → 11,079 列）每次 Accounting 都重算，約 3 秒。歷史交易的結果只取決於
-# 該列內容與台北日期（全部已結清，狀態不受時刻影響），所以用「歷史資料指紋＋台北日期」當鑰匙：
-# - 指紋由 MySQL 對每列「除 original（原始 Excel，計算不用）以外的全部欄位」取 MD5 再合併，
+# 該列內容（全部已結清，狀態不受時刻影響；2026-11-17 起不再看台北日期，2026-11-19 起逐筆，見下方）：
+# - 指紋由 MySQL 對每列「除 original（原始 Excel，計算不用）以外的全部欄位」取 MD5，
 #   直接改資料庫（不加版本、不改 updated_at）、增減列、改狀態都會被發現。
 # - 新增的批單／理賠（historical=False）會受對帳批次與當下時間影響，每次照常重算，不快取。
-# - 每個 gunicorn worker 只記一份；計算前後指紋或日期不同就不記。
+# - 每個 gunicorn worker 記一份（另有共用快照檔）；讀取期間資料有變時不當作完整結果。
 # - 排序與原本相同（reference、uid）；歷史／新增的集合和排序清單對不上時，改用完整計算。
 # - 回傳每列與每件的淺層複本；RI_LEGACY_RESULT_CACHE=false 可整個關掉（與原本完全相同）。
 _CACHE_LOCK=threading.Lock()
@@ -303,15 +303,22 @@ def _fingerprint(qs):
 
 
 # ---- 2026-11-17 業主決定（All Accounts 第一次載入太慢）：已結清歷史的計算結果存成一份共用快照檔 ----
-# 已結清的匯入歷史不會再變；實測把日期往後推 1／400／3,000 天，6,094 筆結果全部相同，所以快照只看
-# 「歷史內容指紋」與「計算程式版本」（legacy／cases 的 Python 原始碼雜湊），不再隨台北日期重算。
-# 一份檔案（pickle＋zlib，放在容器的 /tmp，只有後端自己寫）給同一容器的 4 個 worker 共用：只有拿到檔案鎖的
-# worker 會計算，其他 worker 等它算完直接讀檔（實測 6,094 筆：計算約 6.7 秒、讀檔約 0.7 秒）。
-# 交易內容或程式任何一邊變了，鑰匙就不同，會重算一次。RI_LEGACY_HISTORY_SNAPSHOT=false 可關掉這一層。
+# 已結清的匯入歷史不會再變；實測把日期往後推 1／400／3,000 天，6,094 筆結果全部相同，所以不隨台北日期重算。
+# ---- 2026-11-19 業主決定：逐筆記住、匯入時只算新增的列 ----
+# 11,457 筆時，匯入後第一次打開 All Accounts 要整份重算約 35 秒（2 萬筆會接近單一請求 60 秒的上限）。改為每筆
+# 以「該列內容指紋」（除 original 外全部欄位的 MD5，與未結清快取相同）對應它的結果：每次讀取先用一個查詢取得
+# 全部指紋（成本與原本的整份指紋相同），只有指紋不同或新出現的列才計算，所以匯入 5,000 筆只算那 5,000 筆。
+# - 一份快照檔（pickle＋zlib，容器的 /tmp，只有後端自己寫）給同一容器的 4 個 worker 共用：拿到檔案鎖的 worker
+#   計算缺少的列並寫回，其他 worker 等它算完直接讀檔。檔名含計算程式版本（legacy／cases 的 Python 原始碼雜湊），
+#   程式更新後整份重算一次。RI_LEGACY_HISTORY_SNAPSHOT=false 時只記在 worker 記憶體。
+# - 直接改資料庫（不加版本、不改 updated_at）、增減列、改狀態都會改變該列指紋，下一次讀取就重算那一列。
+# - 資料與指紋在同一個查詢取得，記住的結果一定對應它自己的內容；讀取期間資料有變時，這次結果照用但不當作完整。
 import fcntl, hashlib, pickle, tempfile, zlib
+from contextlib import contextmanager
 from pathlib import Path
 
 _LOGIC=None
+_TRUST=threading.local()
 
 
 def _snapshot_dir():
@@ -327,7 +334,7 @@ def logic_version():
     global _LOGIC
     if _LOGIC is None:
         from django.conf import settings
-        base=Path(settings.BASE_DIR);h=hashlib.sha256(b'legacy-history-snapshot-v1')
+        base=Path(settings.BASE_DIR);h=hashlib.sha256(b'legacy-history-snapshot-v2')
         for app in ('legacy','cases'):
             for path in sorted((base/app).rglob('*.py')):
                 rel=path.relative_to(base).as_posix()
@@ -337,60 +344,123 @@ def logic_version():
     return _LOGIC
 
 
-def _snapshot_file(fingerprint):
-    return _snapshot_dir()/f'{logic_version()}-{fingerprint[0]}-{fingerprint[1]}.pickle.z'
+def _results_file():
+    return _snapshot_dir()/f'{logic_version()}-results.pickle.z'
+
+
+def _snapshot_kind(path):
+    return 'part' if path.name.endswith('-part.pickle.z') else 'results'
 
 
 def _read_snapshot(path):
     try:
         with open(path,'rb') as f:return pickle.loads(zlib.decompress(f.read()))
-    except (OSError,zlib.error,pickle.UnpicklingError,EOFError,ValueError):
+    except (OSError,zlib.error,pickle.UnpicklingError,EOFError,ValueError,AttributeError,ImportError,IndexError,TypeError):
         return None
 
 
 def _write_snapshot(path,value):
-    """Atomic write (temporary file, then rename); older snapshots are removed."""
-    tmp=path.with_name(path.name+f'.{os.getpid()}.tmp')
+    """Atomic write (temporary file, then rename); older snapshots of the same kind are removed."""
+    path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+    tmp=path.with_name(path.name+f'.{os.getpid()}.{threading.get_ident()}.tmp')
     with open(tmp,'wb') as f:f.write(zlib.compress(pickle.dumps(value,protocol=5),1))
     os.replace(tmp,path)
     for old in path.parent.glob('*.pickle.z'):
-        if old!=path:
+        if old!=path and _snapshot_kind(old)==_snapshot_kind(path):
             try:old.unlink()
             except OSError:pass
 
 
-def _computed(qs):
-    return {str(t.uid):_accounting_one(t) for t in sorted_rows(qs,'reference','uid')}
+@contextmanager
+def snapshot_lock(name):
+    """Cross-worker lock (one file per name in the snapshot folder)."""
+    folder=_snapshot_dir();folder.mkdir(mode=0o700,parents=True,exist_ok=True)
+    with open(folder/name,'a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        try:yield
+        finally:fcntl.flock(lock,fcntl.LOCK_UN)
+
+
+def history_digests():
+    """[(uid, content digest)] of every settled historical row: one query, no ordering (no large sort)."""
+    qs=historical_queryset().order_by().annotate(row_digest=_row_digest())
+    return [(str(uid),digest) for uid,digest in qs.values_list('uid','row_digest')]
+
+
+def history_identity(digests):
+    """Count and combined digest of the whole settled history (changes with any row, added or removed row)."""
+    h=hashlib.md5()
+    for uid,digest in sorted(digests):h.update(f'{uid}:{digest};'.encode())
+    return (len(digests),h.hexdigest())
+
+
+@contextmanager
+def trusting(identity):
+    """Inside the block, _historical_results() reuses the remembered result of exactly this identity without
+    reading the digests again (the caller has just read them)."""
+    _TRUST.identity=identity
+    try:yield
+    finally:_TRUST.identity=None
+
+
+def _missing(entries,wanted):
+    return [uid for uid,digest in wanted if entries.get(uid,(None,))[0]!=digest]
+
+
+def _merge(entries,stored,wanted):
+    if isinstance(stored,dict):
+        for uid,digest in wanted:
+            item=stored.get(uid)
+            if entries.get(uid,(None,))[0]!=digest and isinstance(item,tuple) and len(item)==2 and item[0]==digest:
+                entries[uid]=item
+
+
+def _fill(entries,missing):
+    """Compute only the given rows; data and digest come from the same query."""
+    for start in range(0,len(missing),500):
+        for t in historical_queryset().filter(pk__in=missing[start:start+500]).annotate(row_digest=_row_digest()):
+            entries[str(t.uid)]=(t.row_digest,_accounting_one(t))
+
+
+def history_state():
+    """(results by uid, identity, complete): results of every settled historical row, computing only rows whose
+    content digest is not remembered (in this worker or in the shared snapshot file)."""
+    digests=history_digests();identity=history_identity(digests)
+    with _CACHE_LOCK:
+        if _CACHE.get('identity')==identity:return _CACHE['value'],identity,True
+        entries=dict(_CACHE.get('entries') or {})
+    if _missing(entries,digests) and _snapshot_enabled():
+        path=_results_file()
+        _merge(entries,_read_snapshot(path) if path.exists() else None,digests)
+        if _missing(entries,digests):
+            with snapshot_lock('.lock'):   # one worker computes; the others wait and then read its file
+                _merge(entries,_read_snapshot(path) if path.exists() else None,digests)
+                missing=_missing(entries,digests)
+                if missing:
+                    _fill(entries,missing)
+                    current={uid for uid,_ in digests}
+                    _write_snapshot(path,{uid:item for uid,item in entries.items() if uid in current})
+    else:
+        missing=_missing(entries,digests)
+        if missing:_fill(entries,missing)
+    current={uid for uid,_ in digests}
+    entries={uid:item for uid,item in entries.items() if uid in current}
+    value={uid:entries[uid][1] for uid,_ in digests if uid in entries}
+    complete=not _missing(entries,digests)
+    with _CACHE_LOCK:
+        if complete:
+            _CACHE.clear();_CACHE.update(identity=identity,entries=entries,value=value)
+        else:   # a row changed while it was read: use this result once, remember only rows that match their own content
+            _CACHE.clear();_CACHE.update(entries=entries)
+    return value,identity,complete
 
 
 def _historical_results():
-    qs=historical_queryset()
-    fingerprint=_fingerprint(qs);key=fingerprint
-    with _CACHE_LOCK:
-        hit=_CACHE.get('value') if _CACHE.get('key')==key else None
-    if hit is not None:return hit
-    if not _snapshot_enabled():
-        hit=_computed(qs)
-        if _fingerprint(qs)==key:
-            with _CACHE_LOCK:_CACHE.clear();_CACHE.update(key=key,value=hit)
-        return hit
-    folder=_snapshot_dir();folder.mkdir(mode=0o700,parents=True,exist_ok=True)
-    path=_snapshot_file(fingerprint)
-    hit=_read_snapshot(path) if path.exists() else None
-    if hit is None:
-        with open(folder/'.lock','a') as lock:
-            fcntl.flock(lock,fcntl.LOCK_EX)   # one worker computes; the others wait and then read its file
-            try:
-                hit=_read_snapshot(path) if path.exists() else None
-                if hit is None:
-                    hit=_computed(qs)
-                    if _fingerprint(qs)!=key:return hit   # changed while computing: use it, keep nothing
-                    _write_snapshot(path,hit)
-            finally:
-                fcntl.flock(lock,fcntl.LOCK_UN)
-    with _CACHE_LOCK:
-        _CACHE.clear();_CACHE.update(key=key,value=hit)
-    return hit
+    trusted=getattr(_TRUST,'identity',None)
+    if trusted is not None:
+        with _CACHE_LOCK:
+            if _CACHE.get('identity')==trusted:return _CACHE['value']
+    return history_state()[0]
 
 
 # ---- 2026-11-13 效能：未結清舊資料（historical=False）的每筆結果快取（業主同意；回應內容不變） ----
