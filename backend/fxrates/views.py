@@ -124,9 +124,10 @@ class FxRatesView(NoStoreMixin, APIView):
 
         with monthly_operation(year_month), transaction.atomic():
             from production.calc import is_historical, start_month
-            if is_historical(year_month):
-                # 2026-11-15 owner decision: historical months are treated as closed, FX included.
-                return Response({"error": "month_locked", "message": f"Months before {start_month()} are historical and treated as closed; their FX rates are locked."}, status=409)
+            # 2026-11-19 owner decision (replaces the 11-15 full lock): a historical month (before the
+            # Production start month) can be filled in once while it has no rates; the saved rates are
+            # locked at once. Production still treats the month as closed.
+            historical = is_historical(year_month)
             if ProductionReport.objects.filter(year_month=year_month, status="closed").exists():
                 return Response({"error": "month_locked", "message": "This Performance month is locked because its Production Report is closed."}, status=409)
             existing = {
@@ -134,6 +135,8 @@ class FxRatesView(NoStoreMixin, APIView):
                 for r in FxRate.objects.select_for_update().filter(year_month=year_month)
             }
 
+            if historical and existing:
+                return Response({"error": "month_locked", "message": f"Months before {start_month()} are historical: their FX rates can be entered once and are then locked."}, status=409)
             if any(r.is_locked for r in existing.values()):
                 return Response(
                     {
@@ -183,6 +186,8 @@ class FxRatesView(NoStoreMixin, APIView):
                         rate=row["rate"],
                         created_by=actor,
                         updated_by=actor,
+                        **({"is_locked": True, "locked_by": actor, "locked_at": now,
+                            "lock_reason": f"Historical month (before {start_month()}): entered once"} if historical else {}),
                     )
                     saved.append(created)
 

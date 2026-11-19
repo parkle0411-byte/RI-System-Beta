@@ -1,6 +1,6 @@
 <script setup>
 // 移植自 Alpha index.html 的 activeView === 'fxrates' 與 app.js 的 loadFxRates()／populateFxMonth()／openFxDialog()／saveFxRate()。
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiFetch } from '../api'
 import { can } from '../auth'
@@ -12,6 +12,7 @@ const fxLoading = ref(false)
 const fxSaving = ref(false)
 const fxDialogVisible = ref(false)
 const fxRates = ref([])
+const fxPolicy = ref({})
 const fxForm = reactive({ yearMonth: currentMonth(), existingMonth: false, rates: FX_CURRENCIES.map((currency) => ({ currency, rate: null, rowVersion: null, isLocked: false })) })
 
 async function loadFxRates() {
@@ -22,6 +23,7 @@ async function loadFxRates() {
     const body = await response.json()
     if (!response.ok) throw new Error(body.message || body.error || ('HTTP ' + response.status))
     fxRates.value = Array.isArray(body.rates) ? body.rates : []
+    fxPolicy.value = body.policy && typeof body.policy === 'object' ? body.policy : {}
   } catch (err) {
     shell.error = err instanceof Error ? err.message : String(err)
   } finally {
@@ -43,6 +45,9 @@ function populateFxMonth(yearMonth) {
     }
   })
 }
+
+// 2026-11-19 owner: a month before the Production start month can be filled in once; the saved rates are locked.
+const historicalMonth = computed(() => Boolean(fxPolicy.value.historicalBeforeMonth && fxForm.yearMonth && fxForm.yearMonth < fxPolicy.value.historicalBeforeMonth))
 
 function openFxDialog(row = null) {
   fxForm.yearMonth = row?.yearMonth || currentMonth()
@@ -109,6 +114,7 @@ onMounted(loadFxRates)
   <el-dialog v-model="fxDialogVisible" class="master-dialog" width="min(680px, 94vw)" :close-on-click-modal="false">
     <template #header><div class="review-heading"><span class="pending-badge">{{ fxForm.existingMonth ? 'Versioned monthly update' : 'New monthly rates' }}</span><h2>Performance month FX rates</h2><p>All {{ FX_CURRENCIES.length }} Rate to TWD values are required and saved together.</p></div></template>
     <el-form label-position="top" @submit.prevent>
+      <el-alert v-if="historicalMonth" data-testid="fx-historical-once" type="warning" :closable="false" show-icon :title="'Months before ' + fxPolicy.historicalBeforeMonth + ' can be entered once'" description="Historical months are treated as closed. Their rates can be saved once while the month has none; the saved rates are then locked." style="margin-bottom:12px" />
       <el-form-item label="Performance month" required><el-date-picker v-model="fxForm.yearMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" style="width:100%" @change="onFxMonthChange"></el-date-picker></el-form-item>
       <el-table :data="fxForm.rates" row-key="currency" class="case-table" size="small">
         <el-table-column prop="currency" label="Currency" width="150"><template #default="{ row }"><strong>{{ row.currency }}</strong></template></el-table-column>

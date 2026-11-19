@@ -102,8 +102,17 @@ try:
         past = preview('2050-09')
         check('historical month lists its imported row read-only as recognized Production',
               [x.get('legacyTransactionId') for x in past['rows']] == [str(hist_premium.uid)] and past['scope']['historicalMonth'], past['rows'][:1])
+        # 2026-11-19 owner: a historical month can be filled in once (while it has no rates); the rates are then locked.
         r = api(FxRatesView, 'post', dict(yearMonth='2050-10', rates=[dict(currency=cur, rate=30, rowVersion=None) for cur in CURRENCIES]), 'accounting_manager')
-        check('historical month FX is locked', r.status_code == 409 and r.data.get('error') == 'month_locked', r.data)
+        check('historical month without rates: the first FX entry is accepted', r.status_code == 200, r.data)
+        saved = list(FxRate.objects.filter(year_month='2050-10'))
+        check('historical month FX is locked as soon as it is saved', len(saved) == len(CURRENCIES) and all(x.is_locked and 'entered once' in (x.lock_reason or '') for x in saved), [(x.currency, x.is_locked, x.lock_reason) for x in saved])
+        r = api(FxRatesView, 'post', dict(yearMonth='2050-10', rates=[dict(currency=x.currency, rate=31, rowVersion=x.row_version) for x in saved]), 'accounting_manager')
+        check('historical month FX cannot be changed after the one entry', r.status_code == 409 and r.data.get('error') == 'month_locked' and 'entered once' in r.data.get('message', ''), r.data)
+        check('the refused change leaves the saved rates as they were', sorted(float(x.rate) for x in FxRate.objects.filter(year_month='2050-10')) == [30.0] * len(CURRENCIES))
+        r = api(FxRatesView, 'get', {}, 'accounting_manager')
+        listed = [x for x in r.data['rates'] if x['yearMonth'] == '2050-10']
+        check('FX list shows the historical month as Locked', len(listed) == len(CURRENCIES) and all(x['isLocked'] for x in listed), listed[:1])
         # Dashboard: historical months are closed and show Legacy income; native income moves to the start month.
         rows = [{'id': c.pk, 'parent_case_id': None, 'status': c.status, 'payload': c.payload, 'announced_at': '2050-10-05T11:00:00+08:00', 'created_at': '2050-10-01T00:00:00+08:00'}]
         legacy = {'policies': [], 'outstanding': [], 'trend': [{'month': '2050-09', 'incomeTwd': 700}, {'month': '2050-11', 'incomeTwd': 950}]}
