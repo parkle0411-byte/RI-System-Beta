@@ -28,6 +28,40 @@ def fail(code, message, status=409, **extra):
     return Response({'ok': False, 'error': code, 'message': message, **extra}, status=status)
 
 
+# 2026-11-19 業主決定：付給這兩家 Facility 的帳由 Reinsurance Staff 對帳。
+# Reinsurance Staff 只能 Mark reviewed「應付給這兩家」的帳款（保費，或理賠退回），且只能取消自己做的審核；
+# 登錄收付款與其他 Finance 操作仍只有 Finance。
+FACILITY_REVIEW_PERMISSION = 'accounting.review.facility_payables'
+FACILITY_PAYABLE_REVIEW = ('Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)',
+                           'Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)')
+
+
+def facility_payable(payload, no, detail):
+    """帳款是否為「應付給上述兩家」（新系統與舊資料都適用）。
+    再保人依帳款自己的再保人序號判斷（畫面上的對象名稱已去掉 "(Facility)"，不能用來比對）。"""
+    from .accounting_policy import normalized, rows
+    from .payment_policy import claim_source
+    if detail.get('paymentDirection') != 'payable' or detail.get('partyType') != 'reinsurer' or detail.get('cashTracking') == 'derived':
+        return False
+    tx = next((t for t in objects(payload.get('transactions')) if t.get('txNo') == no), None)
+    if tx is None or tx.get('reversed') or tx.get('isReversalEntry'):
+        return False
+    if tx.get('source') == 'claim':
+        name = claim_source(payload, tx)[1]
+    else:
+        index = tx.get('reinsurerIdx'); names = [r.get('name') for r in rows(payload.get('reinsurers'))]
+        name = names[index] if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(names) else ''
+    return normalized(name) in {normalized(n) for n in FACILITY_PAYABLE_REVIEW}
+
+
+def review_rights(person):
+    """回傳 (finance, allowed)：Finance 可審核／取消任何帳款；Reinsurance Staff 只限這兩家的應付帳款與自己的審核。"""
+    from .accounting_views import _can_edit
+    from ri_system.authz import has_permission
+    finance = _can_edit(person)
+    return finance, finance or has_permission(person, FACILITY_REVIEW_PERMISSION)
+
+
 def counterparty(payload, detail):
     return (str(detail.get('currency') or payload.get('currency') or '').upper(), ' '.join(str(detail.get('partyName') or '').split()).casefold())
 
@@ -43,7 +77,9 @@ def review_batches():
     """One logical active batch per counterparty across currencies; retain original review events.
 
     Group on read so existing review records need no migration or destructive rewrite.
-    Writers hold the shared Accounting source lock and cancel the whole logical group.
+    Writers hold the shared Accounting source lock.
+    2026-11-19：取消可以是整個對象批次、取消者自己的審核，或單筆帳款；單筆取消記在該次審核的
+    cancelled_members，這些帳款不再屬於有效批次（原始審核內容保留不動）。
     """
     from .models import FinanceReconciliationBatch
     groups = {}; history = []
@@ -57,14 +93,18 @@ def review_batches():
             batch = copy.copy(original)
             batch.members = []
             batch.currencies = []
+            batch.cancelled = []
             groups[key] = batch
         batch = groups[key]
         if original.currency.upper() not in batch.currencies:
             batch.currencies.append(original.currency.upper())
+        gone = {(m.get('caseUid'), m.get('txNo')) for m in objects(original.cancelled_members)}
+        batch.cancelled.extend({**m, 'reviewEventId': str(original.pk)} for m in objects(original.cancelled_members))
         batch.members.extend({**member, 'reviewEventId': str(original.pk),
             'reviewDate': str(original.review_date), 'reviewReference': original.reference,
-            'reviewNote': original.note, 'reviewedByName': original.created_by_name,
-            'reviewedAt': original.created_at.isoformat(), 'currency': original.currency.upper()} for member in original.members)
+            'reviewNote': original.note, 'reviewedBy': original.created_by, 'reviewedByName': original.created_by_name,
+            'reviewedAt': original.created_at.isoformat(), 'currency': original.currency.upper()}
+            for member in original.members if (member.get('caseUid'), member.get('txNo')) not in gone)
     return [*groups.values(), *history]
 
 
@@ -90,6 +130,7 @@ def review_fields(uid, no, payload, detail, reviews):
             'reviewReference': pair[1]['reviewReference'] if valid else '',
             'reviewNote': pair[1]['reviewNote'] if valid else '',
             'reviewedByName': pair[1]['reviewedByName'] if valid else '',
+            'reviewedBy': pair[1].get('reviewedBy', '') if valid else '',
             'reviewCurrencies': batch.currencies if valid else []}
 
 
@@ -140,9 +181,10 @@ def save_all(view, request, cases, payloads, action, metadata):
 
 def reconcile(view, request, body):
     from .models import Case, FinanceReconciliationBatch
-    from .accounting_views import _can_edit, _real_date
+    from .accounting_views import _real_date
     from ri_system.authz import actor_from
-    if not _can_edit(request.ri_principal):
+    finance, allowed = review_rights(request.ri_principal)
+    if not allowed:
         return fail('permission_denied', 'Finance access is required.', 403)
     reference = str(body.get('reference') or '').strip(); note = str(body.get('note') or '').strip()
     if not _real_date(body.get('date')) or len(reference) > 200 or len(note) > 1000:
@@ -165,6 +207,8 @@ def reconcile(view, request, body):
             return fail('review_not_allowed', 'Select active T1/T2 or claim accounts.')
         if (uid, no) in reviews:
             return fail('already_reviewed', 'Cancel the existing whole review batch before reviewing this account again.')
+        if not finance and not facility_payable(p, no, d):   # Reinsurance Staff：只限這兩家的應付帳款
+            return fail('permission_denied', 'Reinsurance Staff can review only accounts payable to Swiss Re Asia or Allianz (Facility).', 403)
         group = counterparty(p, d)
         if not all(group) or scope is not None and group[1] != scope:
             return fail('review_scope', 'Review accounts for one counterparty per batch.', 400)
@@ -184,44 +228,81 @@ def reconcile(view, request, body):
 
 def cancel_review(view, request, body):
     from .models import Case, FinanceReconciliationBatch
-    from .accounting_views import _can_edit
     from ri_system.authz import actor_from
     from django.utils import timezone
-    if not _can_edit(request.ri_principal):
+    finance, allowed = review_rights(request.ri_principal)
+    if not allowed:
         return fail('permission_denied', 'Finance access is required.', 403)
     note = str(body.get('reason') or '').strip()
     if not note or len(note) > 1000:
         return fail('reason_required', 'Enter the reason for cancelling this entire review batch.', 400)
+    # 2026-11-19 業主決定：scope='batch'（取消整批；未指定時與原本相同）或 'account'（只取消這一筆）。
+    #   Finance：整批＝整個對象批次；單筆可取消任何人審的帳款。
+    #   Reinsurance Staff：整批＝本人在這個對象審過的全部帳款；單筆只限本人審的。其他人審的不動。
+    scope = body.get('scope') or 'batch'
+    if scope not in ('batch', 'account'):
+        return fail('invalid_scope', 'Choose to cancel this account only or the whole batch.', 400)
+    actor = actor_from(request.ri_principal); me = str(actor['id'])
     try:
         # Lock every event, including events created by later reviews for this group.
         from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序並鎖定編號，再讀整筆
         events = sorted_rows(FinanceReconciliationBatch.objects.select_for_update().filter(status='active'), 'created_at', 'id')
         original = next(b for b in events if str(b.pk) == str(body.get('reviewBatchId')))
-        scope = ' '.join(original.party_name.split()).casefold()
-        events = [b for b in events if ' '.join(b.party_name.split()).casefold() == scope]
+        party = ' '.join(original.party_name.split()).casefold()
+        events = [b for b in events if ' '.join(b.party_name.split()).casefold() == party]
         batch = next(b for b in review_batches() if b.status == 'active' and str(b.pk) == str(events[0].pk))
         supplied = body.get('members')
-        if {(m['caseUid'], m['txNo']) for m in supplied} != {(m['caseUid'], m['txNo']) for m in batch.members}:
-            raise ValueError()
+        keys = {(m['caseUid'], m['txNo']) for m in supplied}
+        if scope == 'account':
+            targets = [m for m in batch.members if (m['caseUid'], m['txNo']) in keys]
+            if len(supplied) != 1 or len(targets) != 1:
+                raise ValueError()
+            if not finance and targets[0].get('reviewedBy') != me:
+                return fail('own_reviews_only', 'Reinsurance Staff can cancel only the reviews they made.', 403)
+        else:
+            targets = batch.members if finance else [m for m in batch.members if m.get('reviewedBy') == me]
+            if not targets:
+                return fail('own_reviews_only', 'Reinsurance Staff can cancel only the reviews they made.', 403)
+            if keys != {(m['caseUid'], m['txNo']) for m in targets}:
+                raise ValueError()
         cases = locked_cases(supplied, max_accounts=None)
     except (StopIteration, FinanceReconciliationBatch.DoesNotExist, ValidationError, ValueError, TypeError, KeyError, AttributeError):
         return fail('whole_review_required', 'Reload and cancel every account in the original review batch together.')
     for uid, case in cases.items():
         details = transaction_details(case.payload)
-        for member in batch.members:
+        for member in targets:
             if member['caseUid'] != uid:
                 continue
             d = details.get(member['txNo'], {})
             if any(abs(cents(e.get('appliedAmount', 0))) for e in effective_entries(d.get('entries', []))):
                 return fail('review_payment_locked', 'Reverse active receipt/payment and offset registrations before cancelling the whole review batch.')
-    actor = actor_from(request.ri_principal)
     stamp = timezone.now()
-    for event in events:
-        event.status = 'cancelled'; event.cancelled_at = stamp; event.cancelled_by = str(actor['id'])
+    def close(event):
+        event.status = 'cancelled'; event.cancelled_at = stamp; event.cancelled_by = me
         event.cancelled_by_name = actor['name']; event.cancel_reason = note
-        event.save(update_fields=['status', 'cancelled_at', 'cancelled_by', 'cancelled_by_name', 'cancel_reason'])
+    if finance and scope == 'batch':
+        for event in events:   # 原本的做法：整個對象批次一起取消
+            close(event)
+            event.save(update_fields=['status', 'cancelled_at', 'cancelled_by', 'cancelled_by_name', 'cancel_reason'])
+    else:
+        # 只把指定帳款記為已取消；該次審核的帳款全部取消時，整次審核改為已取消。
+        by_event = {}
+        for m in targets:
+            by_event.setdefault(m['reviewEventId'], []).append(m)
+        for event in events:
+            chosen = by_event.get(str(event.pk))
+            if not chosen:
+                continue
+            event.cancelled_members = [*objects(event.cancelled_members), *({'caseUid': m['caseUid'], 'txNo': m['txNo'],
+                'cancelledAt': stamp.isoformat(), 'cancelledBy': me, 'cancelledByName': actor['name'], 'reason': note} for m in chosen)]
+            fields = ['cancelled_members']
+            gone = {(m.get('caseUid'), m.get('txNo')) for m in event.cancelled_members}
+            if all((m.get('caseUid'), m.get('txNo')) in gone for m in objects(event.members)):
+                close(event); fields += ['status', 'cancelled_at', 'cancelled_by', 'cancelled_by_name', 'cancel_reason']
+            event.save(update_fields=fields)
     error = save_all(view, request, cases, {uid: copy.deepcopy(c.payload) for uid, c in cases.items()},
-                     'finance_review_cancelled', {'reviewBatchId': str(batch.pk), 'reason': note})
+                     'finance_review_cancelled', {'reviewBatchId': str(batch.pk), 'reason': note, 'scope': scope,
+                                                  'accounts': [m['txNo'] for m in targets]})
     return error or Response({'ok': True, 'reviewBatchId': str(batch.pk)})
 
 

@@ -308,7 +308,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 操作者只有 Finance Staff、Finance Manager、System Administrator；業務與 President 保留唯讀。
 - 「已對帳」＝財會已核對內容與金額，不要求對方同時確認，也不代表已收付。T1／T2、理賠及 Oversea 現金 T3 均須先對帳；歷史已對帳／已結清資料及既有收付歷史保留，不補造銀行紀錄。
 - 同一實際對象可跨案、跨期、跨幣別對帳，同對象全部有效對帳合為一個邏輯批次，原始各次對帳事件與幣別保留。對帳日期必填，Review reference／Explanation 選填。
-- 取消對帳須填原因，整個對象批次一起取消。任何幣別成員有有效收付或歷史抵銷時，先依原沖回限制處理；任何成員變動均須取消整批並重新對帳。
+- 取消對帳須填原因；可選**只取消這一筆**或**取消整批**（2026-11-19 業主決定）：Finance 的整批＝整個對象批次（原做法），單筆可取消任何人審的；Reinsurance Staff 只能取消自己審的（整批＝本人在這個對象審過的全部，其他人審的不動）。單筆取消記在該次審核紀錄（取消人、時間、原因），原始審核內容保留；一次審核的帳款全部取消時，該次審核改為已取消。要取消的帳款有有效收付或歷史抵銷時，先依原沖回限制處理；任何成員變動均須取消整批並重新對帳。
 - 停止一切新增抵銷／純抵銷，僅登錄實際現金收款與付款。既有抵銷繼續反映餘額與收付前置條件，保留查閱及合法整筆沖回。
 - Record Selected 可選同一實際對象的多個幣別、兩種方向，逐列 Cash Amount 預帶 Outstanding，可修改。系統按幣別與方向建立獨立收款／付款登錄，不互抵，不跨幣別加總。台幣 Cash Amount 只准整數（2026-11-14），輸入小數該列失敗並提示；外幣最多兩位。
 - 同畫面待登錄列共用實際收付款日期、Accounting Dept. Ref.／Note，參考號或說明至少一項；已完成登錄維持其原存日期與參考號，另記操作時間。
@@ -398,6 +398,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 角色權限以 `backend/ri_system/authz.py` 為準。重點：
   - **President**（Board of Directors 部門，目前 David Kao）：全部唯讀（Dashboard、全部案件含他人草稿、MDM、Production、Accounting、FX、全部人員）；**看不到文件區**；不能新增人員或帳號；所有部門都可選 President 當 Supervisor。
   - **Finance Staff／Finance Manager**：可看全部案件明細、流程、理賠，無案件寫入或文件權限；財務操作見 §8.3、§9。
+  - **Reinsurance Staff 的 Accounting（2026-11-19 業主決定）**：其他帳款唯讀；**應付給 Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility) 或 Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)** 的帳款（新系統與舊資料；保費或理賠退回，以帳款自己的再保人判斷）可在 Unreconciled Mark reviewed；不能登錄收付款、沖回、Swiss statement reference 或理賠追蹤；只能取消自己做的審核（權限 `accounting.review.facility_payables`）。T1、T3、向這兩家收的帳款及其他再保人仍只有 Finance。General Manager 不適用。
   - **Read-only Supervisor（legacy_supervisor）**：舊案專區、Accounting、Production、全部新系統案件、Dashboard、MDM、FX 唯讀；不因 Supervisor 指派取得人員或帳號建立權限。
   - **Case Viewer**：不能看 Insured Master（選單隱藏，API 403）。
   - **主管**（有人把他設為 Supervisor 即成立）：可看本人及同部門直屬下屬，可新增同部門下屬（角色固定：再保部 sales、財務部 accounting、其他 viewer）並為一般角色直屬下屬建立帳號；不能改既有人員。
@@ -542,6 +543,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-19 17:32 | Reinsurance Staff 可 Mark reviewed 應付給 Swiss Re Asia／Allianz（Facility）的帳款、只能取消自己的審核；取消審核可選單筆或整批（§8.3、§11）；migration `cases 0014`（審核紀錄加 cancelled_members） | `backups/facility_review_20261119_173255/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `facility-review-work/rollback.sh 20261119_173255`（已有單筆取消紀錄時會停止） | `ri-backend:before-facility-review-20261119_173255`／`ri-frontend:before-facility-review-20261119_173255` | 候選映像 API 137/137（新增 facility_payable_review 34 項）、畫面全部階段通過＋新階段 V 9 項（修正測試帳號與欄位定位後以 A＋V 重跑）；migrate 後權限與 Audit trigger 重新套用；正式後端逐檔一致；正式資料唯讀確認 4 位 Reinsurance Staff 取得權限、只有 Swiss Re T2 應付標為可審核 |
 | 11-19 | Dashboard Active Endorsements 含保期內的舊資料批單（只換後端） | `backups/dashboard_legacy_endorsements_20261119_154232`（原始碼） | `ri-backend:before-dashboard-legacy-endo-20261119_154232` | 候選映像 Dashboard 相關 API 10 組（新增 2 項，以舊程式及每列各算一張的錯誤版驗證會失敗）、畫面 A＋G；正式資料新舊比對只有 Active Endorsements 1→25 改變；無 migration、不改資料 |
 | 11-19 | Dashboard 件數（Total Bound YTD、Renewals Bound MTD、New Business MTD、續保率）含舊資料（只換後端） | `backups/dashboard_legacy_bound_20261119_141234`（原始碼） | `ri-backend:before-dashboard-legacy-bound-20261119_141234` | 候選映像 Dashboard 相關 API 10 組（新組 13 項，以舊程式及只看保單號的錯誤版驗證會失敗）、畫面 A＋G；正式資料新舊比對只有 Total Bound YTD 1→636、Prior-Year 0→1,689、續保率 N/A→33.5% 改變；無 migration、不改資料 |
 | 11-19 | 已結清舊資料歷史逐筆快取（匯入只算新的列）、畫面格式與排序鍵共用快照、匯入後立即預建（只換後端） | `backups/legacy_history_rows_20261119_124425`（原始碼） | `ri-backend:before-legacy-history-rows-20261119_124425` | 候選映像全部 API 測試組與全部畫面測試；新檢查以舊程式驗證會失敗；正式資料（11,495 筆）新舊回應 19 個逐位元組相同、`run_qa.sh pages` 通過；無 migration、不改資料 |
@@ -604,6 +606,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-19：Reinsurance Staff 可在 Accounting 的 Unreconciled 對應付給 Swiss Re Asia／Allianz（Facility）的帳款 Mark reviewed，不能登錄收付款，只能取消自己的審核；Cancel review batch 改為可選「只取消這一筆」或「取消整批」（Finance 與 Reinsurance Staff 都有，Reinsurance Staff 的整批只含本人審的）。
 
 - 2026-11-19：Dashboard Active Endorsements 含保期內的舊資料批單（§10）。
 - 2026-11-19：Dashboard 新簽件數與續保率含舊資料（依 Revenue Month；保單號＋生效日算一件；§10）。

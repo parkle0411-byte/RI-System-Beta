@@ -171,4 +171,10 @@ case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" U "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 personnel_accounts_ui.py || STATUS=1
 esac
+# V：Reinsurance Staff 審核應付給 Swiss Re Asia／Allianz（Facility）的帳款、只能取消自己的審核（2026-11-19）。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U V} " in *" V "*)
+  docker exec -i ri-ut-backend python manage.py shell < qa/ui/facility_review_seed.py 2>&1 | grep -v -i "imported auto" || STATUS=1
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 facility_review_ui.py || STATUS=1
+esac
 exit $STATUS

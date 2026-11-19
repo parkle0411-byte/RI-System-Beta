@@ -34,12 +34,16 @@ function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',
 const money=(v,c)=>formatMoney(v,c), cents=v=>Math.round(Number(v||0)*100), label=s=>({open:'Open',partial:'Open',settled:'Settled',pending_confirmation:'Open',not_tracked:'Not tracked'})[s]||s
 const statusLabel=r=>r.reversed?'Reversed':r.isReversalEntry?'Reversal entry':label(r.settlement)
 const isBrokerage=computed(()=>tab.value==='brokerage')
-const canSelect=computed(()=>canEdit.value&&['unreconciled','reconciled'].includes(tab.value))
+// 2026-11-19 業主決定：Reinsurance Staff 只能在 Unreconciled 審核應付給 Swiss Re Asia／Allianz（Facility）的帳款，並取消自己的審核
+const canReviewFacility=ref(false), myPersonnelId=ref('')
+const canSelect=computed(()=>canEdit.value&&['unreconciled','reconciled'].includes(tab.value)||canReviewFacility.value&&tab.value==='unreconciled')
+const canReviewRow=r=>canEdit.value||canReviewFacility.value&&r.facilityPayable===true
+const canCancelReview=r=>canEdit.value||canReviewFacility.value&&!!r.reviewedBy&&r.reviewedBy===myPersonnelId.value
 const accountTitle=computed(()=>({all:'All Accounts',unreconciled:'Unreconciled Accounts',reconciled:'Reconciled Accounts',settled:'Settled/Closed',brokerage:'Brokerage'})[tab.value])
 const group=partyKey
 const compatible=r=>!selected.value.length||group(selected.value[0])===group(r)
 const active=activeAccount
-const selectable=r=>!r.legacyHistorical&&canSelect.value&&active(r)&&(tab.value==='unreconciled'?!r.financeReviewed:r.financeReviewed&&r.canRecord&&r.paymentAllowed!==false&&!r.statementNeedsRevision)
+const selectable=r=>!r.legacyHistorical&&canSelect.value&&active(r)&&(tab.value==='unreconciled'?!r.financeReviewed&&canReviewRow(r):r.financeReviewed&&r.canRecord&&r.paymentAllowed!==false&&!r.statementNeedsRevision)
 const eligible=r=>selectable(r)&&compatible(r)
 const isT3=r=>r.cashTracking==='derived'||String(r.legType||'').startsWith('Leg 3')
 const soa=r=>r.reconciliationRef||'Missing'
@@ -105,13 +109,17 @@ async function loadOptions(){try{const response=await apiFetch('/api/accounting?
 watch(pageQuery,query=>{clearTimeout(pageTimer);if(query)pageTimer=setTimeout(loadPage,0)})
 function findRow(list,row){return list.find(r=>r.caseUid===row.caseUid&&r.txNo===row.txNo&&!!r.scheduleOnly===!!row.scheduleOnly&&(!r.scheduleOnly||r.key===row.key))}
 function resolveHistoryRow(){if(!historyRow.value)return;historyRow.value=findRow(rows.value,historyRow.value)||findRow(serverPage.value.rows||[],historyRow.value)||(historyRow.value.legacyHistorical?historyRow.value:null)}
-function apply(b){rows.value=accountingRows(b);batches.value=b.cashBatches||[];reviewBatches.value=b.reviewBatches||[];currencies.value=b.currencies||[];canEdit.value=!!b.scope?.canEdit;warnings.value=(b.warnings||[]).filter(w=>w.dataError);caseHistories.value=b.caseHistories||{};selected.value=[];resolveHistoryRow();if(activeBatch.value)activeBatch.value=batches.value.find(x=>x.batchId===activeBatch.value.batchId)||null;refreshPaymentRows()}
+function apply(b){rows.value=accountingRows(b);batches.value=b.cashBatches||[];reviewBatches.value=b.reviewBatches||[];currencies.value=b.currencies||[];canEdit.value=!!b.scope?.canEdit;canReviewFacility.value=!canEdit.value&&!!b.scope?.canReviewFacilityPayables;myPersonnelId.value=b.scope?.personnelId||'';warnings.value=(b.warnings||[]).filter(w=>w.dataError);caseHistories.value=b.caseHistories||{};selected.value=[];resolveHistoryRow();if(activeBatch.value)activeBatch.value=batches.value.find(x=>x.batchId===activeBatch.value.batchId)||null;refreshPaymentRows()}
 async function post(body){const r=await apiFetch('/api/accounting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const b=await r.json();if(!r.ok){const e=new Error(b.message||b.error);e.status=r.status;throw e}return b}
 async function write(body,done){saving.value=true;try{const result=await post(body);done?.(result);ElMessage.success('Accounting updated');await load()}catch(e){reportWriteError(e,()=>load());await load()}finally{saving.value=false}}
 function members(targets){return targets.map(r=>({caseUid:r.caseUid,txNo:r.txNo,rowVersion:r.caseRowVersion}))}
 function openReview(targets){reviewTargets.value=[...targets];Object.assign(review,{date:today(),reference:'',note:''});reviewVisible.value=true}
 async function saveReview(){if(!review.date||!reviewTargets.value.length)return ElMessage.warning('Enter a review date and select at least one account.');await write({action:'review_accounts',date:review.date,reference:review.reference,note:review.note,members:members(reviewTargets.value)},()=>reviewVisible.value=false)}
-async function cancelReview(row){const batch=reviewBatches.value.find(b=>b.id===row.reviewBatchId);if(!batch)return;let reason;try{const x=await ElMessageBox.prompt('Cancel all '+batch.members.length+' accounts in this Finance review batch. Active receipt/payment and offset registrations must be reversed first.','Cancel entire review batch',{inputValidator:v=>!!v?.trim()||'A reason is required.'});reason=x.value}catch{return};await write({action:'cancel_review_batch',reviewBatchId:batch.id,members:batch.members.map(({caseUid,txNo,rowVersion})=>({caseUid,txNo,rowVersion})),reason})}
+// 2026-11-19：取消時可選只取消這一筆或整批；Reinsurance Staff 的整批＝本人在這個對象審過的全部
+const cancelForm=reactive({visible:false,row:null,batch:null,scope:'account',reason:''})
+const cancelBatchMembers=computed(()=>{const b=cancelForm.batch;if(!b)return [];return canEdit.value?b.members:b.members.filter(m=>m.reviewedBy===myPersonnelId.value)})
+function cancelReview(row){const batch=reviewBatches.value.find(b=>b.id===row.reviewBatchId);if(!batch)return;Object.assign(cancelForm,{visible:true,row,batch,scope:'account',reason:''})}
+async function saveCancelReview(){const {row,batch,scope}=cancelForm,reason=cancelForm.reason.trim();if(!reason)return ElMessage.warning('A reason is required.');const chosen=scope==='account'?[{caseUid:row.caseUid,txNo:row.txNo,rowVersion:row.caseRowVersion}]:cancelBatchMembers.value.map(({caseUid,txNo,rowVersion})=>({caseUid,txNo,rowVersion}));await write({action:'cancel_review_batch',reviewBatchId:batch.id,scope,members:chosen,reason},()=>cancelForm.visible=false)}
 function openPayment(targets,replacement=''){
  if(!targets.length)return
  Object.assign(payment,{date:today(),reference:'',note:'',replacement,submissionId:cashUuid(),
@@ -154,7 +162,7 @@ async function saveTerms(){const t=termsTarget.value;if(!t||!terms.reason.trim()
 const statementAllowed=item=>item.swissFacility&&item.collectionConfirmed&&item.amount>0&&item.outstanding>.004
 const swissRows=computed(()=>rows.value.flatMap(r=>r.schedules||[]))
 const accountReviews=computed(()=>historyRow.value?reviewBatches.value.flatMap(b=>b.members.filter(m=>m.caseUid===historyRow.value.caseUid&&m.txNo===historyRow.value.txNo).map(m=>({...b,date:m.reviewDate||b.date,reference:m.reviewReference??b.reference,note:m.reviewNote??b.note,createdByName:m.reviewedByName||b.createdByName}))):[])
-onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=false;refreshing.value=true;shownAt.value=saved.at.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}load()})
+onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=false;canReviewFacility.value=false;refreshing.value=true;shownAt.value=saved.at.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}load()})
 </script>
 <template>
 <div class="overview-stack">
@@ -211,9 +219,9 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
    <el-table-column label="Action" min-width="245"><template #default="{row}">
     <el-tag v-if="row.legacyHistorical" type="info">Read-only</el-tag>
     <el-button v-if="row.origin!=='legacy'&&can('cases.write')&&['posted','closed'].includes(row.caseStatus)" text type="primary" @click="referenceEditor.open(row.caseUid)">Edit references</el-button>
-    <el-button v-if="canEdit&&active(row)&&(!isBrokerage||row.overseaBusiness)&&!row.financeReviewed" text type="primary" @click="openReview([row])">Mark reviewed</el-button>
+    <el-button v-if="canReviewRow(row)&&active(row)&&(!isBrokerage||row.overseaBusiness)&&!row.financeReviewed" text type="primary" @click="openReview([row])">Mark reviewed</el-button>
     <el-button v-if="canEdit&&row.financeReviewed&&row.canRecord" :disabled="row.paymentAllowed===false||row.statementNeedsRevision" text type="primary" @click="openPayment([row])">Record receipt / payment</el-button>
-    <el-button v-if="!row.legacyHistorical&&canEdit&&row.financeReviewed" text @click="cancelReview(row)">Cancel review batch</el-button>
+    <el-button v-if="!row.legacyHistorical&&row.financeReviewed&&canCancelReview(row)" text @click="cancelReview(row)">Cancel review batch</el-button>
     <template v-for="item in row.schedules" :key="item.key"><el-button v-if="canEdit&&statementAllowed(item)" text type="primary" @click="entryActions.open(item,'statement')">Swiss statement reference</el-button></template>
     <el-button text @click="historyRow=row">{{isBrokerage?'Brokerage settlement details':'History'}}</el-button>
    </template></el-table-column>
@@ -229,6 +237,15 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
   <el-table :data="reviewTargets" max-height="420" data-testid="review-accounts"><el-table-column label="Account" min-width="260"><template #default="{row}">{{rowTitle(row)}}<small v-if="!isT3(row)">SoA: {{soa(row)}}</small><small>{{displayTwRef(row)}} · {{row.accountDisplayDate||'—'}}</small></template></el-table-column><el-table-column prop="originalInsured" label="Insured (EN)" min-width="180"/><el-table-column prop="originalInsuredCn" label="Insured (CN)" min-width="180"/><el-table-column label="Amount" align="right"><template #default="{row}">{{row.currency}} {{money(row.amount,row.currency)}}</template></el-table-column><el-table-column label="Action" width="100" fixed="right"><template #default="{row}"><el-button text type="danger" @click="removeReview(row)">Remove</el-button></template></el-table-column></el-table>
   <el-table :data="reviewTotals" data-testid="review-currency-totals"><el-table-column prop="currency" label="Currency"/><el-table-column label="Receivable amount" align="right"><template #default="{row}">{{row.currency}} {{money(row.receivable,row.currency)}}</template></el-table-column><el-table-column label="Payable amount" align="right"><template #default="{row}">{{row.currency}} {{money(row.payable,row.currency)}}</template></el-table-column></el-table>
   <template #footer><el-button @click="reviewVisible=false">Cancel</el-button><el-button type="primary" :loading="saving" :disabled="!reviewTargets.length" @click="saveReview">Mark reviewed</el-button></template>
+ </el-dialog>
+ <el-dialog class="accounting-modal" v-model="cancelForm.visible" title="Cancel review" width="min(620px,94vw)" :close-on-click-modal="false" data-testid="cancel-review-dialog">
+  <el-radio-group v-model="cancelForm.scope" style="display:flex;flex-direction:column;align-items:flex-start;gap:10px">
+   <el-radio value="account" data-testid="cancel-review-account">Cancel this account only<small style="display:block;color:var(--muted)">{{ transactionNumber(cancelForm.row?.txNo) }} returns to Unreconciled Accounts; the other reviewed accounts stay reviewed.</small></el-radio>
+   <el-radio value="batch" data-testid="cancel-review-batch">{{ canEdit ? 'Cancel the whole review batch' : 'Cancel all my reviews for this counterparty' }} ({{ cancelBatchMembers.length }} accounts)<small style="display:block;color:var(--muted)">{{ canEdit ? 'Every account in this counterparty batch returns to Unreconciled Accounts.' : 'Accounts reviewed by Finance or other colleagues stay reviewed.' }}</small></el-radio>
+  </el-radio-group>
+  <el-form label-position="top" style="margin-top:14px"><el-form-item label="Reason" required><el-input v-model="cancelForm.reason" type="textarea" :autosize="{minRows:2}" maxlength="1000" data-testid="cancel-review-reason"/></el-form-item></el-form>
+  <p style="color:var(--muted);font-size:12px">Active receipt/payment and offset registrations must be reversed first.</p>
+  <template #footer><el-button @click="cancelForm.visible=false">Close</el-button><el-button type="danger" :loading="saving" @click="saveCancelReview">Cancel review</el-button></template>
  </el-dialog>
  <el-dialog class="accounting-modal" v-model="paymentVisible" title="Record receipts / payments" width="min(1150px,96vw)" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
   <p v-if="payment.allocations.length">{{transactionParty(payment.allocations[0].row)}}</p>

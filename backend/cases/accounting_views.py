@@ -209,7 +209,7 @@ class AccountingView(NoStoreMixin, APIView):
             if js_truthy(currency) and currency not in currencies:
                 currencies.append(currency)
         currencies.sort(key=js_to_string)
-        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches
+        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches, facility_payable, FACILITY_REVIEW_PERMISSION
         from .models import FinanceReconciliationBatch
         reviews = active_reviews()
         payload_by_uid = {c['caseUid']: c['payload'] for c in case_views}
@@ -219,6 +219,8 @@ class AccountingView(NoStoreMixin, APIView):
                 continue  # Historical / settled-before-import review is read-only; never infer a new review event.
             row['historicalTermsMissing'] = not payload_by_uid[row['caseUid']].get('financeWorkflowVersion')
             row.update(review_fields(row['caseUid'], row.get('txNo'), payload_by_uid[row['caseUid']], row, reviews))
+            # 2026-11-19：應付給 Swiss Re Asia／Allianz（Facility）的帳款，Reinsurance Staff 可 Mark reviewed
+            row['facilityPayable'] = facility_payable(payload_by_uid[row['caseUid']], row.get('txNo'), row)
         review_batches = [{
             'id': str(b.pk), 'status': b.status, 'date': str(b.review_date),
             'currency': b.currency if len(getattr(b, 'currencies', [b.currency])) == 1 else '',
@@ -226,6 +228,7 @@ class AccountingView(NoStoreMixin, APIView):
             'partyName': b.party_name, 'reference': b.reference, 'note': b.note,
             'createdAt': b.created_at.isoformat(), 'createdByName': b.created_by_name,
             'cancelledAt': b.cancelled_at.isoformat() if b.cancelled_at else '', 'cancelReason': b.cancel_reason,
+            'cancelledMembers': getattr(b, 'cancelled', None) if getattr(b, 'cancelled', None) is not None else list(b.cancelled_members or []),
             'members': [{**m, 'rowVersion': versions.get(m['caseUid'])} for m in b.members],
         } for b in grouped_review_batches()]
         if legacy_scope == "history":
@@ -242,7 +245,9 @@ class AccountingView(NoStoreMixin, APIView):
         return {
             **segment,
             "ok": True, "rows": rows, "transactionRows": transactions, "warnings": warnings, "currencies": currencies,
-            "scope": {"canEdit": _can_edit(request.ri_principal)},
+            "scope": {"canEdit": _can_edit(request.ri_principal),
+                      "canReviewFacilityPayables": has_permission(request.ri_principal, FACILITY_REVIEW_PERMISSION),
+                      "personnelId": f"personnel:{request.ri_principal.pk}" if request.ri_principal else ""},
             "caseHistories": {uid: p.get("financeCorrectionHistory", []) for uid,p in payload_by_uid.items() if p.get("financeCorrectionHistory")}, "reviewBatches": review_batches, "cashBatches": payment_batches(case_views), "swissRows": swiss_rows, "scheduleRows": schedule_rows,
         }
 

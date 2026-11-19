@@ -328,6 +328,9 @@ class FinanceReconciliationBatch(models.Model):
     cancelled_by = models.CharField(max_length=120, blank=True)
     cancelled_by_name = models.CharField(max_length=240, blank=True)
     cancel_reason = models.CharField(max_length=1000, blank=True)
+    # 2026-11-19: single-account cancellations inside a still-active review event
+    # ({caseUid, txNo, cancelledAt, cancelledBy, cancelledByName, reason}); members stay as originally reviewed.
+    cancelled_members = models.JSONField(default=list)
 
     class Meta:
         db_table = 'ri_finance_reconciliation_batches'
