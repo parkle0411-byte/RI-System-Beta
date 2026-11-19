@@ -31,8 +31,8 @@ ROLE_LABELS = {
 #   - Audit Log 只有 System Administrator
 #   - Finance Staff／Finance Manager：Dashboard、Account List 與案件工作區可讀全部案件，保留帳务操作；不能寫案件或文件
 #   - Reinsurance Staff、General Manager：Accounting 帳本唯讀（accounting.read；記付款、沖銷要 accounting.write）
-#   - 2026-11-19 業主決定：Reinsurance Staff 可 Mark reviewed「應付給 Swiss Re Asia／Allianz（Facility）」的帳款，
-#     並取消自己的審核（accounting.review.facility_payables；規則見 cases/finance_workflow.py）
+#   - 2026-11-19 業主決定：Reinsurance Staff 可 Mark reviewed「對象是 Swiss Re Asia／Allianz（Facility）」的帳款（應付與應收），
+#     並取消自己的審核（accounting.review.facility_accounts；規則見 cases/finance_workflow.py）
 # dashboard.read.all 是 VM 才有的權限：Dashboard 顯示全部案件（沒有它就只看自己負責或列在分績裡的案件）。
 # 修改此表時，同步更新 VM-RULES.md 與 qa/suites/auth_permissions.py 的權限矩陣測試。
 ROLE_PERMISSIONS = {
@@ -48,7 +48,7 @@ ROLE_PERMISSIONS = {
     "sales": [
         "dashboard.read", "dashboard.read.all", "cases.read.all", "cases.write", "cases.announce",
         "documents.read", "documents.write", "mdm.read", "mdm.write",
-        "production.read", "fx.read", "accounting.read", "accounting.review.facility_payables",
+        "production.read", "fx.read", "accounting.read", "accounting.review.facility_accounts",
     ],
     "accounting": [
         "dashboard.read", "dashboard.read.all", "cases.read.all", "production.read", "fx.read", "accounting.read", "accounting.write",

@@ -28,20 +28,20 @@ def fail(code, message, status=409, **extra):
     return Response({'ok': False, 'error': code, 'message': message, **extra}, status=status)
 
 
-# 2026-11-19 業主決定：付給這兩家 Facility 的帳由 Reinsurance Staff 對帳。
-# Reinsurance Staff 只能 Mark reviewed「應付給這兩家」的帳款（保費，或理賠退回），且只能取消自己做的審核；
-# 登錄收付款與其他 Finance 操作仍只有 Finance。
-FACILITY_REVIEW_PERMISSION = 'accounting.review.facility_payables'
-FACILITY_PAYABLE_REVIEW = ('Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)',
+# 2026-11-19 業主決定：與這兩家 Facility 的往來帳由 Reinsurance Staff 對帳。
+# Reinsurance Staff 只能 Mark reviewed「對象是這兩家」的帳款（應付與應收：保費、退保保費、理賠款；
+# 同日稍晚業主擴大到應收），且只能取消自己做的審核；登錄收付款與其他 Finance 操作仍只有 Finance。
+FACILITY_REVIEW_PERMISSION = 'accounting.review.facility_accounts'
+FACILITY_REVIEW_REINSURERS = ('Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)',
                            'Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)')
 
 
-def facility_payable(payload, no, detail):
-    """帳款是否為「應付給上述兩家」（新系統與舊資料都適用）。
+def facility_account(payload, no, detail):
+    """帳款的收付對象是否為上述兩家（應付或應收；新系統與舊資料都適用）。
     再保人依帳款自己的再保人序號判斷（畫面上的對象名稱已去掉 "(Facility)"，不能用來比對）。"""
     from .accounting_policy import normalized, rows
     from .payment_policy import claim_source
-    if detail.get('paymentDirection') != 'payable' or detail.get('partyType') != 'reinsurer' or detail.get('cashTracking') == 'derived':
+    if detail.get('paymentDirection') not in ('payable', 'receivable') or detail.get('partyType') != 'reinsurer' or detail.get('cashTracking') == 'derived':
         return False
     tx = next((t for t in objects(payload.get('transactions')) if t.get('txNo') == no), None)
     if tx is None or tx.get('reversed') or tx.get('isReversalEntry'):
@@ -51,11 +51,11 @@ def facility_payable(payload, no, detail):
     else:
         index = tx.get('reinsurerIdx'); names = [r.get('name') for r in rows(payload.get('reinsurers'))]
         name = names[index] if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(names) else ''
-    return normalized(name) in {normalized(n) for n in FACILITY_PAYABLE_REVIEW}
+    return normalized(name) in {normalized(n) for n in FACILITY_REVIEW_REINSURERS}
 
 
 def review_rights(person):
-    """回傳 (finance, allowed)：Finance 可審核／取消任何帳款；Reinsurance Staff 只限這兩家的應付帳款與自己的審核。"""
+    """回傳 (finance, allowed)：Finance 可審核／取消任何帳款；Reinsurance Staff 只限對象是這兩家的帳款與自己的審核。"""
     from .accounting_views import _can_edit
     from ri_system.authz import has_permission
     finance = _can_edit(person)
@@ -207,8 +207,8 @@ def reconcile(view, request, body):
             return fail('review_not_allowed', 'Select active T1/T2 or claim accounts.')
         if (uid, no) in reviews:
             return fail('already_reviewed', 'Cancel the existing whole review batch before reviewing this account again.')
-        if not finance and not facility_payable(p, no, d):   # Reinsurance Staff：只限這兩家的應付帳款
-            return fail('permission_denied', 'Reinsurance Staff can review only accounts payable to Swiss Re Asia or Allianz (Facility).', 403)
+        if not finance and not facility_account(p, no, d):   # Reinsurance Staff：只限對象是這兩家的帳款
+            return fail('permission_denied', 'Reinsurance Staff can review only accounts with Swiss Re Asia or Allianz (Facility).', 403)
         group = counterparty(p, d)
         if not all(group) or scope is not None and group[1] != scope:
             return fail('review_scope', 'Review accounts for one counterparty per batch.', 400)

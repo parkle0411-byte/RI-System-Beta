@@ -1,12 +1,13 @@
-"""2026-11-19 業主決定：Reinsurance Staff 可 Mark reviewed「應付給 Swiss Re Asia／Allianz（Facility）」的帳款，
+"""2026-11-19 業主決定：Reinsurance Staff 可 Mark reviewed「對象是 Swiss Re Asia／Allianz（Facility）」的帳款
+（應付與應收：保費、退保保費、理賠款；同日稍晚擴大到應收），
 不能登錄收付款，只能取消自己做的審核；取消時可選「只取消這一筆」或「取消整批」（Finance 也可以選）。
 只在獨立測試資料庫執行，所有寫入最後整筆回復。
 """
 from pathlib import Path
 exec(Path('/app/qa/suites/finance_workflow.py').read_text().split('class Done(Exception):')[0])
-from cases.finance_workflow import facility_payable, FACILITY_PAYABLE_REVIEW
+from cases.finance_workflow import facility_account, FACILITY_REVIEW_REINSURERS
 from legacy.ledger import RULE_NAMES
-SWISS, ALLIANZ = FACILITY_PAYABLE_REVIEW
+SWISS, ALLIANZ = FACILITY_REVIEW_REINSURERS
 
 
 def facility_case(ref, name, value=1000):
@@ -32,11 +33,11 @@ try:
 
         # ---- 清單旗標 ----
         body = listing(rs)
-        check('Reinsurance Staff：有 Facility 應付審核權，沒有 Finance 編輯權', body['scope']['canReviewFacilityPayables'] is True and body['scope']['canEdit'] is False, body['scope'])
-        check('只有「應付給這兩家」的帳款標為可審核（Swiss Re、Allianz 的 T2）',
-              row_of(body, a, A)['facilityPayable'] and row_of(body, z, Z)['facilityPayable']
-              and not row_of(body, a, leg(a, 'Leg 1'))['facilityPayable'] and not row_of(body, o, O)['facilityPayable'])
-        check('General Manager 沒有這個權限', listing(gm)['scope']['canReviewFacilityPayables'] is False)
+        check('Reinsurance Staff：有 Facility 應付審核權，沒有 Finance 編輯權', body['scope']['canReviewFacilityAccounts'] is True and body['scope']['canEdit'] is False, body['scope'])
+        check('對象是這兩家的帳款才標為可審核（Swiss Re、Allianz 的 T2；Cedant T1、一般再保人不算）',
+              row_of(body, a, A)['facilityReviewable'] and row_of(body, z, Z)['facilityReviewable']
+              and not row_of(body, a, leg(a, 'Leg 1'))['facilityReviewable'] and not row_of(body, o, O)['facilityReviewable'])
+        check('General Manager 沒有這個權限', listing(gm)['scope']['canReviewFacilityAccounts'] is False)
         check('Finance 照舊可編輯', listing(fin)['scope']['canEdit'] is True)
 
         # ---- Mark reviewed 權限 ----
@@ -85,11 +86,27 @@ try:
 
         # ---- 舊資料（Legacy Data）同樣適用 ----
         legacy = {'reinsurers': [{'name': RULE_NAMES['swiss']}], 'transactions': [{'txNo': 'LTX-QA-T2', 'reinsurerIdx': 0, 'source': 'premium'}]}
-        check('舊資料應付給 Swiss Re（Facility）也算', facility_payable(legacy, 'LTX-QA-T2', {'paymentDirection': 'payable', 'partyType': 'reinsurer', 'cashTracking': 'cash'}))
-        check('舊資料應收（向再保人收）不算', not facility_payable(legacy, 'LTX-QA-T2', {'paymentDirection': 'receivable', 'partyType': 'reinsurer', 'cashTracking': 'cash'}))
+        check('舊資料應付給 Swiss Re（Facility）也算', facility_account(legacy, 'LTX-QA-T2', {'paymentDirection': 'payable', 'partyType': 'reinsurer', 'cashTracking': 'cash'}))
+        check('舊資料向 Swiss Re 應收（退保、理賠）也算', facility_account(legacy, 'LTX-QA-T2', {'paymentDirection': 'receivable', 'partyType': 'reinsurer', 'cashTracking': 'cash'}))
         legacy['reinsurers'][0]['name'] = RULE_NAMES['qbe']
-        check('其他 Facility（QBE）不算', not facility_payable(legacy, 'LTX-QA-T2', {'paymentDirection': 'payable', 'partyType': 'reinsurer', 'cashTracking': 'cash'}))
+        check('其他 Facility（QBE）不算', not facility_account(legacy, 'LTX-QA-T2', {'paymentDirection': 'payable', 'partyType': 'reinsurer', 'cashTracking': 'cash'}))
+
+        # ---- 同日擴大：向這兩家應收的退保保費與理賠款 ----
+        refund = facility_case('QA-FR-R', SWISS, -1000); RT2 = leg(refund, 'Leg 2')
+        k = facility_case('QA-FR-K', SWISS); KT1, KT2 = add_claim(k, 300, 1)
+        # add_claim 把對象名稱寫死為 QA Reinsurer；改成系統實際產生的寫法（再保人名稱去掉 (Facility)）
+        k.refresh_from_db(); k.payload = {**k.payload, 'transactions': [{**t, 'reinsurer': 'Swiss Re Asia Pte. Ltd., Hong Kong Branch'} if t.get('source') == 'claim' else t for t in k.payload['transactions']]}; k.save()
+        body = listing(rs)
+        check('退保：向 Swiss Re 收回的保費是應收，標為可審核', row_of(body, refund, RT2)['paymentDirection'] == 'receivable' and row_of(body, refund, RT2)['facilityReviewable'], row_of(body, refund, RT2))
+        check('理賠：向 Swiss Re 收的理賠款標為可審核；付給 Cedant 的不算', row_of(body, k, KT1)['facilityReviewable'] and not row_of(body, k, KT2)['facilityReviewable'])
+        r = review([(refund, RT2)], rs); check('Reinsurance Staff 可審核向 Swiss Re 收的退保保費', r.status_code == 200, r.content)
+        r = review([(k, KT1)], rs); check('Reinsurance Staff 可審核向 Swiss Re 收的理賠款', r.status_code == 200, r.content)
+        r = review([(k, KT2)], rs); check('Reinsurance Staff 不能審核付給 Cedant 的理賠', r.status_code == 403, r.content)
+        r = register([(refund, RT2, 800, 0)], 800, rs); check('退保應收也不能登錄收款', r.status_code == 403, r.content)
+        g = next(x for x in listing(rs)['reviewBatches'] if x['id'] == batch_id(refund, RT2))
+        mine = [{k2: m[k2] for k2 in ('caseUid', 'txNo', 'rowVersion')} for m in g['members'] if m['reviewedBy'] == listing(rs)['scope']['personnelId']]
+        r = cancel_scope(rs, g['id'], 'batch', mine); check('可取消自己審的應收（整批）', r.status_code == 200 and not reviewed(refund, RT2) and not reviewed(k, KT1), r.content)
         raise Done()
 except Done:
     pass
-print(f'{len(checks)}/{len(checks)} passed（Facility 應付審核檢查全部通過；資料庫變更已回復）')
+print(f'{len(checks)}/{len(checks)} passed（Facility 帳款審核檢查全部通過；資料庫變更已回復）')

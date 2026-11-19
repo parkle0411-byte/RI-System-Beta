@@ -34,10 +34,10 @@ function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',
 const money=(v,c)=>formatMoney(v,c), cents=v=>Math.round(Number(v||0)*100), label=s=>({open:'Open',partial:'Open',settled:'Settled',pending_confirmation:'Open',not_tracked:'Not tracked'})[s]||s
 const statusLabel=r=>r.reversed?'Reversed':r.isReversalEntry?'Reversal entry':label(r.settlement)
 const isBrokerage=computed(()=>tab.value==='brokerage')
-// 2026-11-19 業主決定：Reinsurance Staff 只能在 Unreconciled 審核應付給 Swiss Re Asia／Allianz（Facility）的帳款，並取消自己的審核
+// 2026-11-19 業主決定：Reinsurance Staff 只能在 Unreconciled 審核對象是 Swiss Re Asia／Allianz（Facility）的帳款（應付與應收），並取消自己的審核
 const canReviewFacility=ref(false), myPersonnelId=ref('')
 const canSelect=computed(()=>canEdit.value&&['unreconciled','reconciled'].includes(tab.value)||canReviewFacility.value&&tab.value==='unreconciled')
-const canReviewRow=r=>canEdit.value||canReviewFacility.value&&r.facilityPayable===true
+const canReviewRow=r=>canEdit.value||canReviewFacility.value&&r.facilityReviewable===true
 const canCancelReview=r=>canEdit.value||canReviewFacility.value&&!!r.reviewedBy&&r.reviewedBy===myPersonnelId.value
 const accountTitle=computed(()=>({all:'All Accounts',unreconciled:'Unreconciled Accounts',reconciled:'Reconciled Accounts',settled:'Settled/Closed',brokerage:'Brokerage'})[tab.value])
 const group=partyKey
@@ -109,7 +109,7 @@ async function loadOptions(){try{const response=await apiFetch('/api/accounting?
 watch(pageQuery,query=>{clearTimeout(pageTimer);if(query)pageTimer=setTimeout(loadPage,0)})
 function findRow(list,row){return list.find(r=>r.caseUid===row.caseUid&&r.txNo===row.txNo&&!!r.scheduleOnly===!!row.scheduleOnly&&(!r.scheduleOnly||r.key===row.key))}
 function resolveHistoryRow(){if(!historyRow.value)return;historyRow.value=findRow(rows.value,historyRow.value)||findRow(serverPage.value.rows||[],historyRow.value)||(historyRow.value.legacyHistorical?historyRow.value:null)}
-function apply(b){rows.value=accountingRows(b);batches.value=b.cashBatches||[];reviewBatches.value=b.reviewBatches||[];currencies.value=b.currencies||[];canEdit.value=!!b.scope?.canEdit;canReviewFacility.value=!canEdit.value&&!!b.scope?.canReviewFacilityPayables;myPersonnelId.value=b.scope?.personnelId||'';warnings.value=(b.warnings||[]).filter(w=>w.dataError);caseHistories.value=b.caseHistories||{};selected.value=[];resolveHistoryRow();if(activeBatch.value)activeBatch.value=batches.value.find(x=>x.batchId===activeBatch.value.batchId)||null;refreshPaymentRows()}
+function apply(b){rows.value=accountingRows(b);batches.value=b.cashBatches||[];reviewBatches.value=b.reviewBatches||[];currencies.value=b.currencies||[];canEdit.value=!!b.scope?.canEdit;canReviewFacility.value=!canEdit.value&&!!b.scope?.canReviewFacilityAccounts;myPersonnelId.value=b.scope?.personnelId||'';warnings.value=(b.warnings||[]).filter(w=>w.dataError);caseHistories.value=b.caseHistories||{};selected.value=[];resolveHistoryRow();if(activeBatch.value)activeBatch.value=batches.value.find(x=>x.batchId===activeBatch.value.batchId)||null;refreshPaymentRows()}
 async function post(body){const r=await apiFetch('/api/accounting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const b=await r.json();if(!r.ok){const e=new Error(b.message||b.error);e.status=r.status;throw e}return b}
 async function write(body,done){saving.value=true;try{const result=await post(body);done?.(result);ElMessage.success('Accounting updated');await load()}catch(e){reportWriteError(e,()=>load());await load()}finally{saving.value=false}}
 function members(targets){return targets.map(r=>({caseUid:r.caseUid,txNo:r.txNo,rowVersion:r.caseRowVersion}))}
