@@ -91,6 +91,50 @@ def cutoff(value):
     return (parsed.replace(day=1) - timedelta(days=1)).isoformat() if parsed else ''
 
 
+# 2026-11-19 業主決定：Swiss Property 付 Swiss Re 的保費 T2，期別改由這筆 T2 的對帳日（Mark reviewed 的
+# Review date）決定：截止＝結算日前 7 天（當天也算），截止前沒對帳就自動延一季；不再看 Cedant 收齊日。
+REVIEW_LEAD_DAYS = 7
+
+
+def settlement_on_or_after(value):
+    """當天或之後的第一個固定結算日（2/14、5/14、8/14、11/14）。"""
+    parsed = real_date(value)
+    if not parsed:
+        return ''
+    for year in (parsed.year, parsed.year + 1):
+        for month in (2, 5, 8, 11):
+            day = date(year, month, 14)
+            if day >= parsed:
+                return day.isoformat()
+    return ''
+
+
+def review_period(value):
+    """對帳日（或今天）→ 截止日（結算日前 7 天）還沒過的第一個結算日。例：02-07 → 02-14；02-08 → 05-14。"""
+    return settlement_on_or_after(add_days(value, REVIEW_LEAD_DAYS))
+
+
+def premium_t2(payload, item):
+    """Swiss 再保人排程列對應的有效保費 T2 交易（沒有則 None）。"""
+    index = int(item['partyKey'][1:]) - 1
+    for t in objects(payload.get('transactions')):
+        if t.get('reversed') or t.get('isReversalEntry') or t.get('source') == 'claim':
+            continue
+        if not str(t.get('legType') or '').startswith('Leg 2') or t.get('reinsurerIdx') != index:
+            continue
+        if t.get('installmentId') and item.get('installmentId') and t['installmentId'] != item['installmentId']:
+            continue
+        return t
+    return None
+
+
+def t2_review_date(payload, item):
+    """這筆 T2 目前有效的對帳日（審核時寫入、取消時移除；見 cases/finance_workflow.py）。"""
+    t = premium_t2(payload, item)
+    dates = _state(payload).get('t2ReviewDates')
+    return str(dates.get(t.get('txNo')) or '') if t and isinstance(dates, dict) else ''
+
+
 def incoming_entries(payload, key):
     return [e for e in objects(payload.get('paymentEntries')) if e.get('scheduleKey') == key]
 
@@ -177,13 +221,15 @@ def apply_legacy_schedule(payload, items, now):
             swiss_base = endorsement_base_date(payload) if payload.get('parentTwRef') and payload.get('installmentEnabled') is not True else cedant.get('baseDate', '')
             accounting = add_days(swiss_base, 90)
             original = quarter(accounting)
+            reviewed = ''
             if refund:
                 original = max(previous_quarter(original), quarter(local_date(payload.get('endorsementAnnouncedAt'))))
                 chosen = locked_due(payload, item) or original
             else:
                 collected, _ = confirmation(payload, cedant) if cedant else ('', '')
-                chosen = locked_due(payload, item) or max(original, quarter(receipt_date(payload, cedant.get('scheduleKey'))),
-                                                         quarter(collected or today)) if original else ''
+                # 2026-11-19：期別＝原始期與「對帳日（沒對帳用今天）所對應的期」取較晚；已登錄付款的期別鎖定。
+                reviewed = t2_review_date(payload, item)
+                chosen = locked_due(payload, item) or (max(original, review_period(reviewed or today)) if original else '')
                 item.update(collectionConfirmed=bool(collected), collectionConfirmedAt=collected,
                             paymentAllowed=bool(collected), paymentBlockedReason='' if collected else 'Confirm the entire Cedant installment as collected.')
             # Completed legacy payments keep their displayed dates and recorded periods.
@@ -191,8 +237,10 @@ def apply_legacy_schedule(payload, items, now):
             if not has_old_payment:
                 item.update(dueDate=chosen, dueTime='', contractDueDate=chosen, termsDays=90,
                             paymentRule='swiss_quarterly_refund' if refund else 'swiss_quarterly_premium')
-            item.update(swissFacility=True, originalDueDate=original, confirmationCutoff=cutoff(chosen),
-                        projectedDueDate=chosen if not refund and not item.get('collectionConfirmed') else '',
+            item.update(swissFacility=True, originalDueDate=original,
+                        confirmationCutoff=cutoff(chosen) if refund else add_days(chosen, -REVIEW_LEAD_DAYS),
+                        swissReviewDate='' if refund else reviewed,
+                        projectedDueDate=chosen if not refund and not reviewed else '',
                         fullPaymentRequired=not refund)
             statement = _state(payload).get('statements', {}).get(item['scheduleKey'], {})
             item.update(statementDueDate=statement.get('dueDate') or '', statementReference=statement.get('reference') or '',

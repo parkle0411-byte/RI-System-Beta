@@ -172,6 +172,7 @@ with transaction.atomic():
    c=newpost(name)
    if name==FACILITIES[-1]:
     check('Swiss reminder fixture collected and confirmed',apay(fin,c,'Leg 1').status_code==200)
+    review_case(c,fin);c.refresh_from_db()   # 2026-11-19：Cedant 收齊後才能對帳 Swiss T2；對帳日決定結算期與提醒日
     ri=next(r for r in build_payment_schedule(c.payload)['items'] if r.get('swissFacility'))
     check('Swiss reminder fixture statement accepted',request(fin,c,'mark_swiss_statement',scheduleKey=ri['scheduleKey'],reference='AG-MAIL-SWISS').status_code==200);c.refresh_from_db()
    items=transaction_details(c.payload);no=tx_rows(c,'Leg 2')[0]['txNo'];due=items[no]['contractDueDate'];first=items[no].get('reminderDate') or items[no]['dueDate']

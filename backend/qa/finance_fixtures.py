@@ -26,8 +26,25 @@ def review_case(case,finance):
   case.refresh_from_db()
   r=post(finance,{'action':'review_accounts','date':'2026-11-03','reference':'QA-FINANCE-FIXTURE',
    'members':[{'caseUid':str(case.case_uid),'txNo':no,'rowVersion':case.row_version}]})
+  if r.status_code==409 and r.json().get('error')=='cedant_collection_required':continue   # 2026-11-19：Swiss T2 等 Cedant 收齊後在 cash() 補對帳
   if r.status_code>=400:raise AssertionError(('Synthetic review setup failed',r.status_code,r.content))
  case.refresh_from_db()
+
+def _review_swiss_t2_when_ready(client,allocations):
+ """2026-11-19 業主決定：Swiss Property 付 Swiss Re 的保費 T2 要等該期 Cedant 全額收現才能對帳。
+ 測試在付款前才補對帳（與實際作業順序相同），並更新同案其他分配列的 rowVersion。"""
+ from cases.finance_workflow import swiss_premium_t2,swiss_cedant_collected,active_reviews
+ for a in allocations:
+  try:c=Case.objects.get(case_uid=a.get('caseUid'))
+  except (Case.DoesNotExist,ValueError,TypeError):continue
+  tx=swiss_premium_t2(c.payload,a.get('txNo'))
+  if not tx or (str(c.case_uid),a['txNo']) in active_reviews({str(c.case_uid)}) or not swiss_cedant_collected(c.payload,tx):continue
+  r=post(client,{'action':'review_accounts','date':'2026-11-03','reference':'QA-FINANCE-FIXTURE',
+   'members':[{'caseUid':str(c.case_uid),'txNo':a['txNo'],'rowVersion':c.row_version}]})
+  if r.status_code>=400:raise AssertionError(('Synthetic Swiss T2 review failed',r.status_code,r.content))
+  c.refresh_from_db()
+  for other in allocations:
+   if other.get('caseUid')==str(c.case_uid) and 'rowVersion' in other:other['rowVersion']=c.row_version
 
 def cash(client,body):
  """Submit current API format; fixtures must already have been reviewed explicitly."""
@@ -44,6 +61,7 @@ def cash(client,body):
    if valid and values and cents(body.get('amount'))>0 and all(d.get('paymentDirection')=='payable' for a,d in values):
     body['amount']=-body['amount']
   except (ValueError,TypeError):pass
+  if valid and body.get('action')=='record_transaction_payments':_review_swiss_t2_when_ready(client,allocations)
  return post(client,body)
 
 def prepare_case_correction(case,proposed,finance):

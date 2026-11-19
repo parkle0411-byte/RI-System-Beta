@@ -4,6 +4,7 @@ from playwright.sync_api import sync_playwright, expect
 BASE = "http://nginx"; USER, PASSWORD = "ui.facility.rs", "Ui-Facility-Pass-1"   # 由 facility_review_seed.py 建立
 SW, SW_T1, ORD, REFUND = 'UIFR-SW-1-R1-T2', 'UIFR-SW-1-R1-T1', 'UIFR-OR-1-R1-T2', 'UIFR-SW-2-R1-T2'
 CLAIM_RI, CLAIM_CEDANT = 'UIFR-SW-1-C1-P1-R1-T1', 'UIFR-SW-1-C1-P1-R1-T2'   # 理賠：向 Swiss Re 收／付給 Cedant
+AZ = 'UIFR-AZ-1-R1-T2'   # 2026-11-19：Swiss Property 保費 T2 要先收齊 Cedant 才能對帳，審核／取消流程改用 Allianz 應付
 checks = []
 def check(name, ok, detail=''):
     assert ok, (name, detail)
@@ -24,6 +25,9 @@ with sync_playwright() as p:
     tab("Unreconciled Accounts"); expect(row(SW)).to_be_visible()
     mark = lambda no: row(no).get_by_role("button", name="Mark reviewed", exact=True)
     check("應付給 Swiss Re（Facility）的帳款顯示 Mark reviewed", mark(SW).count() == 1)
+    check("Cedant 未收齊：Swiss T2 的 Mark reviewed 停用並說明原因", mark(SW).is_disabled() and "Collect the full Cedant installment" in row(SW).inner_text())
+    expect(row(AZ)).to_be_visible()
+    check("應付給 Allianz（Facility）的帳款可直接 Mark reviewed", mark(AZ).count() == 1 and not mark(AZ).is_disabled())
     check("同一案件的 Cedant 應收沒有 Mark reviewed", mark(SW_T1).count() == 0)
     check("應付給一般再保人的帳款沒有 Mark reviewed", mark(ORD).count() == 0)
     expect(row(REFUND)).to_be_visible()
@@ -32,21 +36,21 @@ with sync_playwright() as p:
     check("向 Swiss Re 收的理賠款顯示 Mark reviewed", mark(CLAIM_RI).count() == 1)
     check("付給 Cedant 的理賠款沒有 Mark reviewed", mark(CLAIM_CEDANT).count() == 0)
     check("Reinsurance Staff 看不到 Record receipt / payment", table.get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
-    mark(SW).click(); dlg = page.locator(".el-dialog:visible"); dlg.locator("input").nth(1).fill("UI facility review")
+    mark(AZ).click(); dlg = page.locator(".el-dialog:visible"); dlg.locator("input").nth(1).fill("UI facility review")
     dlg.get_by_role("button", name="Mark reviewed", exact=True).click(); updated()
-    tab("Reconciled Accounts"); expect(row(SW)).to_be_visible()
+    tab("Reconciled Accounts"); expect(row(AZ)).to_be_visible()
     check("Reconciled：自己審的帳款只有 Cancel review batch，沒有登錄收付款",
-          row(SW).get_by_role("button", name="Cancel review batch", exact=True).count() == 1
-          and row(SW).get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
-    row(SW).get_by_role("button", name="Cancel review batch", exact=True).click()
+          row(AZ).get_by_role("button", name="Cancel review batch", exact=True).count() == 1
+          and row(AZ).get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
+    row(AZ).get_by_role("button", name="Cancel review batch", exact=True).click()
     dlg = page.get_by_test_id("cancel-review-dialog"); expect(dlg).to_be_visible()
     check("取消對話框可選「只取消這一筆」或「取消本人在這家的全部」",
           dlg.get_by_test_id("cancel-review-account").is_visible() and "Cancel all my reviews for this counterparty (1 accounts)" in dlg.get_by_test_id("cancel-review-batch").inner_text())
     dlg.get_by_test_id("cancel-review-account").click(); dlg.locator("textarea").first.fill("UI review correction")   # 測試標記直接落在文字框上
     dlg.get_by_role("button", name="Cancel review", exact=True).click(); updated()
-    check("取消後帳款離開 Reconciled", row(SW).count() == 0)
-    tab("Unreconciled Accounts"); expect(row(SW)).to_be_visible()
-    check("取消後回到 Unreconciled，可再審核", mark(SW).count() == 1)
+    check("取消後帳款離開 Reconciled", row(AZ).count() == 0)
+    tab("Unreconciled Accounts"); expect(row(AZ)).to_be_visible()
+    check("取消後回到 Unreconciled，可再審核", mark(AZ).count() == 1)
     mark(CLAIM_RI).click(); dlg = page.locator(".el-dialog:visible"); dlg.locator("input").nth(1).fill("UI claim review")
     dlg.get_by_role("button", name="Mark reviewed", exact=True).click(); updated()
     tab("Reconciled Accounts"); expect(row(CLAIM_RI)).to_be_visible()

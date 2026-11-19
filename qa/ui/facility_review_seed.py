@@ -18,6 +18,7 @@ def make(ref, reinsurer, premium=1000, claim=False):
                         announced_at=timezone.now(), created_by='ui-seed', updated_by='ui-seed')
 make('UIFR-SW-1', 'Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)', claim=True)
 make('UIFR-OR-1', 'UI Ordinary Reinsurer')
+make('UIFR-AZ-1', 'Allianz Global Corporate & Specialty SE, Hong Kong Branch (Facility)')   # 審核／取消流程（不受 Swiss 新規則影響）
 make('UIFR-SW-2', 'Swiss Re Asia Pte. Ltd., Hong Kong Branch (Facility)', -1000)   # 退保：向 Swiss Re 收回保費（應收）
 # 專用的 Reinsurance Staff 測試帳號（ui.sales 的密碼會在前面的重設密碼階段被改掉）
 from django.contrib.auth import get_user_model

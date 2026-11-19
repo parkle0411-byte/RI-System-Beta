@@ -43,7 +43,7 @@ const accountTitle=computed(()=>({all:'All Accounts',unreconciled:'Unreconciled 
 const group=partyKey
 const compatible=r=>!selected.value.length||group(selected.value[0])===group(r)
 const active=activeAccount
-const selectable=r=>!r.legacyHistorical&&canSelect.value&&active(r)&&(tab.value==='unreconciled'?!r.financeReviewed&&canReviewRow(r):r.financeReviewed&&r.canRecord&&r.paymentAllowed!==false&&!r.statementNeedsRevision)
+const selectable=r=>!r.legacyHistorical&&canSelect.value&&active(r)&&(tab.value==='unreconciled'?!r.financeReviewed&&canReviewRow(r)&&!r.reviewBlockedReason:r.financeReviewed&&r.canRecord&&r.paymentAllowed!==false&&!r.statementNeedsRevision)
 const eligible=r=>selectable(r)&&compatible(r)
 const isT3=r=>r.cashTracking==='derived'||String(r.legType||'').startsWith('Leg 3')
 const soa=r=>r.reconciliationRef||'Missing'
@@ -219,7 +219,7 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
    <el-table-column label="Action" min-width="245"><template #default="{row}">
     <el-tag v-if="row.legacyHistorical" type="info">Read-only</el-tag>
     <el-button v-if="row.origin!=='legacy'&&can('cases.write')&&['posted','closed'].includes(row.caseStatus)" text type="primary" @click="referenceEditor.open(row.caseUid)">Edit references</el-button>
-    <el-button v-if="canReviewRow(row)&&active(row)&&(!isBrokerage||row.overseaBusiness)&&!row.financeReviewed" text type="primary" @click="openReview([row])">Mark reviewed</el-button>
+    <el-button v-if="canReviewRow(row)&&active(row)&&(!isBrokerage||row.overseaBusiness)&&!row.financeReviewed" text type="primary" :disabled="!!row.reviewBlockedReason" :title="row.reviewBlockedReason||''" @click="openReview([row])">Mark reviewed</el-button><small v-if="!row.financeReviewed&&row.reviewBlockedReason" class="review-blocked" style="display:block;color:var(--muted)">{{ row.reviewBlockedReason }}</small>
     <el-button v-if="canEdit&&row.financeReviewed&&row.canRecord" :disabled="row.paymentAllowed===false||row.statementNeedsRevision" text type="primary" @click="openPayment([row])">Record receipt / payment</el-button>
     <el-button v-if="!row.legacyHistorical&&row.financeReviewed&&canCancelReview(row)" text @click="cancelReview(row)">Cancel review batch</el-button>
     <template v-for="item in row.schedules" :key="item.key"><el-button v-if="canEdit&&statementAllowed(item)" text type="primary" @click="entryActions.open(item,'statement')">Swiss statement reference</el-button></template>

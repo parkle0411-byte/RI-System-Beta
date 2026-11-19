@@ -30,18 +30,22 @@ try:
         a = facility_case('QA-FR-A', SWISS); b = facility_case('QA-FR-B', SWISS); c3 = facility_case('QA-FR-C', SWISS)
         c4 = facility_case('QA-FR-D', SWISS); z = facility_case('QA-FR-Z', ALLIANZ); o = fixture('QA-FR-O')   # o：一般再保人
         A, B, C, D, Z, O = (leg(x, 'Leg 2') for x in (a, b, c3, c4, z, o))
+        # 2026-11-19：Swiss Property 付 Swiss Re 的 T2 要等該期 Cedant 全額收現才能對帳 → Finance 先收齊這四件
+        for x in (a, b, c3, c4):
+            t1 = leg(x, 'Leg 1'); amt = next(t['amount'] for t in rows(x) if t['txNo'] == t1)
+            assert review([(x, t1)]).status_code == 200 and register([(x, t1, amt, 0)], amt).status_code == 200, x.tw_ref
 
         # ---- 清單旗標 ----
         body = listing(rs)
         check('Reinsurance Staff：有 Facility 應付審核權，沒有 Finance 編輯權', body['scope']['canReviewFacilityAccounts'] is True and body['scope']['canEdit'] is False, body['scope'])
         check('對象是這兩家的帳款才標為可審核（Swiss Re、Allianz 的 T2；Cedant T1、一般再保人不算）',
               row_of(body, a, A)['facilityReviewable'] and row_of(body, z, Z)['facilityReviewable']
-              and not row_of(body, a, leg(a, 'Leg 1'))['facilityReviewable'] and not row_of(body, o, O)['facilityReviewable'])
+              and not row_of(body, z, leg(z, 'Leg 1'))['facilityReviewable'] and not row_of(body, o, O)['facilityReviewable'])
         check('General Manager 沒有這個權限', listing(gm)['scope']['canReviewFacilityAccounts'] is False)
         check('Finance 照舊可編輯', listing(fin)['scope']['canEdit'] is True)
 
         # ---- Mark reviewed 權限 ----
-        r = review([(a, leg(a, 'Leg 1'))], rs); check('Reinsurance Staff 不能審核 Cedant 應收（T1）', r.status_code == 403, r.content)
+        r = review([(z, leg(z, 'Leg 1'))], rs); check('Reinsurance Staff 不能審核 Cedant 應收（T1）', r.status_code == 403, r.content)
         r = review([(o, O)], rs); check('Reinsurance Staff 不能審核應付給其他再保人的帳款', r.status_code == 403, r.content)
         r = review([(a, A)], gm); check('General Manager 不能審核', r.status_code == 403, r.content)
         r = review([(a, A)], rs); check('Reinsurance Staff 可審核應付給 Swiss Re（Facility）的帳款', r.status_code == 200, r.content)

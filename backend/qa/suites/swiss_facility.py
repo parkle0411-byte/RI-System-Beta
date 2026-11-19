@@ -71,7 +71,8 @@ try:
   with patch('cases.calc.payment_terms._as_utc',side_effect=lambda v=None:late_stamp if v is None else _as_utc(v)),patch('cases.cash_ledger._as_utc',side_effect=lambda v=None:late_stamp if v is None else _as_utc(v)),patch('cases.accounting_views._iso_now',return_value='2026-05-02T02:00:00.000Z'):
    check('backdated bank receipt may be registered',pay(fin,late,nos(late,'Leg 1'),paymentDate='2026-04-30').status_code==200)
    late.refresh_from_db();item=swiss(late,late_stamp)
-   check('late operation moves projected quarter but retains original quarter',item['originalDueDate']=='2026-05-14' and item['dueDate']=='2026-08-14',item)
+   # 2026-11-19 業主決定：期別改由 Swiss T2 的對帳日決定，Cedant 收款／操作日不再影響；05-02 仍在截止（05-07）前 → 預計仍是 05-14
+   check('Cedant late receipt no longer moves the Swiss period (review date decides; projected stays 05-14 before the 05-07 deadline)',item['originalDueDate']=='2026-05-14' and item['dueDate']=='2026-05-14' and item['projectedDueDate']=='2026-05-14' and item['confirmationCutoff']=='2026-05-07',item)
    check('actual operation date is stored separately from bank date',late.payload['paymentEntries'][0]['paymentDate']=='2026-04-30' and late.payload['paymentEntries'][0]['createdAt'].startswith('2026-05-02'))
   # Every RI refund is required, then all independent Cedant T1 must be selected.
   root=make('SWISS-REFUND-ROOT',names=[SWISS_NAME,'QA Other RI'],shares=[60,40])

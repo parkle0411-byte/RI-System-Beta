@@ -54,6 +54,56 @@ def facility_account(payload, no, detail):
     return normalized(name) in {normalized(n) for n in FACILITY_REVIEW_REINSURERS}
 
 
+SWISS_CEDANT_FIRST = 'Collect the full Cedant installment before reviewing the Swiss Re premium payment.'
+
+
+def swiss_premium_t2(payload, no):
+    """Swiss Property 付 Swiss Re 的保費 T2（不含退保應收、理賠、Swiss CGL）；是則回傳交易，否則 None。
+    2026-11-19 業主決定：這筆 T2 的對帳日決定付款結算期，且 Cedant 該期全額收現前不能對帳。"""
+    from .calc.swiss_facility import applies, is_swiss_facility
+    from .swiss_cgl import target as swiss_cgl
+    from .accounting_policy import rows
+    if not applies(payload) or swiss_cgl(payload):
+        return None
+    tx = next((t for t in objects(payload.get('transactions')) if t.get('txNo') == no), None)
+    if (not tx or tx.get('reversed') or tx.get('isReversalEntry') or tx.get('source') == 'claim'
+            or not str(tx.get('legType') or '').startswith('Leg 2') or float(tx.get('amount') or 0) <= 0):
+        return None
+    index = tx.get('reinsurerIdx'); names = [r.get('name') for r in rows(payload.get('reinsurers'))]
+    ok = isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(names) and is_swiss_facility(names[index])
+    return tx if ok else None
+
+
+def swiss_cedant_collected(payload, tx):
+    """該期 Cedant 款是否已全額收現（與付 Swiss Re 的前提相同：該期全部 Cedant 列結清且為實際收現）。"""
+    from .calc.payment_terms import build_payment_schedule
+    from .payment_policy import actual_cash
+    items = build_payment_schedule(payload).get('items') or []
+    period = tx.get('installmentId')
+    cedants = [r for r in items if r['partyType'] == 'cedant' and (not period or r.get('installmentId') == period)]
+    return bool(cedants) and all(abs(r['outstanding']) < .005 and actual_cash(payload, r) for r in cedants)
+
+
+def set_swiss_review_dates(payload, numbers, review_date):
+    """寫入（review_date 有值）或移除（None）Swiss 保費 T2 的對帳日；案件資料變動讓付款排程重新計算。
+    沒有要改的就完全不動案件資料（非 Swiss 案件不會多出欄位）。"""
+    state = payload.get('swissAccounting') if isinstance(payload.get('swissAccounting'), dict) else {}
+    dates = dict(state.get('t2ReviewDates')) if isinstance(state.get('t2ReviewDates'), dict) else {}
+    before = dict(dates)
+    for no in numbers:
+        if review_date is None:
+            dates.pop(no, None)
+        elif swiss_premium_t2(payload, no):
+            dates[no] = str(review_date)
+    if dates == before:
+        return
+    state = payload['swissAccounting'] = dict(state)
+    if dates:
+        state['t2ReviewDates'] = dates
+    else:
+        state.pop('t2ReviewDates', None)
+
+
 def review_rights(person):
     """回傳 (finance, allowed)：Finance 可審核／取消任何帳款；Reinsurance Staff 只限對象是這兩家的帳款與自己的審核。"""
     from .accounting_views import _can_edit
@@ -209,6 +259,9 @@ def reconcile(view, request, body):
             return fail('already_reviewed', 'Cancel the existing whole review batch before reviewing this account again.')
         if not finance and not facility_account(p, no, d):   # Reinsurance Staff：只限對象是這兩家的帳款
             return fail('permission_denied', 'Reinsurance Staff can review only accounts with Swiss Re Asia or Allianz (Facility).', 403)
+        swiss_t2 = swiss_premium_t2(p, no)
+        if swiss_t2 and not swiss_cedant_collected(p, swiss_t2):   # 2026-11-19：Cedant 收齊前不能對帳
+            return fail('cedant_collection_required', SWISS_CEDANT_FIRST)
         group = counterparty(p, d)
         if not all(group) or scope is not None and group[1] != scope:
             return fail('review_scope', 'Review accounts for one counterparty per batch.', 400)
@@ -219,6 +272,8 @@ def reconcile(view, request, body):
         note=note, currency=currency, party_name=party_name, members=items,
         created_by=str(actor['id']), created_by_name=actor['name']) for currency, items in stored.items()]
     payloads = {uid: copy.deepcopy(c.payload) for uid, c in cases.items()}
+    for uid in payloads:   # 2026-11-19：記下 Swiss 保費 T2 的對帳日（決定付款結算期）
+        set_swiss_review_dates(payloads[uid], [m['txNo'] for m in members if m['caseUid'] == uid], body['date'])
     group_id = str(active_reviews(set(cases))[(members[0]['caseUid'], members[0]['txNo'])][0].pk)
     error = save_all(view, request, cases, payloads, 'finance_accounts_reviewed',
                      {'reviewBatchId': group_id, 'reviewEventId': str(events[0].pk),
@@ -300,7 +355,10 @@ def cancel_review(view, request, body):
             if all((m.get('caseUid'), m.get('txNo')) in gone for m in objects(event.members)):
                 close(event); fields += ['status', 'cancelled_at', 'cancelled_by', 'cancelled_by_name', 'cancel_reason']
             event.save(update_fields=fields)
-    error = save_all(view, request, cases, {uid: copy.deepcopy(c.payload) for uid, c in cases.items()},
+    payloads = {uid: copy.deepcopy(c.payload) for uid, c in cases.items()}
+    for uid in payloads:   # 2026-11-19：取消後 Swiss 保費 T2 視為未對帳，結算期依之後的對帳日重算
+        set_swiss_review_dates(payloads[uid], [m['txNo'] for m in targets if m['caseUid'] == uid], None)
+    error = save_all(view, request, cases, payloads,
                      'finance_review_cancelled', {'reviewBatchId': str(batch.pk), 'reason': note, 'scope': scope,
                                                   'accounts': [m['txNo'] for m in targets]})
     return error or Response({'ok': True, 'reviewBatchId': str(batch.pk)})

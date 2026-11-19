@@ -209,7 +209,7 @@ class AccountingView(NoStoreMixin, APIView):
             if js_truthy(currency) and currency not in currencies:
                 currencies.append(currency)
         currencies.sort(key=js_to_string)
-        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches, facility_account, FACILITY_REVIEW_PERMISSION
+        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches, facility_account, FACILITY_REVIEW_PERMISSION, swiss_premium_t2, swiss_cedant_collected, SWISS_CEDANT_FIRST
         from .models import FinanceReconciliationBatch
         reviews = active_reviews()
         payload_by_uid = {c['caseUid']: c['payload'] for c in case_views}
@@ -221,6 +221,9 @@ class AccountingView(NoStoreMixin, APIView):
             row.update(review_fields(row['caseUid'], row.get('txNo'), payload_by_uid[row['caseUid']], row, reviews))
             # 2026-11-19：對象是 Swiss Re Asia／Allianz（Facility）的帳款（應付與應收），Reinsurance Staff 可 Mark reviewed
             row['facilityReviewable'] = facility_account(payload_by_uid[row['caseUid']], row.get('txNo'), row)
+            # 2026-11-19：Swiss Property 付 Swiss Re 的保費 T2，Cedant 該期全額收現前不能對帳
+            swiss_t2 = None if row.get('financeReviewed') else swiss_premium_t2(payload_by_uid[row['caseUid']], row.get('txNo'))
+            row['reviewBlockedReason'] = SWISS_CEDANT_FIRST if swiss_t2 and not swiss_cedant_collected(payload_by_uid[row['caseUid']], swiss_t2) else ''
         review_batches = [{
             'id': str(b.pk), 'status': b.status, 'date': str(b.review_date),
             'currency': b.currency if len(getattr(b, 'currencies', [b.currency])) == 1 else '',
