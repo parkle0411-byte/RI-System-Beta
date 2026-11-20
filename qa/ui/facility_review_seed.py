@@ -27,4 +27,15 @@ u = get_user_model().objects.create_user(username='ui.facility.rs', password='Ui
 Personnel.objects.create(name='UI Facility Reviewer', department='reinsurance', role_code='sales', auth_user_id=str(u.pk),
                          account_status='active', must_change_password=False, email='ui.facility.rs@example.test',
                          created_by='ui-seed', updated_by='ui-seed')
+# 2026-11-20：付再保人的 T2 要先收齊該份額的 Cedant 款才能審核 → Finance 先收齊 Allianz 案件的 Cedant 款（走真正的 API）
+import json
+from django.test import Client
+fin = Client(HTTP_HOST='localhost'); fin.force_login(get_user_model().objects.get(username='ui.finance'))
+def accounting(body):
+    r = fin.post('/api/accounting', json.dumps(body), content_type='application/json'); assert r.status_code == 200, r.content
+az = Case.objects.get(tw_ref='UIFR-AZ-1'); t1 = next(t for t in az.payload['transactions'] if t['legType'] == 'Leg 1')
+accounting({'action': 'review_accounts', 'date': '2026-11-03', 'reference': 'UI-SEED', 'members': [{'caseUid': str(az.case_uid), 'txNo': t1['txNo'], 'rowVersion': az.row_version}]})
+az.refresh_from_db()
+accounting({'action': 'record_transaction_payments', 'paymentDate': '2026-11-03', 'reference': 'UI-SEED-CASH', 'amount': t1['amount'],
+            'allocations': [{'caseUid': str(az.case_uid), 'txNo': t1['txNo'], 'rowVersion': az.row_version, 'cashAmount': t1['amount'], 'offsetAmount': 0}]})
 print('facility review cases seeded')

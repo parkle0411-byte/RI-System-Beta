@@ -82,12 +82,14 @@ try:
   check('receipt reversal blocked by downstream T2',reverse(replacement,[a,b]).json().get('error')=='downstream_payment_locked')
   # Actual cash stays separate by direction; all new offsets are disabled.
   e=fixture('QA-FIN-E');ct1,ct2=add_claim(e)
-  review([(e,leg(e,'Leg 1')),(e,ct2)])
-  r=register([(e,leg(e,'Leg 1'),800,200),(e,ct2,0,200)],800)
+  review([(e,leg(e,'Leg 1'))])
+  check('claim payment to the Cedant cannot be reviewed before the reinsurer claim receipt (2026-11-20)',review([(e,ct2)]).json().get('error')=='reinsurer_claim_required')
+  r=register([(e,leg(e,'Leg 1'),800,200)],800)
   check('new mixed offsets rejected',r.status_code==400 and r.json()['error']=='offsets_disabled',r.content)
   e.refresh_from_db();check('failed mixed registration leaves no partial entries',e.payload['paymentEntries']==[])
   r=register([(e,ct2,1,0)],-1);check('claim payment still requires its own receipts',r.status_code==409)
   review([(e,ct1)]);r=register([(e,ct1,200,0)],200);check('claim receipt works for general reinsurer',r.status_code==200,r.content)
+  check('after the reinsurer claim receipt the Cedant claim payment can be reviewed',review([(e,ct2)]).status_code==200)
   r=register([(e,leg(e,'Leg 1'),1000,0),(e,ct2,200,0)],800)
   check('single registration cannot net two cash directions',r.status_code==400 and r.json()['error']=='cash_direction_mismatch',r.content)
   r=register([(e,leg(e,'Leg 1'),1000,0)],1000);check('actual premium receipt accepted',r.status_code==200,r.content);cashbid=r.json()['batchId']

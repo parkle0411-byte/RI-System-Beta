@@ -67,17 +67,21 @@ try:
   check('Sales cannot record multi-account cash',api(sales,cash_request([(d,d1,1)])).status_code==403)
   malformed=cash_request([(d,d1,1)]);malformed['allocations'][0]['caseUid']=[];check('malformed identifiers do not crash or write',api(fin,malformed).status_code==400)
   # Original prerequisites remain even though partial premium payments are now allowed.
-  a2=leg(a,'Leg 2');review([(a,a2)]);r=api(fin,cash_request([(a,a2,100)])).json()
-  check('partly received T1 still blocks T2',r['failed']==1 and r['results'][0]['error']=='payment_prerequisite',r)
+  # 2026-11-20：T2 要等該份額的 Cedant T1 收齊才能審核 → 只收一部分時連審核都不行，付款也被擋
+  a2=leg(a,'Leg 2');rv=review([(a,a2)]);check('partly received T1 blocks reviewing T2',rv.status_code==409 and rv.json()['error']=='cedant_collection_required',rv.content)
+  r=api(fin,cash_request([(a,a2,100)])).json()
+  check('partly received T1 still blocks T2',r['failed']==1 and r['results'][0]['error']=='finance_review_required',r)
   topup=register([(a,a1,400,0)],400);check('remaining T1 receipt can complete collection',topup.status_code==200,topup.content)
+  check('T2 can be reviewed once its Cedant share is collected',review([(a,a2)]).status_code==200)
   paid=api(fin,cash_request([(a,a2,100)])).json();check('partial T2 allowed once full T1 prerequisite is met',paid['succeeded']==1,paid)
   check('receipt reversal still cannot break downstream partial T2',reverse(topup.json()['batchId'],[a]).json().get('error')=='downstream_payment_locked')
   check('partial T2 does not settle retained brokerage',next(x for x in transaction_details(unchanged(a)).values() if x['cashTracking']=='derived')['settlement']=='open')
   # Return premium receipts and refunds are partial, but collection prerequisites still apply.
   refund=fixture('QA-CASH-REFUND',value=-1000,party='Refund Cedant');rt1=leg(refund,'Leg 1');rt2=leg(refund,'Leg 2');refund.payload.update(parentTwRef='QA-REFUND-PARENT',endoEffectiveDate='2026-09-01',endorsementAnnouncedAt='2026-09-01T00:00:00Z');refund.save()
   review([(refund,rt2)]);check('partial reinsurer refund receipt accepted',register([(refund,rt2,400,0)],400).status_code==200)
-  review([(refund,rt1)]);blocked=api(fin,cash_request([(refund,rt1,200)])).json();check('Cedant refund still waits for all reinsurer collections',blocked['failed']==1)
-  remaining=abs(transaction_details(unchanged(refund))[rt2]['outstanding']);r=register([(refund,rt2,remaining,0)],remaining);check('remaining reinsurer refund collected',r.status_code==200,r.content);r=api(fin,cash_request([(refund,rt1,200)])).json();check('Cedant refund may now be paid partially after collection',r['succeeded']==1 and transaction_details(unchanged(refund))[rt1]['outstanding']==-800,r)
+  rv=review([(refund,rt1)]);check('Cedant refund cannot be reviewed before the reinsurer refund is collected',rv.status_code==409 and rv.json()['error']=='reinsurer_refund_required',rv.content)
+  blocked=api(fin,cash_request([(refund,rt1,200)])).json();check('Cedant refund still waits for all reinsurer collections',blocked['failed']==1)
+  remaining=abs(transaction_details(unchanged(refund))[rt2]['outstanding']);r=register([(refund,rt2,remaining,0)],remaining);check('remaining reinsurer refund collected',r.status_code==200,r.content);review([(refund,rt1)]);r=api(fin,cash_request([(refund,rt1,200)])).json();check('Cedant refund may now be paid partially after collection',r['succeeded']==1 and transaction_details(unchanged(refund))[rt1]['outstanding']==-800,r)
   # New offsets are rejected through both current and legacy API shapes.
   check('pure offset cannot be created by legacy request',register([(d,d1,0,100)],0).status_code==400)
   net=copy.deepcopy(cash_request([(d,d1,1)]));net['allocations'][0]['offsetAmount']=1

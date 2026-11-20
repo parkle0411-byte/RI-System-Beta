@@ -54,12 +54,61 @@ def facility_account(payload, no, detail):
     return normalized(name) in {normalized(n) for n in FACILITY_REVIEW_REINSURERS}
 
 
-SWISS_CEDANT_FIRST = 'Collect the full Cedant installment before reviewing the Swiss Re premium payment.'
+# 2026-11-20 業主決定：所有再保人，Mark reviewed 前要先收齊「對應的那筆錢」（只看該再保人的份額）：
+#   付再保人的保費 T2 → 同期、該再保人份額的 Cedant T1；退給 Cedant 的退費 → 該份額的再保人退款 T2；
+#   付給 Cedant 的理賠（Claim T2）→ 同一筆理賠付款、同一再保人的 Claim T1 **已收到款項（部分即可）**；
+#   理賠維持分次收付：付給 Cedant 仍不能超過已收（業主同日決定）。
+#   取代 2026-11-19「Swiss Property 要等該期 Cedant 全部收齊」。舊版面 Cedant T1 合併時看整期。
+#   「收齊」＝該筆餘額為 0（與付款前提相同：含既有合法抵銷；新的抵銷已停用）。付款前提本身不變。
+REVIEW_PREREQUISITES = {
+    'premium': ('cedant_collection_required', "Collect this reinsurer's share of the Cedant premium before reviewing the payment to the reinsurer."),
+    'refund': ('reinsurer_refund_required', "Collect this reinsurer's refund before reviewing the refund to the Cedant."),
+    'claim': ('reinsurer_claim_required', "Collect this reinsurer's claim payment before reviewing the claim payment to the Cedant."),
+}
+
+
+def review_prerequisite(payload, no, detail):
+    """審核 no 之前必須先收齊的帳款：回傳 (類別, [帳款編號]) 或 None（不需要）。"""
+    txs = [t for t in objects(payload.get('transactions')) if not t.get('reversed') and not t.get('isReversalEntry')]
+    tx = next((t for t in txs if t.get('txNo') == no), None)
+    if not tx or detail.get('paymentDirection') != 'payable':
+        return None
+    leg = lambda t: str(t.get('legType') or '')
+    same_period = lambda t: not tx.get('installmentId') or t.get('installmentId') == tx.get('installmentId')
+    premium = [t for t in txs if t.get('source') != 'claim' and same_period(t)]
+    if tx.get('source') == 'claim':
+        if not leg(tx).startswith('Claim Leg 2'):
+            return None
+        mates = [t for t in txs if t.get('source') == 'claim' and leg(t).startswith('Claim Leg 1') and t.get('claimId') == tx.get('claimId')
+                 and t.get('paymentId') == tx.get('paymentId') and t.get('reinsurerIdx') == tx.get('reinsurerIdx')]
+        return ('claim', [t['txNo'] for t in mates]) if mates else None
+    if leg(tx).startswith('Leg 2') and detail.get('partyType') == 'reinsurer':
+        mates = [t for t in premium if leg(t).startswith('Leg 1') and t.get('reinsurerIdx') == tx.get('reinsurerIdx')]
+        mates = mates or [t for t in premium if leg(t).startswith('Leg 1')]   # 舊版面：Cedant T1 合併 → 看整期
+        return ('premium', [t['txNo'] for t in mates]) if mates else None
+    if leg(tx).startswith('Leg 1') and detail.get('partyType') == 'cedant':
+        index = tx.get('reinsurerIdx')
+        mates = [t for t in premium if leg(t).startswith('Leg 2') and (index is None or t.get('reinsurerIdx') == index)]
+        return ('refund', [t['txNo'] for t in mates]) if mates else None
+    return None
+
+
+def review_blocked(payload, no, detail, details):
+    """不能審核時回傳 (錯誤代碼, 說明)；可以審核回傳 None。details＝該案件的 transaction_details（含 outstanding）。"""
+    need = review_prerequisite(payload, no, detail)
+    if not need:
+        return None
+    kind, numbers = need
+    if kind == 'claim':   # 理賠：已收到一部分就可以審核（付款仍受「不超過已收」限制）
+        collected = all(abs(float((details.get(n) or {}).get('paid', 0))) > .004 for n in numbers)
+    else:
+        collected = all(abs(float((details.get(n) or {}).get('outstanding', 1))) < .005 for n in numbers)
+    return None if collected else REVIEW_PREREQUISITES[kind]
 
 
 def swiss_premium_t2(payload, no):
     """Swiss Property 付 Swiss Re 的保費 T2（不含退保應收、理賠、Swiss CGL）；是則回傳交易，否則 None。
-    2026-11-19 業主決定：這筆 T2 的對帳日決定付款結算期，且 Cedant 該期全額收現前不能對帳。"""
+    2026-11-19 業主決定：這筆 T2 的對帳日決定付款結算期（審核前提見 review_blocked，2026-11-20 起只看該再保人份額）。"""
     from .calc.swiss_facility import applies, is_swiss_facility
     from .swiss_cgl import target as swiss_cgl
     from .accounting_policy import rows
@@ -72,16 +121,6 @@ def swiss_premium_t2(payload, no):
     index = tx.get('reinsurerIdx'); names = [r.get('name') for r in rows(payload.get('reinsurers'))]
     ok = isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(names) and is_swiss_facility(names[index])
     return tx if ok else None
-
-
-def swiss_cedant_collected(payload, tx):
-    """該期 Cedant 款是否已全額收現（與付 Swiss Re 的前提相同：該期全部 Cedant 列結清且為實際收現）。"""
-    from .calc.payment_terms import build_payment_schedule
-    from .payment_policy import actual_cash
-    items = build_payment_schedule(payload).get('items') or []
-    period = tx.get('installmentId')
-    cedants = [r for r in items if r['partyType'] == 'cedant' and (not period or r.get('installmentId') == period)]
-    return bool(cedants) and all(abs(r['outstanding']) < .005 and actual_cash(payload, r) for r in cedants)
 
 
 def set_swiss_review_dates(payload, numbers, review_date):
@@ -259,9 +298,9 @@ def reconcile(view, request, body):
             return fail('already_reviewed', 'Cancel the existing whole review batch before reviewing this transaction again.')
         if not finance and not facility_account(p, no, d):   # Reinsurance Staff：只限對象是這兩家的帳款
             return fail('permission_denied', 'Reinsurance Staff can review only transactions with Swiss Re Asia or Allianz (Facility).', 403)
-        swiss_t2 = swiss_premium_t2(p, no)
-        if swiss_t2 and not swiss_cedant_collected(p, swiss_t2):   # 2026-11-19：Cedant 收齊前不能對帳
-            return fail('cedant_collection_required', SWISS_CEDANT_FIRST)
+        blocked = review_blocked(p, no, d, details[uid])   # 2026-11-20：先收齊對應的那筆錢才能審核
+        if blocked:
+            return fail(*blocked)
         group = counterparty(p, d)
         if not all(group) or scope is not None and group[1] != scope:
             return fail('review_scope', 'Review transactions for one counterparty per batch.', 400)

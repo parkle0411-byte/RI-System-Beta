@@ -128,7 +128,10 @@ def leg(name):
 r=pay(cedant,890)
 check('Cedant refund is blocked until every reinsurer refund is received and settled',r.status_code==409 and next(x for x in rows(child) if x['partyType']=='cedant')['paid']==0)
 # 2026-10-21：錯誤訊息要具體說明原因（先收齊並銷帳所有再保人退款）
-check('the block message tells the user to settle every reinsurer refund first','reinsurer refund' in r.json().get('message','').lower())
+# 2026-11-20：退給 Cedant 的那筆在再保人退款收齊前連審核都不行；原因改在審核時說明（畫面上 Mark reviewed 停用並顯示同一句）
+child.refresh_from_db()
+rv=call('post','/api/accounting',{'action':'review_accounts','date':'2037-05-20','reference':'QA','members':[{'caseUid':str(child.case_uid),'txNo':leg('Leg 1'),'rowVersion':child.row_version}]})
+check('the block message tells the user to settle every reinsurer refund first',rv.status_code==409 and "reinsurer's refund" in rv.json().get('message','').lower())
 check('refund recovery still rejects overpayment',pay(ri,752.01).status_code==400)
 # 2026-10-16 92 項規則（第 52 項）：保費（含退費）每次須登錄整筆餘額，不得部分收付（取代舊的部分退款情境）
 with transaction.atomic():

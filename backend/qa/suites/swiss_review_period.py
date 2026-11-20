@@ -41,7 +41,7 @@ try:
 
         # ---- Cedant 收齊前不能對帳 ----
         body = listing(fin)
-        check('清單標示：Cedant 未收齊，Swiss T2 不能對帳', 'Cedant installment' in row_of(body, a, T2)['reviewBlockedReason'])
+        check('清單標示：Cedant 未收齊，Swiss T2 不能對帳', 'Cedant premium' in row_of(body, a, T2)['reviewBlockedReason'])
         r = review([(a, T2)], fin, date='2027-02-07'); check('Finance 也不能在 Cedant 收齊前審核 Swiss T2', r.status_code == 409 and r.json()['error'] == 'cedant_collection_required', r.content)
         r = review([(a, T2)], rs, date='2027-02-07'); check('Reinsurance Staff 同樣不能', r.status_code == 409 and r.json()['error'] == 'cedant_collection_required', r.content)
         amount = next(t['amount'] for t in rows(a) if t['txNo'] == T1)

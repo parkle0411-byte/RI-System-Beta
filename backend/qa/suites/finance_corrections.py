@@ -25,10 +25,13 @@ try:
  with transaction.atomic():
   fin=client('correction-fin','accounting');sales=client('correction-sales','sales')
   a=fixture('QA-COR-A');b=fixture('QA-COR-B');ta=leg(a,'Leg 2');tb=leg(b,'Leg 2')
+  # 2026-11-20：付再保人的 T2 要先收齊該份額的 Cedant 款才能審核 → 先收齊兩件的 T1
+  for x in (a,b):
+   x1=leg(x,'Leg 1');review([(x,x1)]);assert register([(x,x1,1000,0)],1000).status_code==200,x.tw_ref
   r=review([(a,ta),(b,tb)]);check('multi-case batch review accepted before financial correction',r.status_code==200,r.content);bid=r.json()['reviewBatchId']
   p,error=proposed(a,900);check('any reviewed member change requires cancelling entire batch',bool(error) and 'entire Finance review batch' in error,error)
-  bt1=leg(b,'Leg 1');review([(b,bt1)]);setup=register([(b,bt1,1000,0)],1000)
-  check('peer batch setup receives its own T1',setup.status_code==200,setup.content)
+  bt1=leg(b,'Leg 1')
+  check('peer batch setup receives its own T1',transaction_details(Case.objects.get(pk=b.pk).payload)[bt1]['outstanding']==0)
   paid_peer=register([(b,tb,800,0)],-800);check('one member of original review batch has effective T2 payment',paid_peer.status_code==200,paid_peer.content)
   check('untreated member cannot cancel review while another original member remains paid',cancel(bid,[a,b]).status_code==409)
   check('reverse paid peer before cancelling original review batch',reverse(paid_peer.json()['batchId'],[b]).status_code==200)

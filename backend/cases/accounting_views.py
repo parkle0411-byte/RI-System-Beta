@@ -209,11 +209,14 @@ class AccountingView(NoStoreMixin, APIView):
             if js_truthy(currency) and currency not in currencies:
                 currencies.append(currency)
         currencies.sort(key=js_to_string)
-        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches, facility_account, FACILITY_REVIEW_PERMISSION, swiss_premium_t2, swiss_cedant_collected, SWISS_CEDANT_FIRST
+        from .finance_workflow import active_reviews, review_fields, review_batches as grouped_review_batches, facility_account, FACILITY_REVIEW_PERMISSION, review_blocked
         from .models import FinanceReconciliationBatch
         reviews = active_reviews()
         payload_by_uid = {c['caseUid']: c['payload'] for c in case_views}
         versions = {c['caseUid']: c['rowVersion'] for c in case_views}
+        rows_by_case = {}   # 2026-11-20：同案件的帳款列（含 outstanding），判斷審核前要先收齊的那筆
+        for row in transactions:
+            rows_by_case.setdefault(row['caseUid'], {})[row.get('txNo')] = row
         for row in transactions:
             if row.get('legacyHistorical') or row.get('legacyImportSettled'):
                 continue  # Historical / settled-before-import review is read-only; never infer a new review event.
@@ -221,9 +224,9 @@ class AccountingView(NoStoreMixin, APIView):
             row.update(review_fields(row['caseUid'], row.get('txNo'), payload_by_uid[row['caseUid']], row, reviews))
             # 2026-11-19：對象是 Swiss Re Asia／Allianz（Facility）的帳款（應付與應收），Reinsurance Staff 可 Mark reviewed
             row['facilityReviewable'] = facility_account(payload_by_uid[row['caseUid']], row.get('txNo'), row)
-            # 2026-11-19：Swiss Property 付 Swiss Re 的保費 T2，Cedant 該期全額收現前不能對帳
-            swiss_t2 = None if row.get('financeReviewed') else swiss_premium_t2(payload_by_uid[row['caseUid']], row.get('txNo'))
-            row['reviewBlockedReason'] = SWISS_CEDANT_FIRST if swiss_t2 and not swiss_cedant_collected(payload_by_uid[row['caseUid']], swiss_t2) else ''
+            # 2026-11-20：所有再保人，審核前要先收齊對應的那筆錢（保費 T2、退給 Cedant、付給 Cedant 的理賠）
+            blocked = None if row.get('financeReviewed') else review_blocked(payload_by_uid[row['caseUid']], row.get('txNo'), row, rows_by_case[row['caseUid']])
+            row['reviewBlockedReason'] = blocked[1] if blocked else ''
         review_batches = [{
             'id': str(b.pk), 'status': b.status, 'date': str(b.review_date),
             'currency': b.currency if len(getattr(b, 'currencies', [b.currency])) == 1 else '',

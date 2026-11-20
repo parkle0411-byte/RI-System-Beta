@@ -99,7 +99,8 @@ with transaction.atomic():
    payable=tx_rows(c,'Claim Leg 2')[0]
    check(label+' claim correct due in both directions',d['contractDueDate']==expected and transaction_details(c.payload)[payable['txNo']]['contractDueDate']==expected,(d['contractDueDate'],expected))
    check(label+' no dedicated Facility followup',not any(d.get(k) for k in ('allianzClaim','greatAmericanClaim','qbeClaim')))
-   r=apay(fin,c,'Claim Leg 2',value=100);check(label+' claim cannot pay before receipt',r.status_code in (400,409) and r.json().get('error')=='payment_dependency',r.content[:400])
+   # 2026-11-20：付給 Cedant 的理賠在再保人尚未付任何款項前不能審核，所以付款被「需先審核」擋下
+   r=apay(fin,c,'Claim Leg 2',value=100);check(label+' claim cannot pay before receipt (not reviewable yet)',r.status_code==409 and r.json().get('error')=='finance_review_required',r.content[:400])
    check(label+' partial claim receipt allowed',apay(fin,c,'Claim Leg 1',value=100).status_code==200)
    d=transaction_details(c.payload)[no];check(label+' partial claim keeps due and stays open',d['contractDueDate']==expected and d['settlement']=='partial' and d['amountEditLocked'])
    entry=next(e for e in c.payload['paymentEntries'] if e.get('transactionNo')==no)

@@ -41,6 +41,8 @@ with transaction.atomic():
   check('Announced Case edit restores authoritative financial histories instead of accepting forged rows',changed.status_code==200 and all(c.payload.get(k)==v for k,v in before_history.items()) and not any(h.get('forged') for h in c.payload.get('propertyEditHistory',[])),changed.content[:500])
   before=copy.deepcopy(c.payload['transactions']);r=edit_case(c,0,10)
   check('Case API unclosed financial correction updates directly',r.status_code==200 and len(c.payload['transactions'])==len(before),r.content[:500])
+  # 2026-11-20：T2 要先收齊該份額的 Cedant T1 才能審核 → 先審核並收齊 T1（這裡的更正只改 T2／T3，不動 T1）
+  t1=tx_rows(c,'Leg 1')[0]['txNo'];assert approve(c,[t1]).status_code==200;assert cash(c,[t1]).status_code==200,'T1 setup receipt'
   t2=tx_rows(c,'Leg 2')[0]['txNo'];r=approve(c,[t2]);check('Case API setup reviewed account',r.status_code==200,r.content)
   bid=r.json()['reviewBatchId'];c.refresh_from_db();before=copy.deepcopy(c.payload);version=c.row_version
   r=edit_case(c,0,10);check('Case API blocks changing a reviewed member before whole cancellation',r.status_code==409 and c.payload==before and c.row_version==version,r.content[:600])
@@ -60,7 +62,8 @@ with transaction.atomic():
   correction_month=c.payload['productionReversals'][-1]['month'];preview=call(fin_client,'get','/api/production-report?month='+correction_month)
   changed=[r for r in preview.json()['rows'] if r.get('financeCorrectionId')]
   check('API preview includes full premium and income reversal/replacement at original FX',preview.status_code==200 and len(changed)==2 and sum(r['premium'] for r in changed)==0 and all(r['rate']==30 for r in changed),changed)
-  t1s=[t['txNo'] for t in tx_rows(c,'Leg 1')];approve(c,t1s);r=cash(c,t1s);check('Case API setup full T1 receipt',r.status_code==200,r.content)
+  c.refresh_from_db();open_t1=transaction_details(c.payload)   # 第一家的 T1 已在前面收齊（2026-11-20 審核 T2 的前提），只收其餘的
+  t1s=[t['txNo'] for t in tx_rows(c,'Leg 1') if abs(open_t1[t['txNo']]['outstanding'])>.005];approve(c,t1s);r=cash(c,t1s);check('Case API setup full T1 receipt',r.status_code==200,r.content)
   original_t1=[(t['txNo'],t['amount']) for t in tx_rows(c,'Leg 1')];r=edit_case(c,0,10)
   check('Case API paid T1 preserved during untreated T2 closed correction',r.status_code==200 and [(t['txNo'],t['amount']) for t in tx_rows(c,'Leg 1')]==original_t1,r.content[:700])
   current_a=tx_rows(c,'Leg 2')[0]['txNo'];approve(c,[current_a]);r=cash(c,[current_a]);check('Case API first reinsurer completes T2',r.status_code==200,r.content)

@@ -301,7 +301,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | Swiss CGL QS | B＋90 | 到期前 15 天 | B 所在月底＋90 | 到期前 10 天 |
 
 - **Swiss Property 結算期**：每年 2/14、5/14、8/14、11/14；11–1 月→2/14、2–4 月→5/14、5–7 月→8/14、8–10 月→11/14。原始期依 B＋90（批單 L＋90）歸期。
-  - **付 Swiss Re 的保費 T2（2026-11-19 業主決定）**：期別由這筆 T2 的**對帳日**決定（Mark reviewed 對話框的 Review date）。截止＝結算日前 7 天（2/7、5/7、8/7、11/7，當天也算）：截止前已對帳 → 該期；沒對帳 → 自動延一季，可連續延；不早於原始期。未對帳時以今天推算並顯示預計期（因此不會逾期）；已對帳後超過結算日未付即逾期。**該期 Cedant 全額收現前不能對帳這筆 T2**（Finance 與 Reinsurance Staff 都一樣）；取消審核後依新的對帳日重算。已登錄付款的期別鎖定。取代原本「最後有效收款日／財務確認日歸期取最晚、前一個月月底確認截止」。
+  - **付 Swiss Re 的保費 T2（2026-11-19 業主決定）**：期別由這筆 T2 的**對帳日**決定（Mark reviewed 對話框的 Review date）。截止＝結算日前 7 天（2/7、5/7、8/7、11/7，當天也算）：截止前已對帳 → 該期；沒對帳 → 自動延一季，可連續延；不早於原始期。未對帳時以今天推算並顯示預計期（因此不會逾期）；已對帳後超過結算日未付即逾期。審核前要先收齊**該再保人份額**的 Cedant 款（2026-11-20 起與所有再保人相同，見 §8.3；取代 11-19 的「該期 Cedant 全部收齊」）；取消審核後依新的對帳日重算。已登錄付款的期別鎖定。取代原本「最後有效收款日／財務確認日歸期取最晚、前一個月月底確認截止」。
   - 例：保單 2026-09-01 生效，B＋90＝11-30 → 原始期 2027-02-14：Review date 02-07 以前 → 02-14；02-08～05-07 → 05-14；過了 02-07 還沒對帳 → 預計 05-14。
   - 退保費（向 Swiss Re 收回）照舊：可依 Announce 截止規則提前一期；理賠照舊依建帳日歸期。
 - **批單**（2026-11-13 業主決定）：Cedant 端從**批改生效日 E**起算：到期 E＋C（Facility 為 E＋90），提醒日照上表（一般到期前 15 天、Swiss Property E＋75），與 Word Debit／Credit Note 相同；回溯批單 Announce 時已過到期日即照實顯示逾期。再保人端把 B 換成 L，依上表公式（Swiss Property 依固定結算期，原始期依 L＋90 歸期）。新系統與舊資料新增批單相同；已收付或已結清的帳款保留原日期。
@@ -312,6 +312,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 「已對帳」＝財會已核對內容與金額，不要求對方同時確認，也不代表已收付。T1／T2、理賠及 Oversea 現金 T3 均須先對帳；歷史已對帳／已結清資料及既有收付歷史保留，不補造銀行紀錄。
 - 同一實際對象可跨案、跨期、跨幣別對帳，同對象全部有效對帳合為一個邏輯批次，原始各次對帳事件與幣別保留。對帳日期必填，Review reference／Explanation 選填。
 - 取消對帳須填原因；可選**只取消這一筆**或**取消整批**（2026-11-19 業主決定）：Finance 的整批＝整個對象批次（原做法），單筆可取消任何人審的；Reinsurance Staff 只能取消自己審的（整批＝本人在這個對象審過的全部，其他人審的不動）。單筆取消記在該次審核紀錄（取消人、時間、原因），原始審核內容保留；一次審核的帳款全部取消時，該次審核改為已取消。要取消的帳款有有效收付或歷史抵銷時，先依原沖回限制處理；任何成員變動均須取消整批並重新對帳。
+- **審核前要先收齊對應的那筆錢（2026-11-20 業主決定，所有再保人）**：只看該再保人的份額——付再保人的保費 T2 ← 同期該份額的 Cedant T1；退給 Cedant 的退費 ← 該份額的再保人退款；付給 Cedant 的理賠 ← 同一筆理賠付款、同一再保人的理賠款**已收到一部分即可**（理賠維持分次收付，付 Cedant 仍不超過已收）。保費與退保的「收齊」＝該筆餘額為 0（含既有合法抵銷）。舊版面 Cedant T1 合併時看整期。Finance 與 Reinsurance Staff 都適用；畫面上未收齊的那筆 Mark reviewed 停用並顯示原因。付款前提不變（付再保人仍要該期全部 T1 收齊等），所以可能「已審核但還不能付」。
 - 停止一切新增抵銷／純抵銷，僅登錄實際現金收款與付款。既有抵銷繼續反映餘額與收付前置條件，保留查閱及合法整筆沖回。
 - Record Selected 可選同一實際對象的多個幣別、兩種方向，逐列 Cash Amount 預帶 Outstanding，可修改。系統按幣別與方向建立獨立收款／付款登錄，不互抵，不跨幣別加總。台幣 Cash Amount 只准整數（2026-11-14），輸入小數該列失敗並提示；外幣最多兩位。
 - 同畫面待登錄列共用實際收付款日期、Accounting Dept. Ref.／Note，參考號或說明至少一項；已完成登錄維持其原存日期與參考號，另記操作時間。
@@ -548,6 +549,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-20 16:29 | 審核前先收齊對應款（所有再保人，只看該再保人份額）：付再保人的保費 T2 ← Cedant T1；退給 Cedant ← 再保人退款；付給 Cedant 的理賠 ← 理賠款已收到一部分；Swiss Property 改為只看自己份額（§8.2、§8.3） | `backups/review_collect_20261120_162901/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `review-collect-work/rollback.sh 20261120_162901` | `ri-backend:before-review-collect-20261120_162901`／`ri-frontend:before-review-collect-20261120_162901` | 候選映像 API 140/140（新增 review_after_collection 20 項）、畫面全部階段通過（V 15 項）；無 migration、不改資料；正式後端逐檔一致；正式唯讀確認只有 TWGL2606001-R1-T2、TWGL2606001-E01-R1-T2（付 Swiss Re，Cedant 未收）標示不能審核，已審核帳款不受影響 |
 | 11-20 12:18 | Accounting 用詞 account→transaction（分頁 Transactions／Unreconciled／Reconciled／Settled Transactions、對話框、後端錯誤訊息、案件頁說明）；Account List TW Ref. 欄寬 200、上方左右拉桿＋固定高度＋Insured (EN) 固定；Accounting 與 Account List 底部捲軸不一直顯示（§8.7） | `backups/accttx_20261120_121839/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `accounting-transactions-work/rollback.sh 20261120_121839`（映像標籤 `before-accttx-20261120_121839`）；無 migration、不改資料 |
 | 11-20 11:19 | Cedant 應收的 Accounting 提醒日統一到期前 15 天：Swiss Property B＋80 → B＋75（批單 E＋75；到期 B＋90 不變；§8.2） | `backups/cedant15_20261120_111957/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `cedant-reminder-work/rollback.sh 20261120_111957` | `ri-backend:before-cedant15-20261120_111957`／`ri-frontend:before-cedant15-20261120_111957` | 候選映像 API 139/139（新增 cedant_reminder_15 9 項）、畫面全部階段通過；無 migration；正式後端逐檔一致；正式資料唯讀確認所有 Cedant 應收皆差 15 天（TWPF2611001 01-24 → 01-19） |
 | 11-19 20:55 | Swiss Property 付 Swiss Re 的保費 T2：結算期改由 T2 對帳日（Review date）決定、截止＝結算日前 7 天、未對帳自動延一季、Cedant 收齊前不能對帳（§8.2） | `backups/swiss_period_20261119_205528/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `swiss-period-work/rollback.sh 20261119_205528`（回到 Cedant 收齊日歸期） | `ri-backend:before-swiss-period-20261119_205528`／`ri-frontend:before-swiss-period-20261119_205528` | 候選映像 API 138/138（新增 swiss_review_period 35 項）、畫面全部階段＋階段 V 15 項通過；無 migration；正式後端逐檔一致；正式資料唯讀確認既有 2 件 Swiss CGL 不受影響（正式目前無 Swiss Property 案件） |
@@ -616,6 +618,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ## 近期變更
 
+- 2026-11-20：所有再保人，Mark reviewed 前要先收齊對應的那筆錢（只看該再保人份額）：保費 T2 要先收齊 Cedant 款、退給 Cedant 要先收回再保人退款、付給 Cedant 的理賠要先收到一部分理賠款；Swiss Property 改為只看自己份額，取代 11-19「該期 Cedant 全部收齊」；付款前提不變（§8.2、§8.3，業主決定，API 140 組、畫面全部通過後部署）。
 - 2026-11-20：Accounting 畫面 account 一律改稱 transaction，分頁改名；Account List 欄寬與左右捲動比照 Accounting（§8.7，業主決定，測試 畫面 397＋15、API 139 組全部通過後部署）。
 - 2026-11-20：所有向 Cedant 收款的帳款，Accounting 提醒日統一為實際到期前 15 天：Swiss Property 由 B＋80 改為 B＋75（批單 E＋75），實際到期 B＋90 不變；已結清的舊帳保留原日期。
 

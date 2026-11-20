@@ -20,9 +20,10 @@ def claim(value):
     t=create('claim');t=save(t,dict(claim=value,lossDate='2020-04-01',lossNo='LOSS-FIN',claimReason='Overpayment refund' if value<0 else ''));return confirm(t)
 t=claim(1000)
 pay(t,1,100,100,409)
-review(t,1);review(t,2)
+review(t,1)   # 2026-11-20：付給 Cedant 的理賠要等再保人理賠款收到一部分才能審核
 pay(t,2,50,-50,409)
 r=pay(t,1,100,100)
+review(t,2)
 p=pay(t,2,60,-60)
 reverse(t,r['batchId'],409)
 reverse(t,p['batchId']);reverse(t,r['batchId'])
@@ -36,11 +37,12 @@ record=LegacyTransaction.objects.get(pk=negative['uid'])
 check('negative claim persists signed receipts/payments',all(e['amount']<0 for e in record.financial['paymentEntries']))
 # Refund/premium dependency and full-amount restrictions use the original-currency ledger.
 e=create();e=save(e,dict(gross=400,commissionRate=0,taxRate=0,brokerage=10,effectiveDate='2020-07-01',endorsementNo='E-FIN',oldReason='late_entry'));e=confirm(e)
-review(e,1);review(e,2)
+review(e,1)   # 2026-11-20：付再保人的 T2 要等 Cedant T1 收齊才能審核
 pay(e,2,90,-90,409)
 pay(e,1,50,50)
 pay(e,2,1,-1,409)
 pay(e,1,50,50)
+review(e,2)
 pay(e,2,90,-90)
 rows=accounting_get(admin, '?view=list').json()['transactionRows']
 ours=[r for r in rows if r.get('caseUid')==e['uid']]

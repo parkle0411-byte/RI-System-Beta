@@ -25,7 +25,7 @@ with sync_playwright() as p:
     tab("Unreconciled Transactions"); expect(row(SW)).to_be_visible()
     mark = lambda no: row(no).get_by_role("button", name="Mark reviewed", exact=True)
     check("應付給 Swiss Re（Facility）的帳款顯示 Mark reviewed", mark(SW).count() == 1)
-    check("Cedant 未收齊：Swiss T2 的 Mark reviewed 停用並說明原因", mark(SW).is_disabled() and "Collect the full Cedant installment" in row(SW).inner_text())
+    check("Cedant 未收齊：Swiss T2 的 Mark reviewed 停用並說明原因", mark(SW).is_disabled() and "Cedant premium" in row(SW).inner_text())
     expect(row(AZ)).to_be_visible()
     check("應付給 Allianz（Facility）的帳款可直接 Mark reviewed", mark(AZ).count() == 1 and not mark(AZ).is_disabled())
     check("同一案件的 Cedant 應收沒有 Mark reviewed", mark(SW_T1).count() == 0)

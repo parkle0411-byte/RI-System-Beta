@@ -41,7 +41,8 @@ try:
   check('different counterparties cannot share a remittance',batch([(b,'Leg 1',1000),(c,'Leg 1',1000)]).status_code==400)
   check('failed batch changes neither case',not Case.objects.get(pk=b.pk).payload['paymentEntries'] and not Case.objects.get(pk=c.pk).payload['paymentEntries'])
   usd=make('USD',currency='USD');check('mixed currency batch rejected',batch([(b,'Leg 1',1000),(usd,'Leg 1',1000)]).status_code==400)
-  check('mixed cash direction rejected before an unfunded outgoing allocation',batch([(b,'Leg 1',1000),(b,'Leg 2',800)]).status_code==400)
+  # 2026-11-20：T1 未收齊時 T2 連審核都不行，混合方向的登錄在「需先審核」就被擋下（409），不會付出未收到的錢
+  r=batch([(b,'Leg 1',1000),(b,'Leg 2',800)]);check('mixed cash direction rejected before an unfunded outgoing allocation',r.status_code in (400,409) and not Case.objects.get(pk=b.pk).payload['paymentEntries'],r.content[:300])
   peer=make('PEER')
   with transaction.atomic():
    check('same-party same-currency cross-case receipt accepted',batch([(b,'Leg 1',1000),(peer,'Leg 1',1000)]).status_code==200)
