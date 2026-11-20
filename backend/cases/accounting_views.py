@@ -278,7 +278,7 @@ class AccountingView(NoStoreMixin, APIView):
         if action in retired:
             if not _can_edit(request.ri_principal):
                 return _error(403, 'permission_denied', 'Finance access is required.')
-            return _error(410, 'retired_accounting_action', 'Use the reviewed account registration and whole-registration reversal workflow.')
+            return _error(410, 'retired_accounting_action', 'Use the reviewed transaction registration and whole-registration reversal workflow.')
         if action not in handlers:
             return _error(400, "unsupported_action", "Unsupported Accounting action.")
         try:

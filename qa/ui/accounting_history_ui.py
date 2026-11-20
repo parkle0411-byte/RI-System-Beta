@@ -1,7 +1,7 @@
 """Y: Accounting server paging (2026-11-17 owner decision; replaces the 2026-11-13 background history merge).
 
 Accounting opens on Unreconciled with the open accounts only; settled legacy history is never downloaded as a whole.
-All Accounts / Settled/Closed / Brokerage ask the server for one page of 100 rows (history included); filters are
+Transactions / Settled Transactions / Brokerage ask the server for one page of 100 rows (history included); filters are
 applied by the server (text after a pause), the dropdowns include history-only names, registrations of a history
 row open from its history, and a failed page shows an error with Retry. Runs after accounting_paging_seed.py."""
 import json, re
@@ -42,8 +42,8 @@ with sync_playwright() as p:
         settle()
 
     page.goto(BASE + "/accounting"); rows().first.wait_for(); page.wait_for_timeout(800)
-    check("Accounting opens on Unreconciled Accounts", "Unreconciled Accounts (" in heading()
-          and page.get_by_role("tab", name="Unreconciled Accounts", exact=True).get_attribute("aria-selected") == "true")
+    check("Accounting opens on Unreconciled Transactions", "Unreconciled Transactions (" in heading()
+          and page.get_by_role("tab", name="Unreconciled Transactions", exact=True).get_attribute("aria-selected") == "true")
     check("opening loads the open accounts and the dropdown names only", any("legacy=open" in u for u in requests) and any("view=options" in u for u in requests)
           and not any("legacy=history" in u for u in requests) and not any("view=page" in u for u in requests), requests)
     check("no history is listed or downloaded on Unreconciled", "Historically settled" not in table.inner_text() and page.get_by_role("button", name="Mark reviewed", exact=True).count() > 0)
@@ -51,9 +51,9 @@ with sync_playwright() as p:
     check("Unreconciled selection works as before", rows().first.locator(".el-checkbox.is-checked").count() == 1)
     unreconciled = count()
 
-    tab("All Accounts")
+    tab("Transactions")
     query, body = pages[-1]
-    check("All Accounts asks the server for page 1", query.get("tab") == ["all"] and query.get("page") == ["1"], query)
+    check("Transactions asks the server for page 1", query.get("tab") == ["all"] and query.get("page") == ["1"], query)
     check("the heading shows the server's total over the whole system", count() == body["total"] and body["total"] > 100, (count(), body["total"]))
     check("one page holds 100 rows", rows().count() == 100 and len(body["rows"]) == 100)
     pager = page.get_by_test_id("accounting-server-pagination")
@@ -63,10 +63,10 @@ with sync_playwright() as p:
     n = len(pages); pager.locator(".el-pager li", has_text=re.compile(r"^2$")).click(); settle()
     check("page 2 is a new server request with other rows", len(pages) > n and pages[-1][0].get("page") == ["2"] and rows().first.inner_text() != first)
 
-    tab("Settled/Closed")
+    tab("Settled Transactions")
     query, body = pages[-1]
-    check("Settled/Closed asks for settled accounts", query.get("tab") == ["settled"] and query.get("settlement") == ["settled"] and query.get("page") == ["1"], query)
-    check("Settled/Closed lists settled legacy history from the server", "Historically settled" in table.inner_text() and count() == body["total"] and body["total"] >= 320)
+    check("Settled Transactions asks for settled accounts", query.get("tab") == ["settled"] and query.get("settlement") == ["settled"] and query.get("page") == ["1"], query)
+    check("Settled Transactions lists settled legacy history from the server", "Historically settled" in table.inner_text() and count() == body["total"] and body["total"] >= 320)
 
     # Text filter: one request after typing stops.
     n = len(pages)
@@ -91,7 +91,7 @@ with sync_playwright() as p:
 
     # History of a history row opens its imported receipt.
     rows().first.get_by_role("button", name="History", exact=True).click()
-    dialog = page.locator(".el-dialog:visible").filter(has_text="Account history")
+    dialog = page.locator(".el-dialog:visible").filter(has_text="Transaction history")
     check("the history of a settled legacy account lists its imported receipt (read-only, as before)", "UI-REC-" in dialog.inner_text()
           and dialog.get_by_role("button", name="View registration").count() == 0)
     page.keyboard.press("Escape"); page.wait_for_timeout(400)
@@ -100,7 +100,7 @@ with sync_playwright() as p:
     check("Brokerage asks the server too", pages[-1][0].get("tab") == ["brokerage"])
 
     # Refresh reloads the page and the dropdown names.
-    tab("Settled/Closed")
+    tab("Settled Transactions")
     n_page, n_opt = len([u for u in requests if "view=page" in u]), len([u for u in requests if "view=options" in u])
     page.get_by_role("button", name="Refresh", exact=True).click(); page.wait_for_timeout(1500); settle()
     check("Refresh reloads the current page and the dropdown names", len([u for u in requests if "view=page" in u]) > n_page
@@ -120,7 +120,7 @@ with sync_playwright() as p:
     cedant.hover(); cedant.locator(".el-select__clear").first.click(); page.wait_for_timeout(800); settle()
 
     n = len([u for u in requests if "view=page" in u])
-    page.get_by_role("tab", name="Unreconciled Accounts", exact=True).click(); page.wait_for_timeout(800)
+    page.get_by_role("tab", name="Unreconciled Transactions", exact=True).click(); page.wait_for_timeout(800)
     check("back on Unreconciled the list is the browser's again, with no page request", count() == unreconciled
           and len([u for u in requests if "view=page" in u]) == n and page.get_by_role("button", name="Mark reviewed", exact=True).count() > 0,
           (count(), unreconciled, len([u for u in requests if "view=page" in u]), n))

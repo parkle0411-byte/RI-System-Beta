@@ -97,3 +97,15 @@ strong,b{font-weight:500}
 @media(max-width:1050px){.rdash .row3,.rdash .kpi-grid{grid-template-columns:1fr 1fr}.rdash .row2{grid-template-columns:1fr}}
 @media(max-width:900px){.app-shell{display:block}.sidebar{position:sticky;width:100%;height:auto;padding:10px 12px;flex-direction:row;align-items:center;gap:10px;z-index:40}.brand-block{min-width:150px}.nav-list{flex-direction:row;overflow-x:auto}.nav-item{width:auto;min-width:max-content}.sidebar-note{display:none}.main-area{width:100%}.content-area{padding:16px 14px 60px}.page-header{min-height:auto;padding:16px 14px}.data-version-strip{padding:10px 14px}}
 @media(max-width:620px){.rdash .row3,.rdash .row2,.rdash .kpi-grid{grid-template-columns:1fr}.list-toolbar{align-items:stretch;flex-direction:column}.search-field,.status-filter{width:100%}.account-list-head{align-items:flex-start;gap:10px}.account-list-panel{padding:16px 14px}}
+/* 2026-11-20 Account List：上方左右拉桿（與 Accounting 相同外觀）與固定在左的 Insured (EN)。表格主題是透明底，固定欄需不透明才不會透出後面的欄位。 */
+.account-list-panel .accounting-top-scroll input{appearance:none;display:block;width:100%;height:18px;margin:0;padding:0;border:0;background:transparent;cursor:grab}
+.account-list-panel .accounting-top-scroll input::-webkit-slider-runnable-track{height:14px;background:#e5e7eb;border-radius:7px}
+.account-list-panel .accounting-top-scroll input::-webkit-slider-thumb{appearance:none;width:36px;height:14px;border:2px solid #e5e7eb;border-radius:7px;background:#858b94}
+.account-list-panel .accounting-top-scroll input::-moz-range-track{height:14px;background:#e5e7eb;border-radius:7px}
+.account-list-panel .accounting-top-scroll input::-moz-range-thumb{width:32px;height:10px;border:2px solid #e5e7eb;border-radius:7px;background:#858b94}
+.account-list-panel .accounting-top-scroll input:focus-visible{outline:2px solid var(--el-color-primary);outline-offset:1px;border-radius:7px}
+.account-list-panel .el-scrollbar__thumb{background-color:#858b94;opacity:.8}
+.account-list-panel td.el-table-fixed-column--left,.account-list-panel th.el-table-fixed-column--left{background:var(--surface-card,#f7f6f2)!important}
+.account-list-panel td.el-table-fixed-column--left{z-index:2}
+.account-list-panel th.el-table-fixed-column--left{z-index:4}
+.account-list-panel tr.hover-row>td.el-table-fixed-column--left,.account-list-panel tr:hover>td.el-table-fixed-column--left{background:linear-gradient(rgba(244,199,122,.09),rgba(244,199,122,.09)),var(--surface-card,#f7f6f2)!important}

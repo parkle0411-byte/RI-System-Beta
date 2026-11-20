@@ -23,7 +23,7 @@ def review_change_error(case, old, proposed):
     for (uid, no), pair in reviewed.items():
         before = prior.get(no)
         if before and (material(before, fresh.get(no), old.get('currency'), proposed.get('currency')) or old.get('reinsured') != proposed.get('reinsured')):
-            return 'Cancel the entire Finance review batch for this account in Accounting before changing any member amount or counterparty. Reverse its active registrations first.'
+            return 'Cancel the entire Finance review batch for this transaction in Accounting before changing any member amount or counterparty. Reverse its active registrations first.'
     return ''
 
 
@@ -48,7 +48,7 @@ def correct_accounts(case, p, old, old_live, expected, old_details, changed, act
                 before = before_schedule.get(part['scheduleKey'], {})
                 after = after_schedule.get(part['scheduleKey'], {})
                 if any(before.get(k) != after.get(k) for k in ('baseDate','dueDate','contractDueDate','termsDays')):
-                    return 'Payment terms and dates of an account with effective receipt/payment or offsets are locked; use an endorsement.'
+                    return 'Payment terms and dates of a transaction with effective receipt/payment or offsets are locked; use an endorsement.'
             if changed & {'policyFrom', 'policyTo'} and (p.get('policyFrom'),p.get('policyTo')) != (old.get('policyFrom'),old.get('policyTo')):
                 return 'The policy period is locked by an effective receipt/payment; use an endorsement.'
     changed_bases = {no for no, t in by_base.items() if material(t, expected_by_base.get(no), old.get('currency'), p.get('currency'))}
@@ -75,9 +75,9 @@ def correct_accounts(case, p, old, old_live, expected, old_details, changed, act
             d = old_details.get(t['txNo'], {})
             # Reversed historical registrations do not lock a currently untreated account.
             if d.get('cashTracking') != 'derived' and abs(d.get('paid', 0)) > .004:
-                return 'An account with an active receipt/payment or offset cannot change. Use an endorsement or reverse the complete registration first.'
+                return 'A transaction with an active receipt/payment or offset cannot change. Use an endorsement or reverse the complete registration first.'
             if d.get('cashTracking') == 'derived' and d.get('settlement') == 'settled' and abs(d.get('paid', 0)) > .004:
-                return 'This reinsurer account is already completed. Use an endorsement.'
+                return 'This reinsurer transaction is already completed. Use an endorsement.'
         pairs = {(t.get('installmentId') if old.get('installmentEnabled') else 'FULL', t.get('reinsurerIdx'))
                  for t in old_live if base_no(t) in changed_bases}
         # Preserved aggregate T1/T3 spans the reinsurers' individual Production rows.
@@ -101,7 +101,7 @@ def correct_accounts(case, p, old, old_live, expected, old_details, changed, act
                 stem, idx = row.get('financeSourceKey', row['reinsurerKey']).rsplit(':R', 1)
                 period = stem.split(':', 1)[1]; idx = int(idx)
             except (KeyError, ValueError):
-                return 'Review the stored Production allocation before changing this account.'
+                return 'Review the stored Production allocation before changing this transaction.'
             if (period, idx) in pairs:
                 affected.append((source_id, row, period, idx))
         closed_pairs = {(period, idx) for source_id, row, period, idx in affected if row.get('financeOriginalMonth', row.get('month')) in closed_months}

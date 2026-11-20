@@ -73,8 +73,8 @@ with sync_playwright() as p:
     check("list is ordered by Transaction No., largest first", listed.index("UI9002") < listed.index("UI9001"))
     body = page.inner_text(".legacy-page")
     check("Legacy list shows settled and open imported rows", "Historically Reconciled / Settled" in body and "Imported · Open in Accounting" in body)
-    # 2026-11-13：Accounting 預設開在 Unreconciled；已結清的舊資料歷史在背景載入後出現在 All Accounts。
-    page.goto(BASE + "/accounting"); page.get_by_role("tab", name="All Accounts", exact=True).click()
+    # 2026-11-13：Accounting 預設開在 Unreconciled；已結清的舊資料歷史在背景載入後出現在 Transactions。
+    page.goto(BASE + "/accounting"); page.get_by_role("tab", name="Transactions", exact=True).click()
     page.wait_for_selector("[data-testid=accounting-table] .el-table__body tr")
     page.get_by_text("Historically settled").first.wait_for()
     acc = page.inner_text("[data-testid=accounting-table]")

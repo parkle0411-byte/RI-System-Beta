@@ -19,7 +19,7 @@ with sync_playwright() as pw:
  page.get_by_role('button',name='Review & Announce',exact=True).click();dialog=page.locator('.announce-dialog');expect(dialog.get_by_test_id('oversea-installment-summary')).to_be_visible();dialog.locator('.announce-attestation').click();dialog.get_by_role('button',name='Announce',exact=True).click();waitapi(page)
  result=request(page,'/api/cases?caseUid='+uid,None,'GET')['body']['case'];root=result['twRef'];txs=result['payload']['transactions'];check('Announce creates exactly three T3s',len(txs)==3 and [t['amount'] for t in txs]==[33.34,33.33,33.34])
  check('installment reference follows Effective Date rather than first installment',root.startswith('TWFA4901'))
- page.goto('http://nginx/accounting');page.get_by_role('tab',name='All Accounts',exact=True).click()
+ page.goto('http://nginx/accounting');page.get_by_role('tab',name='Transactions',exact=True).click()
  for tx in txs:
   row=page.get_by_test_id('accounting-table').locator('tbody tr').filter(has_text=tx['txNo']);expect(row).to_be_visible();expect(row).to_contain_text(tx['actualPaymentDate']);expect(row).to_contain_text(tx['accountingDate'])
  check('Accounting displays all separate period dates');page.screenshot(path='out/oversea-installment-accounting.png',full_page=True)

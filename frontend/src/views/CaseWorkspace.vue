@@ -7,7 +7,8 @@ import OverseaBrokerEvidence from '../components/OverseaBrokerEvidence.vue'
 import OverseaBusinessSummary from '../components/OverseaBusinessSummary.vue'
 // Case workspace template is maintained directly in this file.
 // Form state and actions are maintained in case-workspace.script.js.
-import { computed, ref, provide, watch } from 'vue'
+import { computed, ref, provide, watch, onBeforeUnmount } from 'vue'
+import vAccountingScroll from '../directives/accountingScroll'
 import ClauseList from '../components/ClauseList.vue'
 import FacilityRulesDialog from '../components/FacilityRulesDialog.vue'
 import CaseFormSection, { SECTION_EDIT_CONTEXT } from '../components/CaseFormSection.vue'
@@ -92,6 +93,12 @@ watch(() => [activeView.value, facilityRules.value.groups.length], ([view,count]
 const referenceEditor = ref(null)
 const formatShare = value => value == null || value === "" ? "—" : Number(value).toLocaleString("en-US", {maximumFractionDigits: 8})
 async function refreshReferences() { await refreshSelectedCase(); await loadData() }
+// 2026-11-20 業主決定：Account List 的左右滑動比照 Accounting —— 上方左右拉桿、表格固定高度（視窗 65%，240–720）讓標題列不動、Insured (EN) 固定在左；
+// 底部捲軸不一直顯示（滑鼠移到表格上才出現）。
+const listViewportHeight = ref(Math.max(240, Math.min(720, Math.round(window.innerHeight * .65))))
+const resizeList = () => { listViewportHeight.value = Math.max(240, Math.min(720, Math.round(window.innerHeight * .65))) }
+window.addEventListener('resize', resizeList)
+onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
 </script>
 
 <template>
@@ -122,12 +129,12 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                   <el-option label="Reversed" value="reversed"></el-option>
                 </el-select>
               </div>
-              <el-table :data="filteredCases" class="case-table development-case-table" empty-text="No cases yet. Select + New case to create the first draft." row-key="id" @row-click="openCasePreview">
-                <el-table-column prop="originalInsured" label="Insured (EN)" min-width="220" sortable><template #default="{ row }"><el-button link type="primary" class="insured-preview-link" @click.stop="openCasePreview(row)">{{ row.originalInsured || (overseaEnabled(row) ? 'Oversea Business' : 'Unnamed case') }}</el-button></template></el-table-column>
+              <el-table v-accounting-scroll="'Scroll account list horizontally'" :max-height="listViewportHeight" :data="filteredCases" class="case-table development-case-table" data-testid="account-list-table" empty-text="No cases yet. Select + New case to create the first draft." row-key="id" @row-click="openCasePreview">
+                <el-table-column prop="originalInsured" label="Insured (EN)" min-width="220" fixed="left" sortable><template #default="{ row }"><el-button link type="primary" class="insured-preview-link" @click.stop="openCasePreview(row)">{{ row.originalInsured || (overseaEnabled(row) ? 'Oversea Business' : 'Unnamed case') }}</el-button></template></el-table-column>
                 <el-table-column prop="originalInsuredCn" label="Insured (CN)" min-width="180" sortable><template #default="{ row }">{{ row.originalInsuredCn || '—' }}</template></el-table-column>
                 <el-table-column label="Year" width="90" sortable :sort-method="(a,b) => String(a.effectiveDate || '').localeCompare(String(b.effectiveDate || ''))"><template #default="{ row }">{{ String(row.effectiveDate || '').slice(0,4) || '—' }}</template></el-table-column>
                 <el-table-column prop="className" label="Class" min-width="130" sortable><template #default="{ row }">{{ row.className || '—' }}</template></el-table-column>
-                <el-table-column prop="twRef" label="TW Ref. No." min-width="300" sortable><template #default="{ row }"><span class="case-ref">{{ displayTwRef(row) }}</span></template></el-table-column>
+                <el-table-column prop="twRef" label="TW Ref. No." min-width="200" sortable><template #default="{ row }"><span class="case-ref">{{ displayTwRef(row) }}</span></template></el-table-column>
                 <el-table-column label="Reinsurer" min-width="180"><template #default="{ row }">{{ Array.isArray(row.reinsurerDisplayNames) && row.reinsurerDisplayNames.length ? row.reinsurerDisplayNames.join(', ') : '—' }}</template></el-table-column>
                 <el-table-column prop="reinsuredDisplayName" label="Cedant" min-width="150" sortable><template #default="{ row }">{{ row.reinsuredDisplayName || '—' }}</template></el-table-column>
                 <el-table-column label="Policy Period" min-width="300"><template #default="{ row }">{{ formatPolicyPeriod(row) }}</template></el-table-column>
@@ -537,7 +544,7 @@ async function refreshReferences() { await refreshSelectedCase(); await loadData
                       <dt>Transactions</dt><dd>{{ selectedCaseTransactions.length }}</dd>
                     </dl>
                     <div class="overview-table-wrap">
-                      <el-table :data="selectedCaseTransactions" row-key="key" empty-text="Premium accounts are created at Announce, including all installments. Production confirms performance without creating duplicate accounts.">
+                      <el-table :data="selectedCaseTransactions" row-key="key" empty-text="Premium transactions are created at Announce, including all installments. Production confirms performance without creating duplicate transactions.">
                         <el-table-column prop="txNo" label="Transaction no." min-width="210">
                           <template #default="{ row }"><strong>{{ row.displayTxNo }}</strong><el-tag v-if="row.reversed" size="small" type="danger" effect="plain" style="margin-left:6px;">Reversed</el-tag><el-tag v-if="row.isReversalEntry" size="small" type="warning" effect="plain" style="margin-left:6px;">Reversal entry</el-tag></template>
                         </el-table-column>

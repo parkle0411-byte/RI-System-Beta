@@ -28,7 +28,7 @@ with sync_playwright() as p:
     def nav(label):
         page.locator(".app-sidebar, aside").first.get_by_text(label, exact=True).first.click()
     for label, marker, chunk in (("Production Report", "Versioned monthly close", "Production-"), ("FX Rates", "Official monthly rates", "FxRates-"),
-                                 ("Accounting", "Unreconciled Accounts (", "Accounting-")):
+                                 ("Accounting", "Unreconciled Transactions (", "Accounting-")):
         before = len(assets); nav(label); page.get_by_text(marker).first.wait_for()
         check(f"{label} loads its own page file on first visit", any(n.startswith(chunk) for n in [u.rsplit('/', 1)[-1] for u, s, c in assets[before:] if s == 200]))
     before = len(assets); nav("Production Report"); page.get_by_text("Versioned monthly close").first.wait_for()

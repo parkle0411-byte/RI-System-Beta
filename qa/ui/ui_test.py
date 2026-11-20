@@ -183,7 +183,7 @@ def phase_a(page):
     check("sidebar shows unified Master Data Management for an admin", labels == ["Dashboard", "Account List", "Legacy Data (Old Register)", "Master Data Management", "Personnel & Accounts", "Production Report", "Accounting", "FX Rates", "Draft Recycle Bin", "System Reference Data", "Audit Log"], labels)
     for label, marker in [("Account List", "All cases"), ("Master Data Management", "Reinsurers ("), ("Personnel & Accounts", "Personnel roster"),
                           ("FX Rates", "Official monthly rates"), ("Draft Recycle Bin", "Retained Drafts"), ("Audit Log", "Audit events"),
-                          ("Production Report", "Versioned monthly close"), ("Accounting", "Unreconciled Accounts (")]:   # 2026-11-13：Accounting 預設開在 Unreconciled
+                          ("Production Report", "Versioned monthly close"), ("Accounting", "Unreconciled Transactions (")]:   # 2026-11-13：Accounting 預設開在 Unreconciled
         nav(page, label)
         check(f"{label} page loads", page.get_by_text(marker).first.is_visible())
     logout(page)
@@ -237,6 +237,22 @@ def phase_a(page):
     page.locator(".insured-preview-link", has_text="UI Test Insured Ltd").first.wait_for()
     check("the new Draft is listed", page.locator(".insured-preview-link", has_text="UI Test Insured Ltd").count() == 1)
     snap(page, "list-after-draft")
+    # 2026-11-20 Account List 版面：TW Ref. No. 欄寬 200、上方左右拉桿、表格固定高度（標題列不動）、Insured (EN) 固定在左、底部捲軸不一直顯示
+    lt = page.get_by_test_id("account-list-table")
+    tw_w = lt.locator("th", has_text="TW Ref. No.").first.bounding_box()["width"]
+    check("Account List: TW Ref. No. column is compact (about 200, was 300)", 195 <= tw_w < 260, tw_w)
+    check("Account List: top horizontal slider is shown", page.locator(".account-list-panel .accounting-top-scroll input[type=range]").is_visible())
+    check("Account List: Insured (EN) is fixed on the left", lt.locator("th.el-table-fixed-column--left", has_text="Insured (EN)").count() == 1)
+    check("Account List: table has its own height so the header stays", "max-height" in (lt.locator(".el-table__body-wrapper .el-scrollbar__wrap").get_attribute("style") or ""))
+    page.mouse.move(5, 5); page.wait_for_timeout(400)
+    check("Account List: bottom scrollbar is not always shown", not lt.locator(".el-table__body-wrapper .el-scrollbar__bar.is-horizontal").is_visible())
+    page.evaluate("""() => { const s = document.querySelector('.account-list-panel .accounting-top-scroll input'); s.value = s.max; s.dispatchEvent(new Event('input')) }""")
+    page.wait_for_timeout(300)
+    check("Account List: the top slider scrolls the table and Insured (EN) stays visible",
+          lt.locator(".el-table__body-wrapper .el-scrollbar__wrap").evaluate("e => e.scrollLeft") > 0
+          and lt.locator(".insured-preview-link", has_text="UI Test Insured Ltd").first.is_visible())
+    snap(page, "list-scrolled-right")
+    page.evaluate("""() => { const s = document.querySelector('.account-list-panel .accounting-top-scroll input'); s.value = 0; s.dispatchEvent(new Event('input')) }""")
 
     # ---------------- 補齊內容 ----------------
     open_case(page, "UI Test Insured Ltd")
@@ -663,21 +679,24 @@ def phase_d(page):
     login(page, "ui.finance")
     nav(page, "Accounting")
     page.get_by_test_id("accounting-table").locator(".el-table__row").first.wait_for()
-    for name in ("All Accounts", "Unreconciled Accounts", "Reconciled Accounts", "Settled/Closed", "Brokerage"):
+    for name in ("Transactions", "Unreconciled Transactions", "Reconciled Transactions", "Settled Transactions", "Brokerage"):
         check("Accounting tab: " + name, page.get_by_role("tab", name=name, exact=True).is_visible())
+    page.mouse.move(5, 5); page.wait_for_timeout(400)
+    check("Accounting: top horizontal slider is shown", page.locator(".table-card .accounting-top-scroll input[type=range]").first.is_visible())
+    check("Accounting: bottom scrollbar is not always shown (2026-11-20)", not page.get_by_test_id("accounting-table").locator(".el-table__body-wrapper .el-scrollbar__bar.is-horizontal").is_visible())
     check("no cash T3 in unreconciled accounts", not page.get_by_test_id("accounting-table").locator(".el-table__row").filter(has_text="-T3").count())
     filters = page.locator(".table-card").first
     fill(filters, page, "TW Ref", "nothing-matches")
-    check("TW Ref filter finds no unrelated rows", page.get_by_text("No matching accounts. Premium accounts are created at Announce.").is_visible())
+    check("TW Ref filter finds no unrelated rows", page.get_by_text("No matching transactions. Premium transactions are created at Announce.").is_visible())
     fill(filters, page, "TW Ref", "TWPAR2603001")
     r = acc_row(page, "TWPAR2603001-R1-T1")
     check("unreviewed T1 has review action instead of cash action", r.get_by_role("button", name="Mark reviewed", exact=True).is_visible() and r.get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
     r.get_by_role("button", name="Mark reviewed", exact=True).click()
-    dlg = page.get_by_role("dialog", name="Finance account review", exact=True)
+    dlg = page.get_by_role("dialog", name="Finance transaction review", exact=True)
     fill(dlg,page,"Review reference","UI-FINANCE-REVIEW")
     dlg.get_by_role("button",name="Mark reviewed",exact=True).click()
     dlg.wait_for(state="hidden")
-    page.get_by_role("tab",name="Reconciled Accounts",exact=True).click()
+    page.get_by_role("tab",name="Reconciled Transactions",exact=True).click()
     r=acc_row(page,"TWPAR2603001-R1-T1")
     check("Finance review moves account into reviewed tab", r.get_by_role("button",name="Record receipt / payment",exact=True).is_visible())
     r.get_by_role("button",name="Record receipt / payment",exact=True).click()
@@ -698,11 +717,11 @@ def phase_d(page):
     dlg.get_by_role('button',name='Record registrations',exact=True).click()
     expect(dlg.locator('.el-table__body-wrapper tbody tr').first).to_contain_text('Recorded')
     dlg.get_by_role('button',name='Close',exact=True).click();dlg.wait_for(state='hidden')
-    page.get_by_role("tab",name="Settled/Closed",exact=True).click()
+    page.get_by_role("tab",name="Settled Transactions",exact=True).click()
     bank=acc_row(page,"TWPAR2603001-R1-T1")
-    check('Settled/Closed shows fully settled T1', 'Settled' in bank.inner_text())
+    check('Settled Transactions shows fully settled T1', 'Settled' in bank.inner_text())
     bank.get_by_role('button',name='History',exact=True).click()
-    hist=page.get_by_role('dialog',name='Account history',exact=True)
+    hist=page.get_by_role('dialog',name='Transaction history',exact=True)
     hist.get_by_role('button',name='View registration',exact=True).first.click()
     dlg=page.get_by_role('dialog',name='Receipt / payment registration details',exact=True)
     check('settled registration can be reversed before downstream payment',dlg.get_by_role('button',name='Reverse entire registration',exact=True).is_visible())
@@ -711,7 +730,7 @@ def phase_d(page):
     check('whole reversal preserves registration with replacement entry',dlg.get_by_role('button',name='Re-register',exact=True).is_visible())
     dlg.get_by_role('button',name='Close',exact=True).click()
     hist.get_by_role('button',name='Close this dialog',exact=True).click()
-    page.get_by_role('tab',name='Reconciled Accounts',exact=True).click()
+    page.get_by_role('tab',name='Reconciled Transactions',exact=True).click()
     check('reversed receipt reopens balance and retains Finance review','Open' in row_cells(page,'TWPAR2603001-R1-T1'))
     page.get_by_role('tab',name='Brokerage',exact=True).click()
     # 2026-11-17：Brokerage 由伺服器分頁，列在伺服器回應後才出現

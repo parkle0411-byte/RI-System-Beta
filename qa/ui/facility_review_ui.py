@@ -22,7 +22,7 @@ with sync_playwright() as p:
         page.get_by_role("tab", name=name, exact=True).click(); page.wait_for_timeout(500)
     def updated():
         expect(page.get_by_text("Accounting updated").last).to_be_visible(); page.wait_for_timeout(800)
-    tab("Unreconciled Accounts"); expect(row(SW)).to_be_visible()
+    tab("Unreconciled Transactions"); expect(row(SW)).to_be_visible()
     mark = lambda no: row(no).get_by_role("button", name="Mark reviewed", exact=True)
     check("應付給 Swiss Re（Facility）的帳款顯示 Mark reviewed", mark(SW).count() == 1)
     check("Cedant 未收齊：Swiss T2 的 Mark reviewed 停用並說明原因", mark(SW).is_disabled() and "Collect the full Cedant installment" in row(SW).inner_text())
@@ -38,22 +38,22 @@ with sync_playwright() as p:
     check("Reinsurance Staff 看不到 Record receipt / payment", table.get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
     mark(AZ).click(); dlg = page.locator(".el-dialog:visible"); dlg.locator("input").nth(1).fill("UI facility review")
     dlg.get_by_role("button", name="Mark reviewed", exact=True).click(); updated()
-    tab("Reconciled Accounts"); expect(row(AZ)).to_be_visible()
+    tab("Reconciled Transactions"); expect(row(AZ)).to_be_visible()
     check("Reconciled：自己審的帳款只有 Cancel review batch，沒有登錄收付款",
           row(AZ).get_by_role("button", name="Cancel review batch", exact=True).count() == 1
           and row(AZ).get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)
     row(AZ).get_by_role("button", name="Cancel review batch", exact=True).click()
     dlg = page.get_by_test_id("cancel-review-dialog"); expect(dlg).to_be_visible()
     check("取消對話框可選「只取消這一筆」或「取消本人在這家的全部」",
-          dlg.get_by_test_id("cancel-review-account").is_visible() and "Cancel all my reviews for this counterparty (1 accounts)" in dlg.get_by_test_id("cancel-review-batch").inner_text())
+          dlg.get_by_test_id("cancel-review-account").is_visible() and "Cancel all my reviews for this counterparty (1 transactions)" in dlg.get_by_test_id("cancel-review-batch").inner_text())
     dlg.get_by_test_id("cancel-review-account").click(); dlg.locator("textarea").first.fill("UI review correction")   # 測試標記直接落在文字框上
     dlg.get_by_role("button", name="Cancel review", exact=True).click(); updated()
     check("取消後帳款離開 Reconciled", row(AZ).count() == 0)
-    tab("Unreconciled Accounts"); expect(row(AZ)).to_be_visible()
+    tab("Unreconciled Transactions"); expect(row(AZ)).to_be_visible()
     check("取消後回到 Unreconciled，可再審核", mark(AZ).count() == 1)
     mark(CLAIM_RI).click(); dlg = page.locator(".el-dialog:visible"); dlg.locator("input").nth(1).fill("UI claim review")
     dlg.get_by_role("button", name="Mark reviewed", exact=True).click(); updated()
-    tab("Reconciled Accounts"); expect(row(CLAIM_RI)).to_be_visible()
+    tab("Reconciled Transactions"); expect(row(CLAIM_RI)).to_be_visible()
     check("理賠應收審核後移到 Reconciled，只有 Cancel review batch",
           row(CLAIM_RI).get_by_role("button", name="Cancel review batch", exact=True).count() == 1
           and row(CLAIM_RI).get_by_role("button", name="Record receipt / payment", exact=True).count() == 0)

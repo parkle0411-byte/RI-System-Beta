@@ -160,7 +160,7 @@ def details(p, now=None, schedules=None):
                  if e.get('transactionNo')==no and e.get('entryType')=='payment' and e.get('id') not in reversed_ids]
         paid=value if p.get('legacyHistorical') else sum(cents(e['amount']) for e in entries)
         if abs(paid)>abs(value) or paid and (paid<0)!=(value<0):
-            raise ValueError('Legacy allocations exceed the account balance.')
+            raise ValueError('Legacy allocations exceed the transaction balance.')
         outstanding=value-paid; due=item.get('contractDueDate',''); reminder=item.get('dueDate','')
         result[no]=dict(amount=amount(value),paid=amount(paid),outstanding=amount(outstanding),entries=entries,
             partyType=typ,partyName=name,paymentDirection='retained' if derived else direction(tx),

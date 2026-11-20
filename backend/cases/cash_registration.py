@@ -52,7 +52,7 @@ def register_accounts(view, request, body):
         if len(set(keys)) != len(keys):
             raise ValueError()
     except (ValueError, TypeError, AttributeError):
-        return fail('invalid_cash_request', 'Select each account once with valid submission and item identifiers (maximum 2000 accounts).', 400)
+        return fail('invalid_cash_request', 'Select each transaction once with valid submission and item identifiers (maximum 2000 transactions).', 400)
 
     actor = actor_from(request.ri_principal)
     submission_id = body['cashSubmissionId']
@@ -145,21 +145,21 @@ def register_accounts(view, request, body):
             continue
         case = cases.get(uid)
         if case is None or not isinstance(no, str) or not no:
-            result.update(error='account_unavailable', message='This account is unavailable. Refresh Accounting.')
+            result.update(error='account_unavailable', message='This transaction is unavailable. Refresh Accounting.')
             continue
         if type(row.get('rowVersion')) is not int or row['rowVersion'] != initial_versions[uid]:
-            result.update(error='version_conflict', message='This case changed. Refresh the failed account before retrying.')
+            result.update(error='version_conflict', message='This case changed. Refresh the failed transaction before retrying.')
             continue
         case = refresh_case(case)
         from .data_integrity import financial_issues
         if not getattr(case, 'legacy', False) and financial_issues(case.payload):
-            result.update(error='case_data_invalid', message='Correct the case financial data before recording this account.')
+            result.update(error='case_data_invalid', message='Correct the case financial data before recording this transaction.')
             continue
         d = safe_detail(case, no)
         currency, actual_party = counterparty(case.payload, d)
         result.update(currency=currency, paymentDirection=d.get('paymentDirection'), cashAmount=amount(value))
         if not currency or actual_party != scope or d.get('paymentDirection') not in ('receivable', 'payable'):
-            result.update(error='account_unavailable', message='Select an active cash account for the chosen counterparty.')
+            result.update(error='account_unavailable', message='Select an active cash transaction for the chosen counterparty.')
             continue
         if currency == 'TWD' and value % 100:
             # Owner decision 2026-11-14: TWD receipts and payments are whole numbers.
@@ -176,10 +176,10 @@ def register_accounts(view, request, body):
                 if response.status_code != 200:
                     transaction.set_rollback(True)
             if response.status_code != 200:
-                result.update(error=response.data.get('error', 'cash_record_failed'), message=response.data.get('message', 'This account could not be recorded.'))
+                result.update(error=response.data.get('error', 'cash_record_failed'), message=response.data.get('message', 'This transaction could not be recorded.'))
                 continue
         except IntegrityError:
-            result.update(error='payment_conflict', message='This account changed while saving. Refresh and retry the failed item.')
+            result.update(error='payment_conflict', message='This transaction changed while saving. Refresh and retry the failed item.')
             continue
         result.update(status='recorded', replayed=False, batchId=bid, paymentDate=body['paymentDate'], reference=reference, note=note)
         refresh_case(case)

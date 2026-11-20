@@ -193,15 +193,15 @@ def writable_case(case, no):
 def locked_cases(members, max_accounts=2000):
     from .models import Case, FinanceReconciliationBatch
     if not isinstance(members, list) or not members or max_accounts is not None and len(members) > max_accounts:
-        raise ValueError('Select valid accounts within the operation limit.')
+        raise ValueError('Select valid transactions within the operation limit.')
     expected = {}
     seen = set()
     for m in members:
         uid = m.get('caseUid'); no = m.get('txNo'); version = m.get('rowVersion')
         if str(uuid.UUID(uid)) != uid or not isinstance(no, str) or not no or type(version) is not int:
-            raise ValueError('Valid account identifiers and current case versions are required.')
+            raise ValueError('Valid transaction identifiers and current case versions are required.')
         if (uid, no) in seen:
-            raise ValueError('Select each account once with consistent case versions.')
+            raise ValueError('Select each transaction once with consistent case versions.')
         if uid in expected and expected[uid] != version:
             raise StaleCaseError('An affected case changed. Refresh Accounting and try again.')
         seen.add((uid, no)); expected[uid] = version
@@ -247,24 +247,24 @@ def reconcile(view, request, body):
     except StaleCaseError:
         return fail('version_conflict', 'An affected case changed. Refresh Accounting and try again.')
     except (ValueError, TypeError, AttributeError):
-        return fail('version_conflict', 'Refresh and select valid accounts with their current versions.')
+        return fail('version_conflict', 'Refresh and select valid transactions with their current versions.')
     reviews = active_reviews(set(cases)); details = {uid: transaction_details(c.payload) for uid, c in cases.items()}
     scope = None; stored = {}; party_name = ''
     for m in members:
         uid, no = m['caseUid'], m['txNo']; p = cases[uid].payload; d = details[uid].get(no)
         if not d or not writable_case(cases[uid], no) or d.get('cashTracking') == 'derived' or any(
                 t.get('txNo') == no and (t.get('reversed') or t.get('isReversalEntry')) for t in objects(p.get('transactions'))):
-            return fail('review_not_allowed', 'Select active T1/T2 or claim accounts.')
+            return fail('review_not_allowed', 'Select active T1/T2 or claim transactions.')
         if (uid, no) in reviews:
-            return fail('already_reviewed', 'Cancel the existing whole review batch before reviewing this account again.')
+            return fail('already_reviewed', 'Cancel the existing whole review batch before reviewing this transaction again.')
         if not finance and not facility_account(p, no, d):   # Reinsurance Staff：只限對象是這兩家的帳款
-            return fail('permission_denied', 'Reinsurance Staff can review only accounts with Swiss Re Asia or Allianz (Facility).', 403)
+            return fail('permission_denied', 'Reinsurance Staff can review only transactions with Swiss Re Asia or Allianz (Facility).', 403)
         swiss_t2 = swiss_premium_t2(p, no)
         if swiss_t2 and not swiss_cedant_collected(p, swiss_t2):   # 2026-11-19：Cedant 收齊前不能對帳
             return fail('cedant_collection_required', SWISS_CEDANT_FIRST)
         group = counterparty(p, d)
         if not all(group) or scope is not None and group[1] != scope:
-            return fail('review_scope', 'Review accounts for one counterparty per batch.', 400)
+            return fail('review_scope', 'Review transactions for one counterparty per batch.', 400)
         scope = group[1]; party_name = d['partyName']
         stored.setdefault(group[0], []).append({'caseUid': uid, 'txNo': no, 'signature': signature(p, d)})
     actor = actor_from(request.ri_principal)
@@ -296,7 +296,7 @@ def cancel_review(view, request, body):
     #   Reinsurance Staff：整批＝本人在這個對象審過的全部帳款；單筆只限本人審的。其他人審的不動。
     scope = body.get('scope') or 'batch'
     if scope not in ('batch', 'account'):
-        return fail('invalid_scope', 'Choose to cancel this account only or the whole batch.', 400)
+        return fail('invalid_scope', 'Choose to cancel this transaction only or the whole batch.', 400)
     actor = actor_from(request.ri_principal); me = str(actor['id'])
     try:
         # Lock every event, including events created by later reviews for this group.
@@ -322,7 +322,7 @@ def cancel_review(view, request, body):
                 raise ValueError()
         cases = locked_cases(supplied, max_accounts=None)
     except (StopIteration, FinanceReconciliationBatch.DoesNotExist, ValidationError, ValueError, TypeError, KeyError, AttributeError):
-        return fail('whole_review_required', 'Reload and cancel every account in the original review batch together.')
+        return fail('whole_review_required', 'Reload and cancel every transaction in the original review batch together.')
     for uid, case in cases.items():
         details = transaction_details(case.payload)
         for member in targets:
@@ -444,10 +444,10 @@ def register_cash_group(view, request, body, context=None):
     for row in allocations:
         uid, no = row['caseUid'], row['txNo']; p = cases[uid].payload; d = details[uid].get(no)
         if not d or not writable_case(cases[uid], no) or not d.get('canRecord'):
-            return fail('transaction_not_payable', 'Select active reviewed accounts with outstanding balances.', 400)
+            return fail('transaction_not_payable', 'Select active reviewed transactions with outstanding balances.', 400)
         pair = reviews.get((uid, no))
         if not pair or pair[1]['signature'] != signature(p, d):
-            return fail('finance_review_required', 'Finance must review every selected account before recording receipts or payments.')
+            return fail('finance_review_required', 'Finance must review every selected transaction before recording receipts or payments.')
         current = counterparty(p, d)
         if not all(current) or group is not None and current != group:
             return fail('incompatible_allocations', 'Use one currency and one counterparty per registration.', 400)
@@ -471,7 +471,7 @@ def register_cash_group(view, request, body, context=None):
     # One real bank movement: cash cannot be fabricated on both sides of a net remittance.
     cash_in = totals['receivable']; cash_out = totals['payable']
     if cash_in and cash_out:
-        return fail('cash_direction_mismatch', 'Record receipts and payments separately; use the multi-account cash form for both directions.', 400)
+        return fail('cash_direction_mismatch', 'Record receipts and payments separately; use the multi-transaction cash form for both directions.', 400)
     actor = actor_from(request.ri_principal); stamp = _iso_now(); bid = context['batchId'] if context else str(uuid.uuid4())
     payloads = {uid: copy.deepcopy(c.payload) for uid, c in cases.items()}
     from .calc.payment_terms import build_payment_schedule
@@ -481,7 +481,7 @@ def register_cash_group(view, request, body, context=None):
         schedules = {x['scheduleKey']: x for x in build_payment_schedule(p)['items']}
         shares = proportions(cash, capacities)
         if sum(shares) != cash:
-            return fail('payment_conflict', 'An allocation no longer fits the account balance.')
+            return fail('payment_conflict', 'An allocation no longer fits the transaction balance.')
         for part, share in zip(parts, shares):
             if not share:
                 continue
@@ -596,12 +596,12 @@ def followup(view, request, body):
         return fail('permission_denied', 'Finance access is required.', 403)
     case = view._load_case_for_update(str(body.get('caseUid') or ''))
     if not case or case.row_version != body.get('rowVersion'):
-        return fail('version_conflict', 'Refresh the current account before recording follow-up.')
+        return fail('version_conflict', 'Refresh the current transaction before recording follow-up.')
     d = transaction_details(case.payload).get(body.get('txNo'), {})
     note = str(body.get('note') or '').strip()
     if not writable_case(case, body.get('txNo')) or not str(body.get('txNo') or '') or d.get('cashTracking') == 'derived' or abs(d.get('outstanding', 0)) < .005 or not any(
             t.get('source') == 'claim' and t.get('txNo') == body.get('txNo') and not t.get('reversed') and not t.get('isReversalEntry') for t in objects(case.payload.get('transactions'))):
-        return fail('claim_followup_not_allowed', 'Select an active outstanding claim account.')
+        return fail('claim_followup_not_allowed', 'Select an active outstanding claim transaction.')
     if not note or len(note) > 1000:
         return fail('followup_note_required', 'Enter the claim follow-up record.', 400)
     actor = actor_from(request.ri_principal); p = copy.deepcopy(case.payload)

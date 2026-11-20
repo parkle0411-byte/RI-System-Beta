@@ -1,5 +1,5 @@
 """Accounting load failure (2026-11-10): a server error shows a persistent message with Retry,
-never an empty "No matching accounts" list; Retry recovers. Runs in the disposable UI stack."""
+never an empty "No matching transactions" list; Retry recovers. Runs in the disposable UI stack."""
 import re
 from playwright.sync_api import sync_playwright
 BASE = "http://nginx"; PASSWORD = "Ui-Test-Pass-1"
@@ -27,7 +27,7 @@ with sync_playwright() as p:
     text = alert.inner_text()
     check("server error shows a persistent Accounting load error", "could not be loaded" in text and "HTTP 502" in text)
     check("first-load failure asks the user to retry", "Please retry" in text)
-    check("the table never claims there are no matching accounts", "No matching accounts" not in page.inner_text("[data-testid=accounting-table]")
+    check("the table never claims there are no matching accounts", "No matching transactions" not in page.inner_text("[data-testid=accounting-table]")
           and "could not be loaded" in page.inner_text("[data-testid=accounting-table]"))
     page.wait_for_timeout(4000)
     check("the error message stays visible (not a disappearing toast)", alert.is_visible())

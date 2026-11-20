@@ -1,13 +1,14 @@
-// Always visible, keyboard/touch accessible horizontal control for Accounting tables.
+// Always visible, keyboard/touch accessible horizontal control for Accounting tables (and Account List since 2026-11-20).
+// Optional binding value: the slider's accessible name, e.g. v-accounting-scroll="'Scroll account list horizontally'".
 const instances = new WeakMap()
 export default {
-  mounted(el) {
+  mounted(el, binding) {
     const top = document.createElement('div')
     top.className = 'accounting-top-scroll'
     Object.assign(top.style, { height: '18px', maxWidth: '100%', marginBottom: '4px' })
     const slider = document.createElement('input')
     slider.type = 'range'; slider.min = '0'; slider.step = '1'; slider.value = '0'
-    slider.setAttribute('aria-label', 'Scroll accounting table horizontally')
+    slider.setAttribute('aria-label', typeof binding?.value === 'string' && binding.value ? binding.value : 'Scroll accounting table horizontally')
     top.appendChild(slider); el.before(top)
     let wrap, body, frame
     const fromTop = () => { if (wrap) wrap.scrollLeft = Number(slider.value) }
