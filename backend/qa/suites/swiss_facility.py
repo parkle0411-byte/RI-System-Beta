@@ -29,7 +29,8 @@ try:
    case=make('SWISS-CALENDAR-'+str(i),names=[SWISS_NAME],policyFrom=base)
    before=copy.deepcopy(case.payload);items=build_payment_schedule(case.payload,stamp)['items'];cedant=items[0];item=next(r for r in items if r.get('swissFacility'))
    check('original Swiss quarter from Cedant B+90 '+base,item['originalDueDate']==expected,item)
-   check('Swiss Cedant actual due and Accounting date '+base,cedant['contractDueDate']==(date.fromisoformat(base)+timedelta(days=90)).isoformat() and cedant['dueDate']==(date.fromisoformat(base)+timedelta(days=80)).isoformat())
+   # 2026-11-20 業主決定：所有 Cedant 應收的 Accounting 提醒日統一到期前 15 天（Swiss Property 原 B＋80 → B＋75）
+   check('Swiss Cedant actual due B+90 and Accounting date B+75 (15 days before) '+base,cedant['contractDueDate']==(date.fromisoformat(base)+timedelta(days=90)).isoformat() and cedant['dueDate']==(date.fromisoformat(base)+timedelta(days=75)).isoformat() and cedant['paymentRule']=='swiss_cedant_75_90' and cedant['accountingLeadDays']==15,cedant)
    check('reading calendar never rewrites saved history '+base,case.payload==before)
   case=make('SWISS-API-CALENDAR',names=[SWISS_NAME],policyFrom='2026-01-31')
   class Frozen(datetime):

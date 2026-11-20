@@ -21,6 +21,10 @@ _EMAIL = re.compile(f"{_NOT_WS_AT}@{_NOT_WS_AT}\\.{_NOT_WS_AT}\\Z")
 _HTML = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
 
 
+
+# Swiss Property 的 Cedant 規則：2026-11-20 起 B＋75／B＋90；已結清的舊帳保留原本的 B＋80 名稱
+SWISS_CEDANT_RULES = ('swiss_cedant_75_90', 'swiss_cedant_80_90')
+
 def _s(value):
     """String(value)：undefined 是 "undefined"、null 是 "null"。"""
     return "undefined" if value is UNDEFINED else js_to_string(value)
@@ -82,8 +86,9 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
         if get(item, "returnPremium") is True:
             direction = "應退分保人" if get(item, "paymentDirection") == "payable" else "應向再保人／再保經紀人收回"
             amount = direction + " " + amount
-        if get(item, 'paymentRule') == 'swiss_cedant_80_90' and get(item, 'swissCgl') is not True:
-            timing = f"80天會計提醒 {_s(get(item, 'dueDate'))}；90天約定期限 {_s(get(item, 'contractDueDate'))} (Taiwan)"
+        if get(item, 'paymentRule') in SWISS_CEDANT_RULES and get(item, 'swissCgl') is not True:
+            days = '75' if get(item, 'paymentRule') == 'swiss_cedant_75_90' else '80'   # 2026-11-20 起為 75 天；已結清的舊帳保留 80 天
+            timing = f"{days}天會計提醒 {_s(get(item, 'dueDate'))}；90天約定期限 {_s(get(item, 'contractDueDate'))} (Taiwan)"
         elif get(item, 'swissFacility') is True and get(item, 'swissCgl') is not True:
             timing = f"Swiss結算日 {_s(get(item, 'dueDate'))} (Taiwan)"
         else:
@@ -93,7 +98,7 @@ def message(case_data, kind, items, link_url=ALPHA_LINK_URL, link_text=ALPHA_LIN
             timing = f"到期日 {actual} (Taiwan)" + (f"；會計提醒 {accounting}" if accounting and accounting != actual else "")
         amount = ("應收 " if get(item, "paymentDirection") == "receivable" else "應付 ") + amount
         rows.append(f"{_s(get(item, 'installmentLabel'))} · {_s(get(item, 'partyName'))} · {_s(get(item, 'currency'))} {amount} · " + timing)
-    heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') == 'swiss_cedant_80_90' for i in items) else label(kind))
+    heading = ('收付款提醒' if kind != 'weekly_overdue' and any(get(i, 'paymentRule') in SWISS_CEDANT_RULES for i in items) else label(kind))
     return {
         "subject": f"[Payment {heading}] {_s(reference)}",
         "html": f"<p>案件 <strong>{esc(reference)}</strong> 有以下付款期限項目：</p><ul>{''.join('<li>' + esc(r) + '</li>' for r in rows)}</ul>"

@@ -297,14 +297,14 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | Allianz（只 Property） | B＋90 | B＋75 | B 所在月底＋90 | **往後第 3 個月月底前 10 天**（例：1 月→04/20；2 月→05/21；11 月→翌年 02/18） |
 | Great American（只 Property） | B＋90 | B＋75 | B 所在曆年季末＋90 | 季末＋80 |
 | QBE（只 Property） | B＋90 | B＋75 | 承保年度季末＋90（承保年度 8/1 起：8–10、11–1、2–4、5–7 月） | 季末＋80 |
-| Swiss Property | B＋90 | B＋80 | 固定結算期 | 固定結算日 |
+| Swiss Property | B＋90 | B＋75（2026-11-20 起；原 B＋80） | 固定結算期 | 固定結算日 |
 | Swiss CGL QS | B＋90 | 到期前 15 天 | B 所在月底＋90 | 到期前 10 天 |
 
 - **Swiss Property 結算期**：每年 2/14、5/14、8/14、11/14；11–1 月→2/14、2–4 月→5/14、5–7 月→8/14、8–10 月→11/14。原始期依 B＋90（批單 L＋90）歸期。
   - **付 Swiss Re 的保費 T2（2026-11-19 業主決定）**：期別由這筆 T2 的**對帳日**決定（Mark reviewed 對話框的 Review date）。截止＝結算日前 7 天（2/7、5/7、8/7、11/7，當天也算）：截止前已對帳 → 該期；沒對帳 → 自動延一季，可連續延；不早於原始期。未對帳時以今天推算並顯示預計期（因此不會逾期）；已對帳後超過結算日未付即逾期。**該期 Cedant 全額收現前不能對帳這筆 T2**（Finance 與 Reinsurance Staff 都一樣）；取消審核後依新的對帳日重算。已登錄付款的期別鎖定。取代原本「最後有效收款日／財務確認日歸期取最晚、前一個月月底確認截止」。
   - 例：保單 2026-09-01 生效，B＋90＝11-30 → 原始期 2027-02-14：Review date 02-07 以前 → 02-14；02-08～05-07 → 05-14；過了 02-07 還沒對帳 → 預計 05-14。
   - 退保費（向 Swiss Re 收回）照舊：可依 Announce 截止規則提前一期；理賠照舊依建帳日歸期。
-- **批單**（2026-11-13 業主決定）：Cedant 端從**批改生效日 E**起算：到期 E＋C（Facility 為 E＋90），提醒日照上表（一般到期前 15 天、Swiss Property E＋80），與 Word Debit／Credit Note 相同；回溯批單 Announce 時已過到期日即照實顯示逾期。再保人端把 B 換成 L，依上表公式（Swiss Property 依固定結算期，原始期依 L＋90 歸期）。新系統與舊資料新增批單相同；已收付或已結清的帳款保留原日期。
+- **批單**（2026-11-13 業主決定）：Cedant 端從**批改生效日 E**起算：到期 E＋C（Facility 為 E＋90），提醒日照上表（一般到期前 15 天、Swiss Property E＋75），與 Word Debit／Credit Note 相同；回溯批單 Announce 時已過到期日即照實顯示逾期。再保人端把 B 換成 L，依上表公式（Swiss Property 依固定結算期，原始期依 L＋90 歸期）。新系統與舊資料新增批單相同；已收付或已結清的帳款保留原日期。
 - 遲收 Cedant 款、部分收付、補登日期都不重算原期限。超過實際到期日才算逾期。
 
 ### 8.3 財會對帳與實際收付（2026-11-10 部署）
@@ -546,6 +546,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-20 11:19 | Cedant 應收的 Accounting 提醒日統一到期前 15 天：Swiss Property B＋80 → B＋75（批單 E＋75；到期 B＋90 不變；§8.2） | `backups/cedant15_20261120_111957/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `cedant-reminder-work/rollback.sh 20261120_111957` | `ri-backend:before-cedant15-20261120_111957`／`ri-frontend:before-cedant15-20261120_111957` | 候選映像 API 139/139（新增 cedant_reminder_15 9 項）、畫面全部階段通過；無 migration；正式後端逐檔一致；正式資料唯讀確認所有 Cedant 應收皆差 15 天（TWPF2611001 01-24 → 01-19） |
 | 11-19 20:55 | Swiss Property 付 Swiss Re 的保費 T2：結算期改由 T2 對帳日（Review date）決定、截止＝結算日前 7 天、未對帳自動延一季、Cedant 收齊前不能對帳（§8.2） | `backups/swiss_period_20261119_205528/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `swiss-period-work/rollback.sh 20261119_205528`（回到 Cedant 收齊日歸期） | `ri-backend:before-swiss-period-20261119_205528`／`ri-frontend:before-swiss-period-20261119_205528` | 候選映像 API 138/138（新增 swiss_review_period 35 項）、畫面全部階段＋階段 V 15 項通過；無 migration；正式後端逐檔一致；正式資料唯讀確認既有 2 件 Swiss CGL 不受影響（正式目前無 Swiss Property 案件） |
 | 11-19 18:47 | Reinsurance Staff 也可 Mark reviewed 向 Swiss Re Asia／Allianz（Facility）應收的退保保費與理賠款（§11）；權限改名 `accounting.review.facility_accounts` | `backups/facility_recv_20261119_184738/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `facility-review-work/rollback-recv.sh 20261119_184738`（回到只能審核應付） | `ri-backend:before-facility-recv-20261119_184738`／`ri-frontend:before-facility-recv-20261119_184738` | 候選映像 API 137/137（facility_payable_review 41 項，含退保與理賠應收）、畫面全部階段＋階段 V 13 項（含理賠）通過；無 migration；正式後端逐檔一致；正式資料唯讀確認 4 位 Reinsurance Staff 有權限 |
 | 11-19 17:32 | Reinsurance Staff 可 Mark reviewed 應付給 Swiss Re Asia／Allianz（Facility）的帳款、只能取消自己的審核；取消審核可選單筆或整批（§8.3、§11）；migration `cases 0014`（審核紀錄加 cancelled_members） | `backups/facility_review_20261119_173255/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `facility-review-work/rollback.sh 20261119_173255`（已有單筆取消紀錄時會停止） | `ri-backend:before-facility-review-20261119_173255`／`ri-frontend:before-facility-review-20261119_173255` | 候選映像 API 137/137（新增 facility_payable_review 34 項）、畫面全部階段通過＋新階段 V 9 項（修正測試帳號與欄位定位後以 A＋V 重跑）；migrate 後權限與 Audit trigger 重新套用；正式後端逐檔一致；正式資料唯讀確認 4 位 Reinsurance Staff 取得權限、只有 Swiss Re T2 應付標為可審核 |
@@ -611,6 +612,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-20：所有向 Cedant 收款的帳款，Accounting 提醒日統一為實際到期前 15 天：Swiss Property 由 B＋80 改為 B＋75（批單 E＋75），實際到期 B＋90 不變；已結清的舊帳保留原日期。
 
 - 2026-11-19：Swiss Property 付 Swiss Re 的保費結算期改由這筆 T2 的對帳日（Mark reviewed 的 Review date）決定：截止為結算日前 7 天，截止前沒對帳自動延一季；該期 Cedant 全額收現前不能對帳；取消審核依新對帳日重算。未對帳的 T2 不會逾期，也不會寄付款提醒。退保應收、理賠、Swiss CGL QS 不變。
 

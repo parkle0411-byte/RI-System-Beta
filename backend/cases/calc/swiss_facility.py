@@ -210,9 +210,10 @@ def apply_legacy_schedule(payload, items, now):
                         latestReceiptDate=receipt_date(payload, item['scheduleKey']))
         if item['partyType'] == 'cedant':
             contract = add_days(item['baseDate'], 90)
-            accounting = add_days(item['baseDate'], 80)
+            # 2026-11-20 業主決定：所有 Cedant 應收的 Accounting 提醒日統一為到期前 15 天（原 B＋80 → B＋75；到期 B＋90 不變）
+            accounting = add_days(item['baseDate'], 75)
             item.update(partyName=str(payload.get('reinsured') or payload.get('reinsuredName') or payload.get('cedantName') or 'Cedant'), termsDays=90, dueDate=accounting, dueTime='', contractDueDate=contract,
-                        accountingLeadDays=10, paymentRule='swiss_cedant_80_90', reminderDate=accounting)
+                        accountingLeadDays=15, paymentRule='swiss_cedant_75_90', reminderDate=accounting)
         if is_swiss:
             cedant = by_key.get(item['installmentId'] + ':cedant', {})
             # 2026-11-13: the endorsement Cedant counts from the effective date, but the
