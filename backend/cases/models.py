@@ -24,6 +24,7 @@ REINSURANCE_STRUCTURE_CHOICES = [
     ("QS", "Quota Share"),
     ("XOL", "Excess of Loss"),
     ("OVERSEA", "Oversea Business"),
+    ("FACILITY", "Facility"),
 ]
 
 DOCUMENT_KIND_CHOICES = [
@@ -34,6 +35,7 @@ DOCUMENT_KIND_CHOICES = [
     ("broker_debit", "RI Broker Debit Note"),
     ("generated_cover", "Generated Cover Note"),
     ("generated_debit", "Generated Debit Note"),
+    ("facility_attachment", "Facility attachment"),
 ]
 
 # 單檔上限：VM 10 MB（2026-09-25 你的決定；Alpha 是 5 MB）。改這裡要一併產生 migration（資料表有 CHECK 約束）。
@@ -243,6 +245,50 @@ class CaseDocument(models.Model):
 
     def __str__(self):
         return f"{self.kind}:{self.filename}"
+
+
+class FacilityDeclaration(models.Model):
+    """Separate declaration snapshots; closing history is never overwritten."""
+    declaration_uid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    facility = models.ForeignKey(Case, on_delete=models.PROTECT, related_name='facility_declarations')
+    statement_no = models.CharField(max_length=160)
+    period_from = models.DateField()
+    period_to = models.DateField()
+    status = models.CharField(max_length=16, choices=[('draft', 'Draft'), ('posted', 'Announced')], default='draft')
+    payload = models.JSONField(default=dict, encoder=DjangoJSONEncoder)
+    row_version = models.PositiveBigIntegerField(default=1)
+    created_by = models.CharField(max_length=120)
+    updated_by = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    announced_at = models.DateTimeField(null=True, blank=True)
+    announced_by = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        db_table = 'ri_facility_declarations'
+        constraints = [
+            models.UniqueConstraint(fields=['facility', 'statement_no'], name='facility_statement_unique'),
+            models.CheckConstraint(condition=Q(period_to__gte=F('period_from')), name='facility_declaration_period_valid'),
+            models.CheckConstraint(condition=Q(row_version__gt=0), name='facility_declaration_version_valid'),
+            models.CheckConstraint(condition=Q(status__in=['draft', 'posted']), name='facility_declaration_status_valid'),
+        ]
+        indexes = [models.Index(fields=['facility', 'period_from', 'period_to'], name='facility_declaration_dates_idx')]
+
+
+class FacilityDeclarationDocument(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    declaration = models.ForeignKey(FacilityDeclaration, on_delete=models.PROTECT, related_name='documents')
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=255)
+    byte_size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    storage_key = models.CharField(max_length=255, unique=True)
+    uploaded_by = models.CharField(max_length=120)
+    uploaded_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'ri_facility_declaration_documents'
+        constraints = [models.CheckConstraint(condition=Q(byte_size__gt=0, byte_size__lte=MAX_DOCUMENT_BYTES), name='facility_decl_document_size')]
 
 
 class ReferenceSequence(models.Model):

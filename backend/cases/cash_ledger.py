@@ -136,10 +136,15 @@ def transaction_details(payload, now=None, schedule_result=None):
             from .oversea import dates as oversea_dates
             date_rows = [{**oversea_dates(payload, tx), 'termsDays': None}]
         dates = [i['dueDate'] for i in date_rows if i.get('dueDate')]
+        if tx.get('facilityNet') and tx.get('dueDate'):
+            dates = [tx['dueDate']]
         if source == 'claim' and tx.get('dueDate'):
             dates = [tx['dueDate']]
         base_dates = [i['baseDate'] for i in date_rows if i.get('baseDate')]
         contract_dates = [i.get('contractDueDate') for i in date_rows if i.get('contractDueDate')]
+        if tx.get('facilityNet') and tx.get('dueDate'):
+            base_dates = [tx.get('baseDate') or '']
+            contract_dates = [tx['dueDate']]
         if source == 'claim' and tx.get('dueDate'):
             contract_dates = [tx['dueDate']]
         swiss_fields = {}
@@ -163,7 +168,7 @@ def transaction_details(payload, now=None, schedule_result=None):
             'fullPaymentRequired':source == 'premium',
             'postedMonth':tx.get('postedMonth') if 'productionRecognized' in tx else tx.get('postedMonth') or str(tx.get('createdAt') or '')[:7],
             'canRecord':bool(source and (source != 'claim' or leg in ('1','2')) and leg and not derived and not historic and value and party_name
-                             and (source == 'claim' or tx.get('overseaBusiness') and dates or (matching and len(dates) == len(matching)))),
+                             and (source == 'claim' or (tx.get('overseaBusiness') or tx.get('facilityNet')) and dates or (matching and len(dates) == len(matching)))),
             '_sign':sign,'_historic':historic,'_source':source,'_leg':leg,'_suffix':suffix,'_tx':tx,
         }
         if tx.get('overseaBusiness'):

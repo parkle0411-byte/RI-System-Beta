@@ -227,6 +227,15 @@ def build_claim_payment_transactions(root_case, split_source, claim, payment):
 
 
 def reconciliation_ref_for(case_data, transaction):
+    if isinstance(transaction, dict) and transaction.get('facilityNet'):
+        if str(transaction.get('legType') or '').startswith('Leg 1'):
+            return str(transaction.get('facilityStatementNo') or '')
+        if str(transaction.get('legType') or '').startswith('Leg 2'):
+            idx = transaction.get('reinsurerIdx')
+            rows = case_data.get('reinsurers') or []
+            if type(idx) is int and 0 <= idx < len(rows) and isinstance(rows[idx], dict):
+                return str(rows[idx].get('facilityReference') or '')
+        return ''
     leg = js_to_string(js_or(get(transaction, "legType"), ""))
     is_claim = leg.startswith("Claim")
     cedant_facing = leg.startswith("Claim Leg 2") if is_claim else leg.startswith("Leg 1")

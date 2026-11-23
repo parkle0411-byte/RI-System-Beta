@@ -297,6 +297,8 @@ def _status_for(due_date, outstanding, paid, today, now):
 
 
 def build_payment_schedule(case_data, now=None, *, legacy_swiss_cgl=False):
+    if isinstance(case_data, dict) and case_data.get('reinsuranceStructure') == 'FACILITY':
+        return {'items': [], 'issues': [], 'reviewRequired': False, 'totals': {'cedantOutstanding': 0, 'reinsurerOutstanding': 0}}
     from legacy.protocol import is_legacy_payload
     if is_legacy_payload(case_data):
         from legacy.ledger import schedule

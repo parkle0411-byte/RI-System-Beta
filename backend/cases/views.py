@@ -177,7 +177,7 @@ class CasesView(NoStoreMixin, APIView):
                 **({"receiptPaymentDate": payload.get("receiptPaymentDate") or ""} if row.reinsurance_structure == "OVERSEA" else {}),
                 "ownerPersonnelId": row.owner_personnel_id,
                 "ownerPersonnelName": _json_text(payload, "ownerPersonnelName") or "",
-                "originalInsured": _first_text(payload, "originalInsured", "original_insured"),
+                "originalInsured": (_first_text(payload, "facilityName") if row.reinsurance_structure == 'FACILITY' else _first_text(payload, "originalInsured", "original_insured")),
                 "originalInsuredCn": _first_text(payload, "originalInsuredCn"),
                 "insuredMasterId": row.insured_master_id,
                 "reinsurers": reinsurers,

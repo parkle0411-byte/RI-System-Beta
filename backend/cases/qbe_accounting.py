@@ -13,7 +13,7 @@ def is_qbe(name):
 
 
 def target(payload, name):
-    return str(payload.get('classOfBusiness') or '').strip().casefold() == 'property' and is_qbe(name)
+    return payload.get('reinsuranceStructure') != 'FACILITY' and str(payload.get('classOfBusiness') or '').strip().casefold() == 'property' and is_qbe(name)
 
 
 def applies(payload):

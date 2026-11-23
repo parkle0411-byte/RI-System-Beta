@@ -183,6 +183,11 @@ export function buildClaimPaymentTransactions(rootCase, splitSource, claim, paym
 
 export function reconciliationRefFor(caseData, transaction) {
   const leg = String(transaction?.legType || '');
+  if (transaction?.facilityNet) {
+    if (leg.startsWith('Leg 1')) return String(transaction.facilityStatementNo || '');
+    if (leg.startsWith('Leg 2')) return String(caseData?.reinsurers?.[transaction.reinsurerIdx]?.facilityReference || '');
+    return '';
+  }
   const isClaim = leg.startsWith('Claim');
   const cedantFacing = isClaim ? leg.startsWith('Claim Leg 2') : leg.startsWith('Leg 1');
   const reinsurerFacing = isClaim ? leg.startsWith('Claim Leg 1') : leg.startsWith('Leg 2');

@@ -12,7 +12,7 @@ export const STRUCTURE_SUFFIX = {
   OVERSEA: 'Oversea Business'
 };
 
-export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss', OVERSEA: 'Oversea Business' };
+export const STRUCTURE_LABEL = { QS: 'Quota Share', XOL: 'Excess of Loss', OVERSEA: 'Oversea Business', FACILITY: 'Facility' };
 export const UNIVERSAL_CLAUSES = [
   // VM 與 Alpha 不同（2026-09-29）：標題含代碼，文件上印出「LMA3333 …」
   { code: 'LMA3333', title: 'LMA3333 Reinsurers Liability Clause' },

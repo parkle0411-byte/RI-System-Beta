@@ -33,6 +33,11 @@ import { recallScope } from '../alpha/productRecall'
 import ProductRecallRisk from '../components/ProductRecallRisk.vue'
 import ClaimLossSnapshots from '../components/ClaimLossSnapshots.vue'
 import CasePersonnelHistory from '../components/CasePersonnelHistory.vue'
+import FacilityPlacementForm from '../components/FacilityPlacementForm.vue'
+import FacilityDeclarations from '../components/FacilityDeclarations.vue'
+import FacilityCaseSummary from '../components/FacilityCaseSummary.vue'
+import { apiFetch } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const {
   refreshSelectedCase, can, activeView, currentHeader, loading, saving, saveMessage,
@@ -60,7 +65,7 @@ const {
   splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
   formatAmount, formatMoney, selectedMoney, selectedDataIssues, formatCurrency, formatMoneyInput, parseMoneyInput, saveReviewedDraft,
   addLossRecord, removeLossRecord, lossRowInvalid,
-  statusLabel, loadData, saveDraft, cglQsScope, propertyQsCurrencyScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected,
+  statusLabel, loadData, saveDraft, saveFacilityDraft, cglQsScope, propertyQsCurrencyScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected,
   caseReminders, remindersLoading, loadCaseReminders, reminderPreview, reminderPreviewVisible, openReminderPreview, reminderStatusLabel, reminderStatusType, paymentReminderLabel
 } = useCaseWorkspace()
 provide(SECTION_EDIT_CONTEXT, { guarded: isEndorsementDraft, active: editingEndorsementSection, busy: sectionEditorBusy, edit: editEndorsementSection, done: finishEndorsementSection })
@@ -93,6 +98,27 @@ watch(() => [activeView.value, facilityRules.value.groups.length], ([view,count]
 const referenceEditor = ref(null)
 const formatShare = value => value == null || value === "" ? "—" : Number(value).toLocaleString("en-US", {maximumFractionDigits: 8})
 async function refreshReferences() { await refreshSelectedCase(); await loadData() }
+async function announceFacility() {
+  try {
+    await ElMessageBox.confirm('Confirm the Facility terms before Announce?', 'Review Facility', { confirmButtonText: 'Announce', cancelButtonText: 'Back to review' })
+    const response = await apiFetch('/api/facility-announce', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caseUid: selectedCase.value.caseUid, rowVersion: selectedCase.value.rowVersion, confirmed: true }) })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.message || data.error || 'Unable to announce Facility.')
+    ElMessage.success('Facility Announced.')
+    await refreshSelectedCase(); await loadData()
+  } catch (err) { if (err !== 'cancel' && err !== 'close') ElMessage.error(err?.message || String(err)) }
+}
+async function renewFacility() {
+  try {
+    const response = await apiFetch('/api/facility-renewal', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caseUid: selectedCase.value.caseUid, rowVersion: selectedCase.value.rowVersion }) })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.message || data.error || 'Unable to create Facility renewal.')
+    ElMessage.success('Facility renewal Draft created.')
+    await loadData(); await startEditCase(data.case)
+  } catch (err) { ElMessage.error(err?.message || String(err)) }
+}
 // 2026-11-20 業主決定：Account List 的左右滑動比照 Accounting —— 上方左右拉桿、表格固定高度（視窗 65%，240–720）讓標題列不動、Insured (EN) 固定在左；
 // 底部捲軸不一直顯示（滑鼠移到表格上才出現）。
 const listViewportHeight = ref(Math.max(240, Math.min(720, Math.round(window.innerHeight * .65))))
@@ -105,11 +131,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
   <Teleport defer to="#page-header-actions">
             <div v-if="activeView === 'case-create'" class="header-action-group">
               <el-button class="header-secondary-button" @click="cancelNewCase">Cancel</el-button>
-              <el-button v-if="draft.reinsuranceStructure && draft.classOfBusiness" class="primary-button" :loading="saving" @click="saveDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button>
+              <el-button v-if="draft.reinsuranceStructure === 'FACILITY'" class="primary-button" :loading="saving" @click="saveFacilityDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button>
+              <el-button v-if="draft.reinsuranceStructure && draft.reinsuranceStructure !== 'FACILITY' && draft.classOfBusiness" class="primary-button" :loading="saving" @click="saveDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button>
             </div>
             <div v-else-if="activeView === 'case-detail'" class="detail-header-actions">
               <el-button class="header-secondary-button" @click="backToCases">Back to Account List</el-button>
-              <el-button v-if="(['draft', 'posted', 'reversed'].includes(selectedCase?.status) || selectedCase?.status === 'closed' && propertyEnabled(selectedPayload)) && can('cases.write')" class="primary-button" @click="editSelectedCase">{{ selectedCase?.status === 'reversed' ? 'Correct reversed case' : selectedCase?.status === 'posted' ? 'Edit announced case' : 'Edit draft' }}</el-button>
+              <el-button v-if="selectedPayload.reinsuranceStructure === 'FACILITY' && selectedCase?.status === 'draft' && can('cases.announce')" class="primary-button" @click="announceFacility">Review &amp; Announce</el-button>
+              <el-button v-if="selectedPayload.reinsuranceStructure === 'FACILITY' && ['posted','closed'].includes(selectedCase?.status) && can('cases.write')" class="secondary-button" @click="renewFacility">Create renewal</el-button>
+              <el-button v-if="(['draft', 'posted', 'reversed'].includes(selectedCase?.status) || selectedCase?.status === 'closed' && (propertyEnabled(selectedPayload) || selectedPayload.reinsuranceStructure === 'FACILITY')) && can('cases.write')" class="primary-button" @click="editSelectedCase">{{ selectedCase?.status === 'reversed' ? 'Correct reversed case' : ['posted', 'closed'].includes(selectedCase?.status) ? 'Edit announced case' : 'Edit draft' }}</el-button>
               <el-button v-if="caseWorkflow?.actions?.canReverse && can('cases.write')" class="secondary-button" :loading="workflowSaving" @click="reverseSelectedCase">Reverse case</el-button>
               <el-button v-if="!overseaEnabled(selectedPayload) && caseWorkflow?.actions?.canRenew && can('cases.write') && caseEntryAllowed(selectedPayload)" class="secondary-button" :loading="workflowSaving" @click="createRenewal">Create renewal</el-button>
             </div>
@@ -144,8 +173,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
 
             <el-dialog v-model="casePreviewVisible" title="Case Preview" width="min(820px, 94vw)" class="case-preview-dialog" destroy-on-close>
               <div v-if="casePreview" class="case-preview-grid">
-                <div class="case-preview-item"><span>Insured (EN)</span><strong>{{ casePreview.originalInsured || '—' }}</strong></div>
-                <div class="case-preview-item"><span>Insured (CN)</span><strong>{{ casePreview.originalInsuredCn || '—' }}</strong></div>
+                <div class="case-preview-item"><span>{{ casePreview.reinsuranceStructure === 'FACILITY' ? 'Facility Name' : 'Insured (EN)' }}</span><strong>{{ casePreview.originalInsured || '—' }}</strong></div>
+                <div v-if="casePreview.reinsuranceStructure !== 'FACILITY'" class="case-preview-item"><span>Insured (CN)</span><strong>{{ casePreview.originalInsuredCn || '—' }}</strong></div>
                 <div class="case-preview-item"><span>Year</span><strong>{{ String(casePreview.effectiveDate || '').slice(0,4) || '—' }}</strong></div>
                 <div class="case-preview-item"><span>Class</span><strong>{{ casePreview.className || '—' }}</strong></div>
                 <div class="case-preview-item"><span>TW Ref. No.</span><strong>{{ displayTwRef(casePreview) }}</strong></div>
@@ -163,8 +192,24 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
           </template>
 
           <template v-else-if="activeView === 'case-detail'">
-            <PlacingSlipPanel v-if="selectedCase && placingRulesEnabled(selectedCase.payload)" :case-record="selectedCase" />
-            <div v-loading="caseDetailLoading">
+            <div v-if="selectedCase && selectedPayload.reinsuranceStructure === 'FACILITY'" v-loading="caseDetailLoading">
+              <FacilityCaseSummary :payload="selectedPayload" />
+              <section v-if="can('documents.read')" class="overview-card"><h2>Facility attachments</h2>
+                <div v-for="doc in caseDocuments" :key="doc.id"><el-button link @click="downloadCaseDocument(doc)">{{ doc.filename }}</el-button><el-button v-if="selectedCase.status === 'draft' && can('documents.write')" link @click="deleteCaseDocument(doc)">Remove</el-button></div>
+                <div v-if="can('documents.write')"><el-upload action="#" :auto-upload="false" :limit="1" :file-list="documentFileList" :on-change="onDocumentFileChange" :on-remove="onDocumentFileRemove"><el-button>Select attachment</el-button></el-upload><el-button :loading="documentsSaving" @click="documentForm.kind = 'facility_attachment'; uploadCaseDocument()">Upload attachment</el-button></div>
+              </section>
+              <FacilityDeclarations v-if="['posted','closed'].includes(selectedCase.status)" :facility="selectedCase" :writable="can('cases.write')" @changed="refreshSelectedCase" />
+              <section v-if="['posted','closed'].includes(selectedCase.status)" class="overview-card" data-testid="facility-soa"><h2>Statement of Account — {{ displayTwRef(selectedCase) }}</h2><p>Settlement changes are made in Accounting.</p>
+                <el-table :data="selectedCaseTransactions" row-key="key" empty-text="No Declaration transactions yet.">
+                  <el-table-column prop="displayTxNo" label="Transaction no." min-width="240" /><el-table-column prop="legType" label="Leg" />
+                  <el-table-column prop="displayParty" label="Party" /><el-table-column prop="paymentDirection" label="Direction" />
+                  <el-table-column label="Amount"><template #default="{ row }">{{ selectedPayload.currency }} {{ selectedMoney(row.amount, selectedPayload.currency) }}</template></el-table-column>
+                  <el-table-column prop="reconciliationRef" label="SoA Reference" /><el-table-column label="Status"><template #default="{ row }">{{ row.reversed ? 'Reversed' : row.isReversalEntry ? 'Reversal' : row.settlement }}</template></el-table-column>
+                </el-table>
+              </section>
+            </div>
+            <PlacingSlipPanel v-if="selectedCase && selectedPayload.reinsuranceStructure !== 'FACILITY' && placingRulesEnabled(selectedCase.payload)" :case-record="selectedCase" />
+            <div v-if="selectedPayload.reinsuranceStructure !== 'FACILITY'" v-loading="caseDetailLoading">
               <el-alert v-if="selectedDataIssues.length" data-testid="case-data-error" type="error" :closable="false" show-icon title="Case data is invalid — amounts pending confirmation" :description="selectedDataIssues.map(i=>i.label).join('; ')" />
               <el-alert v-if="caseWorkflow?.actions?.renewalNotice && can('cases.write')" class="case-readiness-alert renewal-notice" :title="caseWorkflow.actions.renewalNotice" type="info" :closable="false" show-icon></el-alert>
               <el-tabs v-model="caseDetailTab" class="case-detail-tabs" @tab-change="onCaseDetailTabChange">
@@ -186,12 +231,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                       <el-form label-position="top">
                         <el-form-item label="Document type">
                           <el-select v-model="documentForm.kind" @change="onDocumentKindChange">
+                            <el-option v-if="selectedPayload.reinsuranceStructure === 'FACILITY'" label="Facility attachment" value="facility_attachment"></el-option>
                             <el-option :label="selectedPayload.parentTwRef ? 'Endorsement' : 'Offer Slip'" value="offer"></el-option>
                             <el-option label="Reinsurer Signed Slip" value="signed"></el-option>
                             <el-option label="Reinsurer Confirmation E-mail" value="confirmation"></el-option>
                           </el-select>
                         </el-form-item>
-                        <el-form-item v-if="documentForm.kind !== 'offer'" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
+                        <el-form-item v-if="!['offer', 'facility_attachment'].includes(documentForm.kind)" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
                           <el-select v-model="documentForm.reinsurers" multiple collapse-tags collapse-tags-tooltip placeholder="Select reinsurer(s)">
                             <el-option v-for="row in selectedReinsurers" :key="row.key" :label="row.label" :value="row.key"></el-option>
                           </el-select>
@@ -497,12 +543,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                       <el-form label-position="top">
                         <el-form-item label="Document type">
                           <el-select v-model="documentForm.kind" @change="onDocumentKindChange">
+                            <el-option v-if="selectedPayload.reinsuranceStructure === 'FACILITY'" label="Facility attachment" value="facility_attachment"></el-option>
                             <el-option :label="selectedPayload.parentTwRef ? 'Endorsement' : 'Offer Slip'" value="offer"></el-option>
                             <el-option label="Reinsurer Signed Slip" value="signed"></el-option>
                             <el-option label="Reinsurer Confirmation E-mail" value="confirmation"></el-option>
                           </el-select>
                         </el-form-item>
-                        <el-form-item v-if="documentForm.kind !== 'offer'" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
+                        <el-form-item v-if="!['offer', 'facility_attachment'].includes(documentForm.kind)" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
                           <el-select v-model="documentForm.reinsurers" multiple collapse-tags collapse-tags-tooltip placeholder="Select reinsurer(s)">
                             <el-option v-for="row in selectedReinsurers" :key="row.key" :label="row.label" :value="row.key"></el-option>
                           </el-select>
@@ -793,13 +840,14 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
             <el-form label-position="top" class="case-form" @pointerdown.capture="autosaveTouch" @keydown.capture="autosaveTouch" @input.capture="autosaveTouch" @change.capture="autosaveTouch" @focusout.capture="autosaveBlur" @submit.prevent>
               <section class="overview-card structure-selection" data-testid="reinsurance-structure-section">
                 <div class="form-grid cols-2">
-                  <el-form-item label="Reinsurance Type" required :class="{ 'is-required-error': fieldInvalid('reinsuranceStructure') }"><el-select :model-value="draft.reinsuranceStructure" @update:model-value="onStructureSelected" :disabled="isEndorsementDraft" :clearable="facilityStructureAllowed(draft,'')" placeholder="Select"><el-option label="Quota Share" value="QS"></el-option><el-option label="Oversea Business" value="OVERSEA"></el-option></el-select></el-form-item>
+                  <el-form-item label="Reinsurance Type" required :class="{ 'is-required-error': fieldInvalid('reinsuranceStructure') }"><el-select :model-value="draft.reinsuranceStructure" @update:model-value="onStructureSelected" :disabled="isEndorsementDraft" :clearable="facilityStructureAllowed(draft,'')" placeholder="Select"><el-option label="Quota Share" value="QS"></el-option><el-option label="Oversea Business" value="OVERSEA"></el-option><el-option label="Facility" value="FACILITY"></el-option></el-select></el-form-item>
                   <el-form-item label="Insurance Type" required :class="{ 'is-required-error': fieldInvalid('classOfBusiness') }"><el-select :model-value="draft.classOfBusiness" :disabled="isEndorsementDraft" filterable clearable placeholder="Select insurance type" @update:model-value="onClassSelected"><el-option v-for="item in masterOptions('class', draft.classOfBusiness)" :key="item.id" :label="item.historical ? item.name + ' (historical)' : (item.code ? item.name + ' · ' + item.code : item.name)" :value="item.name"></el-option></el-select></el-form-item>
                 </div>
                 <p class="document-help">Select a reinsurance type and insurance type to enter the case details.</p>
                 <p v-if="isEndorsementDraft" class="document-help">Inherited sections are read-only. Use Edit on the section you need to change; only one section can be edited at a time.</p>
               </section>
-              <template v-if="draft.reinsuranceStructure && draft.classOfBusiness">
+              <FacilityPlacementForm v-if="draft.reinsuranceStructure === 'FACILITY'" :draft="draft" :reinsured-options="masterOptions('reinsured', draft.reinsured)" :reinsurer-options="masterOptions('reinsurer', '')" :personnel="eligiblePersonnel" @owner-change="onOwnerSelected" @ae-change="onAeSelected" />
+              <template v-if="draft.reinsuranceStructure && draft.reinsuranceStructure !== 'FACILITY' && draft.classOfBusiness">
               <OverseaBusinessForm v-if="overseaEnabled(draft)" :payload="draft" :brokers="masterOptions('foreign_broker',draft.reinsurers[0]?.name)" :cedants="masterOptions('reinsured',draft.reinsured)" :aes="eligiblePersonnel" @ae-change="onAeSelected" @owner-change="onOwnerSelected" @policy-from-time-change="onPolicyFromTimeChange" />
               <template v-else>
               <section v-if="hasManualTwRefReinsurer && !isEndorsementDraft" class="overview-card" data-testid="manual-tw-ref-section">

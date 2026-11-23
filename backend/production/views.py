@@ -97,7 +97,7 @@ def report_view(report, include_rows=True):
 
 
 def _live_cases():
-    return Case.objects.filter(recycled_at__isnull=True, is_archived=False, status__in=("posted", "closed", "reversed", "draft")).exclude(status="draft",payload__productionReversals__isnull=True)
+    return Case.objects.filter(recycled_at__isnull=True, is_archived=False, status__in=("posted", "closed", "reversed", "draft")).exclude(status="draft",payload__productionReversals__isnull=True).exclude(reinsurance_structure='FACILITY')
 
 
 def _exclusions(month):
@@ -109,7 +109,8 @@ def load_month(month, *, cached=False):
     Generate／Close／Exclude 一律 cached=False：在鎖之內從資料庫讀最新資料，並用它檢查來源是否變動。"""
     fingerprint = None
     if cached and result_cache.enabled():   # 先取得指紋、再讀資料
-        fingerprint = (result_cache.table_fingerprint(_live_cases()), result_cache.table_fingerprint(Case.objects.filter(tw_ref__isnull=False)),
+        from cases.models import FacilityDeclaration
+        fingerprint = (result_cache.table_fingerprint(_live_cases()), result_cache.table_fingerprint(Case.objects.filter(tw_ref__isnull=False)), result_cache.table_fingerprint(FacilityDeclaration.objects.all()),
                        result_cache.table_fingerprint(FxRate.objects.filter(year_month=month)),
                        result_cache.table_fingerprint(_exclusions(month), version=None, stamp="created_at"))
         from legacy.production import report_sources
@@ -131,6 +132,8 @@ def load_month(month, *, cached=False):
         preview = calc.build_production_preview(sources, month, fx_rates, [exclusion_row(e) for e in exclusions], links)
         from legacy.production import append_preview
         preview = append_preview(preview,month)
+        from cases.facility_production import append_preview as append_facility_preview
+        preview = append_facility_preview(preview, month, fx_rates, links=links)
         return cases, sources, preview
 
     if fingerprint is None:
@@ -247,6 +250,8 @@ class ProductionReportView(NoStoreMixin, APIView):
             return _error(409, "row_not_available", "This row is no longer available. Refresh the preview.")
         if row.get('legacyTransactionId'):
             return _error(409,'legacy_month_fixed','Legacy transactions retain their explicitly selected Revenue Month. The selected month cannot be deferred from this screen.')
+        if row.get('facilityDeclarationUid'):
+            return _error(409,'facility_month_fixed','Facility Declarations retain the Revenue Month assigned at Announce. The selected month cannot be deferred from this screen.')
         actor_info = actor_from(person)
         try:
             with transaction.atomic():
@@ -321,7 +326,7 @@ class ProductionReportView(NoStoreMixin, APIView):
 
         rows_by_case = {}
         for row in [*(report.rows if is_array(report.rows) else []), *state["preview"].get("accountingRows", [])]:
-            if row.get('legacyTransactionId'):continue
+            if row.get('legacyTransactionId') or row.get('facilityDeclarationUid'):continue
             rows_by_case.setdefault(js_to_number(get(row, "caseId")), []).append(row)
         sources = {float(s["id"]): s for s in state["sources"]}
         cases = {float(c.pk): c for c in state["cases"]}
@@ -360,6 +365,8 @@ class ProductionReportView(NoStoreMixin, APIView):
                 now = timezone.now()
                 from legacy.production import freeze_report
                 freeze_report(person,report.rows)
+                from cases.facility_production import freeze_report as freeze_facility_report
+                freeze_facility_report(report.rows, month, actor_info, request_id_from(request))
                 locked_report.status = "closed"
                 locked_report.row_version += 1
                 locked_report.close_token = close_token

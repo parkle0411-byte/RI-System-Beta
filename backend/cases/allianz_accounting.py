@@ -24,6 +24,7 @@ def is_allianz(name):
 
 def target(payload, name):
     return (isinstance(payload, dict)
+            and payload.get('reinsuranceStructure') != 'FACILITY'
             and str(payload.get('classOfBusiness') or '').strip().casefold() == 'property'
             and is_allianz(name))
 

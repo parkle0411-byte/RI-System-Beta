@@ -167,7 +167,7 @@ def _pad2(n):
     return f"{n:02d}"
 
 
-def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None):
+def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None, facility_trend=None):
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     today = now.strftime("%Y-%m-%d")
     year, month_number = now.year, now.month
@@ -345,6 +345,8 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         if r.get("_financialInvalid"):continue
         if not _live(r):
             continue
+        if r['payload'].get('reinsuranceStructure') == 'FACILITY':
+            continue
         rate = case_rate(r["payload"])
         entries = production.installment_allocations(r["payload"]) if production_rules else installment_income(r["payload"])
         for entry in entries:
@@ -356,6 +358,10 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     for entry in (legacy or {}).get("trend", []):
         if entry.get("month") in monthly and entry.get("incomeTwd") is not None:
             monthly[entry["month"]] += number_or_zero(entry["incomeTwd"])
+
+    for entry in facility_trend or []:
+        if entry.get('month') in monthly and entry.get('incomeTwd') is not None:
+            monthly[entry['month']] += number_or_zero(entry['incomeTwd'])
 
     closed_months = set()
     visible_ids = {str(r.get('id')) for r in rows}

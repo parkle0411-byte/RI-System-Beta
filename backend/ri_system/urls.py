@@ -16,6 +16,9 @@ from cases.placing_views import PlacingSlipView
 from cases.recycle_views import DraftRecycleBinView
 from cases.reference_views import ReconciliationReferencesView
 from cases.views import CasesView
+from cases.facility_declaration_views import FacilityDeclarationsView, FacilityDeclarationAnnounceView
+from cases.facility_declaration_documents import FacilityDeclarationDocumentsView
+from cases.facility_placement_views import FacilityPlacementView, FacilityAnnounceView, FacilityRenewalView
 from cases.insured_views import InsuredMasterView
 from cases.personnel_history_views import CasePersonnelHistoryView
 from cases.workflow_views import AnnounceView, WorkflowView
@@ -46,6 +49,12 @@ urlpatterns = [
     path("api/audit-log", include("audit.urls")),
     path("api/insured-masters", InsuredMasterView.as_view(), name="insured-masters"),
     path("api/cases", CasesView.as_view(), name="cases"),
+    path("api/facility-declarations", FacilityDeclarationsView.as_view(), name="facility-declarations"),
+    path("api/facility-declaration-announce", FacilityDeclarationAnnounceView.as_view(), name="facility-declaration-announce"),
+    path("api/facility-declaration-documents", FacilityDeclarationDocumentsView.as_view(), name="facility-declaration-documents"),
+    path("api/facility-placement", FacilityPlacementView.as_view(), name="facility-placement"),
+    path("api/facility-announce", FacilityAnnounceView.as_view(), name="facility-announce"),
+    path("api/facility-renewal", FacilityRenewalView.as_view(), name="facility-renewal"),
     path("api/case-personnel-history", CasePersonnelHistoryView.as_view(), name="case-personnel-history"),
     path("api/case-reconciliation-references", ReconciliationReferencesView.as_view(), name="case-reconciliation-references"),
     path("api/draft-recycle-bin", DraftRecycleBinView.as_view(), name="draft-recycle-bin"),

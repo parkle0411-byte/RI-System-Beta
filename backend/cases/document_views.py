@@ -215,21 +215,24 @@ class CaseDocumentsView(NoStoreMixin, APIView):
         from .oversea import enabled as oversea_enabled
         oversea = oversea_enabled(_payload(case))
         broker_note = kind in ('broker_credit', 'broker_debit')
+        facility_attachment = kind == 'facility_attachment'
+        if facility_attachment and case.reinsurance_structure != 'FACILITY':
+            return _error(400, 'invalid_document_kind', 'Facility attachments require a Facility case.')
         if broker_note and (not oversea or kind == 'broker_debit' and case.case_kind != 'endorsement'):
             return _error(400, 'invalid_document_kind', 'Original Oversea cases require an RI Broker Credit Note; Debit Notes are available only for Oversea endorsements.')
-        if kind not in ("offer", "signed", "confirmation", "broker_credit", "broker_debit"):
+        if kind not in ("offer", "signed", "confirmation", "broker_credit", "broker_debit", "facility_attachment"):
             return _error(400, "invalid_document_kind",
                           "Choose Endorsement, Reinsurer Signed Slip or Reinsurer Confirmation E-mail." if case.case_kind == 'endorsement' else "Choose Offer Slip, Reinsurer Signed Slip or Reinsurer Confirmation E-mail.")
         filename = docs.safe_filename(body.get("filename"))
         from .qs_documents import scope as qs_document_scope
-        decoded = docs.decode_and_validate(filename, body.get("base64"), MAX_DOCUMENT_BYTES if qs_document_scope(_payload(case)) else 10*1024*1024)
+        decoded = docs.decode_and_validate(filename, body.get("base64"), MAX_DOCUMENT_BYTES if qs_document_scope(_payload(case)) or facility_attachment else 10*1024*1024)
         if "error" in decoded:
             return _error(decoded["error"][0], "invalid_file", decoded["error"][1])
         allowed = docs.required_reinsurers(_payload(case))
         supplied = body.get("reinsurers")
-        names = [] if kind == "offer" or broker_note else list(dict.fromkeys(
+        names = [] if kind == "offer" or broker_note or facility_attachment else list(dict.fromkeys(
             k for k in (docs.reinsurer_key(v) for v in (supplied if is_array(supplied) else [])) if k))
-        if kind != "offer" and not broker_note and (not names or any(name not in allowed for name in names)):
+        if kind != "offer" and not broker_note and not facility_attachment and (not names or any(name not in allowed for name in names)):
             return _error(400, "reinsurer_mapping_required", "Select the reinsurer(s) covered by this evidence.")
 
         filename = docs.storable_text(filename)

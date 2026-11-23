@@ -23,7 +23,7 @@ def is_swiss_facility(name):
 
 
 def applies(payload):
-    return (isinstance(payload, dict) and any(is_swiss_facility(r.get('name')) for r in objects(payload.get('reinsurers'))))
+    return (isinstance(payload, dict) and payload.get('reinsuranceStructure') != 'FACILITY' and any(is_swiss_facility(r.get('name')) for r in objects(payload.get('reinsurers'))))
 
 
 def case_payload(case, copy_payload=True):

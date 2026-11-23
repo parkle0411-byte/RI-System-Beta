@@ -257,7 +257,7 @@ export function useCaseWorkspace() {
   const allFacilityReinsurers = computed(() => selectedDraftReinsurers.value.length > 0 && selectedDraftReinsurers.value.every((row) => isFacilityName(row.name)))
   let previousMixedInterest = null
   watch(() => [allFacilityReinsurers.value, draft.classOfBusiness, draft.reinsuranceStructure], ([pure], prior = []) => {
-    if (replacingDraft || activeView.value !== 'case-create') return
+    if (replacingDraft || activeView.value !== 'case-create' || draft.reinsuranceStructure === 'FACILITY') return
     const fixed = fixedFacilityInterest(draft)
     if (fixed) {
       if (!prior[0] && ![FIXED_TEXT.interest, CGL_INTEREST].includes(draft.interest)) previousMixedInterest = draft.interest
@@ -272,7 +272,7 @@ export function useCaseWorkspace() {
   }, { flush: 'post' })
   const previousGaTax = new WeakMap()
   watchEffect(() => {
-    if (activeView.value !== 'case-create' || editingOriginalStatus.value !== 'draft' || draft.parentTwRef || draft.twRef) return
+    if (activeView.value !== 'case-create' || editingOriginalStatus.value !== 'draft' || draft.reinsuranceStructure === 'FACILITY' || draft.parentTwRef || draft.twRef) return
     draft.reinsurers.forEach(row => {
       if (isGreatAmericanTarget(draft, row.name)) {
         if (!previousGaTax.has(row)) previousGaTax.set(row, row.taxPct)
@@ -467,6 +467,11 @@ export function useCaseWorkspace() {
   const caseDetailTabLabel = computed(() => ({ documents: 'Documentation', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders' }[caseDetailTab.value] || 'Case detail'))
   function reconciliationRefFor(caseData, transaction) {
     const leg = String(transaction?.legType || '')
+    if (transaction?.facilityNet) {
+      if (leg.startsWith('Leg 1')) return String(transaction.facilityStatementNo || '')
+      if (leg.startsWith('Leg 2')) return String(caseData?.reinsurers?.[transaction.reinsurerIdx]?.facilityReference || '')
+      return ''
+    }
     const isClaim = leg.startsWith('Claim')
     const cedantFacing = isClaim ? leg.startsWith('Claim Leg 2') : leg.startsWith('Leg 1')
     const reinsurerFacing = isClaim ? leg.startsWith('Claim Leg 1') : leg.startsWith('Leg 2')
@@ -497,7 +502,7 @@ export function useCaseWorkspace() {
       return {
         ...headers['case-detail'],
         title: selectedCase.value.twRef ? displayTwRef(selectedCase.value) : 'Draft · not assigned',
-        subtitle: `${payload.originalInsured || (overseaEnabled(payload) ? 'Oversea Business' : 'Unnamed case')} · ${statusLabel(selectedCase.value.status)}`
+        subtitle: `${payload.facilityName || payload.originalInsured || (overseaEnabled(payload) ? 'Oversea Business' : 'Unnamed case')} · ${statusLabel(selectedCase.value.status)}`
       }
     }
     return headers[activeView.value] || headers.cases
@@ -790,10 +795,10 @@ export function useCaseWorkspace() {
     return selectedReinsurers.value.find((row) => row.key === reinsurerKey(value))?.label || value || '—'
   }
   function documentKindLabel(kind) {
-    return { broker_credit: 'RI Broker Credit Note', broker_debit: 'RI Broker Debit Note', offer: selectedPayload.value.parentTwRef ? 'Endorsement' : 'Offer Slip', signed: 'Reinsurer Signed Slip', confirmation: 'Reinsurer Confirmation E-mail' }[kind] || kind
+    return { facility_attachment: 'Facility attachment', broker_credit: 'RI Broker Credit Note', broker_debit: 'RI Broker Debit Note', offer: selectedPayload.value.parentTwRef ? 'Endorsement' : 'Offer Slip', signed: 'Reinsurer Signed Slip', confirmation: 'Reinsurer Confirmation E-mail' }[kind] || kind
   }
   function resetDocumentForm() {
-    documentForm.kind = overseaEnabled(selectedPayload.value) ? 'broker_credit' : 'offer'
+    documentForm.kind = selectedPayload.value.reinsuranceStructure === 'FACILITY' ? 'facility_attachment' : overseaEnabled(selectedPayload.value) ? 'broker_credit' : 'offer'
     documentForm.reinsurers = []
     documentForm.file = null
     documentFileList.value = []
@@ -1352,8 +1357,8 @@ export function useCaseWorkspace() {
   async function uploadCaseDocument() {
     const file = documentForm.file
     if (!file) return ElMessage.error('Select a document to upload.')
-    if (!file.size || file.size > (propertyScope(selectedPayload.value) || propertyScope(draft) || isStp(selectedPayload.value) && !selectedPayload.value?.parentTwRef || isStp(draft) && !draft.parentTwRef ? MAX_DOCUMENT_BYTES : 10*1024*1024)) return ElMessage.error(overseaEnabled(selectedPayload.value) ? 'Each document must be nonempty and no larger than 10 MB.' : 'Each document must be nonempty and no larger than 30 MB.')
-    if (!['offer','broker_credit','broker_debit'].includes(documentForm.kind) && !documentForm.reinsurers.length) return ElMessage.error('Select the reinsurer(s) covered by this evidence.')
+    if (!file.size || file.size > (selectedPayload.value.reinsuranceStructure === 'FACILITY' || propertyScope(selectedPayload.value) || propertyScope(draft) || isStp(selectedPayload.value) && !selectedPayload.value?.parentTwRef || isStp(draft) && !draft.parentTwRef ? MAX_DOCUMENT_BYTES : 10*1024*1024)) return ElMessage.error(overseaEnabled(selectedPayload.value) ? 'Each document must be nonempty and no larger than 10 MB.' : 'Each document must be nonempty and no larger than 30 MB.')
+    if (!['offer','broker_credit','broker_debit','facility_attachment'].includes(documentForm.kind) && !documentForm.reinsurers.length) return ElMessage.error('Select the reinsurer(s) covered by this evidence.')
     documentsSaving.value = true
     try {
       const base64 = await fileAsBase64(file)
@@ -1513,14 +1518,15 @@ export function useCaseWorkspace() {
   function removeSumInsured(index) { if (draft.sumInsured.length > 1) draft.sumInsured.splice(index, 1) }
 
   function masterOptions(type, currentValue = '') {
+    const facilityPlacement = draft.reinsuranceStructure === 'FACILITY'
     const options = mdmRecords.value
       .filter((row) => row.entityType === type && row.isActive)
-      .filter((row) => type !== 'class' || (overseaEnabled(draft) ? overseaClasses : draft.reinsuranceStructure ? entryClasses : [...entryClasses,...overseaClasses]).includes(row.name))
-      .filter((row) => type !== 'reinsurer' || facilitySelectionAllowed(draft,row.name))
+      .filter((row) => facilityPlacement || type !== 'class' || (overseaEnabled(draft) ? overseaClasses : draft.reinsuranceStructure ? entryClasses : [...entryClasses,...overseaClasses]).includes(row.name))
+      .filter((row) => facilityPlacement || type !== 'reinsurer' || facilitySelectionAllowed(draft,row.name))
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name, 'en'))
     const current = String(currentValue || '').trim()
-    if (current && (type !== 'class' || (overseaEnabled(draft) ? overseaClasses : draft.reinsuranceStructure ? entryClasses : [...entryClasses,...overseaClasses]).includes(current)) && !options.some((row) => row.name === current) && !(type === 'reinsurer' && !facilitySelectionAllowed(draft,current))) {
+    if (current && (facilityPlacement || type !== 'class' || (overseaEnabled(draft) ? overseaClasses : draft.reinsuranceStructure ? entryClasses : [...entryClasses,...overseaClasses]).includes(current)) && !options.some((row) => row.name === current) && !(type === 'reinsurer' && !facilityPlacement && !facilitySelectionAllowed(draft,current))) {
       const isCreator = type === 'ae' && !isEditing.value && current === auth.principal?.name
       options.push({ id: `historical-${type}-${current}`, entityType: type, code: '', name: current, isActive: isCreator, historical: !isCreator })
     }
@@ -1556,6 +1562,11 @@ export function useCaseWorkspace() {
   }
 
   function onClassSelected(name) {
+    if (draft.reinsuranceStructure === 'FACILITY') {
+      draft.classOfBusiness = name || ''
+      draft.classCode = mdmRecords.value.find(row => row.entityType === 'class' && row.name === name)?.code || ''
+      return
+    }
     if (name && draft.reinsuranceStructure && (overseaEnabled(draft) ? !overseaClasses.includes(name) : !entryClasses.includes(name))) return
     const scopeIssues = facilitySelectionIssues({ ...draft, classOfBusiness: name })
     if (scopeIssues.length) {
@@ -1689,6 +1700,10 @@ export function useCaseWorkspace() {
   }
 
   function onStructureSelected(value) {
+    if (value === 'FACILITY') {
+      draft.reinsuranceStructure = value
+      return
+    }
     if (!facilityStructureAllowed(draft, value)) {
       ElMessage.warning('Swiss Re CGL Facility supports Quota Share (QS) only. Remove the Swiss Facility before changing the reinsurance type.')
       return
@@ -2349,6 +2364,25 @@ export function useCaseWorkspace() {
     } finally { saving.value = false }
   }
 
+  async function saveFacilityDraft() {
+    if (saving.value) return
+    saving.value = true
+    try {
+      const updating = Boolean(editingCaseUid.value)
+      const payload = { case: JSON.parse(JSON.stringify(draft)) }
+      if (updating) { payload.caseUid = editingCaseUid.value; payload.rowVersion = Number(editingRowVersion.value) }
+      await jsonOrThrow(await apiFetch('/api/facility-placement', {
+        method: updating ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload)
+      }))
+      ElMessage.success(updating ? 'Facility Draft updated.' : 'Facility Draft saved.')
+      resetDraft()
+      activeView.value = 'cases'
+      await loadData()
+    } catch (err) { reportWriteError(err, () => loadData()) }
+    finally { saving.value = false }
+  }
+
   // 在案件畫面時再按一次左側「Account List」：回到列表（Alpha 的 selectView('cases')）
   watch(() => shell.navClicks, () => {
     if (activeView.value === 'case-create') resetDraft()
@@ -2429,6 +2463,6 @@ export function useCaseWorkspace() {
     splitStatus, onSplitToggle, splitPartyInvalid, splitPersonOptions, onSplitPersonSelected,
     formatAmount, formatMoney, selectedMoney, selectedDataIssues, formatCurrency, formatMoneyInput, parseMoneyInput, saveReviewedDraft,
     addLossRecord, removeLossRecord, lossRowInvalid,
-    statusLabel, loadData, saveDraft, cglQsScope, propertyQsCurrencyScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected
+    statusLabel, loadData, saveDraft, saveFacilityDraft, cglQsScope, propertyQsCurrencyScope, keyInScope, relaxedDraft, autosaveMessage, autosaveError, autosaveTouch, autosaveBlur, retryAutosave, onCurrencySelected
   }
 }
