@@ -56,6 +56,8 @@ def normalize_facility_draft(source):
         if not isinstance(item, str) or len(item) > (50000 if key not in ('facilityName', 'classOfBusiness', 'classCode', 'reinsured', 'ownerPersonnelName', 'ae', 'renewedFromTwRef', 'newOrRenew', 'facilityTypePrefix') else 240):
             raise ValueError(f'{key} has an invalid format or exceeds its size limit.')
         value[key] = item.strip()
+    if value['classOfBusiness'] not in ('', 'Personal Accident'):
+        raise ValueError('Facility Placement currently supports Personal Accident only.')
     for key in ('ownerPersonnelId', 'aePersonnelId'):
         item = source.get(key)
         if item not in (None, ''):
@@ -119,6 +121,8 @@ def validate_facility(facility):
                        ('classOfBusiness', 'Insurance type')):
         if not str(facility.get(key) or '').strip():
             raise ValueError(f'{label} is required.')
+    if facility.get('classOfBusiness') != 'Personal Accident':
+        raise ValueError('Facility Placement currently supports Personal Accident only.')
     if str(facility.get('currency') or '').upper() not in CURRENCIES:
         raise ValueError('A supported Facility currency is required.')
     start = _date(facility.get('policyFrom'), 'Facility start')

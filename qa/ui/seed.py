@@ -40,6 +40,7 @@ for code, title in (("LMA3333", "LMA3333 Reinsurers Liability Clause"), ("INTERM
 master("ae", "UI AE One")
 master("reinsured", "UI Cedant Insurance", abbreviation="UIC", address="1 Test Road")
 master("class", "Property", "PAR")
+master("class", "Personal Accident", "PA")
 master("reinsurer", "UI Re Alpha", abbreviation="URA", fixedClauses=[{"code": "LMA5390", "title": "Test Clause Alpha"}], ratings=[])
 master("reinsurer", "UI Re Beta (Facility)", abbreviation="URB", fixedClauses=[], ratings=[])
 master("foreign_broker", "UI Broker")

@@ -1563,6 +1563,7 @@ export function useCaseWorkspace() {
 
   function onClassSelected(name) {
     if (draft.reinsuranceStructure === 'FACILITY') {
+      if (name && name !== 'Personal Accident') return
       draft.classOfBusiness = name || ''
       draft.classCode = mdmRecords.value.find(row => row.entityType === 'class' && row.name === name)?.code || ''
       return
@@ -1702,6 +1703,7 @@ export function useCaseWorkspace() {
   function onStructureSelected(value) {
     if (value === 'FACILITY') {
       draft.reinsuranceStructure = value
+      if (draft.classOfBusiness !== 'Personal Accident') { draft.classOfBusiness = ''; draft.classCode = '' }
       return
     }
     if (!facilityStructureAllowed(draft, value)) {

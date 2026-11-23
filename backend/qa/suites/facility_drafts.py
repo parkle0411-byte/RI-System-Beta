@@ -45,6 +45,8 @@ try:
                                    {'name': 'B', 'sharePct': 30, 'deductionPct': 25, 'taxPct': 0, 'facilityReference': 'RB'}]}
         blocked = call(finance, 'post', '/api/facility-placement', {'case': facility})
         check('finance cannot create Facility', blocked.status_code == 403, blocked.content)
+        invalid_class = call(sales, 'post', '/api/facility-placement', {'case': {**facility, 'classOfBusiness': 'Property'}})
+        check('Facility rejects non-PA insurance type', invalid_class.status_code == 400, invalid_class.content)
         response = call(sales, 'post', '/api/facility-placement', {'case': facility})
         check('create Facility draft', response.status_code == 201, response.content)
         assert response.status_code == 201, response.content
@@ -56,6 +58,11 @@ try:
         check('Facility attachment can be uploaded', attachment.status_code == 201, attachment.content)
         facility['ownerPersonnelId'] = case.owner_personnel_id
         facility['aePersonnelId'] = case.ae_personnel_id
+        invalid_edit = call(sales, 'put', '/api/facility-placement', {'caseUid': uid, 'rowVersion': 1,
+                            'case': {**facility, 'classOfBusiness': 'Marine Cargo'}})
+        case.refresh_from_db()
+        check('Facility rejects changing PA to another insurance type', invalid_edit.status_code == 400 and
+              case.payload['classOfBusiness'] == 'Personal Accident', invalid_edit.content)
         listing = call(sales, 'get', '/api/cases').json()['cases']
         check('Account List contains Facility name', any(item['caseUid'] == uid and item['originalInsured'] == 'Travel Facility' for item in listing))
         facility['facilityName'] = 'Travel Facility revised'
