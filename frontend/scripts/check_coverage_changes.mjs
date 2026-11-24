@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
-import { initialRecall, productRecallDraftIssues, productRecallIssues } from '../src/alpha/productRecall.js'
-import { cglRiskDetailsIssues, cglOtherDraftIssues, cglCoveragesText } from '../src/alpha/cglRiskDetails.js'
+import { register } from 'node:module'
+register('./extensionless_resolve.mjs', import.meta.url)
+const { initialRecall, productRecallDraftIssues, productRecallIssues } = await import('../src/alpha/productRecall.js')
+const { cglRiskDetailsIssues, cglOtherDraftIssues, cglCoveragesText } = await import('../src/alpha/cglRiskDetails.js')
 const risk = initialRecall()
 for (const row of risk.losses) Object.assign(row, { amount: 100, currency: 'USD' })
 const p = { classOfBusiness: 'Product Recall', reinsuranceStructure: 'QS', currency: 'USD', limitOfLiability: 1000, deductibles: 10, originalExclusions:'None', originalConditions:'None', reinsuredRetention:'None', expressWarranties:'None', conditionsPrecedent:'None', subjectivities:'None', productRecall:risk }

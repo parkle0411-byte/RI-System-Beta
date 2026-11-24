@@ -33,7 +33,10 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglInformatio
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/cglQs.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, '') + '\nObject.assign(globalThis,{cglQsScope,cglQsIssues,draftFormatIssues});})()', context);
 vm.runInContext('(function(){' + fs.readFileSync(path.join(__dirname, '../src/alpha/propertyQsCurrency.js'), 'utf8').replace(/export /g, '') + '\nObject.assign(globalThis,{propertyQsCurrencyScope,propertyQsCurrencyIssues});})()', context);
 vm.runInContext(extract('  const keyInScope =', '\n  const draftFamily =').replace('const ordinaryDraftScope =','globalThis.ordinaryDraftScope ='),context);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/cglRiskDetails.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
+// Own scope: cglRiskDetails.js and productRecall.js both declare a local nameKey (2026-11-24).
+const cglRiskSource = fs.readFileSync(path.join(__dirname, '../src/alpha/cglRiskDetails.js'), 'utf8').replace(/^import .*$/gm, '');
+const cglRiskNames = [...cglRiskSource.matchAll(/^export (?:const|function) (\w+)/gm)].map(m => m[1]);
+vm.runInContext('(function(){' + cglRiskSource.replace(/export /g, '') + '\nObject.assign(globalThis,{' + cglRiskNames.join(',') + '});})()', context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/sumInsured.js'), 'utf8').replace(/export /g, ''), context);
 context.FIXED_TEXT = { interest: "The Reinsured's Insurance Interest in the Real and Personal Property of the Insured including Property whilst in their Care, Custody or Control." };
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/alpha/facilityRules.js'), 'utf8').replace(/^import .*$/gm, '').replace(/export /g, ''), context);
