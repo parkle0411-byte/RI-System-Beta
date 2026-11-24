@@ -1,38 +1,56 @@
 <script setup>
+import { watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import DraftNumber from './DraftNumber.vue'
 import { clientKey } from '../alpha/constants'
-import { orderedRecallRows } from '../alpha/productRecall'
+import { orderedRecallRows, RECALL_CURRENCIES, initialRecall } from '../alpha/productRecall'
 const props = defineProps({ payload: { type: Object, required: true }, relaxed: Boolean })
-const add = (group) => props.payload.productRecall[group].push({ id: clientKey(), name: '', selected: true, fixed: false, ...(group === 'events' ? {} : { amount: null }) })
-const move = (rows, i, direction) => { const j = i + direction; if (j < 0 || j >= rows.length) return; [rows[i], rows[j]] = [rows[j], rows[i]] }
-async function remove(rows, i) {
-  if (rows[i].amount != null && String(rows[i].amount) !== '') {
-    try { await ElMessageBox.confirm('Remove this item and its amount?', 'Remove item', { type: 'warning' }) } catch { return }
-  }
-  rows.splice(i, 1)
+watch(() => props.payload.productRecall, risk => {
+  if (!risk) return
+  const defaults = initialRecall()
+  for (const group of ['events', 'losses']) if (!Array.isArray(risk[group])) risk[group] = defaults[group]
+  risk.losses.forEach(row => { if (row.selected && !row.currency) { row.currency = props.payload.currency; row.currencyAuto = true } })
+}, { immediate: true })
+const otherKey = group => group === 'events' ? 'eventsOtherSelected' : 'lossesOtherSelected'
+const otherChecked = group => props.payload.productRecall[otherKey(group)] ?? props.payload.productRecall[group].some(r => !r.fixed && r.selected)
+function toggleOther(group, enabled) {
+  props.payload.productRecall[otherKey(group)] = enabled
+  props.payload.productRecall[group].filter(r => !r.fixed).forEach(r => { r.selected = enabled })
+}
+function toggleFixed(row, selected) {
+  row.selected = selected
+  if (selected && (!row.currency || (row.currencyAuto === true && (row.amount == null || String(row.amount).trim() === '')))) { row.currency = props.payload.currency; row.currencyAuto = true }
+}
+function add(group) {
+  props.payload.productRecall[group].push({ id: clientKey(), name: '', selected: true, fixed: false, ...(group === 'events' ? {} : { amount: null, currency: props.payload.currency, currencyAuto: true }) })
+}
+async function remove(group, row) {
+  try { await ElMessageBox.confirm('Remove this item and its details?', 'Remove item', { type: 'warning' }) } catch { return }
+  const rows = props.payload.productRecall[group]
+  rows.splice(rows.indexOf(row), 1)
 }
 </script>
 
 <template>
   <div v-if="payload.productRecall" data-testid="product-recall-risk">
     <section v-for="group in ['events', 'losses']" :key="group">
-      <div class="repeat-heading"><h3>{{ group === 'events' ? 'Covered Events' : 'Covered Loss' }}</h3><el-button @click="add(group)">Add item</el-button></div>
-      <div v-for="row in orderedRecallRows(payload.productRecall[group], group)" :key="row.id" class="repeat-row">
-        <el-checkbox v-model="row.selected" :aria-label="`Select ${row.name || 'item'}`" />
-        <span v-if="row.fixed">{{ row.name }}</span><el-input v-else v-model="row.name" maxlength="240" placeholder="Item name" />
-        <template v-if="group === 'losses' && row.selected"><span>{{ payload.currency }}</span><DraftNumber v-model="row.amount" :relaxed="relaxed" :min="0" :controls="false" /></template>
-        <el-button v-if="!row.fixed" text type="danger" @click="remove(payload.productRecall[group], payload.productRecall[group].indexOf(row))">Remove</el-button>
+      <div class="repeat-heading"><h3>{{ group === 'events' ? 'Covered Events' : 'Covered Loss' }}</h3></div>
+      <div v-for="row in orderedRecallRows(payload.productRecall[group], group).filter(r => r.fixed)" :key="row.id" class="repeat-row">
+        <el-checkbox :model-value="row.selected" @update:model-value="toggleFixed(row, $event)">{{ row.name }}</el-checkbox>
+        <template v-if="group === 'losses' && row.selected">
+          <el-select v-model="row.currency" placeholder="Currency" @change="row.currencyAuto = false"><el-option v-for="currency in RECALL_CURRENCIES" :key="currency" :label="currency" :value="currency" /></el-select>
+          <DraftNumber v-model="row.amount" :relaxed="relaxed" :min="0" :controls="false" />
+        </template>
       </div>
-    </section>
-    <section>
-      <div class="repeat-heading"><h3>Additional Sub-limits</h3><el-button @click="add('additionalSublimits')">Add sub-limit</el-button></div>
-      <div v-for="(row, i) in payload.productRecall.additionalSublimits" :key="row.id" class="repeat-row">
-        <el-input v-model="row.name" maxlength="240" placeholder="Item name" /><span>{{ payload.currency }}</span><DraftNumber v-model="row.amount" :relaxed="relaxed" :min="0" :controls="false" />
-        <el-button :disabled="i === 0" @click="move(payload.productRecall.additionalSublimits, i, -1)">↑</el-button>
-        <el-button :disabled="i === payload.productRecall.additionalSublimits.length - 1" @click="move(payload.productRecall.additionalSublimits, i, 1)">↓</el-button>
-        <el-button text type="danger" @click="remove(payload.productRecall.additionalSublimits, i)">Remove</el-button>
-      </div>
+      <div class="repeat-row"><el-checkbox :model-value="otherChecked(group)" @update:model-value="toggleOther(group, $event)">Other</el-checkbox></div>
+      <template v-if="otherChecked(group)">
+        <div v-for="row in payload.productRecall[group].filter(r => !r.fixed)" :key="row.id" class="repeat-row">
+          <el-input v-model="row.name" maxlength="240" placeholder="Item name" @blur="row.name = row.name.trim()" />
+          <template v-if="group === 'losses'"><el-select v-model="row.currency" placeholder="Currency" @change="row.currencyAuto = false"><el-option v-for="currency in RECALL_CURRENCIES" :key="currency" :label="currency" :value="currency" /></el-select><DraftNumber v-model="row.amount" :relaxed="relaxed" :min="0" :controls="false" /></template>
+          <el-button text type="danger" @click="remove(group, row)">Remove</el-button>
+        </div>
+        <el-button @click="add(group)">Add item</el-button>
+      </template>
     </section>
   </div>
 </template>

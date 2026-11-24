@@ -10,7 +10,7 @@ COVERAGES = (
     'Medical Payment',
     'Other',
 )
-RISK_KEYS = ('coverages', 'coveragesOther', 'selfInsuredRetention')
+RISK_KEYS = ('coverages', 'coveragesOther', 'coveragesOtherItems', 'selfInsuredRetention')
 
 
 def normalize_risk_details(payload, errors, *, text):
@@ -22,7 +22,15 @@ def normalize_risk_details(payload, errors, *, text):
         raw = []
     if len(raw) > len(COVERAGES) or any(not isinstance(item, str) or item not in COVERAGES for item in raw):
         errors.append('Coverages must use the available options.')
+    items = payload.get('coveragesOtherItems')
+    if items is None:
+        items = [str(payload.get('coveragesOther')).strip()] if payload.get('coveragesOther') else []
+    if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+        errors.append('Coverage Other items must be a list of text entries.')
+        items = []
+    items = [item.strip() for item in items]
     return {
+        'coveragesOtherItems': items,
         'coverages': [item for item in COVERAGES if item in raw],
         # Retain the description if Other is unchecked; only active selections
         # are shown in Review and Word. Re-selecting Other can restore the text.
@@ -31,14 +39,49 @@ def normalize_risk_details(payload, errors, *, text):
     }
 
 
+def multi_other(payload):
+    return is_standard_cgl(payload) and str(payload.get('reinsuranceStructure') or '').upper() in ('QS', 'FACULTATIVE')
+
+
+def other_items(payload):
+    items = payload.get('coveragesOtherItems')
+    if isinstance(items, list):
+        return items
+    old = js_trim(str(payload.get('coveragesOther') or ''))
+    return [old] if old else []
+
+
+def other_draft_issues(payload):
+    if not multi_other(payload) or 'Other' not in (payload.get('coverages') or []):
+        return []
+    items = payload.get('coveragesOtherItems')
+    if items is not None and (not isinstance(items, list) or any(not isinstance(x, str) for x in items)):
+        return [{'field': 'coveragesOther', 'label': 'Coverage Other must be a list of text entries'}]
+    name_key = lambda value: value.translate(str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))
+    names = {name_key(x) for x in COVERAGES if x != 'Other'}
+    for item in other_items(payload):
+        name = js_trim(str(item))
+        if name and (name_key(name) in names or len(name) > 240 or '\n' in name or '\r' in name):
+            return [{'field': 'coveragesOther', 'label': 'Coverage names must be unique, single-line and at most 240 characters'}]
+        if name:
+            names.add(name_key(name))
+    return []
+
+
 def risk_details_issues(payload):
     if not is_standard_cgl(payload):
         return []
     selected = payload.get('coverages')
     if not isinstance(selected, list) or not selected or any(item not in COVERAGES for item in selected):
         return [{'field': 'coverages', 'label': 'Coverages — select at least one available option'}]
-    if 'Other' in selected and not js_trim(js_to_string(js_or(payload.get('coveragesOther'), ''))):
-        return [{'field': 'coveragesOther', 'label': 'Coverages — Other'}]
+    if 'Other' in selected:
+        if multi_other(payload):
+            items = other_items(payload)
+            if not items or any(not js_trim(str(item)) for item in items):
+                return [{'field': 'coveragesOther', 'label': 'Coverages — Other'}]
+            return other_draft_issues(payload)
+        if not js_trim(js_to_string(js_or(payload.get('coveragesOther'), ''))):
+            return [{'field': 'coveragesOther', 'label': 'Coverages — Other'}]
     return []
 
 

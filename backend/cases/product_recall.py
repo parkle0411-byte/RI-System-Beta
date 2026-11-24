@@ -4,6 +4,7 @@ The row IDs identify coverage selections and survive reordering/renewal.
 They are data identifiers, not labels displayed on the cover note.
 """
 from decimal import Decimal, InvalidOperation
+import math
 
 EVENTS = ('Defect', 'Malicious Product Tampering', 'Product Extortion', 'Government Recall')
 LOSSES = ('First Party Recall Costs', 'Third Party Recall Costs', 'Consultant and Advisor Costs', 'Extortion Costs')
@@ -26,7 +27,7 @@ def initial():
         'choiceOfLaw': CHOICE_OF_LAW,
         'events': [{'id': f'event-{i}', 'name': name, 'selected': True, 'fixed': True} for i, name in enumerate(EVENTS, 1)],
         'losses': [{'id': f'loss-{i}', 'name': name, 'selected': True, 'fixed': True, 'amount': None} for i, name in enumerate(LOSSES, 1)],
-        'additionalSublimits': [],
+        'eventsOtherSelected': False, 'lossesOtherSelected': False,
     }
 
 
@@ -39,7 +40,12 @@ def _number(value):
 
 
 def _text(value):
-    return str(value or '').strip()
+    from .calc.jsnum import js_trim
+    return js_trim(str(value or ''))
+
+
+def _name_key(value):
+    return value.translate(str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'))
 
 
 def issues(payload, *, ready=False):
@@ -51,20 +57,28 @@ def issues(payload, *, ready=False):
     result = []
     def add(field, message):
         result.append({'field': field, 'label': message})
-    groups = [('events', 'Covered Event'), ('losses', 'Covered Loss'), ('additionalSublimits', 'Additional Sub-limit')]
+    groups = [('events', 'Covered Event'), ('losses', 'Covered Loss')]
     for key, label in groups:
         entries = risk.get(key, [])
         if not isinstance(entries, list):
             add('productRecall.' + key, label + ' must be a list')
             continue
+        flag = 'eventsOtherSelected' if key == 'events' else 'lossesOtherSelected'
+        if flag in risk and not isinstance(risk[flag], bool):
+            add('productRecall.' + flag, label + ' Other selection must be true or false')
+        other = risk.get(flag, any(isinstance(r, dict) and not r.get('fixed') and r.get('selected') for r in entries))
+        custom = [r for r in entries if isinstance(r, dict) and not r.get('fixed')]
+        if ready and other and not custom:
+            add('productRecall.' + key, label + ' Other requires an item')
         names, ids = set(), set()
-        fixed_names = {f'{"event" if key == "events" else "loss"}-{i}': name for i, name in enumerate(EVENTS if key == 'events' else LOSSES, 1)} if key != 'additionalSublimits' else {}
+        fixed_names = {f'{"event" if key == "events" else "loss"}-{i}': name for i, name in enumerate(EVENTS if key == 'events' else LOSSES, 1)}
         for i, row in enumerate(entries):
             if not isinstance(row, dict):
                 add(f'productRecall.{key}.{i}', label + ' must be an object')
                 continue
-            name = _text(row.get('name'))
-            row_id = _text(row.get('id'))
+            name, row_id = _text(row.get('name')), _text(row.get('id'))
+            if not isinstance(row.get('selected'), bool):
+                add(f'productRecall.{key}.{i}.selected', label + ' selection must be true or false')
             if not row_id or row_id in ids:
                 add(f'productRecall.{key}.{i}.id', label + ' must have a unique identifier')
             ids.add(row_id)
@@ -72,21 +86,20 @@ def issues(payload, *, ready=False):
                 add(f'productRecall.{key}.{i}.name', 'Standard items cannot be renamed')
             if row.get('fixed') is True and row_id not in fixed_names:
                 add(f'productRecall.{key}.{i}.name', 'Unknown standard item')
-            if not name and ready:
+            if not row.get('fixed') and not other:
+                continue
+            if len(name) > 240 or '\n' in name or '\r' in name:
+                add(f'productRecall.{key}.{i}.name', label + ' name must be a single line of at most 240 characters')
+            if not name and ready and (not row.get('fixed') or row.get('selected')):
                 add(f'productRecall.{key}.{i}.name', label + ' name is required')
-            normalized = name.casefold()
+            normalized = _name_key(name)
             if normalized and normalized in names:
                 add(f'productRecall.{key}.{i}.name', label + ' names must be unique')
             if normalized:
                 names.add(normalized)
-        if ready and key != 'additionalSublimits' and not any(isinstance(r, dict) and r.get('selected') and _text(r.get('name')) for r in entries):
+        if ready and not any(isinstance(r, dict) and (r.get('selected') if r.get('fixed') else other) and _text(r.get('name')) for r in entries):
             add('productRecall.' + key, 'Select at least one ' + label)
     losses = risk.get('losses') if isinstance(risk.get('losses'), list) else []
-    additional = risk.get('additionalSublimits') if isinstance(risk.get('additionalSublimits'), list) else []
-    loss_names = {_text(row.get('name')).casefold() for row in losses if isinstance(row, dict) and _text(row.get('name'))}
-    for i, row in enumerate(additional):
-        if isinstance(row, dict) and _text(row.get('name')).casefold() in loss_names:
-            add(f'productRecall.additionalSublimits.{i}.name', 'Use the existing Covered Loss sub-limit')
     limit = _number(payload.get('limitOfLiability'))
     currency = str(payload.get('currency') or '').upper()
     if ready and (limit is None or limit <= 0):
@@ -113,11 +126,23 @@ def issues(payload, *, ready=False):
         if ready and cap and limit is not None and value > limit:
             add(field, 'Amount must not exceed the Limit of Indemnity')
     amount_issue('limitOfLiability', payload.get('limitOfLiability'), cap=False)
-    for key, rows in (('losses', losses), ('additionalSublimits', additional)):
-        for i, row in enumerate(rows):
-            if not isinstance(row, dict) or key == 'losses' and not row.get('selected'):
-                continue
-            amount_issue(f'productRecall.{key}.{i}.amount', row.get('amount'), required=ready)
+    from .claim_currency import valid_amount
+    allowed_currencies = ('TWD', 'USD', 'EUR', 'JPY', 'GBP', 'HKD', 'MYR')
+    other = risk.get('lossesOtherSelected', any(isinstance(r, dict) and not r.get('fixed') and r.get('selected') for r in losses))
+    for i, row in enumerate(losses):
+        if not isinstance(row, dict) or not (row.get('selected') if row.get('fixed') else other):
+            continue
+        if 'currency' in row and not _text(row.get('currency')):
+            add(f'productRecall.losses.{i}.currency', 'Select a valid sub-limit currency')
+        row_currency = _text(row.get('currency') or currency).upper()
+        if row_currency not in allowed_currencies:
+            add(f'productRecall.losses.{i}.currency', 'Select a valid sub-limit currency')
+        raw = row.get('amount')
+        if raw is None or str(raw).strip() == '':
+            if ready:
+                add(f'productRecall.losses.{i}.amount', 'Enter an amount greater than 0')
+        elif _number(raw) is None or _number(raw) <= 0 or not math.isfinite(float(_number(raw))) or not valid_amount(raw, row_currency):
+            add(f'productRecall.losses.{i}.amount', 'Amount must be greater than 0 and use the currency precision')
     deductible = payload.get('deductibles')
     if ready and not _text(deductible) and not _text(payload.get('selfInsuredRetention')):
         add('deductibles', 'Enter Deductibles or Self-Insured Retention')

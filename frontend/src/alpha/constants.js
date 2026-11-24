@@ -134,7 +134,7 @@ export function emptyDraft() {
     autoClauses: [], manualClauses: [],
     status: 'draft',
     interest: FIXED_TEXT.interest,
-    coverages: [], coveragesOther: '', selfInsuredRetention: '',
+    coverages: [], coveragesOther: '', coveragesOtherItems: [], selfInsuredRetention: '',
     limitOfLiability: null,
     aggregateLimit: null,
     underlyingLimits: '',

@@ -522,6 +522,8 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
 
     if is_standard_cgl(value) or any(key in inp for key in RISK_KEYS):
         value.update(normalize_risk_details(inp, errors, text=text))
+        from .cgl_risk_details import other_draft_issues
+        errors.extend(issue['label'] for issue in other_draft_issues(value))
 
     from .product_recall import scope as recall_information_scope
     if is_standard_cgl(value) or recall_information_scope(value) or "cglInformation" in inp:
@@ -561,6 +563,24 @@ def normalize_draft(input_, *, allow_negative_premiums=False, existing_premiums=
     if product_recall_scope(value):
         risk = inp.get('productRecall')
         value['productRecall'] = json_roundtrip(risk) if isinstance(risk, dict) else {}
+        details = value['productRecall']
+        details.pop('additionalSublimits', None)
+        for group, flag in (('events', 'eventsOtherSelected'), ('losses', 'lossesOtherSelected')):
+            entries = details.get(group)
+            if isinstance(entries, list):
+                for entry in entries:
+                    if isinstance(entry, dict):
+                        if isinstance(entry.get('name'), str): entry['name'] = entry['name'].strip()
+                        if flag in details and not entry.get('fixed'): entry['selected'] = details[flag]
+                        if group == 'losses' and entry.get('selected') and 'currency' in entry and not str(entry.get('currency') or '').strip():
+                            errors.append('Select a valid sub-limit currency')
+                        if group == 'losses' and isinstance(entry.get('currency'), str) and entry['currency'].strip():
+                            entry['currency'] = entry['currency'].strip().upper()
+                        if group == 'losses' and not entry.get('currency') and (entry.get('selected') or entry.get('amount') not in (None, '')) and value.get('currency'):
+                            entry['currency'] = str(value['currency']).strip().upper()
+                            entry['currencyAuto'] = True
+        from .product_recall import issues as recall_draft_issues
+        errors.extend(issue['label'] for issue in recall_draft_issues(value, ready=False))
     from .cgl_information import normalize_aggregate
     normalize_aggregate(inp, value)
     from .placing_rules import normalize_extra, share_issues

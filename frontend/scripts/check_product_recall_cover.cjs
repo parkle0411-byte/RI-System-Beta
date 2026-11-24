@@ -7,7 +7,7 @@ vm.runInNewContext(fs.readFileSync(path.join(assets, 'docx-templates.js'), 'utf8
 vm.runInNewContext(fs.readFileSync(path.join(assets, 'vm-docx-generator.js'), 'utf8'), sandbox)
 const generator = sandbox.self.RIDocx
 const risk = { events: [{id:'event-2',name:'Malicious Product Tampering', selected:true}, {id:'event-1',name:'Defect', selected:true}, {name:'Hidden event', selected:false}],
-  losses: [{id:'loss-2',name:'Third Party Recall Costs', selected:true, amount:500}, {id:'loss-1',name:'First Party Recall Costs', selected:true, amount:400}],
+  losses: [{id:'loss-2',name:'Third Party Recall Costs', selected:true, amount:500, currency:'EUR'}, {id:'loss-1',name:'First Party Recall Costs', selected:true, amount:400}],
   additionalSublimits: [{name:'Custom Costs', amount:250}], choiceOfLaw:'Test jurisdiction' }
 const c = {classOfBusiness:'Product Recall', reinsuranceStructure:'QS', currency:'USD',
   placingRulesVersion:'placing-qs-20261028-v1', coReinsuranceWarranty:'Test co-reinsurance warranty',
@@ -21,9 +21,10 @@ const c = {classOfBusiness:'Product Recall', reinsuranceStructure:'QS', currency
   const zip = await JSZip.loadAsync(result), xml = await zip.file('word/document.xml').async('string')
   const content = [...xml.matchAll(/<w:t(?:\s[^>]*)?>(.*?)<\/w:t>/g)].map(x => x[1]).join(' ')
   for (const value of ['COVERED EVENTS','Defect','COVERED LOSS','Recall Costs','LIMIT OF INDEMNITY','in the aggregate',
-    'Custom Costs','Retention wording','exclusive jurisdiction of the Courts of the Republic of China, Taiwan','LSW3001 Premium Payment Clause',
+    'EUR 500.00 in respect of Third Party Recall Costs','Retention wording','exclusive jurisdiction of the Courts of the Republic of China, Taiwan','LSW3001 Premium Payment Clause',
     'No previous recalls or product withdrawals since start selling.', 'As advised to TWIB as at', 'Test co-reinsurance warranty']) assert(content.includes(value), value)
   assert.strictEqual(xml.split('All other terms and conditions are as per the original policy wordings.').length - 1, 2, 'both original-policy sections have the agreed tail')
+  assert(!content.includes('Custom Costs'), 'additional sub-limits are no longer output')
   assert(!content.includes('Hidden event'))
   assert(!content.includes('Test jurisdiction'))
   assert(content.indexOf('Defect') < content.indexOf('Malicious Product Tampering'))
@@ -38,5 +39,10 @@ const c = {classOfBusiness:'Product Recall', reinsuranceStructure:'QS', currency
   const secondXml = await (await JSZip.loadAsync(withDeductible)).file('word/document.xml').async('string')
   assert(secondXml.includes('each and every Insured Event'), 'Deductibles wording')
   assert(secondXml.includes('1 Test Road'), 'provided principal address')
+  const cgl = {...c, classOfBusiness:'Commercial General Liability', cglCoveragesText:'Additional coverage A\nAdditional coverage B'}
+  const cglResult = await generator.generateCover(cgl, sandbox.window.RI_DOCX_TEMPLATES, 'nodebuffer')
+  const cglXml = await (await JSZip.loadAsync(cglResult)).file('word/document.xml').async('string')
+  assert(cglXml.includes('Additional coverage A') && cglXml.includes('Additional coverage B'), 'CGL Other entries appear individually')
+  assert(!cglXml.includes('Other: Additional coverage'), 'CGL Other prefix is absent')
   console.log('PASS Product Recall Cover Note generated DOCX fields and ordering')
 })().catch(error => {console.error(error); process.exitCode = 1})

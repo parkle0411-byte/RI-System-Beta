@@ -134,8 +134,8 @@ def document_values(p, annual):
     if recall:
         risk=p.get('productRecall') or {}
         from .product_recall import CHOICE_OF_LAW, ordered_rows
-        sublimits=[r for r in ordered_rows(risk.get('losses'), 'losses') if r.get('selected')] + list(risk.get('additionalSublimits') or [])
-        values.update({'AGGREGATE LIMIT':None, 'SUB-LIMITS':'\n'.join(f"{money(r.get('amount'), currency)} in respect of {str(r.get('name') or '').strip()}" for r in sublimits),
+        sublimits=[r for r in ordered_rows(risk.get('losses'), 'losses') if r.get('selected')]
+        values.update({'AGGREGATE LIMIT':None, 'SUB-LIMITS':'\n'.join(f"{money(r.get('amount'), r.get('currency') or currency)} in respect of {str(r.get('name') or '').strip()}" for r in sublimits),
                        'DEDUCTIBLES':(money(p.get('deductibles'),currency)+' each and every Insured Event') if p.get('deductibles') not in (None,'') else None,
                        'PREMIUM PAYMENT TERMS':f"{p.get('paymentTermsDays')} Day Payment condition - LSW3001 Premium Payment Clause",
                        'CHOICE OF LAW AND JURISDICTION':CHOICE_OF_LAW})
@@ -194,7 +194,8 @@ def render(p, ae_email, *, annual=True, previous=None, references=None):
             event=insert_row(risk,proto,'COVERED EVENTS','\n'.join(str(r.get('name') or '').strip() for r in ordered_rows(recall.get('events'), 'events') if r.get('selected')),after=proto)
             insert_row(risk,proto,'COVERED LOSS','\n'.join(str(r.get('name') or '').strip() for r in ordered_rows(recall.get('losses'), 'losses') if r.get('selected')),after=event)
         elif rules.cgl(p):
-            coverage='\n'.join(str(p.get('coveragesOther') or '') if x=='Other' else x for x in p.get('coverages') or [])
+            from .cgl_risk_details import multi_other, other_items
+            coverage='\n'.join(item for x in p.get('coverages') or [] for item in (other_items(p) if x == 'Other' and multi_other(p) else [str(p.get('coveragesOther') or '') if x == 'Other' else x]))
             insert_row(risk,proto,'COVERAGES',coverage,after=proto)
         if p.get('originalExclusions'):insert_row(risk,proto,'ORIGINAL EXCLUSIONS',original_conditions(p['originalExclusions'], recall=True) if product_recall_scope(p) else p['originalExclusions'])
         info=tables[1]; children=list(info); start=next(i for i,r in enumerate(children) if 'FOR Property Placement'==text(r)); split=next(i for i,r in enumerate(children) if text(r)=='FOR Commercial General Liability & Products Liability Placement')

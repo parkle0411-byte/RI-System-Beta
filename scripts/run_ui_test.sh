@@ -34,7 +34,7 @@ if [ -e qa/ui/out ]; then
 fi
 mkdir -p qa/ui/out
 run_phase() {
-  case " ${PHASES:-A PR H R B0 B K C D E F G P1 P2 O L X I Y Z} " in *" $1 "*) ;; *) return 0 ;; esac
+  case " ${PHASES:-A PR CG H R B0 B K C D E F G P1 P2 O L X I Y Z} " in *" $1 "*) ;; *) return 0 ;; esac
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 ui_test.py "$1"
 }
@@ -79,6 +79,10 @@ from cases.models import Case
 print('endorsement draft discarded', Case.objects.filter(parent_case__tw_ref='TWPAR2603001', status='draft').update(recycled_at=timezone.now(), recycled_by='seed'))" 2>&1 | grep discarded
 run_phase B || STATUS=1
 run_phase K || STATUS=1
+case " ${PHASES:-A PR CG H R B0 B K C D E F G P1 P2 O L X I Y Z} " in *" CG "*)
+  docker exec ri-ut-backend python manage.py shell -c "from masterdata.models import MasterRecord; MasterRecord.objects.get_or_create(entity_type='class', name='Commercial General Liability', defaults={'code':'GL','payload':{},'created_by':'seed','updated_by':'seed'}); print('CGL coverage fixture ready')" || STATUS=1
+  run_phase CG || STATUS=1
+esac
 run_phase C || STATUS=1
 run_phase E || STATUS=1
 # Production Report：下個月（台北時間）的 USD 匯率先放好，階段 F 才能在下個月產生與關帳

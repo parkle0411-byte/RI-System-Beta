@@ -21,7 +21,7 @@ reinsuredRetention reinstatementProvisions indemnityPeriod originalExclusions
 basisOfValuation basisOfValuationOther originalConditions expressWarranties
 conditionsPrecedent subjectivities occupation construction lossPayee notices
 specialAgreement ae newOrRenew exchRate remark statementNo coverages
-coveragesOther selfInsuredRetention cglInformation cglAnnual manualClauses
+coveragesOther coveragesOtherItems selfInsuredRetention cglInformation cglAnnual manualClauses
 clauseDetails clauses autoClauses endoEffectiveDate endoTypes endoText coReinsuranceWarranty constructionSelections constructionLegacyText constructionLegacyConfirmed constructionSelectionVersion conveyance voyage attachmentTermination geographicalScope storage stpPremiumRate stpWebsite stpTurnoverMode stpTurnover stpHubs'''.split())
 EDITABLE = EDITABLE | frozenset(('productRecall', 'aePersonnelId', 'aeEmail'))
 
@@ -83,6 +83,29 @@ def normalize(p, *, existing=None):
         if key in p and (not isinstance(p[key], list) or len(p[key]) > 500):
             return {'errors': [f'{key} must be a list of at most 500 entries.'], 'value': None}
     raw = {k: copy.deepcopy(v) for k, v in p.items() if k in EDITABLE}
+    if isinstance(raw.get('coveragesOtherItems'), list):
+        raw['coveragesOtherItems'] = [x.strip() if isinstance(x, str) else x for x in raw['coveragesOtherItems']]
+    risk = raw.get('productRecall')
+    if isinstance(risk, dict):
+        risk.pop('additionalSublimits', None)
+        for group, flag in (('events', 'eventsOtherSelected'), ('losses', 'lossesOtherSelected')):
+            rows = risk.get(group)
+            if not isinstance(rows, list):
+                continue
+            enabled = risk.get(flag, any(isinstance(r, dict) and not r.get('fixed') and r.get('selected') for r in rows))
+            for row in rows:
+                if isinstance(row, dict):
+                    if isinstance(row.get('name'), str): row['name'] = row['name'].strip()
+                    if not row.get('fixed'): row['selected'] = bool(enabled)
+                    if group == 'losses' and isinstance(row.get('currency'), str) and row['currency'].strip():
+                        row['currency'] = row['currency'].strip().upper()
+                    if group == 'losses' and not row.get('currency') and (row.get('selected') or row.get('amount') not in (None, '')) and p.get('currency'):
+                        row['currency'] = str(p['currency']).strip().upper()
+                        row['currencyAuto'] = True
+    from .cgl_risk_details import other_draft_issues
+    problems = other_draft_issues(p)
+    if problems:
+        return {'errors': [issue['label'] for issue in problems], 'value': None}
     if recall_scope(p):
         problems = recall_issues(p, ready=False)
         if problems:
@@ -125,6 +148,7 @@ def normalize(p, *, existing=None):
     result = normalize_draft({**p, **raw}, allow_negative_premiums=bool((existing or p).get("parentTwRef")), existing_premiums=existing)
     value = result['value']
     if recall_scope(value):
+        if 'productRecall' in raw: value['productRecall'] = copy.deepcopy(raw['productRecall'])
         for key in ('clauses', 'clauseDetails', 'autoClauses', 'manualClauses'):
             raw[key] = copy.deepcopy(value[key])
     # 2026-11-12：未完成草稿保留使用者輸入的原文（draftInput），但超過金額上限的數字不放進計算用欄位

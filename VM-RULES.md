@@ -193,7 +193,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **Information** 取代 Occupation & Construction、Sum Insured、Loss Record、Special Agreement（後兩項移入 Information）。Policy Form 必選（Occurrence／Claims-Made）；Claims-Made 才顯示 Retroactive Date 與 Extended Reporting Period（適用時期間必填）。Territorial／Jurisdiction Limits 必選（三項或 Other 說明）。Business、Products 必填；Website 選填不驗證；Estimated Turnover 至少一筆（區域、幣別、非負金額）；Special Agreement 必選適用與否，適用時必填內容。切換 Policy Form／適用狀態會先確認，確認後清空從屬內容。
 - 新版：Business 複選 Manufacturer／Distributor／Importer／Exporter／Other；Turnover Region 單選 USA/Canada／Rest of World／Other；舊自由文字一律放 Other 並需逐區塊確認。Overview 顯示 Adj. Rate（100% Premium ÷ Turnover 換算後加總 ×100%，保單生效月匯率，六位小數；缺匯率顯示 N/A）。
 - **Retroactive Date** 可多筆（日期＋說明）：至少一筆；兩筆以上每筆說明必填；依日期排序、同日不可重複；舊單一日期以一筆無說明顯示。文件每筆一行，例如 `(September 01, 2002 in respect of limit USD 1,000,000)`。
-- **Coverages**（Interest 後）：Premises-Operations Liability、Products & Completed-Operation Liability、Products Liability、Personal & Advertising Injury Liability、Medical Payment、Other 多選，至少一項，Other 須說明。Products Liability 為獨立 Coverage 選項，固定排在 Products & Completed-Operation Liability 與 Personal & Advertising Injury Liability 之間；儲存、Review、Overview、Word 均沿用所選文字。
+- **Coverages**（Interest 後）：Premises-Operations Liability、Products & Completed-Operation Liability、Products Liability、Personal & Advertising Injury Liability、Medical Payment、Other 多選，至少一項，一般與 Swiss CGL QS 的 Other 可逐筆新增多個單行說明（每筆最多 240 字），固定項目後依新增順序顯示；取消勾選時保留但不檢查、不輸出。已勾選 Other 須至少一筆且各筆完整；草稿可暫存空白，Review／Announce 前補齊或刪除。名稱不得與固定或自訂項目重複（忽略前後空白及英文字母大小寫），存草稿時檢查。Review、Overview、Cover Note、Placing Slip 逐筆輸出說明，不加 Other 字樣。Products Liability 為獨立 Coverage 選項，固定排在 Products & Completed-Operation Liability 與 Personal & Advertising Injury Liability 之間。
 - **Type**：Products Liability／Commercial General Liability 單選（新案 CGL QS 預設 Commercial General Liability），組成「名稱＋結構後綴＋as original」。
 - **Interest** 預填 Reinsurance of the Reinsured’s liability under the original policy.（一般及混合案件可改；純 Facility 固定使用標準句並在 Key-In 隱藏）。
 - **Limit of Indemnity**（原 Limit of Liability）必填 > 0，文件後加 each occurrence。
@@ -209,8 +209,8 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 
 ### 5.2a Product Recall QS（2026-11-14）
 - 獨立 Product Recall 險種，僅一般 Facultative QS，支援原單、續保與批單；流程、權限、分期、佣金、稅與帳務以一般 CGL QS 為基礎。TWD／USD，預設 USD；Cedant／再保人 Tax 預設 1%，Cedant／一般再保人付款天數預設 90。TW Ref 為 TWPR＋保單生效年兩碼＋月兩碼＋每月流水號（至少三碼），Announce 取號；批單、分期及理賠沿用既有後綴。
-- Covered Events 預設 Defect、Malicious Product Tampering、Product Extortion、Government Recall；Covered Loss 預設 First Party Recall Costs、Third Party Recall Costs、Consultant and Advisor Costs、Extortion Costs。可取消或增加單行項目；範本項目依範本順序固定排列，自訂項目接在後面並保留相對順序，兩組均不提供手動排序。每類至少一項，空白列須補齊或刪除。清單內名稱去前後空白、忽略大小寫不得重複；固定項目不可更名。
-- Limit of Indemnity 為案件幣別正數，文件接 each occurrence and in the aggregate。每個已選 Covered Loss 對應必填正數 Sub-limit，可另加項目；取消選擇保留金額但不檢查或輸出。所有輸出 Sub-limit 均不得超過 Limit；額外項目不可與 Covered Loss 同名。TWD 整數、USD 最多兩位小數。Deductibles 與自由文字 Self-Insured Retention 至少一項；Deductibles 有填時大於 0 且不超過 Limit，文件接 each and every Insured Event。
+- Covered Events 預設 Defect、Malicious Product Tampering、Product Extortion、Government Recall；Covered Loss 預設 First Party Recall Costs、Third Party Recall Costs、Consultant and Advisor Costs、Extortion Costs。四項預設全選、可取消；每組 Other 可新增多筆單行名稱（每筆最多 240 字），固定項目依範本順序、自訂項目依新增順序排列，不提供排序。取消 Other 保留其資料但不檢查或輸出；各組至少一項，選 Other 時至少一筆，所有選用項目 Review／Announce 前須完整。各清單名稱去前後空白、忽略英文字母大小寫不得重複，儲存草稿時檢查；刪除自訂項目前須確認。
+- Limit of Indemnity 為案件幣別正數，文件接 each occurrence and in the aggregate。每個已選 Covered Loss 對應 Sub-limit：幣別可選 TWD／USD／EUR／JPY／GBP／HKD／MYR，預設當時 Case 幣別，金額必須大於 0 且符合所選幣別精度；草稿可留空，已輸入無效值阻擋儲存，Review／Announce 時必填。取消選擇保留幣別及金額但不檢查或輸出；修改 Case 幣別不換算已存項目。Sub-limit 不檢查是否超過 Limit，不提供 Additional Sub-limits。Cover Note／Placing Slip 輸出「幣別 金額 in respect of 項目名稱」。Deductibles 與自由文字 Self-Insured Retention 至少一項；Deductibles 有填時大於 0 且不超過 Limit，文件接 each and every Insured Event。
 - Principal Address 選填；Interest 固定原單責任再保句。Retention、Original Exclusions／Conditions 與可修改的 warranties、conditions precedent、subjectivities 依已確認預設與必填規則。Choice of Law and Jurisdiction 在案件畫面隱藏，Cover Note 與 Placing Slip 固定輸出範本條文。Reinsurance Conditions 固定範本文字、LMA3333 與 Intermediary Clause，文件最後附兩項完整條文；Premium Payment Terms 使用 Cedant Collection Days 及 LSW3001 名稱，不附完整 LSW3001。
 - Information 使用 CGL Policy Form、Retroactive Date、Extended Reporting Period、Territorial Limits 及 Insured Business 規則；新案預設 Occurrence Form；續保及批單沿用來源選擇，可再修改。Claims-Made 才顯示從屬資料，切換 Occurrence 隱藏且保留。Products 必填、Website 選填。Turnover 明細按幣別加總且文件保留原幣；單筆只顯示一行，各幣別 Case 幣別優先後按字母排序。CGL QS／Swiss CGL QS 文件也採同一原幣顯示規則；Overview Adj. Rate 仍依生效月匯率計算，缺匯率顯示 N/A。
 - Loss Record 明細可用 TWD 及 §8.5 的 15 種外幣，各筆保留原幣；New 的 0 年無損失句為 No previous recalls or product withdrawals since start selling.，後接 Broker Advised Date。Cover Note 依 CGL 版面與已確認的 Product Recall 順序；Placing Slip 為獨立生成程式，使用相同 Product Recall 業務資料。
@@ -549,6 +549,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-24 14:34 | Product Recall Covered Events／Loss 多筆 Other、各項 Sub-limit 幣別；一般及 Swiss CGL QS Coverage 多筆 Other | `backups/coverage_change_20261124_143136/`（部署前資料庫及版控原始碼） | `ri-backend:before-coverage-change-20261124_143136`／`ri-frontend:before-coverage-change-20261124_143136` | 候選映像 API 141/141 組、畫面 410/410 項；文件、續保與批單專項通過；無 migration、無批次資料改寫；後端 465 檔及前端 33 檔逐檔一致 |
 | 11-23 15:27 | Facility Placement 的 Insurance Type 限定 Personal Accident（PA） | `backups/facility_pa_20261123_152645/`（部署前 DB 及變更檔；原始碼可用變更檔反向還原） | `ri-backend:before-facility-pa-20261123_152645`／`ri-frontend:before-facility-pa-20261123_152645` | 候選映像完整 API 回歸與畫面回歸、Facility PA 專項通過；無 migration，服務與原始碼逐檔核對 |
 | 11-23 14:27 | Facility Placement、Declaration、Accounting／SoA、Off-set、Revenue Month、關帳更正及 Renewal | `backups/facility_20261123_142716/`（部署前 DB、文件及變更檔；原始碼可用變更檔反向還原） | `ri-backend:before-facility-20261123_142716`／`ri-frontend:before-facility-20261123_142716` | 候選映像完整 API 回歸與畫面回歸、Facility 專項及瀏覽器起始日更正通過；正式 migration、服務與原始碼逐檔核對 |
 | 11-20 16:29 | 審核前先收齊對應款（所有再保人，只看該再保人份額）：付再保人的保費 T2 ← Cedant T1；退給 Cedant ← 再保人退款；付給 Cedant 的理賠 ← 理賠款已收到一部分；Swiss Property 改為只看自己份額（§8.2、§8.3） | `backups/review_collect_20261120_162901/`（含部署前 DB、文件、被覆蓋原始碼）；回復用 `review-collect-work/rollback.sh 20261120_162901` | `ri-backend:before-review-collect-20261120_162901`／`ri-frontend:before-review-collect-20261120_162901` | 候選映像 API 140/140（新增 review_after_collection 20 項）、畫面全部階段通過（V 15 項）；無 migration、不改資料；正式後端逐檔一致；正式唯讀確認只有 TWGL2606001-R1-T2、TWGL2606001-E01-R1-T2（付 Swiss Re，Cedant 未收）標示不能審核，已審核帳款不受影響 |
@@ -619,6 +620,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-24：依業主確認部署 Product Recall Covered Events／Loss 多筆 Other、每項 Sub-limit 獨立幣別及金額、移除 Additional Sub-limits；一般與 Swiss CGL QS Coverage Other 改支援多筆並調整畫面與 Word 輸出。完整 API 與畫面回歸通過，部署前未批次改寫資料。
 
 - 2026-11-20：所有再保人，Mark reviewed 前要先收齊對應的那筆錢（只看該再保人份額）：保費 T2 要先收齊 Cedant 款、退給 Cedant 要先收回再保人退款、付給 Cedant 的理賠要先收到一部分理賠款；Swiss Property 改為只看自己份額，取代 11-19「該期 Cedant 全部收齊」；付款前提不變（§8.2、§8.3，業主決定，API 140 組、畫面全部通過後部署）。
 - 2026-11-20：Accounting 畫面 account 一律改稱 transaction，分頁改名；Account List 欄寬與左右捲動比照 Accounting（§8.7，業主決定，測試 畫面 397＋15、API 139 組全部通過後部署）。

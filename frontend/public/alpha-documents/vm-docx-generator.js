@@ -512,7 +512,7 @@
       LIMIT_OF_LIABILITY: money(c && c.limitOfLiability, c) + (isProductRecall(c) ? ' each occurrence and in the aggregate' : newCgl(c) ? ' each occurrence' : ''),
       AGGREGATE_LIMIT: newQs(c) ? (Number(c.aggregateLimit) ? money(c.aggregateLimit,c) : '') : Array.isArray(c && c.cglInformationRows) && !text(c && c.aggregateLimit) ? '' : money(c && c.aggregateLimit, c),
       UNDERLYING_LIMITS: qsProperty(c) ? '' : Array.isArray(c && c.cglInformationRows) && text(c && c.reinsuranceStructure).toUpperCase() !== 'XOL' ? '' : text(c && c.underlyingLimits),
-      SUB_LIMITS: isProductRecall(c) ? [...orderedRecallRows(c.productRecall?.losses, 'losses').filter(row => row.selected), ...(c.productRecall?.additionalSublimits || [])].map(row => `${currencyLabel(c)} ${formatMoney(row.amount, c)} in respect of ${text(row.name)}`).join('\n') : text(c && c.subLimits),
+      SUB_LIMITS: isProductRecall(c) ? orderedRecallRows(c.productRecall?.losses, 'losses').filter(row => row.selected).map(row => { const itemCase = { ...c, currency: row.currency || c.currency }; return `${currencyLabel(itemCase)} ${formatMoney(row.amount, itemCase)} in respect of ${text(row.name)}`; }).join('\n') : text(c && c.subLimits),
       DEDUCTIBLES: isProductRecall(c) ? (text(c.deductibles) ? `${currencyLabel(c)} ${formatMoney(c.deductibles, c)} each and every Insured Event` : '') : text(c && c.deductibles),
       REINSURED_RETENTION: pureFacility(c) ? 'Advice of Reinsured’s retention waived' : text(c && c.reinsuredRetention) || ((qsProperty(c) || newCgl(c)) ? "Advice of Reinsured's retention waived." : ""),
       REINSTATEMENT_PROVISIONS: pureFacility(c) ? '' : text(c && c.reinstatementProvisions),
@@ -1151,7 +1151,7 @@
     const pattern = new RegExp(`\\b(${[...new Set(codes)].join('|')})[ \t\u00a0\u202f]+(?=[+-]?\\d)`, 'g');
     const retroactive = (c?.cglInformationRows || []).find(row => row.label === 'Retroactive Date');
     const preserved = new Set(String(retroactive?.value || '').split('\n').map(value => xmlEscape(value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;')));
-    return xml.replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g, (node, content) => preserved.has(content) ? node : node.replace(pattern, '$1'));
+    return xml.replace(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g, (node, content) => preserved.has(content) || isProductRecall(c) && /^[A-Z]{3} [+-]?\d.* in respect of /.test(content) ? node : node.replace(pattern, '$1'));
   }
 
   function expandDocumentRepeatingRows(xml, c) {

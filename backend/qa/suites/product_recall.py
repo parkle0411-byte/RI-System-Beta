@@ -39,6 +39,13 @@ with transaction.atomic():
     check('Product Recall is an independent active Insurance Type', bool(master) and resolve_master_references(case)['classMasterId'] == master.pk)
     draft = draft_normalize(case)
     check('Product Recall incomplete draft retains risk details', not draft['errors'] and draft['value']['productRecall']['losses'][0]['amount'] == 100, draft.get('errors'))
+    check('default sub-limit currency is stored in the draft', draft['value']['productRecall']['losses'][0]['currency'] == 'USD' and draft['value']['draftInput']['productRecall']['losses'][0]['currency'] == 'USD' and draft['value']['productRecall']['losses'][0]['currencyAuto'] is True)
+    changed_case_currency = copy.deepcopy(draft['value']['draftInput'])
+    changed_case_currency['currency'] = 'TWD'
+    retained = draft_normalize(changed_case_currency)
+    check('Case currency change preserves saved sub-limit currency', not retained['errors'] and retained['value']['productRecall']['losses'][0]['currency'] == 'USD', retained.get('errors'))
+    cleared = copy.deepcopy(case); cleared['productRecall']['losses'][0]['currency'] = ''
+    check('explicitly clearing sub-limit currency blocks saving', bool(draft_normalize(cleared)['errors']) and bool(normalize_draft(cleared)['errors']))
     result = normalize_draft(case)
     check('Product Recall normalizes without errors', not result['errors'], result['errors'])
     no_form = copy.deepcopy(case); no_form['cglInformation'].pop('policyForm')
@@ -61,6 +68,26 @@ with transaction.atomic():
     check('fixed jurisdiction is not an editable required field', not any(i['field'] == 'productRecall.choiceOfLaw' for i in validate_announce_ready(without_law, allow_zero_loss_years=True)))
     sample = [{'id':'event-3'}, {'id':'custom-b'}, {'id':'event-1'}, {'id':'custom-a'}, {'id':'event-2'}]
     check('standard order precedes custom items in their existing relative order', [x['id'] for x in ordered_rows(sample, 'events')] == ['event-1', 'event-2', 'event-3', 'custom-b', 'custom-a'])
+    sample_case = copy.deepcopy(case)
+    sample_risk = sample_case['productRecall']
+    sample_risk['lossesOtherSelected'] = True
+    sample_risk['losses'].append({'id': 'custom-1', 'name': ' Extra costs ', 'fixed': False, 'selected': True, 'currency': ' eur ', 'amount': 5000})
+    sample_risk['losses'].append({'id': 'custom-2', 'name': 'Other costs', 'fixed': False, 'selected': True, 'currency': 'TWD', 'amount': 100})
+    sample_risk['additionalSublimits'] = [{'id': 'unused', 'name': 'DO NOT DISPLAY', 'amount': 999}]
+    saved = draft_normalize(sample_case)
+    check('multiple Other loss entries retain currencies and trim names', not saved['errors'] and saved['value']['productRecall']['losses'][-2]['name'] == 'Extra costs' and saved['value']['productRecall']['losses'][-2]['currency'] == 'EUR', saved.get('errors'))
+    check('additional sublimits removed from draft', 'additionalSublimits' not in saved['value']['productRecall'])
+    bad = copy.deepcopy(sample_case); bad['productRecall']['losses'][-1]['name'] = 'extra COSTS'
+    check('duplicate other names rejected while saving', bool(draft_normalize(bad)['errors']))
+    invalid = copy.deepcopy(sample_case); invalid['productRecall']['losses'][-1]['amount'] = '1.50'
+    check('TWD decimal amount rejected while saving', bool(draft_normalize(invalid)['errors']))
+    hidden = copy.deepcopy(invalid); hidden['productRecall']['lossesOtherSelected'] = False
+    check('hidden Other values are retained without validation', not draft_normalize(hidden)['errors'])
+    hidden_value = normalize_draft(hidden)['value']
+    check('normalization deactivates hidden Other even if an API row claims selected', not hidden_value['productRecall']['losses'][-1]['selected'])
+    from cases.placing_word import document_values
+    values = document_values(saved['value'], True)
+    check('placing sublimits use each currency and omit additional items', 'EUR 5,000.00 in respect of Extra costs' in values['SUB-LIMITS'] and 'TWD 100 in respect of Other costs' in values['SUB-LIMITS'] and 'DO NOT DISPLAY' not in values['SUB-LIMITS'], values['SUB-LIMITS'])
     from cases.placing_word import render
     doc = render(case, 'qa@example.com')
     xml = zipfile.ZipFile(io.BytesIO(doc)).read('word/document.xml')

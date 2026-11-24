@@ -1268,20 +1268,43 @@ def phase_pr(page):
     check('Covered Events and Covered Loss have no ordering controls', events.get_by_role('button', name='↑').count() == 0 and losses.get_by_role('button', name='↑').count() == 0)
     check('Choice of Law is hidden from the case form', page.locator('.case-form').get_by_text('Choice of Law and Jurisdiction').count() == 0)
     check('Product Recall defaults to Occurrence Form', selected_label(section(page, 'Information'), page, 'Policy Form') == 'Occurrence Form')
-    check('four template Covered Events and Covered Losses default to selected', events.locator('.repeat-row').count() == 4 and losses.locator('.repeat-row').count() == 4
+    check('four template Covered Events and Covered Losses default to selected', events.locator('.repeat-row').count() == 5 and losses.locator('.repeat-row').count() == 5
           and events.locator('input[type=checkbox]:checked').count() == 4 and losses.locator('input[type=checkbox]:checked').count() == 4)
+    check('Additional Sub-limits is absent', editor.get_by_text('Additional Sub-limits').count() == 0)
+    events.locator('.repeat-row').nth(4).locator('.el-checkbox').click()
     events.get_by_role('button', name='Add item').click()
     extra = events.locator('.repeat-row').last
-    extra.locator('input:not([type=checkbox])').fill('Custom event')
-    check('custom Covered Event is appended after standard items', events.locator('.repeat-row').first.inner_text().strip().startswith('Defect') and extra.locator('input:not([type=checkbox])').input_value() == 'Custom event')
-    extra.get_by_role('button', name='Remove').click()
+    extra.locator('input').fill('Custom event')
+    check('custom Covered Event is appended after standard items', events.locator('.repeat-row').first.inner_text().strip().startswith('Defect') and extra.locator('input').input_value() == 'Custom event')
+    events.locator('.repeat-row').nth(4).locator('.el-checkbox').click()
+    check('unchecking Other hides custom events', events.locator('input[placeholder="Item name"]').count() == 0)
+    events.locator('.repeat-row').nth(4).locator('.el-checkbox').click()
+    check('rechecking Other restores custom events', events.locator('input[placeholder="Item name"]').first.input_value() == 'Custom event')
+    extra = events.locator('.repeat-row').last
+    extra.get_by_role('button', name='Remove').click(); confirm_box(page, 'OK')
     first = losses.locator('.repeat-row').filter(has_text='First Party Recall Costs').first
-    amount = first.locator('input:not([type=checkbox])').first
+    amount = first.locator('.draft-number input, .el-input-number input').last
     amount.fill('123'); amount.press('Tab')
+    first.locator('.el-select').click()
+    page.locator('.el-select-dropdown__item:visible').filter(has_text='EUR').first.click()
+    check('Covered Loss can use its own currency', first.locator('.el-select').inner_text().strip() == 'EUR')
     first.locator('.el-checkbox').click()
-    check('unselected Covered Loss hides its Sub-limit amount', first.locator('input:not([type=checkbox])').count() == 0)
+    check('unselected Covered Loss hides its Sub-limit amount', first.locator('.draft-number input, .el-input-number input').count() == 0)
     first.locator('.el-checkbox').click()
-    check('reselecting Covered Loss restores its entered amount', first.locator('input:not([type=checkbox])').first.input_value() == '123')
+    check('reselecting Covered Loss restores currency and amount', first.locator('.draft-number input, .el-input-number input').last.input_value() == '123' and first.locator('.el-select').inner_text().strip() == 'EUR')
+    never_filled = losses.locator('.repeat-row').filter(has_text='Third Party Recall Costs').first
+    never_filled.locator('.el-checkbox').click()
+    pick(risk, page, 'Currency', 'TWD')
+    never_filled.locator('.el-checkbox').click()
+    check('never-filled Covered Loss defaults to current Case currency on selection', never_filled.locator('.el-select').inner_text().strip() == 'TWD')
+    pick(risk, page, 'Currency', 'USD')
+    never_filled.locator('.el-select').click()
+    page.locator('.el-select-dropdown__item:visible').filter(has_text='EUR').first.click()
+    never_filled.locator('.el-checkbox').click()
+    pick(risk, page, 'Currency', 'TWD')
+    never_filled.locator('.el-checkbox').click()
+    check('manually selected sub-limit currency is retained without an amount', never_filled.locator('.el-select').inner_text().strip() == 'EUR')
+    pick(risk, page, 'Currency', 'USD')
     security = section(page, 'Schedule of Security')
     pick(security.locator('.repeat-card').first, page, 'Reinsurer', 'UI Re Alpha')
     clauses = section(page, 'Reinsurance Conditions')
@@ -1290,6 +1313,30 @@ def phase_pr(page):
     page.get_by_text('Draft saved automatically').first.wait_for(timeout=15000)
     check('incomplete Product Recall can be saved as a draft', True)
     snap(page, 'product-recall-draft')
+    logout(page)
+
+
+def phase_cg(page):
+    login(page, 'ui.sales')
+    nav(page, 'Account List')
+    page.get_by_role('button', name='+ New case').click()
+    page.locator('.case-form').wait_for()
+    pick(structure_card(page), page, 'Reinsurance Type', 'Quota Share')
+    pick(structure_card(page), page, 'Insurance Type', 'Commercial General Liability')
+    coverage = page.get_by_test_id('cgl-coverages'); coverage.wait_for()
+    coverage.locator('.el-checkbox').filter(has_text='Other').click()
+    coverage.get_by_role('button', name='Add coverage').click()
+    coverage.get_by_role('button', name='Add coverage').click()
+    inputs = coverage.locator('.coverage-other-row input')
+    inputs.nth(0).fill('Custom A'); inputs.nth(1).fill('Custom B')
+    check('CGL Other supports multiple single-line entries', inputs.count() == 2 and inputs.nth(0).input_value() == 'Custom A' and inputs.nth(1).input_value() == 'Custom B')
+    coverage.locator('.el-checkbox').filter(has_text='Other').click()
+    check('unchecking CGL Other hides its entries', coverage.locator('.coverage-other-row input').count() == 0)
+    coverage.locator('.el-checkbox').filter(has_text='Other').click()
+    check('rechecking CGL Other restores entries', coverage.locator('.coverage-other-row input').count() == 2 and coverage.locator('.coverage-other-row input').nth(1).input_value() == 'Custom B')
+    coverage.locator('.coverage-other-row').first.get_by_role('button', name='Remove').click()
+    confirm_box(page, 'OK')
+    check('deleting CGL Other requires confirmation and preserves remaining entry', coverage.locator('.coverage-other-row input').count() == 1 and coverage.locator('.coverage-other-row input').first.input_value() == 'Custom B')
     logout(page)
 
 
@@ -1303,7 +1350,7 @@ with sync_playwright() as p:
     page.on("console", lambda m: m.type == "error" and console_errors.append(m.text))
     page.on("pageerror", lambda e: console_errors.append("pageerror: " + str(e)))
     try:
-        {"L": phase_l, "A": phase_a, "PR": phase_pr, "CL": phase_cl, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
+        {"L": phase_l, "A": phase_a, "PR": phase_pr, "CG": phase_cg, "CL": phase_cl, "H": phase_h, "R": phase_r, "P1": phase_p1, "P2": phase_p2, "B0": phase_b0, "B": phase_b, "K": phase_k, "C": phase_c, "D": phase_d, "E": phase_e, "F": phase_f, "G": phase_g}[PHASE](page)
     except Exception as exc:  # noqa: BLE001 - 任何例外都記成失敗並留下截圖
         check(f"phase {PHASE} ran to the end", False, repr(exc)[:400])
         snap(page, "error")

@@ -8,7 +8,7 @@ import { facilitySelectionAllowed, facilitySelectionIssues, facilityStructureAll
 import { propertyScope, propertyEnabled, propertyPostcode, propertyIssues, fixedCedant } from '../alpha/propertyOriginal'
 import { propertyQsCurrencyScope, propertyQsCurrencyIssues } from '../alpha/propertyQsCurrency'
 import { premiumInputErrors, premiumPeriodAmounts } from '../alpha/lib/accounting.js'
-import { recallScope, initialRecall, productRecallIssues } from '../alpha/productRecall'
+import { recallScope, initialRecall, productRecallIssues, productRecallDraftIssues } from '../alpha/productRecall'
 import { claimLossSnapshotIssues } from '../alpha/claimLossSnapshots'
 // 案件工作區邏輯直接在此維護；現行規則以 VM-RULES.md 為準。
 // 模板直接維護於 CaseWorkspace.vue。
@@ -52,7 +52,7 @@ import { isStandardCgl, emptyCglInformation, cglInformationIssues, initializeCgl
 import { cglQsScope, cglQsIssues, draftFormatIssues } from '../alpha/cglQs'
 import { useDraftAutosave } from '../alpha/draftAutosave'
 import { insuranceIssues, recomputeRenewal, markRenewalPremium } from '../alpha/endorsementRules'
-import { CGL_INTEREST, cglTypePrefix, cglType, cglTypeIssues, cglUnderlyingIssues, liabilityLimitLabel, cglRiskDetailsIssues, CGL_CLAUSE_PRESETS, cglAnnual } from '../alpha/cglRiskDetails'
+import { CGL_INTEREST, cglTypePrefix, cglType, cglTypeIssues, cglUnderlyingIssues, liabilityLimitLabel, cglRiskDetailsIssues, cglOtherDraftIssues, CGL_CLAUSE_PRESETS, cglAnnual } from '../alpha/cglRiskDetails'
 
 const MAX_DOCUMENT_BYTES = 30 * 1024 * 1024 // VM：10 MB（Alpha 5 MB）
 const OPEN_SECTIONS = ['risk', 'security', 'terms', 'information', 'occupation', 'sumInsured', 'loss', 'specialAgreement', 'cedantPremium', 'split', 'conditions']
@@ -143,6 +143,8 @@ export function useCaseWorkspace() {
     snapshot: () => ({...plainDraft(), pendingClause:{...caseClauseDraft}}),
     identity: () => ({caseUid:editingCaseUid.value,rowVersion:editingRowVersion.value}),
     save: async (data,id) => {
+      const issue = [...productRecallDraftIssues(data), ...cglOtherDraftIssues(data)][0]
+      if (issue) throw new Error(issue.label)
       const send = async identity => saveWithInsuredMerge('/api/cases', {...identity,case:data,incompleteDraft:true,endorsementUnlocked:endorsementFieldsUnlocked.value,draftKey:draftCreationKey,insuredMasterVersion:editingInsuredMaster.value?.rowVersion}, identity.caseUid ? 'PUT' : 'POST')
       let body=await send(id)
       if(body.recoveredDraft)body=await send({caseUid:body.case.caseUid,rowVersion:body.case.rowVersion})
@@ -1777,6 +1779,7 @@ export function useCaseWorkspace() {
       .map((row) => ({ ...row, clientKey: clientKey() }))
     fresh.coverages = Array.isArray(source?.coverages) ? [...source.coverages] : []
     fresh.coveragesOther = String(source?.coveragesOther || '')
+    fresh.coveragesOtherItems = Array.isArray(source?.coveragesOtherItems) ? [...source.coveragesOtherItems] : (fresh.coveragesOther.trim() ? [fresh.coveragesOther.trim()] : [])
     fresh.selfInsuredRetention = String(source?.selfInsuredRetention || '')
     fresh.cglInformation = { ...emptyCglInformation(), ...(source?.cglInformation || {}) }
     fresh.cglInformation.estimatedTurnover = (Array.isArray(source?.cglInformation?.estimatedTurnover) ? source.cglInformation.estimatedTurnover : [])
@@ -2270,6 +2273,8 @@ export function useCaseWorkspace() {
   }
 
   async function saveDraft({ stayInForm = false } = {}) {
+    const riskIssue = [...productRecallDraftIssues(draft), ...cglOtherDraftIssues(draft)][0]
+    if (riskIssue) { ElMessage.error(riskIssue.label); return }
     if(relaxedDraft.value){await draftAutosave.flush(true);return}
     const scopeIssue = facilitySelectionIssues(draft)[0]
     if (scopeIssue) {

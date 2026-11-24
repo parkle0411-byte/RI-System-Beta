@@ -77,6 +77,16 @@ try:
                 ('Facility', dict(reinsurers=[dict(name='QA (Facility)')])), ('PWS XOL', dict(reinsuranceStructure='XOL',reinsurers=[dict(name='QA', foreignBroker='PWS')])),
                 ('Swiss', dict(reinsurers=[dict(name='Swiss Re Asia Pte. Ltd.')]))]:
             check(scope + ' has no new requirements', not risk_details_issues({**base, **patch, 'coverages': []}))
+        from cases.draft_input import normalize as draft_normalize
+        many = {**base, 'coverages': ['Other'], 'coveragesOtherItems': ['  Extra A ', 'Extra B']}
+        normal = draft_normalize(many)
+        check('CGL Other supports multiple trimmed entries', not normal['errors'] and normal['value']['draftInput']['coveragesOtherItems'] == ['Extra A', 'Extra B'], normal['errors'])
+        duplicate = {**many, 'coveragesOtherItems': ['Extra A', ' extra a ']}
+        check('CGL Other duplicate blocks draft saving', bool(draft_normalize(duplicate)['errors']))
+        incomplete = {**many, 'coveragesOtherItems': ['Extra A', '']}
+        check('CGL Other incomplete entries allow draft but block readiness', not draft_normalize(incomplete)['errors'] and bool(risk_details_issues(incomplete)))
+        hidden = {**incomplete, 'coverages': [COVERAGES[0]]}
+        check('CGL unchecked Other retains incomplete entries', not draft_normalize(hidden)['errors'] and not risk_details_issues(hidden))
         response = call('post', '/api/cases', {'case': {**base, 'coverages': []}})
         check('API saves incomplete coverage draft', response.status_code == 201, response.content[:400])
         uid = response.json()['case']['caseUid']; case = Case.objects.get(case_uid=uid)
@@ -87,19 +97,19 @@ try:
         check('API saves Other description pending draft', response.status_code == 200, response.content[:400]); case.refresh_from_db()
         response = call('post', '/api/case-announce', dict(caseUid=uid, rowVersion=case.row_version, confirmed=True))
         check('Announce blocks missing Other text', response.status_code == 400 and 'Coverages' in response.content.decode())
-        complete = {**base, 'coverages': list(COVERAGES), 'coveragesOther': 'Extra & liability\nLine 2',
+        complete = {**base, 'coverages': list(COVERAGES), 'coveragesOtherItems': ['Extra & liability', 'Line 2'],
             'selfInsuredRetention': 'USD10,000 each claim\nCosts included'}
         response = call('put', '/api/cases', dict(caseUid=uid, rowVersion=case.row_version, case=complete))
         check('API saves all selections and optional SIR', response.status_code == 200, response.content[:400]); case.refresh_from_db()
         check('all coverage selections round-trip', case.payload['coverages'] == list(COVERAGES))
-        check('Other wording round-trips', case.payload['coveragesOther'] == complete['coveragesOther'])
+        check('Other wording round-trips', case.payload['coveragesOtherItems'] == complete['coveragesOtherItems'])
         check('SIR round-trips separately from RI retention', case.payload['selfInsuredRetention'] == complete['selfInsuredRetention'] and case.payload['reinsuredRetention'] == 'Advice waived')
         check('complete risk readiness', not validate_announce_ready(case.payload, allow_zero_loss_years=True))
         stored_complete = copy.deepcopy(case.payload)
         Case.objects.filter(pk=case.pk).update(status='posted', tw_ref='ZZ-COVERAGE-QA-001', announced_at=timezone.now())
         response = call('post', '/api/document-generation-log', dict(caseUid=uid, kind='cover', format='docx'))
         check('complete stored cover authorized', response.status_code == 204, response.content[:400])
-        for patch in [dict(coverages=[]), dict(coverages=['Other'], coveragesOther='')]:
+        for patch in [dict(coverages=[]), dict(coverages=['Other'], coveragesOther='', coveragesOtherItems=[])]:
             stored = {**stored_complete, **patch}; Case.objects.filter(pk=case.pk).update(payload=stored)
             response = call('post', '/api/document-generation-log', dict(caseUid=uid, kind='cover', format='docx', **complete))
             check('Cover validates stored coverage despite request override ' + str(patch), response.status_code == 409 and response.json().get('error') == 'cgl_coverages_required', response.content[:400])

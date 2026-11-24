@@ -9,22 +9,38 @@ export const CGL_COVERAGES = [
   'Other'
 ]
 
+const nameKey = value => value.replace(/[A-Z]/g, c => c.toLowerCase())
+export const cglMultiOther = payload => isStandardCgl(payload) && ['QS', 'FACULTATIVE'].includes(String(payload?.reinsuranceStructure || '').toUpperCase())
+export function cglOtherItems(payload) {
+  return Array.isArray(payload?.coveragesOtherItems) ? payload.coveragesOtherItems : (String(payload?.coveragesOther || '').trim() ? [String(payload.coveragesOther).trim()] : [])
+}
+export function cglOtherDraftIssues(payload) {
+  if (!cglMultiOther(payload) || !payload?.coverages?.includes('Other')) return []
+  const names = new Set(CGL_COVERAGES.filter(x => x !== 'Other').map(x => nameKey(x.trim()))), issues = []
+  for (const value of cglOtherItems(payload)) {
+    const name = String(value || '').trim(), key = nameKey(name)
+    if (name && (names.has(key) || name.length > 240 || /[\r\n]/.test(name))) issues.push({ field: 'coveragesOther', label: 'Coverage names must be unique, single-line and at most 240 characters' })
+    if (name) names.add(key)
+  }
+  return issues
+}
 export function cglRiskDetailsIssues(payload) {
   if (!isStandardCgl(payload)) return []
   const selected = payload?.coverages
-  if (!Array.isArray(selected) || !selected.length || selected.some(item => !CGL_COVERAGES.includes(item))) {
-    return [{ field: 'coverages', label: 'Coverages — select at least one available option' }]
-  }
-  if (selected.includes('Other') && !String(payload?.coveragesOther || '').trim()) {
-    return [{ field: 'coveragesOther', label: 'Coverages — Other' }]
+  if (!Array.isArray(selected) || !selected.length || selected.some(item => !CGL_COVERAGES.includes(item))) return [{ field: 'coverages', label: 'Coverages — select at least one available option' }]
+  if (selected.includes('Other')) {
+    if (cglMultiOther(payload)) {
+      const items = cglOtherItems(payload)
+      if (!items.length || items.some(x => !String(x || '').trim())) return [{ field: 'coveragesOther', label: 'Coverages — Other' }]
+      return cglOtherDraftIssues(payload)
+    }
+    if (!String(payload?.coveragesOther || '').trim()) return [{ field: 'coveragesOther', label: 'Coverages — Other' }]
   }
   return []
 }
-
 export function cglCoveragesText(payload) {
   const selected = Array.isArray(payload?.coverages) ? payload.coverages : []
-  return CGL_COVERAGES.filter(item => selected.includes(item))
-    .map(item => item === 'Other' ? 'Other: ' + String(payload?.coveragesOther || '').trim() : item).join('\n')
+  return CGL_COVERAGES.filter(item => selected.includes(item)).flatMap(item => item === 'Other' ? (cglMultiOther(payload) ? cglOtherItems(payload).map(x => String(x).trim()) : ['Other: ' + String(payload?.coveragesOther || '').trim()]) : [item]).filter(Boolean).join('\n')
 }
 
 

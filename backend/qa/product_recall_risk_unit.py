@@ -21,23 +21,51 @@ class ProductRecallRisk(unittest.TestCase):
         self.assertFalse(self.fields())
 
     def test_missing_and_duplicate_names(self):
-        self.case['productRecall']['events'].append({'name': ' DEFECT ', 'selected': True})
+        self.case['productRecall']['eventsOtherSelected'] = True
+        self.case['productRecall']['events'].append({'id': 'extra', 'name': ' DEFECT ', 'selected': True})
         self.assertIn('productRecall.events.4.name', self.fields(ready=False))
         self.case['productRecall']['events'][-1]['name'] = ' '
         self.assertNotIn('productRecall.events.4.name', self.fields(ready=False))
         self.assertIn('productRecall.events.4.name', self.fields())
 
-    def test_unselected_loss_amount_is_preserved_but_not_checked(self):
+    def test_unselected_loss_is_not_checked_and_limit_does_not_cap_sublimit(self):
         row = self.case['productRecall']['losses'][0]
-        row.update(selected=False, amount=5000)
+        row.update(selected=False, amount=0, currency='USD')
         self.assertNotIn('productRecall.losses.0.amount', self.fields())
-        row['selected'] = True
-        self.assertIn('productRecall.losses.0.amount', self.fields())
+        row.update(selected=True, amount=5000)
+        self.assertNotIn('productRecall.losses.0.amount', self.fields())
+        row.update(currency='TWD', amount='100.5')
+        self.assertIn('productRecall.losses.0.amount', self.fields(False))
+        row.update(currency='EUR')
+        self.assertNotIn('productRecall.losses.0.amount', self.fields(False))
+        row.update(amount='1e500')
+        self.assertIn('productRecall.losses.0.amount', self.fields(False))
 
-    def test_other_sublimit_must_not_duplicate_unselected_loss(self):
-        self.case['productRecall']['losses'][0]['selected'] = False
-        self.case['productRecall']['additionalSublimits'].append({'name': 'first party recall costs', 'amount': 100})
-        self.assertIn('productRecall.additionalSublimits.0.name', self.fields(False))
+    def test_other_group_toggle_and_incomplete_rows(self):
+        risk = self.case['productRecall']
+        risk['losses'].append({'id': 'custom', 'name': '', 'fixed': False, 'selected': False, 'currency': 'EUR', 'amount': None})
+        risk['lossesOtherSelected'] = False
+        self.assertNotIn('productRecall.losses.4.name', self.fields())
+        risk['lossesOtherSelected'] = True
+        self.assertNotIn('productRecall.losses.4.name', self.fields(False))
+        self.assertIn('productRecall.losses.4.name', self.fields())
+        self.assertIn('productRecall.losses.4.amount', self.fields())
+
+    def test_duplicate_matching_only_folds_english_letters(self):
+        self.case['productRecall']['eventsOtherSelected'] = True
+        self.case['productRecall']['events'].extend([
+            {'id': 'x1', 'name': 'Straße', 'fixed': False, 'selected': True},
+            {'id': 'x2', 'name': 'STRASSE', 'fixed': False, 'selected': True},
+        ])
+        self.assertNotIn('productRecall.events.5.name', self.fields(False))
+        self.case['productRecall']['events'][-1]['name'] = 'straße'
+        self.assertIn('productRecall.events.5.name', self.fields(False))
+
+    def test_selection_flags_must_be_boolean(self):
+        self.case['productRecall']['eventsOtherSelected'] = 'false'
+        self.assertIn('productRecall.eventsOtherSelected', self.fields(False))
+        self.case['productRecall']['events'][0]['selected'] = 'false'
+        self.assertIn('productRecall.events.0.selected', self.fields(False))
 
     def test_deductible_or_retention_and_precision(self):
         self.case.update(currency='TWD', deductibles='1.5', selfInsuredRetention='')
