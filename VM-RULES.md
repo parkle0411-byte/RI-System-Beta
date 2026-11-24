@@ -52,6 +52,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | 建立／停用／重新啟用／重設帳號 | `docker exec ri-backend python manage.py create_ri_account\|disable_ri_account\|enable_ri_account\|reset_ri_password --personnel-id N …` |
 | 備份資料庫 | `docker exec ri-mysql sh -c 'mysqldump -uroot -p"$(cat /run/secrets/mysql_root_password)" --single-transaction --routines --triggers ri_system' > backups/…sql`（`chmod 600`；`backups/` 不進版控） |
 | 備份案件文件 | `docker exec ri-backend tar czf - -C /data/documents . > backups/case-documents-$(date +%Y%m%d-%H%M%S).tar.gz`（與資料庫同時備份） |
+| 清理舊備份與舊畫面測試截圖 | `scripts/backup_cleanup.sh`（預覽）／`--apply`：超過 14 天的備份、超過 7 天的 `qa/ui/out.previous-*`；每週三 06:00 自動執行（2026-11-24） |
 | 清理過期登入紀錄 | `scripts/install_session_cleanup_cron.sh`（`--remove` 移除）：每天 05:40 執行 `manage.py clearsessions`，只刪已過期的 `django_session`，紀錄在 `logs/session-cleanup.log`（2026-11-13） |
 | 提醒排程 | `scripts/install_reminder_cron.sh`（`--remove` 移除）；手動：`manage.py run_signed_slip_reminders`／`run_payment_reminders [--today YYYY-MM-DD]`；紀錄在 `logs/reminders.log` |
 | 唯讀資料檢視 | `/admin/`（System Administrator）。新增 model 要在 `admin.py` 用 `ReadOnlyModelAdmin` 註冊 |
@@ -88,9 +89,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
     - 候選映像若含其他 session 尚未完成的修改（`git status` 有不屬於本次的變更），先問業主是否一起部署，不要自行帶上線。
 - **Docker 映像保留（2026-11-06 業主決定；2026-11-12 修訂回滾點）**：`ri-*` 自建映像一律保留——容器使用中（含已停止）、7 天內建立或 tag 日期在 7 天內、本文件／腳本／compose 有寫到（`before-*` 回滾點除外）；其餘可刪。**`before-*` 回滾點**：7 天內全部保留，另外 `ri-backend`、`ri-frontend` 各自不論多舊至少保留最新 10 個（`ROLLBACK_KEEP_MIN`）；超過的每週清理時刪除，即使「部署與回復紀錄」有寫到——更舊的版本改由版本紀錄（Git）重建，資料由備份還原。第三方映像（mysql、nginx、node、python…）不自動刪。清理用 `scripts/docker_cleanup.sh`（預設預覽，`--apply` 才刪；`KEEP_DAYS` 可調），同時清超過 7 天的建置快取與 dangling 映像。每週三 06:00（台灣時間）由 parkle 的 crontab 自動執行，紀錄在 `logs/docker-cleanup.log`。不要用 `docker system prune -a` 或 `docker rmi -f`。
 - **大型測試時段與記憶體（2026-11-10 業主決定；2026-11-11 修訂）**：VM 只有 8 GB，測試與正式系統共用。同仁正式使用系統前，壓測（`qa/stress/`）、全部 API／全部畫面測試等大型測試不限時段；正式使用後改在下班後執行（開始正式使用時由業主告知，再更新本條）。跑完檢查 `free -m`，有 swap 時在空閒記憶體大於 swap 用量的前提下執行 `sudo swapoff -a && sudo swapon -a`，把正式系統搬回記憶體（約數分鐘，網站不停）。用不到的測試環境要停止（不刪除）。
-- **備份保留（2026-11-12 業主決定）**：`backups/` 內 14 天內的備份全部保留。超過 14 天的：每天保留最後一份，以及所有在「改資料庫結構（migration）、匯入、清空或批次寫入正式資料」之前拍的備份；其餘刪除，保留的打包成 `backups/archive_<起>-<迄>.tar.zst`（打包後逐位元驗證再移除原檔，取用時 `tar -I zstd -xf … -C backups <路徑>`）。每週三 Debug 時把剛滿 14 天的備份列出保留／刪除清單，業主看過才刪。已處理：9 月 18 個檔案 → 保留 13 個於 `archive_20260921-20260929.tar.zst`、刪除 5 個（匯入文字紀錄、2 份變動後快照、`before_pin`、空的文件壓縮檔）；10 月 `archive_20261001-20261029.tar.zst`（未刪）；2026-11-16 依業主決定刪除 10-30 的 5 份部署前備份（cgl_aggregate_retroactive、endorsement_sections、allianz_reminder、endo_note_order_percent、case_keyin_ui；當天沒有保留任何一份，前後最近為 10 月打包檔與 11-02 `case_keyin_refinement`）。
+- **備份保留（2026-11-24 業主決定，取代 2026-11-12 的規則）**：交給 VM 自動處理。`scripts/backup_cleanup.sh`（預設預覽，`--apply` 才刪）每週三 06:00 接在工具清理之後由 parkle 的 crontab 執行，紀錄在 `logs/backup-cleanup.log`：`backups/` 第一層超過 14 天的項目**全部刪除**（含 migration／匯入／清空前的備份、`archive_*`、`work-folders_*` 打包檔與舊主機資料庫匯出，不保留每天最後一份，也不保留最新一份），`qa/ui/out.previous-*` 超過 7 天刪除；天數取名稱日期與修改時間較新者。因此 14 天前的資料無法再由備份還原（各 `rollback.sh` 的資料還原只在 14 天內有效；回復映像另依 Docker 映像保留規則）。不再每週列清單給業主核准。第一次執行 2026-11-25 06:00（預覽：43 項備份 774 MB、7 個截圖資料夾 26 MB）。2026-11-24 以前的處理紀錄：9 月 18 個檔案 → 保留 13 個於 `archive_20260921-20260929.tar.zst`、刪除 5 個（匯入文字紀錄、2 份變動後快照、`before_pin`、空的文件壓縮檔）；10 月 `archive_20261001-20261029.tar.zst`（未刪）；2026-11-16 依業主決定刪除 10-30 的 5 份部署前備份（cgl_aggregate_retroactive、endorsement_sections、allianz_reminder、endo_note_order_percent、case_keyin_ui；當天沒有保留任何一份，前後最近為 10 月打包檔與 11-02 `case_keyin_refinement`）。
 - **每週健檢報告（2026-11-13 業主決定）**：`scripts/weekly_health.sh`（唯讀；`--no-log` 只印出，否則附加到 `logs/weekly-health.log`）。每週三 Debug 時執行並向業主報告：主機記憶體／swap／硬碟、容器、映像與備份數量、最慢的 10 個 API（nginx `urt`，容器重建後重新累計）、案件與舊資料筆數、資料庫大小，以及 Accounting 畫面實際使用的四個請求（打開時的清單、All Accounts／Settled/Closed 第 1 頁、下拉名單）各量第一次與第二次的時間與大小（2026-11-17 起；跳過「須先改密碼」的帳號）。Dashboard 或 Accounting 打開超過約 3 秒時提出優化選項（含 `~/RI System/perf-work/round3-20261110` 未部署的共用快取）。
-- **工作資料夾（2026-11-12）**：`~/RI System` 內已上線功能的 16 個工作資料夾（accounting、legacy、oversea、stp、nav-icons、property-qs-currency、data-clear…）已打包為 `backups/work-folders_20261112.tar.zst`（14,925 個檔案，逐檔比對一致後移除原資料夾）；含 STP Word 視覺檢查用的 LibreOffice 執行環境（`stp-work/tools/`，需要時解壓）。`RI-docs`（決策文件）與 `perf-work`（未部署的共用快取）保留原處。
+- **工作資料夾（2026-11-12）**：`~/RI System` 內已上線功能的 16 個工作資料夾（accounting、legacy、oversea、stp、nav-icons、property-qs-currency、data-clear…）已打包為 `backups/work-folders_20261112.tar.zst`（14,925 個檔案，逐檔比對一致後移除原資料夾）；含 STP Word 視覺檢查用的 LibreOffice 執行環境（`stp-work/tools/`，需要時解壓）。依 2026-11-24 備份保留規則，此打包檔（與 `archive_20260921-20260929.tar.zst`）於 2026-12-02 週三 06:00 自動刪除（業主決定；之後只能從 Git 版本紀錄重建程式）。`RI-docs`（決策文件）與 `perf-work`（未部署的共用快取）保留原處。
 - **開發工具舊版本清理（2026-11-07 業主決定）**：`scripts/tools_cleanup.sh`（預設預覽，`--apply` 才刪）每週三 06:00 接在 Docker 清理之後由 parkle 的 crontab 自動執行，紀錄在 `logs/tools-cleanup.log`。清 parkle 家目錄內 Codex、Claude Code、VS Code 伺服器與擴充套件的舊版本、VS Code 擴充安裝檔快取，以及 `/tmp/ri-*` 暫存；一律保留執行中、目前版本、最新版本與 7 天內的項目，工具正在更新時跳過。不處理其他帳號（如 olin1）。
 
 **開發注意**
@@ -622,6 +623,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-24：舊備份與舊畫面測試截圖交給 VM 自動清理（業主決定）：新增 `scripts/backup_cleanup.sh`，每週三 06:00 刪除超過 14 天的全部備份（含打包檔）與超過 7 天的 `qa/ui/out.previous-*`；取代 11-12「每天留最後一份、migration 前保留、業主核准清單」的規則（§3）。每週健檢的備份那一行改為顯示將自動刪除的項數。
 
 - 2026-11-24：本次公告與完整 MDM／Schema 指南更新：依目前 VM 核對資料表、Facility、保障選項、匯率與會計審核流程；只更新參考文件。
 

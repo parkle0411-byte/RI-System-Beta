@@ -23,7 +23,7 @@ echo
 echo "## Docker 與備份"
 docker system df --format '{{.Type}}\t{{.TotalCount}}\t{{.Size}}\t{{.Reclaimable}}' | awk -F'\t' '{printf "%-14s 數量 %-5s 大小 %-10s 可回收 %s\n",$1,$2,$3,$4}'
 echo "回滾點映像（before-*）：$(docker images --format '{{.Tag}}' | grep -c '^before-' || true) 個標籤"
-echo "備份：$(ls backups 2>/dev/null | wc -l) 項，$(du -sh backups 2>/dev/null | cut -f1)；超過 14 天未打包：$(find backups -mindepth 1 -maxdepth 1 -mtime +14 ! -name 'archive_*' ! -name 'work-folders_*' 2>/dev/null | wc -l) 項"
+echo "備份：$(ls backups 2>/dev/null | wc -l) 項，$(du -sh backups 2>/dev/null | cut -f1)；超過 14 天（週三 06:00 backup_cleanup.sh 自動刪除）：$(find backups -mindepth 1 -maxdepth 1 -mmin +$((14 * 1440)) 2>/dev/null | wc -l) 項"
 echo
 echo "## 最慢的頁面（nginx 記錄的後端處理時間 urt；自 ri-nginx 上次啟動 $(date -d "$(docker inspect -f '{{.State.StartedAt}}' ri-nginx 2>/dev/null)" '+%m-%d %H:%M' 2>/dev/null) 起）"
 docker logs ri-nginx 2>/dev/null | python3 -I -c '
