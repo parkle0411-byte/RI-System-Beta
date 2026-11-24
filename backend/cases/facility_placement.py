@@ -159,6 +159,8 @@ def validate_declaration(facility, declaration, others=(), exclude_id=None):
         raise ValueError('A supported Facility currency is required.')
     if abs(premium) > MAX_PREMIUM:
         raise ValueError('Premium exceeds the supported amount.')
+    if abs(claim) > MAX_PREMIUM:
+        raise ValueError('Claim exceeds the supported amount.')
     if not valid_amount(premium, currency) or not valid_amount(claim, currency):
         raise ValueError('Premium and Claim must use the permitted currency precision.')
     active = [x for x in others if exclude_id is None or x.get('id') != exclude_id]

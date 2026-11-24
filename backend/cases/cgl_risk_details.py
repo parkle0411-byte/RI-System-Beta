@@ -52,7 +52,12 @@ def other_items(payload):
 
 
 def other_draft_issues(payload):
-    if not multi_other(payload) or 'Other' not in (payload.get('coverages') or []):
+    selected = payload.get('coverages')
+    if not multi_other(payload) or not selected:
+        return []
+    if not isinstance(selected, list):
+        return [{'field': 'coverages', 'label': 'Coverages must be a list of available options'}]
+    if 'Other' not in selected:
         return []
     items = payload.get('coveragesOtherItems')
     if items is not None and (not isinstance(items, list) or any(not isinstance(x, str) for x in items)):

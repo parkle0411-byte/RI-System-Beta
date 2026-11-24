@@ -61,9 +61,9 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 | TWD 保費一次性轉整數 | `manage.py convert_twd_premiums [--apply]`（預設 dry-run；可重複執行） |
 
 **測試方式**
-- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 2 小時，目前為 133 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
+- **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 50 分鐘，2026-11-24 為 142 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
-- **Accounting 伺服器分頁一致性**（2026-11-17）：`scripts/run_qa.sh pages`——以正式資料（唯讀）取伺服器各分頁，與畫面原本的程式（`accountingRows.js`、`accountingList.js`，node 執行）逐頁比對；約 2 分鐘。`PAGES_BACKEND=<容器>` 改用其他後端（例：壓測環境）。
+- **Accounting 伺服器分頁一致性**（2026-11-17）：`scripts/run_qa.sh pages`——以正式資料（唯讀）取伺服器各分頁，與畫面原本的程式（`accountingRows.js`、`accountingList.js`，node 執行）逐頁比對；2026-11-24 正式資料 582 頁約 6–10 分鐘。`PAGES_BACKEND=<容器>` 改用其他後端（例：壓測環境）。
 - **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16）、人員頁帳號操作 U 10 項（2026-11-17），合計 374 項。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
@@ -157,7 +157,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - 再保人清單、分期清單或計算用數字無法解讀時，整案金額顯示 `Pending confirmation` 並列出異常；不修補、不以 0 代替、不丟棄原資料。
 - 修正前，後端擋下 Announce、文件、收付款、沖回、更正、續保／批單／Reverse 與理賠操作；Dashboard／Production 註明異常案件未計入。須技術人員查明原文後修復。
 - Accounting 逐案計算：單一案件無法解讀只略過並警告，其他照常。
-- **金額上限（2026-11-12 業主決定）**：保費類金額——100% Premium、各再保人 Premium、分期 Premium、Oversea 的 Brokerage 與 100% Premium 增減——絕對值上限 999,999,999,999（`AMOUNT_MAX`，前後端同值）；儲存時超過即拒絕並指出欄位，未完成草稿自動儲存時保留輸入原文但不放進計算用欄位（送審時提示）。已存資料若超過上限，視同無法解讀的金額依本節處理：Account List 只標示該案件 `dataError`，其餘案件照常，該案件可由表單改正。保險金額（Sum Insured）、各種限額與賠款金額不套用此上限。
+- **金額上限（2026-11-12 業主決定）**：保費類金額——100% Premium、各再保人 Premium、分期 Premium、Oversea 的 Brokerage 與 100% Premium 增減——絕對值上限 999,999,999,999（`AMOUNT_MAX`，前後端同值）；儲存時超過即拒絕並指出欄位，未完成草稿自動儲存時保留輸入原文但不放進計算用欄位（送審時提示）。已存資料若超過上限，視同無法解讀的金額依本節處理：Account List 只標示該案件 `dataError`，其餘案件照常，該案件可由表單改正。保險金額（Sum Insured）、各種限額與賠款金額不套用此上限。例外：Facility Declaration 的 Premium 與 Claim 都套用同一上限 999,999,999,999（2026-11-24 業主決定；超過時存草稿、公告與更正都回 400 並說明，不再出現 Server Error）。
 - `reinsurers`／`performanceInstallments` 不是清單時回 400 或以空白列取代，不產生伺服器錯誤。
 
 ### 4.7 條款（Clauses）
@@ -471,7 +471,9 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 ## 15. 效能設定與量測（1 萬件壓測資料）
 
 - 每件案件結果快取：以「資料內容指紋＋台北日期」記住付款排程與交易明細；每 worker 最多 30,000 筆（約多 210 MB）。
-- Dashboard／Production 結果快取：先取資料變更指紋再讀資料；每 worker 32 筆、TTL 5 分鐘；Generate／Close／Exclude 不用快取。
+- Dashboard／Production 結果快取：先取資料變更指紋再讀資料；每 worker 32 筆、TTL 1 小時（`RI_RESULT_CACHE_TTL` 3600；2026-11-24 由 5 分鐘改，資料有變仍立即重算，上限只防直接改資料庫）；Generate／Close／Exclude 不用快取。
+- **Dashboard 舊資料加總**（2026-11-24，回應內容不變；測試 `vmopt_1124`）：`legacy.dashboard.dashboard_inputs` 以「程式版本＋舊資料變更指紋（含 version）＋FX Rates 變更指紋＋台北日期」記住，保險上限同上；共用快照檔在快照資料夾的 `dashboard/` 子資料夾（不可與歷史快照同層，否則會互相刪除），一個 worker 讀 1.1 萬筆舊資料、其他 worker 讀檔。正式資料副本：沒有快取時約 4 秒，換年度等其他 Dashboard 計算 3.6 秒 → 0.4 秒。
+- **Accounting 分頁**（2026-11-24，回應內容不變）：每個查詢（分頁、篩選、文字、日期）已篩選並排好的舊資料歷史列存在歷史快取裡（每份最多 32 組），下拉名單的歷史部分也只算一次；每次只篩未結清的列再合併排序（穩定排序，結果與整份排序相同）。正式資料副本：換頁 0.6–1.0 秒 → 0.3–0.45 秒，下拉名單 0.58 → 0.34 秒；剩下主要是每次重算未結清清單（約 0.2 秒）。
 - 業主決定不做：Production 連結表只讀 3 個欄位、跨 worker 共用快取、每件案件整列結果快取（伺服器分頁原列在此，2026-11-16 業主改為只對 Accounting 三個分頁做，見 §8.7）；理賠交易不再每筆複製再保人名單（2026-11-16 先不做：每筆理賠付款約 7 KB、其中約六成是重複名單，正式目前只有 1 筆）。
 - **Accounting 已結清舊資料歷史的快取**（回應內容不變；`RI_LEGACY_RESULT_CACHE=false` 時全部不快取、每次重算；測試 `legacy_accounting_cache`、`accounting_pages`）：
   - **計算結果**（2026-11-10；2026-11-17 共用快照與背景預建；2026-11-19 業主決定改逐筆）：只快取匯入的歷史交易（唯讀、已結清），**每筆**以「該列內容指紋（除 original 外全部欄位的 MD5）」對應結果，**不隨台北日期重算**（正式資料實測日期往後推 1／400／3,000 天結果全部相同）。每次讀取先用一個查詢取得全部指紋，只有指紋不同或新出現的列才計算：匯入 5,000 筆只算那 5,000 筆，直接改資料庫也只重算那一列。結果存成共用快照檔（容器 `/tmp/ri-legacy-history`，pickle＋zlib，只有後端自己寫；檔名含計算程式版本＝legacy／cases 原始碼雜湊，程式更新後整份重算一次），一個 worker 計算、其他讀檔。`RI_LEGACY_HISTORY_SNAPSHOT=false` 只記在 worker 記憶體。「匯入時逐筆存進資料庫」方案實測讀取與重算差不多（6.0 秒對 6.7 秒），不採用。
@@ -550,6 +552,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-24 18:21 | VM 優化＋Debug：Facility Declaration Claim 上限、CGL Coverages 型別檢查、Dashboard 舊資料加總快取（worker 共用）、結果快取上限 5 分鐘 → 1 小時、Accounting 分頁保留已篩選排序的舊資料歷史（只換後端；回復：`~/RI System/vmopt-1124-work/rollback.sh 20261124_182126`） | `backups/vmopt_1124_20261124_182126/`（部署前 DB 61 MB 及變更檔與 compose.yaml） | `ri-backend:before-vmopt-1124-20261124_182126` | 候選 `ri-backend:vmopt1124-candidate`（78d3b45fdfa8）：完整 API 142 組（含新 `vmopt_1124` 42 項，3 個刻意改壞的版本皆被抓到）、完整畫面 413 項全過；正式資料副本上 716 個 Dashboard／Accounting 回應與舊版逐位元相同（新版各取兩次）、`run_qa.sh pages` 582 頁一致；無 migration、不寫業務資料；部署後 466 個後端檔案與原始碼一致 |
 | 11-24 14:34 | Product Recall Covered Events／Loss 多筆 Other、各項 Sub-limit 幣別；一般及 Swiss CGL QS Coverage 多筆 Other | `backups/coverage_change_20261124_143136/`（部署前資料庫及版控原始碼） | `ri-backend:before-coverage-change-20261124_143136`／`ri-frontend:before-coverage-change-20261124_143136` | 候選映像 API 141/141 組、畫面 410/410 項；文件、續保與批單專項通過；無 migration、無批次資料改寫；後端 465 檔及前端 33 檔逐檔一致 |
 | 11-23 15:27 | Facility Placement 的 Insurance Type 限定 Personal Accident（PA） | `backups/facility_pa_20261123_152645/`（部署前 DB 及變更檔；原始碼可用變更檔反向還原） | `ri-backend:before-facility-pa-20261123_152645`／`ri-frontend:before-facility-pa-20261123_152645` | 候選映像完整 API 回歸與畫面回歸、Facility PA 專項通過；無 migration，服務與原始碼逐檔核對 |
 | 11-23 14:27 | Facility Placement、Declaration、Accounting／SoA、Off-set、Revenue Month、關帳更正及 Renewal | `backups/facility_20261123_142716/`（部署前 DB、文件及變更檔；原始碼可用變更檔反向還原） | `ri-backend:before-facility-20261123_142716`／`ri-frontend:before-facility-20261123_142716` | 候選映像完整 API 回歸與畫面回歸、Facility 專項及瀏覽器起始日更正通過；正式 migration、服務與原始碼逐檔核對 |
@@ -623,6 +626,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-24：VM 優化＋Debug（業主決定，18:21 部署，只換後端）：Facility Declaration 的 Claim 上限 999,999,999,999（原本沒有上限，10^27 以上公告會 Server Error；§4 金額上限）；CGL Coverages 在未完成草稿送成非清單時回 400（原為 Server Error）；Dashboard 舊資料加總快取並由 4 個 worker 共用、結果快取保險上限 5 分鐘 → 1 小時、Accounting 分頁保留已篩選排序的舊資料歷史（§15，回應逐位元不變）。另修正前端建置前檢查（11-24 Product Recall／CGL 變更讓 `npm run build` 失敗；只改 `frontend/scripts/`，網站檔案不變、未部署前端）。
 
 - 2026-11-24：舊備份與舊畫面測試截圖交給 VM 自動清理（業主決定）：新增 `scripts/backup_cleanup.sh`，每週三 06:00 刪除超過 14 天的全部備份（含打包檔）與超過 7 天的 `qa/ui/out.previous-*`；取代 11-12「每天留最後一份、migration 前保留、業主核准清單」的規則（§3）。每週健檢的備份那一行改為顯示將自動刪除的項數。
 

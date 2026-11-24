@@ -19,7 +19,15 @@
   reinsurers' shares of one endorsement count once.
 
 Read-only: nothing here writes legacy or Case data.
+
+2026-11-24 owner: the inputs are cached by the legacy and FX change fingerprints and the Taipei date (same
+insurance limit as the Dashboard result cache, RI_RESULT_CACHE_TTL), and shared by the web workers through a
+snapshot file in its own folder, so one worker reads the 11,000+ legacy rows and the others reuse its result.
 """
+import copy
+import threading
+import time
+
 from .models import LegacyTransaction
 
 CLASS_NAMES = {'PD': 'Property', 'GL': 'Commercial General Liability'}
@@ -35,8 +43,52 @@ def _policy_key(data, reference):
     return ('policy', number) if number else ('reference', str(reference or ''))
 
 
+_MEMO_LOCK = threading.Lock()
+_MEMO = {}
+
+
+def _inputs_key():
+    from fxrates.models import FxRate
+    from ri_system.result_cache import table_fingerprint
+    from . import ledger
+    return (ledger.logic_version(), table_fingerprint(LegacyTransaction.objects.all(), version='version'),
+            table_fingerprint(FxRate.objects.all()), ledger._today())
+
+
+def _inputs_file():
+    from . import ledger
+    return ledger._snapshot_dir() / 'dashboard' / 'legacy-inputs.pickle.z'
+
+
 def dashboard_inputs():
-    """Plain dicts for dashboard.calc.build_dashboard(legacy=...)."""
+    """Plain dicts for dashboard.calc.build_dashboard(legacy=...); each caller gets its own copy."""
+    from django.conf import settings
+    from ri_system import result_cache
+    from . import ledger
+    if not result_cache.enabled():
+        return _compute_inputs()
+    key = _inputs_key()   # fingerprint first, then read the data (see ri_system/result_cache.py)
+    ttl = getattr(settings, 'RESULT_CACHE_TTL_SECONDS', 60)
+    with _MEMO_LOCK:
+        if _MEMO.get('key') == key and time.time() - _MEMO['at'] < ttl:
+            return copy.deepcopy(_MEMO['value'])
+    if ledger._snapshot_enabled():
+        path = _inputs_file()
+        with ledger.snapshot_lock('.dashboard.lock'):   # one worker reads the legacy rows; the others wait and read its file
+            stored = ledger._read_snapshot(path) if path.exists() else None
+            if isinstance(stored, dict) and stored.get('key') == key and time.time() - stored.get('at', 0) < ttl:
+                at, value = stored['at'], stored['value']
+            else:
+                at, value = time.time(), _compute_inputs()
+                ledger._write_snapshot(path, {'key': key, 'at': at, 'value': value})
+    else:
+        at, value = time.time(), _compute_inputs()
+    with _MEMO_LOCK:
+        _MEMO.clear(); _MEMO.update(key=key, at=at, value=value)
+    return copy.deepcopy(value)
+
+
+def _compute_inputs():
     from .ledger import accounting_data
     from .services import rate_for
     from ri_system.sorted_fetch import sorted_rows   # 2026-11-16：先排序編號再讀整筆

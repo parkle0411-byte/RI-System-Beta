@@ -279,7 +279,7 @@ def _code_units(value):
     return js_to_string(value).encode("utf-16-be", "surrogatepass")
 
 
-def party_options(rows):
+def _parties(rows):
     cedants, reinsurers = {}, {}
     for r in rows:
         if is_derived_brokerage(r):
@@ -287,7 +287,12 @@ def party_options(rows):
         party = transaction_party(r)
         if js_truthy(party):
             (cedants if is_cedant_account(r) else reinsurers).setdefault(party, None)
-    return {"cedants": sorted(cedants, key=_code_units), "reinsurers": sorted(reinsurers, key=_code_units)}
+    return cedants, reinsurers
+
+
+def party_options(rows, also=({}, {})):
+    cedants, reinsurers = _parties(rows)
+    return {"cedants": sorted({**also[0], **cedants}, key=_code_units), "reinsurers": sorted({**also[1], **reinsurers}, key=_code_units)}
 
 
 # ---- the settled legacy history part ----
@@ -421,6 +426,38 @@ def _history_keys(part, tab, now):
     return keys
 
 
+PAGE_LISTS_MAX = 32
+
+
+def _history_parties(part):
+    """Cedants and reinsurers of the history rows (computed once per part)."""
+    with _HISTORY_LOCK:
+        found = part.get("parties")
+    if found is None:
+        found = _parties(part["rows"])
+        with _HISTORY_LOCK:
+            part["parties"] = found
+    return found
+
+
+def _history_listed(part, tab, filters, text, now):
+    """History rows of one query, filtered and in sort order (2026-11-24 owner: page changes no longer filter and sort
+    the whole history again). Kept in the part, like its sort keys; callers must not modify the returned list."""
+    slot = (tab, repr(sorted(filters.items())), repr(sorted(text.items())), None if part.get("dateFree") else now)
+    with _HISTORY_LOCK:
+        listed = part.setdefault("pageLists", {}).get(slot)
+    if listed is None:
+        keys = _history_keys(part, tab, now)
+        listed = filter_rows(part["rows"], tab, filters, text)
+        listed.sort(key=lambda r: keys.get(id(r)) or sort_key(r, tab, now))
+        with _HISTORY_LOCK:
+            lists = part.setdefault("pageLists", {})
+            while len(lists) >= PAGE_LISTS_MAX:
+                lists.pop(next(iter(lists)))
+            lists[slot] = listed
+    return listed
+
+
 def warm_history(view, request, max_age):
     """Background warm-up: the part, the sort keys of every tab, and the shared file with those keys."""
     import legacy.ledger as ledger
@@ -455,13 +492,13 @@ def _merged(view, request):
     """Rows in the browser's former order: the open list response first, then the settled history (as it was merged)."""
     open_body = json_roundtrip(view.list_body(request, "open"))
     history = _history_part(view, request)
-    rows = [r for r in account_rows(open_body) if not js_truthy(get(r, "legacyHistorical"))] + history["rows"]   # mergeHistory()
+    open_rows = [r for r in account_rows(open_body) if not js_truthy(get(r, "legacyHistorical"))]   # mergeHistory(): open rows, then history
     currencies = sorted({*map(js_to_string, open_body.get("currencies") or []), *map(js_to_string, history["currencies"])}, key=_code_units)
     batches = {b.get("batchId"): b for b in open_body.get("cashBatches") or []}
     for batch_id, batch in history["batches"].items():
         batches[batch_id] = batch
     case_histories = {**(open_body.get("caseHistories") or {}), **history["caseHistories"]}
-    return rows, currencies, batches, case_histories, history
+    return open_rows, currencies, batches, case_histories, history
 
 
 def _filters(params):
@@ -478,11 +515,11 @@ def _error(code, message):
 def page_response(view, request):
     from .calc.payment_terms import taipei_date
     params = request.query_params
-    rows, currencies, batches, case_histories, history = _merged(view, request)
+    open_rows, currencies, batches, case_histories, history = _merged(view, request)
     import time
     with _HISTORY_LOCK:
         _HISTORY["used"] = time.monotonic()   # the warm-up does the minute content check while the screen is in use
-    options = {**party_options(rows), "currencies": currencies}
+    options = {**party_options(open_rows, _history_parties(history)), "currencies": currencies}
     if params.get("view") == "options":
         return Response(json_roundtrip({"ok": True, "options": options}))
     tab = params.get("tab", "")
@@ -495,7 +532,8 @@ def page_response(view, request):
     page = min(MAX_PAGE, max(1, page))
     filters, text = _filters(params)
     now = taipei_date(None)
-    listed = filter_rows(rows, tab, filters, text)
+    # Stable sort of (open rows, then history rows already in order) gives the same order as sorting all rows at once.
+    listed = filter_rows(open_rows, tab, filters, text) + _history_listed(history, tab, filters, text, now)
     cached = _history_keys(history, tab, now)
     listed.sort(key=lambda r: cached.get(id(r)) or sort_key(r, tab, now))
     total = len(listed)
