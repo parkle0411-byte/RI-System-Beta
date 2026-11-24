@@ -73,7 +73,7 @@ MANUAL_DOWNLOAD_NAMES = {
 }
 
 
-MANUAL_RELEASE_DATES = {'mdm': '2026-11-16', 'schema': '2026-11-16', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
+MANUAL_RELEASE_DATES = {'mdm': '2026-11-24', 'schema': '2026-11-24', 'auw-accounting': '2026-10-29', 'swiss-cgl': '2026-10-29', 'swiss-pd': '2026-10-29', 'qbe-pd': '2026-10-29', 'great-american-questionnaire': '2026-10-29', 'allianz-questionnaire': '2026-10-30'}
 
 def manual_row(key):
     return {'id': key, 'filename': MANUAL_DOWNLOAD_NAMES[key], 'release_date': MANUAL_RELEASE_DATES[key], 'kind': 'manual'}

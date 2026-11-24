@@ -465,7 +465,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 - **共用拖拉排序（2026-11-04）**：System Guides 與 Document Templates 各自排序；沿用 System Administrator 權限，拖拉把手或鍵盤上下鍵調整後自動保存，所有使用者與重新登入共用。順序原子寫入文件 volume 的 `system-reference/.orders/`，備份須包含文件 volume；不需 migration。並行修改以排序版本檢查拒絕覆寫；未排序的新檔列在已存順序之後，彼此依上傳時間由新到舊顯示；更名保留位置，回收筒還原保留已存排序位置。
 
-現行指南（Word）：完整 MDM 指南、完整 Schema 指南（2026-11-16 版）；Swiss Re Facility PD、Swiss Re Facility CGL、Great American Facility PD、QBE Facility PD、Allianz Facility PD（10-30 改提醒日）、Syndicate 609 AUW Facility PD 專屬規則（皆 2026-10-29 版）。舊問卷與舊版隨備份保留。
+現行指南（Word）：完整 MDM 指南、完整 Schema 指南（2026-11-24 版）；Swiss Re Facility PD、Swiss Re Facility CGL、Great American Facility PD、QBE Facility PD、Allianz Facility PD（10-30 改提醒日）、Syndicate 609 AUW Facility PD 專屬規則（皆 2026-10-29 版）。舊問卷與舊版隨備份保留。
 
 ## 15. 效能設定與量測（1 萬件壓測資料）
 
@@ -608,6 +608,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 | 11-11 | Oversea 批單 Brokerage 分期 | `backups/oversea_endo_installments_20261111_111953` | `ri-backend:before-oversea-endo-installments-20261111_111953`／`ri-frontend:before-oversea-endo-installments-20261111_111953` | 完整 API／畫面與批單正負分期驗證；無 migration |
 | 11-11 | 更新完整 MDM／Schema 指南 | `backups/release_guides_20261111_093819` | `ri-backend:before-release-guides-20261111_093819` | 35 表、354 欄逐一核對，離線版面、隔離與正式下載及權限驗證；無 migration 或業務資料寫入 |
 
+| 11-24 | 更新完整 MDM／Schema 指南 | `backups/release_guides_20261124_144058` | `ri-backend:before-release-guides-20261124_144058` | 37 表、380 欄逐一核對，離線版面、隔離與正式下載及權限驗證；無 migration 或業務資料寫入 |
+
 （回復映像標籤指 `ri-backend:` 與 `ri-frontend:` 兩個映像。「有」表示當次有備份但原紀錄未寫檔名。完整驗證細節見封存的變更紀錄。2026-11-10 以前的紀錄見 `docs/archive/VM-RULES-HISTORY-2026-11.md`。）
 
 ### 資料清理紀錄（舊資料）
@@ -620,6 +622,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-24：本次公告與完整 MDM／Schema 指南更新：依目前 VM 核對資料表、Facility、保障選項、匯率與會計審核流程；只更新參考文件。
 
 - 2026-11-24：依業主確認部署 Product Recall Covered Events／Loss 多筆 Other、每項 Sub-limit 獨立幣別及金額、移除 Additional Sub-limits；一般與 Swiss CGL QS Coverage Other 改支援多筆並調整畫面與 Word 輸出。完整 API 與畫面回歸通過，部署前未批次改寫資料。
 
