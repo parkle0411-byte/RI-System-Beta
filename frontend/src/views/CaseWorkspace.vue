@@ -131,7 +131,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
   <Teleport defer to="#page-header-actions">
             <div v-if="activeView === 'case-create'" class="header-action-group">
               <el-button class="header-secondary-button" @click="cancelNewCase">Cancel</el-button>
-              <el-button v-if="draft.reinsuranceStructure === 'FACILITY'" class="primary-button" :loading="saving" @click="saveFacilityDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button>
+              <el-button v-if="draft.reinsuranceStructure === 'FACILITY' && draft.classOfBusiness === 'Personal Accident'" class="primary-button" :loading="saving" @click="saveFacilityDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button>
               <el-button v-if="draft.reinsuranceStructure && draft.reinsuranceStructure !== 'FACILITY' && draft.classOfBusiness" class="primary-button" :loading="saving" @click="saveDraft">{{ isEditing ? 'Save changes' : 'Save draft' }}</el-button>
             </div>
             <div v-else-if="activeView === 'case-detail'" class="detail-header-actions">
@@ -849,7 +849,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                 <p class="document-help">Select a reinsurance type and insurance type to enter the case details.</p>
                 <p v-if="isEndorsementDraft" class="document-help">Inherited sections are read-only. Use Edit on the section you need to change; only one section can be edited at a time.</p>
               </section>
-              <FacilityPlacementForm v-if="draft.reinsuranceStructure === 'FACILITY'" :draft="draft" :reinsured-options="masterOptions('reinsured', draft.reinsured)" :reinsurer-options="masterOptions('reinsurer', '')" :personnel="eligiblePersonnel" @owner-change="onOwnerSelected" @ae-change="onAeSelected" />
+              <FacilityPlacementForm v-if="draft.reinsuranceStructure === 'FACILITY' && draft.classOfBusiness === 'Personal Accident'" :draft="draft" :reinsured-options="masterOptions('reinsured', draft.reinsured)" :reinsurer-options="masterOptions('reinsurer', '')" :personnel="eligiblePersonnel" @owner-change="onOwnerSelected" @ae-change="onAeSelected" />
               <template v-if="draft.reinsuranceStructure && draft.reinsuranceStructure !== 'FACILITY' && draft.classOfBusiness">
               <OverseaBusinessForm v-if="overseaEnabled(draft)" :payload="draft" :brokers="masterOptions('foreign_broker',draft.reinsurers[0]?.name)" :cedants="masterOptions('reinsured',draft.reinsured)" :aes="eligiblePersonnel" @ae-change="onAeSelected" @owner-change="onOwnerSelected" @policy-from-time-change="onPolicyFromTimeChange" />
               <template v-else>

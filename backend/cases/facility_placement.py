@@ -10,7 +10,7 @@ from .claim_currency import allocate_claim_shares, valid_amount
 from .property_original import allocate, money, num, totals
 
 MAX_PREMIUM = Decimal('999999999999')
-SUFFIX = 'Personal Accident Facultative Facility Reinsurance'
+SUFFIX = 'Facultative Facility Reinsurance'
 from fxrates.currencies import ALL as CURRENCIES
 TEXT_FIELDS = ('facilityName', 'classOfBusiness', 'classCode', 'facilityTypePrefix', 'reinsured',
                'reinsuredLocation', 'originalAssuredDescription', 'periodConditions', 'interest', 'coverageLimits',
@@ -111,13 +111,14 @@ def normalize_facility_draft(source):
         value['reinsurers'].append(clean)
     if sum(Decimal(str(row['sharePct'] or 0)) for row in value['reinsurers']) > 100:
         raise ValueError('Reinsurer shares must not exceed 100%.')
-    value['type'] = f"{value['facilityTypePrefix']} {SUFFIX}".strip()
+    value['type'] = ' '.join(part for part in (value['facilityTypePrefix'], value['classOfBusiness'], SUFFIX) if part)
     return value
 
 
 def validate_facility(facility):
     """Check a Facility before review/announcement, without creating ledger entries."""
     for key, label in (('facilityName', 'Facility name'), ('reinsured', 'Reinsured'),
+                       ('originalAssuredDescription', 'Original Insured'),
                        ('classOfBusiness', 'Insurance type')):
         if not str(facility.get(key) or '').strip():
             raise ValueError(f'{label} is required.')
@@ -129,10 +130,16 @@ def validate_facility(facility):
     end = _date(facility.get('policyTo'), 'Facility end')
     if end < start:
         raise ValueError('Facility end must not precede its start.')
+    for row in facility.get('reinsurers') or []:
+        if not isinstance(row, dict) or row.get('taxPct') is None or row.get('taxPct') == '':
+            raise ValueError('Each Reinsurer requires a tax percentage; enter 0 when no tax applies.')
+        if not 0 <= _number(row['taxPct'], 'Reinsurer tax') <= 100:
+            raise ValueError('Reinsurer tax is out of range.')
     validate_declaration(facility, {'periodFrom': start.isoformat(), 'periodTo': start.isoformat(),
                                   'statementNo': '_readiness_check_', 'premium': 1, 'claim': 0})
     prefix = str(facility.get('facilityTypePrefix') or '').strip()
-    return {'type': f'{prefix} {SUFFIX}'.strip(), 'policyFrom': start.isoformat(), 'policyTo': end.isoformat()}
+    return {'type': ' '.join(part for part in (prefix, facility['classOfBusiness'], SUFFIX) if part),
+            'policyFrom': start.isoformat(), 'policyTo': end.isoformat()}
 
 
 def validate_declaration(facility, declaration, others=(), exclude_id=None):

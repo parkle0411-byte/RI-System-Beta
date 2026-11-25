@@ -50,6 +50,7 @@ def call(c, method, url, data=None):
 
 # ---- B2: Facility Declaration Claim limit (same as Premium, 999,999,999,999) ----
 FAC = {'facilityName': 'VM Facility', 'facilityTypePrefix': 'Travel', 'classOfBusiness': 'Personal Accident', 'reinsured': 'Cedant',
+       'originalAssuredDescription': 'Various groups as declared by the Reinsured',
        'currency': 'USD', 'policyFrom': '2026-07-01', 'policyTo': '2027-07-01', 'riCommPct': 20, 'taxPct': 0, 'ppwDays': 75,
        'reinsurers': [{'name': 'A', 'sharePct': 50, 'deductionPct': 30, 'taxPct': 0, 'facilityReference': 'RA'},
                       {'name': 'B', 'sharePct': 30, 'deductionPct': 25, 'taxPct': 0, 'facilityReference': 'RB'}]}

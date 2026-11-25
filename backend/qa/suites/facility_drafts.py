@@ -39,12 +39,30 @@ try:
     with transaction.atomic():
         sales, finance, manager = session('sales', 1), session('accounting', 2), session('accounting_manager', 3)
         facility = {'facilityName': 'Travel Facility', 'facilityTypePrefix': 'Travel', 'classOfBusiness': 'Personal Accident',
-                    'reinsured': 'Cedant', 'currency': 'USD', 'policyFrom': '2026-07-01', 'policyTo': '2027-07-01',
+                    'reinsured': 'Cedant', 'originalAssuredDescription': 'Various groups as declared by the Reinsured',
+                    'currency': 'USD', 'policyFrom': '2026-07-01', 'policyTo': '2027-07-01',
                     'riCommPct': 20, 'taxPct': 0, 'ppwDays': 75,
                     'reinsurers': [{'name': 'A', 'sharePct': 50, 'deductionPct': 30, 'taxPct': 0, 'facilityReference': 'RA'},
                                    {'name': 'B', 'sharePct': 30, 'deductionPct': 25, 'taxPct': 0, 'facilityReference': 'RB'}]}
         blocked = call(finance, 'post', '/api/facility-placement', {'case': facility})
         check('finance cannot create Facility', blocked.status_code == 403, blocked.content)
+        incomplete = call(sales, 'post', '/api/facility-placement', {'case': {**facility, 'originalAssuredDescription': ''}})
+        check('incomplete Facility can be saved as Draft', incomplete.status_code == 201, incomplete.content)
+        if incomplete.status_code == 201:
+            incomplete_case = incomplete.json()['case']
+            not_ready = call(sales, 'post', '/api/facility-announce', {'caseUid': incomplete_case['caseUid'],
+                             'rowVersion': incomplete_case['rowVersion'], 'confirmed': True})
+            check('Original Insured is required to Announce', not_ready.status_code == 400 and
+                  'Original Insured' in not_ready.json().get('message', ''), not_ready.content)
+            missing_tax = copy.deepcopy(facility); missing_tax['reinsurers'][1]['taxPct'] = ''
+            saved_tax = call(sales, 'put', '/api/facility-placement', {'caseUid': incomplete_case['caseUid'],
+                             'rowVersion': incomplete_case['rowVersion'], 'case': missing_tax})
+            check('Facility Draft may retain an unfilled Reinsurer Tax', saved_tax.status_code == 200, saved_tax.content)
+            if saved_tax.status_code == 200:
+                not_ready = call(sales, 'post', '/api/facility-announce', {'caseUid': incomplete_case['caseUid'],
+                                 'rowVersion': saved_tax.json()['case']['rowVersion'], 'confirmed': True})
+                check('Reinsurer Tax is required to Announce', not_ready.status_code == 400 and
+                      'tax percentage' in not_ready.json().get('message', ''), not_ready.content)
         invalid_class = call(sales, 'post', '/api/facility-placement', {'case': {**facility, 'classOfBusiness': 'Property'}})
         check('Facility rejects non-PA insurance type', invalid_class.status_code == 400, invalid_class.content)
         response = call(sales, 'post', '/api/facility-placement', {'case': facility})

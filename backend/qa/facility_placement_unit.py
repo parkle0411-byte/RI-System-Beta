@@ -72,11 +72,19 @@ class FacilityPlacementRules(unittest.TestCase):
 
     def test_facility_readiness_has_fixed_type_and_no_premium_requirement(self):
         facility = {**self.facility, 'facilityName': 'Travel', 'reinsured': 'Cedant',
+                    'originalAssuredDescription': 'Various groups as declared by the Reinsured',
                     'classOfBusiness': 'Personal Accident', 'policyTo': '2027-07-01', 'facilityTypePrefix': 'Travel'}
         self.assertEqual(validate_facility(facility)['type'], 'Travel Personal Accident Facultative Facility Reinsurance')
-        for key in ('facilityName', 'reinsured', 'classOfBusiness', 'currency'):
+        for key in ('facilityName', 'reinsured', 'originalAssuredDescription', 'classOfBusiness', 'currency'):
             with self.subTest(field=key), self.assertRaises(ValueError):
                 validate_facility({**facility, key: ''})
+        for field in ('name', 'sharePct', 'deductionPct', 'taxPct', 'facilityReference'):
+            reinsurers = [{**row} for row in facility['reinsurers']]
+            reinsurers[1][field] = ''
+            with self.subTest(reinsurer_field=field), self.assertRaises(ValueError):
+                validate_facility({**facility, 'reinsurers': reinsurers})
+        reinsurers = [{**row, 'deductionPct': 0, 'taxPct': 0} for row in facility['reinsurers']]
+        validate_facility({**facility, 'reinsurers': reinsurers})
 
     def test_currency_precision_and_limits(self):
         for changes in ({'premium': '100.001'}, {'premium': '1000000000000'}, {'claim': 'NaN'}):
