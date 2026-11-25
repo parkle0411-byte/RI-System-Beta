@@ -1,0 +1,95 @@
+/* Dashboard 互動（2026-11-25）：沿用現有顏色與版面，只加互動樣式。由 Dashboard.vue 載入（隨 Dashboard 頁面一起分檔）。 */
+.rdash .card { transition: border-color var(--m-fast), box-shadow var(--m-base) var(--m-ease), transform var(--m-fast) var(--m-ease); }
+.rdash .row3 .card:hover, .rdash .row2 .card:hover { border-color: rgba(175, 45, 65, .28); box-shadow: 0 1px 2px rgba(95, 20, 30, .06), 0 8px 22px rgba(95, 20, 30, .10); transform: translateY(-2px); }
+
+/* 頂端列：Total Gross Premium（左）、載入時間與 Refresh（右） */
+.rdash .dash-bar { display: flex; align-items: center; gap: 10px; margin-bottom: -6px; color: var(--inkm); font-size: 12px; }
+.rdash .dash-bar .gp { margin-right: auto; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.rdash .gp-l { color: var(--inkm); font-size: 11px; }
+.rdash .gp-v { color: var(--dink); font-family: var(--mono); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.rdash .gp-note { color: var(--inkm); font-size: 11px; }
+.rdash .dash-bar b { color: var(--ink2); font-weight: 500; }
+
+/* 分段切換、晶片、勾選 */
+.rdash .seg { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+.rdash .seg button { padding: 2px 10px; border: 0; border-radius: 6px; color: var(--ink2); background: none; font-size: 11.5px; cursor: pointer; transition: background var(--m-fast), color var(--m-fast); }
+.rdash .seg button:hover { color: #AF2D41; }
+.rdash .seg button.on { color: #fff; background: #AF2D41; }
+.rdash .fchip { padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--ink2); background: #fff; font-size: 12px; cursor: pointer; transition: all var(--m-fast) var(--m-ease); }
+.rdash .fchip:hover { border-color: #AF2D41; color: #AF2D41; }
+.rdash .fchip.active { border-color: #AF2D41; color: #fff; background: #AF2D41; }
+.rdash .fchip:active { transform: scale(.95); }
+.rdash .tgl { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; color: var(--ink2); font-size: 12px; cursor: pointer; transition: background var(--m-fast); }
+.rdash .tgl:hover { background: rgba(175, 45, 65, .07); }
+.rdash .tgl input { accent-color: #AF2D41; }
+.rdash .ctools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.rdash .ctools .replay-button { height: 28px; margin-left: auto; }
+
+/* 趨勢圖 */
+.rdash .trend-chart { position: relative; outline: none; cursor: crosshair; user-select: none; touch-action: pan-y; }
+/* 沿用的舊樣式把圖框固定成 900:220 並裁切；互動版要讓提示框可以超出圖框、高度跟著內容 */
+.rdash .trend-chart { aspect-ratio: auto; height: auto; overflow: visible; }
+.rdash .trend-chart .trend-svg { height: auto; }
+.rdash .trend-chart:focus-visible { outline: 2px solid #AF2D41; outline-offset: 2px; border-radius: 6px; }
+.rdash .trend-chart .band { fill: rgba(175, 45, 65, .06); opacity: 0; transition: opacity var(--m-fast); }
+.rdash .trend-chart .band.on { opacity: 1; }
+.rdash .trend-chart .band.pin { fill: rgba(175, 45, 65, .14); opacity: 1; }
+.rdash .trend-chart .band.rng { fill: rgba(175, 45, 65, .10); opacity: 1; }
+.rdash .trend-chart .col { transition: transform 420ms cubic-bezier(.3, .9, .3, 1), opacity 220ms; }
+.rdash .trend-chart .col.dim { opacity: .22; }
+.rdash .trend-chart .trend-bar { transition: x 420ms var(--m-ease), y 420ms var(--m-ease), width 420ms var(--m-ease), height 420ms var(--m-ease), opacity 140ms; transform-box: fill-box; transform-origin: 50% 100%; animation: trend-rise 760ms var(--m-ease) calc(80ms + var(--slot, 0) * 45ms) backwards; }
+.rdash .trend-chart .trend-bar.neg { transform-origin: 50% 0%; }
+.rdash .trend-chart .trend-bar.off { opacity: 0; }
+.rdash .trend-chart .trend-bar.current.est { fill: url(#trend-hatch); stroke: #AF2D41; stroke-width: 1; }
+.rdash .trend-chart.hovering .col .trend-bar { opacity: .4; }
+.rdash .trend-chart.hovering .col.hot .trend-bar { opacity: 1; }
+.rdash .trend-chart.hovering .col .trend-bar.off { opacity: 0; }
+.rdash .trend-chart.spotprior .trend-bar.current, .rdash .trend-chart.spotcurrent .trend-bar.prior { opacity: .15; }
+.rdash .trend-chart .tgt { fill: #4A3AA7; transition: opacity var(--m-base); }
+.rdash .trend-chart .trend-point { transition: opacity var(--m-base); }
+.rdash .trend-chart .trend-line { transition: opacity var(--m-base); }
+.rdash .trend-chart .beat { fill: #27500A; transition: transform 420ms var(--m-ease); animation: m-fade 300ms ease 800ms backwards; }
+.rdash .trend-chart .vlab { fill: #5F5F5F; font: 10px var(--mono); animation: m-fade 300ms ease 800ms backwards; }
+.rdash .trend-chart .vlab.up { fill: #27500A; } .rdash .trend-chart .vlab.dn { fill: #791F1F; }
+.rdash .trend-chart .trend-month { fill: var(--inkm); font-size: 10px; font-family: var(--sans); }
+@keyframes trend-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.rdash .ctip { position: absolute; z-index: 5; display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--bd); border-radius: 8px; color: var(--dink); background: #fff; box-shadow: 0 6px 18px rgba(95, 20, 30, .14); font-size: 12px; line-height: 1.5; white-space: nowrap; opacity: 0; transform: translateY(4px); transition: opacity var(--m-fast), transform var(--m-fast); pointer-events: none; }
+.rdash .ctip.on { opacity: 1; transform: none; }
+.rdash .ctip .tiprow { display: flex; justify-content: space-between; gap: 16px; } .rdash .ctip .tiprow span:first-child { color: var(--inkm); }
+.rdash .cdetail { min-height: 38px; margin-top: 10px; padding: 9px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; border-radius: 8px; color: var(--ink2); background: rgba(175, 45, 65, .05); font-size: 12.5px; animation: m-view var(--m-base) var(--m-ease) backwards; }
+.rdash .cdetail b { color: var(--dink); font-weight: 500; } .rdash .cdetail .up { color: #27500A; } .rdash .cdetail .dn { color: #791F1F; }
+.rdash .cdetail button.x { margin-left: auto; border: 0; color: var(--inkm); background: none; font-size: 12px; cursor: pointer; }
+.rdash .cdetail button.x.pill { margin-left: 0; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; color: #AF2D41; background: #fff; transition: all var(--m-fast); }
+.rdash .cdetail button.x.pill:hover { border-color: #AF2D41; color: #fff; background: #AF2D41; }
+.rdash .cdetail .cvhint { color: var(--inkm); }
+.rdash .lgd { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border: 0; border-radius: 6px; color: var(--ink2); background: none; font-size: 11.5px; cursor: pointer; transition: background var(--m-fast), opacity var(--m-fast); }
+.rdash .lgd:hover { background: rgba(175, 45, 65, .08); } .rdash .lgd.off { opacity: .45; text-decoration: line-through; }
+.rdash .lgd i { width: 14px; height: 3px; border-radius: 2px; }
+.rdash .legend-item .hatch-swatch { height: 8px; background: repeating-linear-gradient(45deg, #AF2D41 0 2px, #F7E4E7 2px 4px); }
+
+/* 占比長條：滑過看金額、可排序（TransitionGroup 負責換位動畫） */
+.rdash .mix-row { position: relative; border-radius: 8px; transition: background var(--m-fast); }
+.rdash .mix-row:hover { background: rgba(175, 45, 65, .07); }
+.rdash .mix-row[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 60px; bottom: calc(100% + 2px); z-index: 6; padding: 3px 8px; border-radius: 6px; color: #fff; background: #241417; font-size: 11px; white-space: nowrap; pointer-events: none; animation: m-fade var(--m-fast) backwards; }
+.rdash .mix-flip-move { transition: transform 360ms cubic-bezier(.3, .9, .3, 1); }
+.rdash .mix-fill { transform-origin: left; animation: mix-grow 520ms var(--m-ease) backwards; }
+@keyframes mix-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Accounting 小卡 */
+.rdash .acc-val { color: var(--dink); font-family: var(--mono); font-size: 18px; font-weight: 500; }
+.rdash .acc-claims { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--m-base) var(--m-ease); }
+.rdash .acc-claims > div { overflow: hidden; }
+.rdash .acc-claims.open { grid-template-rows: 1fr; }
+.rdash .acc-toggle .chev { display: inline-block; margin-right: 6px; transition: transform var(--m-base) var(--m-ease); } .rdash .acc-toggle.open .chev { transform: rotate(90deg); }
+
+/* Retention 評價 */
+.rdash .retval { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rdash .rate { position: relative; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 1.5; cursor: default; animation: m-view 300ms var(--m-ease) 500ms backwards; }
+.rdash .rate:focus-visible { outline: 2px solid #AF2D41; outline-offset: 2px; }
+.rdash .rate-ok { color: #27500A; background: #EAF3DE; } .rdash .rate-info { color: #0C447C; background: #E6F1FB; } .rdash .rate-warn { color: #633806; background: #FAEEDA; } .rdash .rate-bad { color: #791F1F; background: #FCEBEB; }
+.rdash .rate-pop { position: absolute; left: 0; top: calc(100% + 8px); z-index: 30; width: 236px; padding: 10px 12px; display: grid; gap: 4px; border: 1px solid var(--border); border-radius: 10px; color: #5F5F5F; background: #fff; box-shadow: 0 8px 22px rgba(95, 20, 30, .14); font-size: 12px; font-weight: 400; opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity var(--m-fast), transform var(--m-fast), visibility 0s var(--m-fast); pointer-events: none; }
+.rdash .rate:hover .rate-pop, .rdash .rate:focus-visible .rate-pop { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.rdash .rate-pop > b { margin-bottom: 4px; color: var(--dink); font-weight: 500; font-size: 11.5px; }
+.rdash .rp-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 6px; } .rdash .rp-row em { color: var(--inkm); font-family: var(--mono); font-size: 11px; font-style: normal; }
+.rdash .rp-row.on { color: var(--dink); background: rgba(175, 45, 65, .08); font-weight: 500; } .rdash .rp-row.on em { color: var(--dink); }
+.rdash .rp-dot { width: 8px; height: 8px; border-radius: 50%; } .rdash .rp-dot.rate-ok { background: #27500A; } .rdash .rp-dot.rate-info { background: #0C447C; } .rdash .rp-dot.rate-warn { background: #633806; } .rdash .rp-dot.rate-bad { background: #791F1F; }

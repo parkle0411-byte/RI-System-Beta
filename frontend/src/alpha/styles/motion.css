@@ -1,0 +1,32 @@
+/* 互動層（2026-11-25，業主決定：顏色與版面不變，只加互動與回饋）。
+   放在 development-alignment.css 之後載入；只加 transition／animation／focus 樣式，不改任何顏色、尺寸或版面。
+   力度克制（120–200 ms、位移 ≤ 4px）；全部受 prefers-reduced-motion 保護。 */
+:root { --m-fast: 120ms; --m-base: 180ms; --m-ease: cubic-bezier(.2, .7, .2, 1); }
+
+/* 1. 滑過／點擊回饋 */
+.nav-item,
+.el-button,
+.mdm-tab,
+.status-badge {
+  transition: background-color var(--m-fast) var(--m-ease), border-color var(--m-fast) var(--m-ease), color var(--m-fast) var(--m-ease), box-shadow var(--m-base) var(--m-ease), transform var(--m-fast) var(--m-ease);
+}
+.nav-item .nav-icon { transition: transform var(--m-base) var(--m-ease); }
+.nav-item:hover .nav-icon { transform: translateX(1px) scale(1.06); }
+.nav-item:active,
+.el-button:active:not(.is-disabled):not([disabled]) { transform: scale(.98); }
+
+/* 鍵盤 focus 外框（輸入框沿用 Element Plus 自己的焦點樣式） */
+.nav-item:focus-visible,
+.el-button:focus-visible,
+.mdm-tab:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible { outline: 2px solid #AF2D41; outline-offset: 2px; }
+
+/* 2. 頁面切換：新頁面淡入（只用 backwards，結束後不留下 transform） */
+.content-area > * { animation: m-view var(--m-base) var(--m-ease) backwards; }
+@keyframes m-view { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes m-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; transition-delay: 0ms !important; }
+}
