@@ -25,7 +25,7 @@ def dashboard_trend(visible_case_ids, fx_rows, current_month):
     result = []
     for month in sorted(month_set):
         preview = append_preview({'rows': [], 'missingRateCurrencies': [], 'sourceSignature': ''}, month, {month: rates}, declarations)
-        result.extend({'month': month, 'incomeTwd': row['income']} for row in preview['rows']
+        result.extend({'month': month, 'incomeTwd': row['income'], 'caseId': row.get('caseId')} for row in preview['rows']
                       if row.get('caseId') in visible and row.get('income') is not None)
     return result
 

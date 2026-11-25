@@ -12,6 +12,7 @@ import { formatAmount } from '../alpha/format'
 import { shell } from '../alpha/shell'
 import vCountup from '../directives/countUp'
 import DashboardTrend from '../components/DashboardTrend.vue'
+import DashboardSparkline from '../components/DashboardSparkline.vue'
 import '../alpha/styles/dashboard-interaction.css'
 
 const twoDecimals = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -78,11 +79,45 @@ const rating = computed(() => {
 
 // 占比長條：排序（Share／A–Z）
 const mixSort = ref('share')
-const reinsurerSort = ref('share')
+const reinsurerSort = ref('share') // share｜cases｜name
 const sortRows = (rows, mode) => (mode === 'name' ? [...(rows || [])].sort((a, b) => String(a.name).localeCompare(String(b.name))) : (rows || []))
 const classRows = computed(() => sortRows(dashboard.value.classMix, mixSort.value))
-const reinsurerRows = computed(() => sortRows(dashboard.value.reinsurers, reinsurerSort.value))
+const reinsurerRows = computed(() => {
+  if (reinsurerSort.value === 'cases' && insights.value.reinsurersByCases?.rows?.length) {
+    const { rows, policies } = insights.value.reinsurersByCases
+    return rows.map(row => ({ name: row.name, pct: policies ? row.cases / policies * 100 : 0, label: `${row.cases}`, tip: `${row.cases} of ${policies} in-force policies` }))
+  }
+  return sortRows(dashboard.value.reinsurers, reinsurerSort.value === 'cases' ? 'share' : reinsurerSort.value).map(row => ({ name: row.name, pct: row.pct, label: `${Number(row.pct || 0).toFixed(1)}%`, tip: rowTip(row) }))
+})
 const rowTip = row => `TWD ${formatAmount(row.amount)} · ${Number(row.pct || 0).toFixed(1)}%`
+
+// 補充資料（後端 insights；沒有時各項互動自動隱藏）
+const insights = computed(() => dashboard.value.insights || {})
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const trendMonthLabel = key => `${MONTH_NAMES[Number(String(key).slice(5, 7)) - 1] || key} ${String(key).slice(0, 4)}`
+const trends = computed(() => insights.value.trends)
+// Total Bound YTD：今年 1 月到本月逐月累計（只有一個月時不畫）；Renewals／New Business：近 12 個月逐月件數
+const sparkTotal = computed(() => {
+  const t = trends.value
+  if (!t) return null
+  const year = String(dashboard.value.period?.year || '')
+  const keep = t.months.map((m, i) => (m.startsWith(year) ? i : -1)).filter(i => i >= 0)
+  let total = 0
+  return { labels: keep.map(i => trendMonthLabel(t.months[i])), values: keep.map(i => (total += t.bound[i])) }
+})
+const sparkRenew = computed(() => (trends.value ? { labels: trends.value.months.map(trendMonthLabel), values: trends.value.renew } : null))
+const sparkNew = computed(() => (trends.value ? { labels: trends.value.months.map(trendMonthLabel), values: trends.value.new } : null))
+const ytdYoY = computed(() => {
+  const prior = Number(dashboard.value.metrics?.ytdPrior), current = Number(dashboard.value.metrics?.ytdCurrent)
+  return prior > 0 && Number.isFinite(current) ? (current / prior - 1) * 100 : null
+})
+// 占比長條點一下，趨勢圖只看該險種（名稱要在後端提供的險種清單內）
+const trendClass = ref(null)
+const trendClassNames = computed(() => insights.value.brokerage?.byClass?.names || [])
+function pickClass(row) {
+  if (!trendClassNames.value.includes(row.name)) return
+  trendClass.value = trendClass.value === row.name ? null : row.name
+}
 
 // Accounting 小卡：原幣別理賠明細可收合
 const claimsOpen = ref(false)
@@ -105,21 +140,24 @@ onBeforeUnmount(() => clearInterval(clock))
   <div class="row3">
     <section class="card">
       <div class="card-head"><h3>Total Bound YTD</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
-      <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.ytdCurrent || 0 }"></span><div class="side-stat"><div class="label">Prior-Year YTD</div><div class="val">{{ dashboard.metrics?.ytdPrior || 0 }}</div></div></div>
+      <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.ytdCurrent || 0 }"></span><div class="side-stat"><div class="label">Prior-Year YTD</div><div class="val">{{ dashboard.metrics?.ytdPrior || 0 }}</div><div v-if="ytdYoY != null" class="yoy" :class="ytdYoY >= 0 ? 'up' : 'dn'" data-testid="dashboard-yoy">{{ ytdYoY >= 0 ? '▲' : '▼' }} {{ Math.abs(ytdYoY).toFixed(1) }}% vs {{ (dashboard.period?.year || 0) - 1 }}</div></div></div>
+      <DashboardSparkline v-if="sparkTotal && sparkTotal.values.length > 1" :values="sparkTotal.values" :labels="sparkTotal.labels" name="Total Bound YTD by month (cumulative)" unit=" bound" />
     </section>
     <section class="card">
       <div class="card-head"><h3>Renewals Bound MTD</h3><span class="chip muted">vs. Expected</span></div>
       <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.renewalsMtd || 0 }"></span><div class="side-stat"><div class="label">Expected Renewals</div><div class="val">{{ dashboard.metrics?.expectedRenewalsMtd || 0 }}</div></div></div>
+      <DashboardSparkline v-if="sparkRenew" :values="sparkRenew.values" :labels="sparkRenew.labels" color="#5F5F5F" name="Renewals bound per month" unit=" renewed" />
     </section>
     <section class="card new-business-card">
       <div class="card-head"><h3>New Business MTD</h3><span class="chip muted">{{ dashboard.period?.currentMonth }}</span></div>
       <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.newBusinessMtd || 0 }"></span><el-button v-if="can('cases.write')" size="small" class="primary-button" data-testid="dashboard-new-case" @click="router.push({ path: '/cases', query: { action: 'new' } })">+ New Case</el-button></div>
+      <DashboardSparkline v-if="sparkNew" :values="sparkNew.values" :labels="sparkNew.labels" name="New business bound per month" unit=" new" />
     </section>
   </div>
 
   <section class="card trend-card">
     <div class="card-head"><h3>YTD Brokerage Trend (TWD)</h3><el-select v-model="selectedTrendYear" aria-label="Brokerage trend year" data-testid="dashboard-trend-year" size="small" style="width: 110px" :disabled="dashboardLoading" @change="loadDashboard"><el-option v-for="year in trendYears" :key="year" :label="String(year)" :value="year" /></el-select></div>
-    <DashboardTrend v-if="dashboard.brokerage?.labels?.length" :labels="dashboard.brokerage.labels" :current="dashboard.brokerage.current" :prior="dashboard.brokerage.prior" :target="dashboard.brokerage.target" :current-status="dashboard.brokerage.currentStatus || []" :prior-status="dashboard.brokerage.priorStatus || []" :year="selectedTrendYear" :grow-key="growKey" />
+    <DashboardTrend v-if="dashboard.brokerage?.labels?.length" :labels="dashboard.brokerage.labels" :current="dashboard.brokerage.current" :prior="dashboard.brokerage.prior" :target="dashboard.brokerage.target" :current-status="dashboard.brokerage.currentStatus || []" :prior-status="dashboard.brokerage.priorStatus || []" :year="selectedTrendYear" :grow-key="growKey" :prior2="insights.brokerage?.prior2 || []" :prior2-status="insights.brokerage?.prior2Status || []" :by-class="insights.brokerage?.byClass || null" v-model:class-filter="trendClass" />
     <div v-else class="empty-note">No performance months yet.</div>
     <p class="empty-note">Closed months use official Production amounts; other months are estimates. {{ (dashboard.brokerage?.labels||[]).map((month,index)=>month+': '+(dashboard.brokerage?.currentStatus?.[index]||'estimated')).join(' · ') }}</p>
   </section>
@@ -149,12 +187,12 @@ onBeforeUnmount(() => clearInterval(clock))
   <div class="row2">
     <section class="card">
       <div class="card-head"><h3 style="margin-bottom:14px">Mix by Class of Business</h3><div v-if="dashboard.classMix?.length > 1" class="seg" role="group" aria-label="Sort classes"><button type="button" :class="{ on: mixSort === 'share' }" @click="mixSort = 'share'">Share</button><button type="button" :class="{ on: mixSort === 'name' }" @click="mixSort = 'name'">A–Z</button></div></div>
-      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in classRows" :key="'class-' + row.name" class="mix-row" :data-tip="rowTip(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
+      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in classRows" :key="'class-' + row.name" class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
     <section class="card">
-      <div class="card-head"><h3 style="margin-bottom:14px">Top Reinsurers/RI Broker by Ceded Premium</h3><div v-if="dashboard.reinsurers?.length > 1" class="seg" role="group" aria-label="Sort reinsurers"><button type="button" :class="{ on: reinsurerSort === 'share' }" @click="reinsurerSort = 'share'">Share</button><button type="button" :class="{ on: reinsurerSort === 'name' }" @click="reinsurerSort = 'name'">A–Z</button></div></div>
-      <transition-group v-if="dashboard.reinsurers?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in reinsurerRows" :key="'reinsurer-' + row.name" class="mix-row" :data-tip="rowTip(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
+      <div class="card-head"><h3 style="margin-bottom:14px">Top Reinsurers/RI Broker by Ceded Premium</h3><div v-if="dashboard.reinsurers?.length > 1" class="seg" role="group" aria-label="Sort reinsurers"><button type="button" :class="{ on: reinsurerSort === 'share' }" @click="reinsurerSort = 'share'">Share</button><button v-if="insights.reinsurersByCases?.rows?.length" type="button" :class="{ on: reinsurerSort === 'cases' }" @click="reinsurerSort = 'cases'">Cases</button><button type="button" :class="{ on: reinsurerSort === 'name' }" @click="reinsurerSort = 'name'">A–Z</button></div></div>
+      <transition-group v-if="dashboard.reinsurers?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in reinsurerRows" :key="'reinsurer-' + row.name" class="mix-row" :data-tip="row.tip"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ row.label }}</strong></div></transition-group>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
   </div>

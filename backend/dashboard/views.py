@@ -120,7 +120,10 @@ class DashboardView(NoStoreMixin, APIView):
             legacy = dashboard_inputs() if see_all else None
             from cases.facility_production import dashboard_trend
             facility = dashboard_trend({r['id'] for r in rows}, fx, local.strftime('%Y-%m'))
-            return build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year, legacy=legacy, facility_trend=facility)
+            extras = {}
+            result = build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year, legacy=legacy, facility_trend=facility, extras=extras)
+            result['insights'] = extras   # 補充資料（2026-11-25）：既有欄位與數字不動
+            return result
 
         return Response(json_roundtrip(result_cache.get_or_compute(key, fingerprint, compute)))
 

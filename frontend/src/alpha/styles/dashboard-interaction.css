@@ -93,3 +93,26 @@
 .rdash .rp-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 6px; } .rdash .rp-row em { color: var(--inkm); font-family: var(--mono); font-size: 11px; font-style: normal; }
 .rdash .rp-row.on { color: var(--dink); background: rgba(175, 45, 65, .08); font-weight: 500; } .rdash .rp-row.on em { color: var(--dink); }
 .rdash .rp-dot { width: 8px; height: 8px; border-radius: 50%; } .rdash .rp-dot.rate-ok { background: #27500A; } .rdash .rp-dot.rate-info { background: #0C447C; } .rdash .rp-dot.rate-warn { background: #633806; } .rdash .rp-dot.rate-bad { background: #791F1F; }
+
+/* 2026-11-25：迷你走勢線、YoY、2024 對照、險種篩選與堆疊、再保人按件數 */
+.rdash .spark { position: relative; margin-top: 10px; width: 120px; }
+.rdash .spark-svg { display: block; overflow: visible; }
+.rdash .spark-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: spark-draw 900ms var(--m-ease) 200ms forwards; }
+@keyframes spark-draw { to { stroke-dashoffset: 0; } }
+.rdash .spark-dot { transition: cx 100ms linear, cy 100ms linear; }
+.rdash .spark-tip { position: absolute; left: 128px; top: 4px; padding: 1px 7px; border-radius: 6px; color: #fff; background: #241417; font-size: 11px; white-space: nowrap; opacity: 0; transition: opacity var(--m-fast); pointer-events: none; }
+.rdash .spark-tip.on { opacity: 1; }
+.rdash .yoy { margin-top: 2px; font-family: var(--mono); font-size: 11px; font-weight: 500; }
+.rdash .yoy.up { color: #27500A; } .rdash .yoy.dn { color: #791F1F; }
+.rdash .cls-select { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink2); background: #fff; font: inherit; font-size: 12px; cursor: pointer; transition: border-color var(--m-fast); }
+.rdash .cls-select:hover { border-color: #AF2D41; }
+.rdash .tgl.disabled { opacity: .45; cursor: not-allowed; }
+.rdash .fchip:disabled { opacity: .45; cursor: not-allowed; }
+.rdash .trend-chart .trend-seg { transition: x 420ms var(--m-ease), y 420ms var(--m-ease), width 420ms var(--m-ease), height 420ms var(--m-ease), opacity 140ms; transform-box: fill-box; transform-origin: 50% 100%; animation: trend-rise 760ms var(--m-ease) calc(80ms + var(--slot, 0) * 45ms) backwards; }
+.rdash .trend-chart .trend-seg.off { opacity: 0; }
+.rdash .trend-chart .trend-seg.est { opacity: .6; }
+.rdash .trend-chart.hovering .col .trend-seg { opacity: .4; } .rdash .trend-chart.hovering .col.hot .trend-seg { opacity: 1; }
+.rdash .ctip .tipsw { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 2px; }
+.rdash .mix-row.pickable { cursor: pointer; }
+.rdash .mix-row.picked { background: rgba(175, 45, 65, .12); }
+.rdash .mix-row.pickable:focus-visible { outline: 2px solid #AF2D41; outline-offset: -2px; }

@@ -124,7 +124,8 @@ def _compute_inputs():
             # 2026-11-15: imported and new legacy premium/endorsement rows are Production by
             # Revenue Month (historical months show them as recognized).
             fx = rate_for(t) or {}
-            trend.append({'month': t.revenue_month, 'incomeTwd': fx.get('incomeTwd')})
+            trend.append({'month': t.revenue_month, 'incomeTwd': fx.get('incomeTwd'),
+                          'className': d.get('classOfBusiness') or CLASS_NAMES.get(str(d.get('classCode') or ''), 'Property')})
     outstanding = []
     _, rows = accounting_data('open')
     for row in rows:

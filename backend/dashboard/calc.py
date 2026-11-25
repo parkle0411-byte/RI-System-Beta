@@ -167,7 +167,110 @@ def _pad2(n):
     return f"{n:02d}"
 
 
-def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None, facility_trend=None):
+LEGACY_CLASS_CODES = {'PD': 'Property', 'GL': 'Commercial General Liability'}
+
+
+def _previous_months(current_month, count):
+    """含本月在內往回 count 個月（舊的在前）。"""
+    year, number = int(current_month[:4]), int(current_month[5:7])
+    result = []
+    for _ in range(count):
+        result.append(f"{year:04d}-{number:02d}")
+        number -= 1
+        if number == 0:
+            year, number = year - 1, 12
+    return list(reversed(result))
+
+
+def _insights(extras_inputs):
+    """趨勢圖與統計卡的補充資料（2026-11-25）：全部由 build_dashboard 已算好的資料整理，不改任何既有數字。
+      - brokerage.prior2：前前年每月佣金（與 prior、current 同一套規則；已結算月份用 Production 關帳數字）
+      - byClass：每月佣金按險種拆分；前 5 大險種各一列，其餘（含舊資料與 Facility 沒有險種的收入）併入 Other，
+        各險種加總永遠等於當月總額
+      - trends：近 12 個月的新承保件數（含舊資料；Total Bound YTD 為今年各月加總）
+      - reinsurersByCases：在保保單件數的再保人排行（新系統保單＋舊資料在保保單，與金額榜同一批）
+    """
+    x = extras_inputs
+    monthly, class_monthly, other = x['monthly'], x['class_monthly'], x['OTHER']
+    trend_year, months = x['trend_year'], x['months']
+
+    def series(year):
+        return [monthly[f"{year}-{m}"] for m in months]
+
+    def status(year):
+        return ["closed" if f"{year}-{m}" in x['closed_months'] or production.is_historical(f"{year}-{m}") else "estimated" for m in months]
+
+    # 險種：以三年合計排名，前 5 名各自一列，其餘併入 Other
+    totals = {}
+    for key, bucket in class_monthly.items():
+        for name, amount in bucket.items():
+            if name != other:
+                totals[name] = totals.get(name, 0.0) + amount
+    ranked = [n for n, _ in sorted(totals.items(), key=lambda e: (-e[1], e[0])) if totals[n] > 0][:5]
+    names = ranked + ["Other"]
+
+    def by_class(year):
+        out = {name: [] for name in names}
+        for m in months:
+            key = f"{year}-{m}"
+            named = 0.0
+            for name in ranked:
+                value = class_monthly[key].get(name, 0.0)
+                named += value
+                out[name].append(value)
+            rest = monthly[key] - named   # 其餘＝總額減去前 5 名，加總永遠對得上
+            out["Other"].append(0.0 if abs(rest) < 0.005 else rest)
+        return out
+
+    # 近 12 個月件數
+    window = _previous_months(x['current_month'], 12)
+    bound = {m: 0 for m in window}
+    renew = {m: 0 for m in window}
+    new = {m: 0 for m in window}
+    for r in x['roots']:
+        if not x['live'](r):
+            continue
+        key = x['posted_month'](r)
+        if key in bound:
+            bound[key] += 1
+            kind = get(r["payload"], "newOrRenew")
+            if kind == "Renew":
+                renew[key] += 1
+            elif kind == "New":
+                new[key] += 1
+    for b in x['legacy_bound']:
+        key = b["month"][:7]
+        if key in bound:
+            bound[key] += 1
+            if b["newOrRenew"] == "Renew":
+                renew[key] += 1
+            elif b["newOrRenew"] == "New":
+                new[key] += 1
+
+    # 再保人件數：由多到少，同件數維持與金額榜相同的名稱順序；前 6 名＋其餘併成 Other（其餘的件數是聯集，不重複計算）
+    cases = x['reinsurer_cases']
+    ordered = sorted(((name, len(cases[name])) for name in _key_order(list(cases))), key=lambda e: -e[1])
+    top, rest = ordered[:6], ordered[6:]
+    rows = [{"name": name, "cases": count} for name, count in top]
+    if rest:
+        union = set()
+        for name, _ in rest:
+            union |= cases[name]
+        rows.append({"name": "Other", "cases": len(union)})
+    everyone = set()
+    for policies in cases.values():
+        everyone |= policies
+    return {
+        "brokerage": {"prior2": series(trend_year - 2), "prior2Status": status(trend_year - 2),
+                      "byClass": {"names": names, "current": by_class(trend_year), "prior": by_class(trend_year - 1), "prior2": by_class(trend_year - 2)}},
+        "trends": {"months": window, "bound": [bound[m] for m in window], "renew": [renew[m] for m in window], "new": [new[m] for m in window]},
+        "reinsurersByCases": {"rows": rows, "policies": len(everyone)},
+    }
+
+
+def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None, facility_trend=None, extras=None):
+    """extras（2026-11-25）：傳入 dict 時，另外把趨勢圖與統計卡的補充資料（前前年對照、險種逐月、近 12 個月件數、再保人件數）填進去；
+    回傳值與不傳 extras 時逐位元組相同。"""
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
     today = now.strftime("%Y-%m-%d")
     year, month_number = now.year, now.month
@@ -229,6 +332,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
 
     gross = out1 = out2 = 0.0
     class_totals, reinsurer_totals = {}, {}
+    reinsurer_cases = {}   # extras：再保人 → 參與的在保保單（新系統用保單的根案件 id，舊資料用清單序號）
     # Problem 3 (2026-11-13): Gross Premium uses the stepwise-rounded ceded premium
     # (same as Accounting) and includes Announced endorsements of in-force policies.
     from cases.calc.accounting import calc_legs_for_reinsurer
@@ -246,8 +350,10 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             class_totals[class_name] = class_totals.get(class_name, 0.0) + amount
             name = js_or(strip_facility(get(reinsurer, "name"), production_rules), "Unnamed")
             reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
+            if extras is not None:
+                reinsurer_cases.setdefault(name, set()).add(("case", get(r, "parent_case_id") or get(r, "id")))
     legacy_in_force = legacy_renewals = 0
-    for policy in (legacy or {}).get("policies", []):
+    for policy_index, policy in enumerate((legacy or {}).get("policies", [])):
         expiry = policy.get("expiry") or ""
         if month(expiry) == current_month:
             legacy_renewals += 1
@@ -260,6 +366,8 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             class_totals[item["className"]] = class_totals.get(item["className"], 0.0) + amount
             name = js_or(strip_facility(item.get("party"), production_rules), "Unnamed")
             reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
+            if extras is not None:
+                reinsurer_cases.setdefault(name, set()).add(("legacy", policy_index))
     expected_renewals_mtd += legacy_renewals
     # 2026-11-19 owner: legacy endorsements still in force (company-wide Dashboard).
     legacy_active_endorsements = len([e for e in (legacy or {}).get("endorsements", [])
@@ -340,7 +448,14 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
 
     trend_year = year if brokerage_year is None else brokerage_year
     trend_months = month_number if trend_year == year else 12
-    monthly = {f"{y}-{_pad2(m)}": 0.0 for y in (trend_year - 1, trend_year) for m in range(1, 13)}
+    trend_years = (trend_year - 2, trend_year - 1, trend_year) if extras is not None else (trend_year - 1, trend_year)
+    monthly = {f"{y}-{_pad2(m)}": 0.0 for y in trend_years for m in range(1, 13)}
+    OTHER = '__other__'
+    class_monthly = {k: {} for k in monthly} if extras is not None else None
+    class_of_case = {str(r.get('id')): js_to_string(js_or(get(r['payload'], 'classOfBusiness'), 'Unclassified')) for r in rows} if extras is not None else {}
+    def add_class(month_key, class_name, amount):
+        bucket = class_monthly[month_key]
+        bucket[class_name] = bucket.get(class_name, 0.0) + amount
     for r in rows:
         if r.get("_financialInvalid"):continue
         if not _live(r):
@@ -354,14 +469,20 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             entry_month = production.effective_month(entry["performanceMonth"]) if production_rules else entry["performanceMonth"]
             if entry_month in monthly:
                 monthly[entry_month] += entry["income"] * rate
+                if extras is not None:
+                    add_class(entry_month, class_of_case.get(str(r.get('id'))) or OTHER, entry["income"] * rate)
 
     for entry in (legacy or {}).get("trend", []):
         if entry.get("month") in monthly and entry.get("incomeTwd") is not None:
             monthly[entry["month"]] += number_or_zero(entry["incomeTwd"])
+            if extras is not None:
+                add_class(entry["month"], entry.get("className") or OTHER, number_or_zero(entry["incomeTwd"]))
 
     for entry in facility_trend or []:
         if entry.get('month') in monthly and entry.get('incomeTwd') is not None:
             monthly[entry['month']] += number_or_zero(entry['incomeTwd'])
+            if extras is not None:
+                add_class(entry['month'], class_of_case.get(str(entry.get('caseId'))) or OTHER, number_or_zero(entry['incomeTwd']))
 
     closed_months = set()
     visible_ids = {str(r.get('id')) for r in rows}
@@ -372,6 +493,14 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             monthly[report_month] = sum(number_or_zero(row.get('income')) for row in report.get('rows', [])
                                         if str(row.get('caseId')) in visible_ids
                                         or (legacy is not None and str(row.get('caseId') or '').startswith('legacy:')))
+            if extras is not None:
+                class_monthly[report_month] = {}
+                for row in report.get('rows', []):
+                    case_key = str(row.get('caseId') or '')
+                    if case_key in visible_ids:
+                        add_class(report_month, class_of_case.get(case_key) or OTHER, number_or_zero(row.get('income')))
+                    elif legacy is not None and case_key.startswith('legacy:'):
+                        add_class(report_month, LEGACY_CLASS_CODES.get(str(row.get('classCode') or '').upper()) or OTHER, number_or_zero(row.get('income')))
 
     targets_annual, targets_monthly = None, {}
     for t in target_rows:
@@ -381,6 +510,12 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             targets_monthly[js_to_string(get(t, "period_key"))] = js_to_number(get(t, "amount"))
 
     months = [_pad2(i + 1) for i in range(trend_months)]
+    if extras is not None:
+        extras.update(_insights(extras_inputs={
+            'monthly': monthly, 'class_monthly': class_monthly, 'OTHER': OTHER, 'trend_year': trend_year, 'months': months,
+            'closed_months': closed_months, 'reinsurer_cases': reinsurer_cases, 'roots': roots, 'live': _live, 'posted_month': posted_month,
+            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force),
+        }))
     return {
         "ok": True,
         "period": {"year": year, "currentMonth": current_month, "monthNumber": month_number},

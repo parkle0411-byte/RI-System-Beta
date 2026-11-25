@@ -13,8 +13,13 @@ const props = defineProps({
   currentStatus: { type: Array, default: () => [] },
   priorStatus: { type: Array, default: () => [] },
   year: { type: Number, default: null },
-  growKey: { type: Number, default: 0 }
+  growKey: { type: Number, default: 0 },
+  // 2026-11-25：前前年對照與險種逐月（後端 insights；沒有時整組控制項隱藏）
+  prior2: { type: Array, default: () => [] },
+  prior2Status: { type: Array, default: () => [] },
+  byClass: { type: Object, default: null }
 })
+const classFilter = defineModel('classFilter', { default: null })
 
 const W = 900, H = 250, L = 66, R = 10, B = 26, T0 = 30
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
@@ -31,6 +36,36 @@ const labelMode = ref('off') // off | values | yoy
 const sortMode = ref('time') // time | rank
 const highlight = ref('all') // all | above | below
 const visible = ref({ prior: true, current: true })
+const stack = ref(false)
+const cmp = ref('prior') // prior（前一年）| prior2（前前年）| none
+const CLASS_COLORS = ['#AF2D41', '#D98A96', '#5F5F5F', '#8C8386', '#791F1F', '#C9C3BF']
+const classNames = computed(() => props.byClass?.names || [])
+const hasClass = computed(() => classNames.value.length > 0)
+const hasPrior2 = computed(() => props.prior2.length > 0)
+const classColor = name => CLASS_COLORS[Math.min(classNames.value.indexOf(name), CLASS_COLORS.length - 1)] || '#8C8386'
+const priorYear = computed(() => (cmp.value === 'prior2' ? props.year - 2 : props.year - 1))
+const classSeries = (key, name) => props.byClass?.[key]?.[name] || []
+// 顯示用的三組資料：選了險種時改用該險種的月佣金；目標只有總額，險種視圖不顯示
+const srcCurrent = computed(() => (classFilter.value && props.byClass ? classSeries('current', classFilter.value) : props.current))
+const srcPrior = computed(() => {
+  if (cmp.value === 'none') return props.current.map(() => 0)
+  const key = cmp.value === 'prior2' ? 'prior2' : 'prior'
+  if (classFilter.value && props.byClass) return classSeries(key, classFilter.value)
+  return key === 'prior2' ? props.prior2 : props.prior
+})
+const srcTarget = computed(() => (classFilter.value ? props.target.map(() => 0) : props.target))
+const priorStatusNow = computed(() => (cmp.value === 'prior2' ? props.prior2Status : props.priorStatus))
+const targetOn = computed(() => showTarget.value && !classFilter.value)
+const perClass = computed(() => {
+  // 每月各險種金額（累計模式下逐險種累計）
+  if (!hasClass.value) return {}
+  const out = {}
+  for (const name of classNames.value) {
+    const arr = classSeries('current', name).map(num)
+    out[name] = cumulative.value ? running(arr) : arr
+  }
+  return out
+})
 const pin = ref(null)
 const range = ref(null)
 const zoom = ref(null)
@@ -44,7 +79,7 @@ let timer = null
 const count = computed(() => props.labels.length)
 const running = arr => { let s = 0; return arr.map(v => (s += num(v))) }
 const series = computed(() => {
-  let P = props.prior.map(num), C = props.current.map(num), T = props.target.map(num)
+  let P = srcPrior.value.map(num), C = srcCurrent.value.map(num), T = srcTarget.value.map(num)
   if (cumulative.value) { P = running(P); C = running(C); T = running(T) }
   return { P, C, T }
 })
@@ -52,7 +87,7 @@ const columns = computed(() => {
   const { P, C, T } = series.value
   let cols = props.labels.map((label, i) => ({
     i, label, P: P[i] ?? 0, C: C[i] ?? 0, T: T[i] ?? 0,
-    est: props.currentStatus[i] === 'estimated', pest: props.priorStatus[i] === 'estimated'
+    est: props.currentStatus[i] === 'estimated', pest: priorStatusNow.value[i] === 'estimated'
   }))
   if (zoom.value) cols = cols.filter(c => c.i >= zoom.value[0] && c.i <= zoom.value[1])
   if (sortMode.value === 'rank') cols = cols.slice().sort((a, b) => b.C - a.C || a.i - b.i)
@@ -64,9 +99,9 @@ const shown = computed(() => columns.value.slice(0, reveal.value))
 const scale = computed(() => {
   const vals = []
   for (const c of columns.value) {
-    if (visible.value.prior) vals.push(c.P)
+    if (visible.value.prior && cmp.value !== 'none') vals.push(c.P)
     if (visible.value.current) vals.push(c.C)
-    if (showTarget.value) vals.push(c.T)
+    if (targetOn.value) vals.push(c.T)
   }
   const lo = Math.min(0, ...vals), hi = Math.max(1, ...vals)
   const raw = (hi - lo) / 4, pw = Math.pow(10, Math.floor(Math.log10(raw))), step = [1, 2, 2.5, 5, 10].map(k => k * pw).find(v => v >= raw)
@@ -84,9 +119,23 @@ const barGeo = (v, x, w) => {
   const yy = y(v), top = Math.min(yy, y0.value), h = Math.abs(yy - y0.value)
   return { x, y: top, width: w, height: h, neg: v < 0 }
 }
+const segments = c => {
+  if (!stack.value || classFilter.value || !hasClass.value) return []
+  let up = 0, down = 0
+  const out = []
+  for (const name of classNames.value) {
+    const v = num(perClass.value[name]?.[c.i])
+    if (!v) continue
+    let top, bottom
+    if (v >= 0) { top = y(up + v); bottom = y(up); up += v } else { top = y(down); bottom = y(down + v); down += v }
+    out.push({ name, v, color: classColor(name), x: slotW.value * .52, y: Math.min(top, bottom), width: slotW.value * .32, height: Math.abs(bottom - top) })
+  }
+  return out
+}
 function geoStyle(g) { return { x: g.x + 'px', y: g.y + 'px', width: g.width + 'px', height: g.height + 'px' } }
-const hit = c => c.T > 0 && c.C >= c.T
-const dimmed = c => highlight.value === 'above' ? !hit(c) : highlight.value === 'below' ? hit(c) : false
+const hit = c => !classFilter.value && c.T > 0 && c.C >= c.T
+const dimmed = c => classFilter.value ? false : (highlight.value === 'above' ? !hit(c) : highlight.value === 'below' ? hit(c) : false)
+const stackOn = computed(() => stack.value && !classFilter.value && hasClass.value)
 const targetPoints = computed(() => shown.value.map((c, s) => `${L + s * slotW.value + slotW.value / 2},${y(c.T)}`).join(' '))
 const labelText = c => {
   if (labelMode.value === 'values') return short(c.C)
@@ -138,25 +187,26 @@ const tipRows = computed(() => {
   const c = hoverCol.value
   if (!c) return []
   const rows = [{ k: 'title', v: `${monthName(c.i)}${cumulative.value ? ' · YTD' : ''}` }]
-  if (visible.value.prior) rows.push({ k: `${props.year - 1}${c.pest ? ' (est.)' : ''}`, v: formatAmount(c.P) })
+  if (visible.value.prior && cmp.value !== 'none') rows.push({ k: `${priorYear.value}${c.pest ? ' (est.)' : ''}`, v: formatAmount(c.P) })
   if (visible.value.current) rows.push({ k: `${props.year}${c.est ? ' (est.)' : ''}`, v: formatAmount(c.C) })
-  if (showTarget.value) rows.push({ k: 'Target', v: c.T ? `${formatAmount(c.T)} · ${(c.C / c.T * 100).toFixed(0)}%` : formatAmount(c.T) })
+  if (targetOn.value) rows.push({ k: 'Target', v: c.T ? `${formatAmount(c.T)} · ${(c.C / c.T * 100).toFixed(0)}%` : formatAmount(c.T) })
+  if (stackOn.value) for (const seg of segments(c)) rows.push({ k: seg.name, v: formatAmount(seg.v), color: seg.color })
   return rows
 })
 
 // 摘要列
-const raw = i => ({ P: num(props.prior[i]), C: num(props.current[i]), T: num(props.target[i]) })
+const raw = i => ({ P: num(srcPrior.value[i]), C: num(srcCurrent.value[i]), T: num(srcTarget.value[i]) })
 const deltaText = d => (d == null ? '' : `${d >= 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(1)}%`)
 const summary = computed(() => {
   if (range.value) {
     let p = 0, c = 0, t = 0
     for (let i = range.value[0]; i <= range.value[1]; i++) { const r = raw(i); p += r.P; c += r.C; t += r.T }
     const n = range.value[1] - range.value[0] + 1
-    return { kind: 'range', title: `${monthName(range.value[0])}–${monthName(range.value[1])}`, total: c, avg: c / n, delta: pct(c, p), attain: t ? c / t * 100 : null }
+    return { kind: 'range', title: `${monthName(range.value[0])}–${monthName(range.value[1])}`, total: c, avg: c / n, delta: pct(c, p), attain: t && !classFilter.value ? c / t * 100 : null }
   }
   if (pin.value != null) {
     const r = raw(pin.value)
-    return { kind: 'pin', title: `${monthName(pin.value)} ${props.year}`, value: r.C, est: props.currentStatus[pin.value] === 'estimated', prior: r.P, delta: pct(r.C, r.P), attain: r.T ? r.C / r.T * 100 : null }
+    return { kind: 'pin', title: `${monthName(pin.value)} ${props.year}`, value: r.C, est: props.currentStatus[pin.value] === 'estimated', prior: r.P, delta: pct(r.C, r.P), attain: r.T && !classFilter.value ? r.C / r.T * 100 : null }
   }
   if (highlight.value !== 'all') {
     const above = columns.value.filter(hit).length
@@ -174,6 +224,8 @@ function zoomIn() { if (range.value) { zoom.value = range.value.slice(); range.v
 function toggleSeries(key) { visible.value = { ...visible.value, [key]: !visible.value[key] } }
 
 watch(() => props.labels.length, () => { pin.value = null; range.value = null; zoom.value = null })
+watch(classFilter, value => { if (value) { highlight.value = 'all'; stack.value = false } })
+watch(hasPrior2, value => { if (!value && cmp.value === 'prior2') cmp.value = 'prior' })
 onBeforeUnmount(() => clearInterval(timer))
 </script>
 
@@ -188,6 +240,11 @@ onBeforeUnmount(() => clearInterval(timer))
         <button type="button" :class="{ on: sortMode === 'time' }" @click="sortMode = 'time'">Time</button>
         <button type="button" :class="{ on: sortMode === 'rank' }" @click="sortMode = 'rank'; range = null">Rank</button>
       </div>
+      <div v-if="hasPrior2" class="seg" role="group" aria-label="Compare with">
+        <button type="button" :class="{ on: cmp === 'prior' }" @click="cmp = 'prior'">vs {{ year - 1 }}</button>
+        <button type="button" :class="{ on: cmp === 'prior2' }" @click="cmp = 'prior2'">vs {{ year - 2 }}</button>
+        <button type="button" :class="{ on: cmp === 'none' }" @click="cmp = 'none'">No comparison</button>
+      </div>
       <div class="seg" role="group" aria-label="Labels">
         <button type="button" :class="{ on: labelMode === 'off' }" @click="labelMode = 'off'">No labels</button>
         <button type="button" :class="{ on: labelMode === 'values' }" @click="labelMode = 'values'">Values</button>
@@ -196,9 +253,15 @@ onBeforeUnmount(() => clearInterval(timer))
     </div>
     <div class="ctools">
       <button type="button" class="fchip" :class="{ active: highlight === 'all' }" @click="highlight = 'all'">All</button>
-      <button type="button" class="fchip" :class="{ active: highlight === 'above' }" @click="highlight = 'above'">At/above target</button>
-      <button type="button" class="fchip" :class="{ active: highlight === 'below' }" @click="highlight = 'below'">Below target</button>
-      <label class="tgl"><input v-model="showTarget" type="checkbox"> Target</label>
+      <button type="button" class="fchip" :class="{ active: highlight === 'above' }" :disabled="!!classFilter" @click="highlight = 'above'">At/above target</button>
+      <button type="button" class="fchip" :class="{ active: highlight === 'below' }" :disabled="!!classFilter" @click="highlight = 'below'">Below target</button>
+      <label class="tgl" :class="{ disabled: !!classFilter }"><input v-model="showTarget" type="checkbox" :disabled="!!classFilter"> Target</label>
+      <label v-if="hasClass" class="tgl" :class="{ disabled: !!classFilter }"><input v-model="stack" type="checkbox" :disabled="!!classFilter"> By class</label>
+      <select v-if="hasClass" class="cls-select" aria-label="Class filter" :value="classFilter || ''" @change="classFilter = $event.target.value || null">
+        <option value="">All classes</option>
+        <option v-for="name in classNames" :key="name" :value="name">{{ name }}</option>
+      </select>
+      <button v-if="classFilter" type="button" class="fchip active" @click="classFilter = null">{{ classFilter }} ✕</button>
       <button v-if="zoom" type="button" class="fchip active" @click="zoom = null">Zoom {{ monthName(zoom[0]) }}–{{ monthName(zoom[1]) }} ✕</button>
       <button type="button" class="el-button secondary-button replay-button" @click="replay">▶ Replay</button>
     </div>
@@ -216,33 +279,34 @@ onBeforeUnmount(() => clearInterval(timer))
           <text v-for="t in scale.ticks" :key="'a' + t" :x="L - 8" :y="y(t) + 4" text-anchor="end">{{ short(t) }}</text>
         </g>
         <line class="trend-zero" :x1="L" :y1="y0" :x2="W - R" :y2="y0" />
-        <polyline class="trend-line target" :points="targetPoints" :style="{ opacity: showTarget && sortMode === 'time' ? 1 : 0 }"></polyline>
+        <polyline class="trend-line target" :points="targetPoints" :style="{ opacity: targetOn && sortMode === 'time' ? 1 : 0 }"></polyline>
         <g v-for="(c, slot) in shown" :key="c.i + '-' + growKey" class="col" :class="{ dim: dimmed(c), hot: hoverIndex === c.i }" :style="{ transform: `translateX(${L + slot * slotW}px)`, '--slot': slot }">
           <rect class="band" :class="{ on: hoverIndex === c.i, pin: pin === c.i, rng: range && c.i >= range[0] && c.i <= range[1] }" x="0" :y="T0" :width="slotW" :height="plotH" />
-          <rect class="trend-bar prior" :class="{ off: !visible.prior, neg: c.P < 0 }" :x="barGeo(c.P, slotW * .16, slotW * .32).x" :y="barGeo(c.P, 0, 0).y" :width="slotW * .32" :height="barGeo(c.P, 0, 0).height" :style="geoStyle(barGeo(c.P, slotW * .16, slotW * .32))"><title>{{ labels[c.i] }} · {{ year - 1 }} · Prior {{ formatAmount(c.P) }}</title></rect>
-          <rect class="trend-bar current" :class="{ off: !visible.current, neg: c.C < 0, est: c.est }" :x="barGeo(c.C, slotW * .52, slotW * .32).x" :y="barGeo(c.C, 0, 0).y" :width="slotW * .32" :height="barGeo(c.C, 0, 0).height" :style="geoStyle(barGeo(c.C, slotW * .52, slotW * .32))"><title>{{ labels[c.i] }} · {{ year }} · Current {{ formatAmount(c.C) }}</title></rect>
-          <rect class="tgt" :x="slotW * .08" :y="y(c.T) - 1" :width="slotW * .84" height="2" :style="{ opacity: showTarget && sortMode === 'rank' ? 1 : 0 }" />
-          <circle class="trend-point target" :cx="slotW / 2" :cy="y(c.T)" r="3" :style="{ opacity: showTarget ? 1 : 0 }"><title>{{ labels[c.i] }} · Target {{ formatAmount(c.T) }}</title></circle>
-          <path v-if="showTarget && hit(c) && visible.current" class="beat" d="M-4 0h8l-4-6z" :style="{ transform: `translate(${slotW * .68}px, ${Math.min(y(c.C), y0) - 4}px)` }" />
-          <text v-if="labelMode !== 'off' && visible.current && labelText(c)" class="vlab" :class="labelClass(c)" :x="slotW * .68" :y="Math.min(y(c.C), y0) - (showTarget && hit(c) ? 14 : 6)" text-anchor="middle">{{ labelText(c) }}</text>
+          <rect class="trend-bar prior" :class="{ off: !visible.prior || cmp === 'none', neg: c.P < 0 }" :x="barGeo(c.P, slotW * .16, slotW * .32).x" :y="barGeo(c.P, 0, 0).y" :width="slotW * .32" :height="barGeo(c.P, 0, 0).height" :style="geoStyle(barGeo(c.P, slotW * .16, slotW * .32))"><title>{{ labels[c.i] }} · {{ priorYear }} · Prior {{ formatAmount(c.P) }}</title></rect>
+          <rect class="trend-bar current" :class="{ off: !visible.current || stackOn, neg: c.C < 0, est: c.est }" :x="barGeo(c.C, slotW * .52, slotW * .32).x" :y="barGeo(c.C, 0, 0).y" :width="slotW * .32" :height="barGeo(c.C, 0, 0).height" :style="geoStyle(barGeo(c.C, slotW * .52, slotW * .32))"><title>{{ labels[c.i] }} · {{ year }} · Current {{ formatAmount(c.C) }}</title></rect>
+          <rect v-for="seg in segments(c)" :key="seg.name" class="trend-seg" :class="{ off: !visible.current, est: c.est }" :x="seg.x" :y="seg.y" :width="seg.width" :height="seg.height" :style="{ ...geoStyle(seg), fill: seg.color }"><title>{{ labels[c.i] }} · {{ seg.name }} {{ formatAmount(seg.v) }}</title></rect>
+          <rect class="tgt" :x="slotW * .08" :y="y(c.T) - 1" :width="slotW * .84" height="2" :style="{ opacity: targetOn && sortMode === 'rank' ? 1 : 0 }" />
+          <circle class="trend-point target" :cx="slotW / 2" :cy="y(c.T)" r="3" :style="{ opacity: targetOn ? 1 : 0 }"><title>{{ labels[c.i] }} · Target {{ formatAmount(c.T) }}</title></circle>
+          <path v-if="targetOn && hit(c) && visible.current" class="beat" d="M-4 0h8l-4-6z" :style="{ transform: `translate(${slotW * .68}px, ${Math.min(y(c.C), y0) - 4}px)` }" />
+          <text v-if="labelMode !== 'off' && visible.current && labelText(c)" class="vlab" :class="labelClass(c)" :x="slotW * .68" :y="Math.min(y(c.C), y0) - (targetOn && hit(c) ? 14 : 6)" text-anchor="middle">{{ labelText(c) }}</text>
           <text class="trend-month" :x="slotW / 2" :y="H - 8" text-anchor="middle">{{ c.label }}</text>
         </g>
       </svg>
       <div class="ctip" :class="{ on: tip.on && tipRows.length }" :style="{ left: tip.x + 'px', top: tip.y + 'px' }">
-        <template v-for="row in tipRows" :key="row.k"><b v-if="row.k === 'title'">{{ row.v }}</b><span v-else class="tiprow"><span>{{ row.k }}</span><span>{{ row.v }}</span></span></template>
+        <template v-for="row in tipRows" :key="row.k"><b v-if="row.k === 'title'">{{ row.v }}</b><span v-else class="tiprow"><span><i v-if="row.color" class="tipsw" :style="{ background: row.color }"></i>{{ row.k }}</span><span>{{ row.v }}</span></span></template>
       </div>
     </div>
 
     <div class="cdetail" :key="summary.kind + String(pin) + String(range)">
       <template v-if="summary.kind === 'range'">
         <b>{{ summary.title }}</b><span>Total <b>{{ short(summary.total) }}</b></span><span>Avg <b>{{ short(summary.avg) }}</b>/mo</span>
-        <span v-if="summary.delta != null" :class="summary.delta >= 0 ? 'up' : 'dn'">{{ deltaText(summary.delta) }} vs {{ year - 1 }}</span>
+        <span v-if="summary.delta != null && cmp !== 'none'" :class="summary.delta >= 0 ? 'up' : 'dn'">{{ deltaText(summary.delta) }} vs {{ priorYear }}</span>
         <span v-if="summary.attain != null"><b>{{ summary.attain.toFixed(0) }}%</b> of target</span>
         <button type="button" class="x pill" @click="zoomIn">Zoom in ⤢</button><button type="button" class="x" @click="range = null">Clear ✕</button>
       </template>
       <template v-else-if="summary.kind === 'pin'">
         <b>{{ summary.title }}</b><span><b>{{ short(summary.value) }}</b><template v-if="summary.est"> (estimate)</template></span>
-        <span v-if="summary.delta != null" :class="summary.delta >= 0 ? 'up' : 'dn'">{{ deltaText(summary.delta) }} vs {{ short(summary.prior) }} in {{ year - 1 }}</span>
+        <span v-if="summary.delta != null && cmp !== 'none'" :class="summary.delta >= 0 ? 'up' : 'dn'">{{ deltaText(summary.delta) }} vs {{ short(summary.prior) }} in {{ priorYear }}</span>
         <span v-if="summary.attain != null"><b>{{ summary.attain.toFixed(0) }}%</b> of target</span>
         <button type="button" class="x" @click="pin = null">✕</button>
       </template>
@@ -251,9 +315,10 @@ onBeforeUnmount(() => clearInterval(timer))
     </div>
 
     <div class="legend">
-      <button type="button" class="lgd" :class="{ off: !visible.prior }" @click="toggleSeries('prior')" @mouseenter="spot = 'prior'" @mouseleave="spot = null"><i style="background:#5F5F5F"></i>Prior year ({{ year - 1 }})</button>
+      <button type="button" class="lgd" :class="{ off: !visible.prior }" @click="toggleSeries('prior')" @mouseenter="spot = 'prior'" @mouseleave="spot = null" v-show="cmp !== 'none'"><i style="background:#5F5F5F"></i>Prior year ({{ priorYear }})</button>
       <button type="button" class="lgd" :class="{ off: !visible.current }" @click="toggleSeries('current')" @mouseenter="spot = 'current'" @mouseleave="spot = null"><i style="background:#AF2D41"></i>Current year ({{ year }})</button>
-      <span class="legend-item"><i style="background:#4A3AA7"></i>Monthly target</span>
+      <span v-if="targetOn" class="legend-item"><i style="background:#4A3AA7"></i>Monthly target</span>
+      <template v-if="stackOn"><span v-for="name in classNames" :key="'lg' + name" class="legend-item"><i :style="{ background: classColor(name) }"></i>{{ name }}</span></template>
       <span class="legend-item"><i class="hatch-swatch"></i>Estimate</span>
     </div>
   </div>

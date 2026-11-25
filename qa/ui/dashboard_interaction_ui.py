@@ -14,7 +14,16 @@ def check(name, ok, detail=''):
     checks.append(name); print('PASS ' + name, flush=True)
 errors = []
 
-def make(year=2026, retention=91.4, months=10, negative=False):
+def insights(months):
+    share = {"Property": .6, "Commercial General Liability": .25, "Product Recall": .1, "Other": .05}
+    cur = [350000 + 30000 * i for i in range(months)]; pri = [300000 + 40000 * i for i in range(months)]; pri2 = [200000 + 20000 * i for i in range(months)]
+    by = lambda arr: {n: [round(v * sh) for v in arr] for n, sh in share.items()}
+    window = [f"{2025 + (11 + i) // 12}-{(11 + i) % 12 + 1:02d}" for i in range(12)]   # 2025-12 … 2026-11
+    return {"brokerage": {"prior2": pri2, "prior2Status": ["closed"] * months, "byClass": {"names": list(share), "current": by(cur), "prior": by(pri), "prior2": by(pri2)}},
+            "trends": {"months": window, "bound": [3, 4, 5, 4, 6, 5, 7, 6, 5, 4, 8, 12], "renew": [1, 2, 2, 1, 3, 2, 3, 2, 2, 1, 4, 5], "new": [2, 2, 3, 3, 3, 3, 4, 4, 3, 3, 4, 7]},
+            "reinsurersByCases": {"rows": [{"name": "Allianz", "cases": 30}, {"name": "Swiss Re", "cases": 20}], "policies": 40}}
+
+def make(year=2026, retention=91.4, months=10, negative=False, with_insights=True):
     labels = [f"{m:02d}" for m in range(1, months + 1)]
     prior = [300000 + 40000 * i for i in range(months)]
     current = [350000 + 30000 * i for i in range(months)]
@@ -31,15 +40,16 @@ def make(year=2026, retention=91.4, months=10, negative=False):
         "brokerage": {"labels": labels, "currentStatus": status, "priorStatus": ["closed"] * months, "current": current, "prior": prior, "target": target, "annualTarget": 6000000},
         "classMix": [{"name": "Property", "amount": 186400000, "pct": 58.0}, {"name": "Commercial General Liability", "amount": 86800000, "pct": 27.0}, {"name": "Product Recall", "amount": 48200000, "pct": 15.0}],
         "reinsurers": [{"name": "Swiss Re", "amount": 84200000, "pct": 60.0}, {"name": "Allianz", "amount": 61500000, "pct": 40.0}],
+        **({"insights": insights(months)} if with_insights else {}),
     }
 
-state = {"retention": 91.4, "negative": False, "calls": 0}
+state = {"retention": 91.4, "negative": False, "calls": 0, "insights": True}
 def handler(route):
     url = route.request.url
     m = re.search(r"brokerageYear=(\d+)", url)
     year = int(m.group(1)) if m else 2026
     state["calls"] += 1
-    body = make(year=year, retention=state["retention"], months=12 if year != 2026 else 10, negative=state["negative"])
+    body = make(year=year, retention=state["retention"], months=12 if year != 2026 else 10, negative=state["negative"], with_insights=state["insights"])
     route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
 def login(page):
@@ -53,6 +63,16 @@ with sync_playwright() as p:
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
     login(page)
+    # --- the real server (before the mock goes in): the new insights are present and consistent with the existing numbers
+    api = page.request.get(BASE + "/api/dashboard"); body = api.json()
+    ins = body.get("insights") or {}
+    check("the real /api/dashboard carries insights without changing the existing fields", api.ok and set(ins) == {"brokerage", "trends", "reinsurersByCases"} and "insights" not in body["brokerage"] and {"labels", "current", "prior", "target"} <= set(body["brokerage"]), list(ins))
+    bc = ins["brokerage"]["byClass"]; n_real = len(body["brokerage"]["current"])
+    check("real data: the classes add up to the month totals for current, prior and prior2", all(abs(sum(bc[k][name][i] for name in bc["names"]) - ref[i]) < 0.01 for k, ref in (("current", body["brokerage"]["current"]), ("prior", body["brokerage"]["prior"]), ("prior2", ins["brokerage"]["prior2"])) for i in range(n_real)))
+    this_year = [i for i, m in enumerate(ins["trends"]["months"]) if m.startswith(str(body["period"]["year"]))]
+    check("real data: this year's monthly counts add up to Total Bound YTD", sum(ins["trends"]["bound"][i] for i in this_year) == body["metrics"]["ytdCurrent"], (sum(ins["trends"]["bound"][i] for i in this_year), body["metrics"]["ytdCurrent"]))
+    old = page.request.get(BASE + "/api/dashboard?brokerageYear=" + str(body["period"]["year"] - 1)).json()
+    check("real data: choosing last year keeps the existing fields and shifts prior2 back one more year", len(old["brokerage"]["current"]) == 12 and len(old["insights"]["brokerage"]["prior2"]) == 12 and old["metrics"] == body["metrics"])
     page.route(re.compile(r".*/api/dashboard.*"), handler)
     page.goto(BASE + "/dashboard"); page.locator(".rdash").wait_for()
 
@@ -202,6 +222,72 @@ with sync_playwright() as p:
     zero = page.locator(".trend-zero").bounding_box(); nb = neg.bounding_box()
     check("a negative month is drawn below the zero line", "neg" in neg.get_attribute("class") and nb["y"] >= zero["y"] - 1 and nb["height"] > 5, (zero, nb))
     state["negative"] = False
+
+    # --- 2026-11-25 data-backed interactions: YoY, sparklines, compare, class filter and stack, reinsurer cases
+    state["retention"] = 91.4; page.reload(); page.locator(".rdash").wait_for(); page.wait_for_selector(".trend-bar.current"); page.wait_for_timeout(1500)
+    yoy = page.get_by_test_id("dashboard-yoy")
+    check("Total Bound YTD shows its year-over-year change from the existing numbers", yoy.inner_text() == "▲ 11.8% vs 2025", yoy.inner_text())
+    check("each of the three stat cards has a sparkline", page.locator(".row3 .spark").count() == 3)
+    label = page.locator(".row3 .card").first.locator(".spark").get_attribute("aria-label")
+    nums = [int(x) for x in re.findall(r"\d+", label.split(":", 1)[1])]
+    check("the Total Bound YTD sparkline is cumulative for this year (never decreases, ends at the YTD total)", nums == sorted(nums) and len(nums) == 11 and nums[-1] == sum([4, 5, 4, 6, 5, 7, 6, 5, 4, 8, 12]), nums)
+    page.locator(".row3 .card").nth(1).locator(".spark-svg").hover(position={"x": 60, "y": 10}); page.wait_for_timeout(250)
+    tip = page.locator(".row3 .card").nth(1).locator(".spark-tip.on").inner_text()
+    check("hovering a sparkline names the month and the count", re.match(r"^[A-Z][a-z]{2} \d{4} · \d+ renewed$", tip) is not None, tip)
+    page.mouse.move(5, 5)
+    heights = lambda sel: page.evaluate("(s) => [...document.querySelectorAll(s)].map(e => Math.round(e.getBoundingClientRect().height))", sel)
+    p25 = heights(".trend-bar.prior")
+    page.get_by_role("button", name="vs 2024").click(); page.wait_for_timeout(900)
+    p24 = heights(".trend-bar.prior")
+    check("vs 2024 swaps the grey bars to the year before last", p24 != p25 and all(b < a for a, b in zip(p25, p24)) and "Prior year (2024)" in page.locator(".legend").inner_text(), (p25, p24))
+    page.get_by_role("button", name="No comparison").click(); page.wait_for_timeout(500)
+    check("No comparison hides the grey bars and their legend entry", page.evaluate("() => getComputedStyle(document.querySelector('.trend-bar.prior')).opacity") == "0" and "Prior year" not in page.locator(".legend").inner_text())
+    page.get_by_role("button", name="vs 2025").click(); page.wait_for_timeout(700)
+    check("vs 2025 brings the comparison back", heights(".trend-bar.prior") == p25 and "Prior year (2025)" in page.locator(".legend").inner_text())
+    allc = heights(".trend-bar.current")
+    axis_top = lambda: max(float(t.replace("K", "").replace(",", "")) for t in page.locator(".trend-axis-labels text").all_text_contents())
+    top_all = axis_top()
+    page.locator(".cls-select").select_option("Property"); page.wait_for_timeout(900)
+    top_prop = axis_top()
+    check("choosing a class shows only that class's monthly brokerage (the axis rescales to the smaller amounts)", top_prop < top_all and page.get_by_role("button", name=re.compile("^Property ✕")).count() == 1, (top_all, top_prop))
+    check("the target is hidden and disabled while a class is chosen (targets exist for the total only)", page.get_by_role("checkbox", name="Target").is_disabled() and page.evaluate("() => getComputedStyle(document.querySelector('.trend-point.target')).opacity") == "0"
+          and page.get_by_role("button", name="At/above target").is_disabled() and page.locator(".beat").count() == 0)
+    page.locator(".trend-chart").scroll_into_view_if_needed(); box = page.locator(".trend-svg").bounding_box(); cy = box["y"] + box["height"] * .5
+    page.mouse.click(box["x"] + (66 + 4.5 * (824 / n)) * box["width"] / 900, box["y"] + box["height"] * .5); page.wait_for_timeout(250)
+    check("a pinned month of a class has no target percentage", "of target" not in page.locator(".cdetail").inner_text() and "May 2026" in page.locator(".cdetail").inner_text(), page.locator(".cdetail").inner_text())
+    page.get_by_role("button", name=re.compile("^Property ✕")).click(); page.wait_for_timeout(900)
+    check("clearing the class restores the totals", heights(".trend-bar.current") == allc and not page.get_by_role("checkbox", name="Target").is_disabled())
+    page.get_by_role("checkbox", name="By class").check(); page.wait_for_timeout(900)
+    segs = page.locator(".trend-seg").count()
+    check("By class splits each current bar into class segments (the plain bar stays in the DOM, hidden)", segs >= n * 3 and page.locator(".trend-bar.current").count() == n
+          and page.evaluate("() => getComputedStyle(document.querySelector('.trend-bar.current')).opacity") == "0", segs)
+    check("the legend lists the classes while stacked", all(name in page.locator(".legend").inner_text() for name in ["Property", "Commercial General Liability", "Product Recall", "Other"]))
+    seg_total = page.evaluate("() => [...document.querySelectorAll('.trend-seg')].filter(e => e.closest('.col') === document.querySelectorAll('.trend-chart .col')[3]).reduce((a, e) => a + e.getBoundingClientRect().height, 0)")
+    check("the segments of a month add up to the height of the total bar", abs(seg_total - allc[3]) <= 3, (seg_total, allc[3]))
+    page.locator(".trend-chart").scroll_into_view_if_needed(); box = page.locator(".trend-svg").bounding_box(); cy = box["y"] + box["height"] * .5
+    page.mouse.move(slot(3), cy); page.wait_for_timeout(250)
+    check("the tooltip lists each class while stacked", "Property" in page.locator(".ctip.on").inner_text() and "Other" in page.locator(".ctip.on").inner_text(), page.locator(".ctip.on").inner_text())
+    page.get_by_role("checkbox", name="By class").uncheck(); page.wait_for_timeout(700)
+    mixcard = page.locator(".card", has_text="Mix by Class of Business")
+    mixcard.locator(".mix-row", has_text="Product Recall").click(); page.wait_for_timeout(700)
+    check("clicking a class in the mix filters the trend chart", page.locator(".cls-select").input_value() == "Product Recall" and mixcard.locator(".mix-row.picked").count() == 1)
+    mixcard.locator(".mix-row", has_text="Product Recall").click(); page.wait_for_timeout(500)
+    check("clicking it again clears the filter", page.locator(".cls-select").input_value() == "" and mixcard.locator(".mix-row.picked").count() == 0)
+    rc = page.locator(".card", has_text="Top Reinsurers")
+    rnames = lambda: [e.inner_text() for e in rc.locator(".mix-row > span:first-child").all()]
+    check("reinsurers start in amount-share order", rnames() == ["Swiss Re", "Allianz"] and rc.locator(".mix-row strong").first.inner_text() == "60.0%", rnames())
+    rc.get_by_role("button", name="Cases").click(); page.wait_for_timeout(700)
+    check("Cases ranks reinsurers by in-force policy count", rnames() == ["Allianz", "Swiss Re"] and rc.locator(".mix-row strong").first.inner_text() == "30", rnames())
+    check("each row says how many of the in-force policies it covers", rc.locator(".mix-row").first.get_attribute("data-tip") == "30 of 40 in-force policies")
+    fill = rc.locator(".mix-fill").first.bounding_box()["width"]; track = rc.locator(".mix-track").first.bounding_box()["width"]
+    check("the bar is the share of in-force policies (30 of 40 is about 75%)", 0.70 < fill / track < 0.80, (fill, track))
+    rc.get_by_role("button", name="Share").click(); page.wait_for_timeout(600)
+    check("Share returns to the amount ranking", rnames() == ["Swiss Re", "Allianz"])
+    # without insights (older server response) every new control stays out of the way
+    state["insights"] = False; page.reload(); page.locator(".rdash").wait_for(); page.wait_for_selector(".trend-bar.current"); page.wait_for_timeout(1200)
+    check("without insights nothing new is shown and nothing breaks", page.locator(".spark").count() == 0 and page.locator(".cls-select").count() == 0 and page.get_by_role("button", name="vs 2024").count() == 0
+          and page.get_by_role("button", name="Cases").count() == 0 and page.locator(".trend-bar.current").count() == n and page.get_by_test_id("dashboard-yoy").count() == 1)
+    state["insights"] = True
 
     # --- navigation away and back works
     page.locator(".nav-item", has_text="Account List").click(); page.wait_for_url(BASE + "/cases"); page.locator(".nav-item", has_text="Dashboard").click(); page.wait_for_url(BASE + "/dashboard")
