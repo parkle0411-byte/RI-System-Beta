@@ -1,7 +1,7 @@
 <script setup>
 // 外框：照 Alpha public/index.html 的 app-shell（左側選單、頁首、內容區）。
 // VM 專有：登入者的改密碼／登出、System Administrator 的唯讀資料檢視連結、強制改密碼對話框。
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { auth, can, changePassword, logout, continueSession } from './auth'
@@ -13,6 +13,22 @@ const router = useRouter()
 const route = useRoute()
 const navigation = computed(() => allNavigation.filter(navAllowed))
 const activeNavId = computed(() => route.meta.nav?.id || '')
+
+// 側欄選中底色：滑到被點的項目（2026-11-25 互動層；只是畫面回饋，導覽、權限與路由不變）。
+// 量不到位置（例如導覽尚未顯示）時 indicator 為 null，仍用原本 .nav-item.active 的底色。
+const navEl = ref(null)
+const indicator = ref(null)
+function measureIndicator() {
+  const el = navEl.value?.querySelector('.nav-item.active')
+  indicator.value = el ? { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight } : null
+}
+watch([activeNavId, navigation, () => auth.principal], () => nextTick(measureIndicator), { flush: 'post' })
+onMounted(() => {
+  nextTick(measureIndicator)
+  window.addEventListener('resize', measureIndicator)
+  document.fonts?.ready?.then(measureIndicator)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', measureIndicator))
 
 function selectView(item) {
   if (route.path !== item.path) router.push(item.path)
@@ -85,7 +101,8 @@ async function savePassword() {
         <div class="brand-name">Reinsurance Department System</div>
       </div>
 
-      <nav v-if="!forced" class="nav-list" aria-label="系統導覽">
+      <nav v-if="!forced" ref="navEl" class="nav-list" :class="{ 'has-ind': indicator }" aria-label="系統導覽">
+        <span v-if="indicator" class="nav-ind" aria-hidden="true" :style="{ transform: `translate(${indicator.x}px, ${indicator.y}px)`, width: indicator.w + 'px', height: indicator.h + 'px' }"></span>
         <button v-for="item in navigation" :key="item.id" type="button" class="nav-item"
           :class="{ active: activeNavId === item.id }" @click="selectView(item)">
           <img class="nav-icon" :src="item.icon" alt="" aria-hidden="true">

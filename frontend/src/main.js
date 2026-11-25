@@ -10,7 +10,9 @@ import './alpha/styles/motion.css'
 import App from './App.vue'
 import router from './router'
 import { installUnauthorizedHandler } from './auth'
+import { installRipple } from './alpha/ripple'
 
 installUnauthorizedHandler(router)
+installRipple()
 
 createApp(App).use(ElementPlus).use(router).mount('#app')

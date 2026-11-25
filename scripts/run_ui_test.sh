@@ -138,9 +138,14 @@ case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" X "*)
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 accounting_load_error.py || STATUS=1
 esac
 # DI: Dashboard 互動層（2026-11-25；以假的 /api/dashboard 回應驗證版面、數字格式、Retention 評價邊界與柱狀圖互動，不改資料）。
-case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI} " in *" DI "*)
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI} " in *" DI "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 dashboard_interaction_ui.py || STATUS=1
+esac
+# GI: 全站互動層第二輪（2026-11-25；側欄滑動底色、按鈕漣漪、必填欄位抖動；不改資料）。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI} " in *" GI "*)
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 interaction_global_ui.py || STATUS=1
 esac
 # I: Legacy 網頁匯入（2026-11-11；系統管理員上傳 Register → 預覽 → 匯入 → Accounting）。
 case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" I "*)

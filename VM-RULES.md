@@ -64,7 +64,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 50 分鐘，2026-11-24 為 142 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **Accounting 伺服器分頁一致性**（2026-11-17）：`scripts/run_qa.sh pages`——以正式資料（唯讀）取伺服器各分頁，與畫面原本的程式（`accountingRows.js`、`accountingList.js`，node 執行）逐頁比對；2026-11-24 正式資料 582 頁約 6–10 分鐘。`PAGES_BACKEND=<容器>` 改用其他後端（例：壓測環境）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16）、人員頁帳號操作 U 10 項（2026-11-17），合計 374 項；另有 Dashboard 互動 DI 48 項（2026-11-25，以假的 /api/dashboard 回應驗證，完整執行時一併跑）。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16）、人員頁帳號操作 U 10 項（2026-11-17），合計 374 項；另有 Dashboard 互動 DI 48 項（2026-11-25，以假的 /api/dashboard 回應驗證，完整執行時一併跑）、全站互動 GI 18 項（2026-11-25，側欄滑動底色、按鈕漣漪、必填欄位抖動）。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
@@ -388,6 +388,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 ## 10. Dashboard
 
+- **全站互動層第二輪（2026-11-25）**：側欄選中底色（與原 `.nav-item.active` 同色）滑到被點的項目（`App.vue` 量測選中項位置；量不到時仍用原本底色）；按鈕點擊漣漪（`src/alpha/ripple.js` 全站單一 pointerdown 監聽，漣漪放在自己的外層容器 `.ripple-wrap`、不改按鈕 class，停用與文字／連結型按鈕不做）；案件表單內被標成必填錯誤（`is-required-error`／`required-invalid`）的欄位輕微抖動（純 CSS，驗證與捲動到錯誤欄位的程式不變）。不做：載入骨架條、成功提示改動（Element Plus 已有動畫）。全部遵守 prefers-reduced-motion。
 - **互動層（2026-11-25 業主決定：顏色、版面、資料與 API 不變，只加互動）**：全站 `src/alpha/styles/motion.css`（hover／按壓過渡、鍵盤 focus 外框、頁面淡入；全部遵守 prefers-reduced-motion）。Dashboard 另有：數字滾動（`v-countup`，最終文字與原本格式完全相同，無資料時仍顯示 N/A）；Total Gross Premium 在三張統計卡上方（左）、右側「Loaded … ago」與 Refresh（顯示的是此畫面最近一次向伺服器取資料的時間，伺服器端另有結果快取）；Accounting · Receivable / Payable 是獨立小卡，原幣別理賠明細（Claim receivable / payable by original currency）預設收合、可展開；KPI 剩四項（In-Force Policies、Active Endorsements、Open Quotes、Renewal Retention Ratio）。
 - **Renewal Retention Ratio 評價**：91–100 Excellent、81–90 Very Good、71–80 Good、61–70 Satisfactory、41–60 Average、21–40 Below Average、0–20 Unsatisfactory；比率有小數時以各級下限判定（90.5 → Very Good、40.5 → Below Average）；沒有比率（N/A）不顯示評價；滑過或鍵盤聚焦標籤顯示七級對照表。
 - **趨勢圖（`DashboardTrend.vue`，只用柱狀圖）**：資料全部來自 `/api/dashboard` 的 `brokerage`（labels、current、prior、target、currentStatus、priorStatus），不新增欄位；保留單一 polyline、每月一對 `.trend-bar.prior／.current` 與一個 `.trend-point.target`、年份選單與負值月份（柱子畫在零線下方）。柱子從底部長出（各欄錯開）、狀態切換時平順變形；滑過提示、點選釘住月份、拖曳選範圍統計與縮放、鍵盤左右／Esc、Monthly／Cumulative、Target 開關、數值或 YoY 標籤、Rank 排序、At/above／Below target 篩選、圖例開關、Replay；已結算以外的月份（`currentStatus` 為 estimated）用斜線底紋。占比與再保人長條：滑過看金額與百分比、Share／A–Z 排序。不做（資料不足，需後端補才可能）：2024 對照、按險種堆疊與篩選、週視圖、統計卡迷你走勢線、YoY／MoM 切換、再保人按件數排名。
@@ -555,6 +556,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-25 17:52 | 互動層第二輪：側欄滑動底色、按鈕漣漪、必填欄位抖動（只換前端；回復：`~/RI System/ui-interaction-2-work/rollback.sh 20261125_175242`） | `backups/ui_interaction2_20261125_175242/`（部署前 DB 61 MB 及被覆蓋原始碼） | `ri-frontend:before-ui-interaction2-20261125_175242` | 候選 `ri-frontend:ui-interaction2-candidate`（d55525292533）：全部畫面測試通過（含 DI 48 項與新專項 GI 18 項）；前端建置與檢查通過；無 migration、不改資料、後端未動；正式前端與測試用建置內容逐檔一致 |
 | 11-25 17:15 | 互動層：全站 CSS 互動（hover／按壓／focus／頁面淡入）＋Dashboard 互動（數字滾動、Total Gross Premium 移到頂端、Loaded／Refresh、Accounting 獨立小卡、Retention 評價、占比長條、互動柱狀圖）（只換前端；回復：`~/RI System/ui-interaction-work/rollback.sh 20261125_171545`） | `backups/ui_interaction_20261125_171545/`（部署前 DB 61 MB 及被覆蓋原始碼） | `ri-frontend:before-ui-interaction-20261125_171545` | 候選 `ri-frontend:ui-interaction-candidate`（7322363880e5）：全部畫面測試通過（含新專項 DI 48 項）；前端建置與檢查通過；無 migration、不改資料、後端未動；正式前端與測試用建置內容逐檔一致 |
 | 11-25 10:16 | Facility 表單顯示與必填欄位、Type、期間排列及 Cedant Tax 整理 | `backups/facility_form_20261125_101543/`（部署前 DB 及變更檔；原始碼可用變更檔反向還原） | `ri-backend:before-facility-form-20261125_101543`／`ri-frontend:before-facility-form-20261125_101543` | 候選映像完整 API 回歸與畫面回歸、Facility 必填與畫面專項、Claude 優化回歸通過；無 migration，服務與原始碼逐檔核對 |
 | 11-24 18:21 | VM 優化＋Debug：Facility Declaration Claim 上限、CGL Coverages 型別檢查、Dashboard 舊資料加總快取（worker 共用）、結果快取上限 5 分鐘 → 1 小時、Accounting 分頁保留已篩選排序的舊資料歷史（只換後端；回復：`~/RI System/vmopt-1124-work/rollback.sh 20261124_182126`） | `backups/vmopt_1124_20261124_182126/`（部署前 DB 61 MB 及變更檔與 compose.yaml） | `ri-backend:before-vmopt-1124-20261124_182126` | 候選 `ri-backend:vmopt1124-candidate`（78d3b45fdfa8）：完整 API 142 組（含新 `vmopt_1124` 42 項，3 個刻意改壞的版本皆被抓到）、完整畫面 413 項全過；正式資料副本上 716 個 Dashboard／Accounting 回應與舊版逐位元相同（新版各取兩次）、`run_qa.sh pages` 582 頁一致；無 migration、不寫業務資料；部署後 466 個後端檔案與原始碼一致 |
@@ -631,6 +633,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-25：互動層第二輪（業主決定，17:52 部署，只換前端；回復：`~/RI System/ui-interaction-2-work/rollback.sh 20261125_175242`）：側欄滑動底色、按鈕漣漪、必填欄位抖動；新增畫面測試專項 GI（18 項）。無 migration、不改資料。
 
 - 2026-11-25：互動層（業主決定，17:15 部署，只換前端；回復：`~/RI System/ui-interaction-work/rollback.sh 20261125_171545`）：顏色與版面不變，只加互動。全站 `motion.css`；Dashboard 數字滾動、Total Gross Premium 移到頂端（§10）、Loaded／Refresh、Accounting 獨立小卡、Retention 評價、占比長條互動與互動柱狀圖；新增畫面測試專項 DI（48 項）。無 migration、不改資料。
 
