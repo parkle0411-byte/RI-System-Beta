@@ -215,6 +215,7 @@ def _insights(extras_inputs):
         各險種加總永遠等於當月總額
       - trends：近 12 個月的新承保件數（bound、new 含舊資料，Total Bound YTD 為今年各月 bound 加總；renew 只算新系統）
       - reinsurersByCases：在保保單件數的再保人排行（新系統保單＋舊資料在保保單，與金額榜同一批）
+      - overdueOutstanding（2026-11-26）：Accounting · Receivable / Payable 中已逾期的應收與應付（台幣；實際到期日早於今天、同一批帳款與匯率，是兩個總額的一部分）
       - grossPremiumUsd（2026-11-26）：Total Gross Premium 的美金對照；每張保單用認列月匯率換成台幣、再用同一個月的 USD 匯率換成美金後加總（沒有任何 USD 匯率時為 None）
     """
     x = extras_inputs
@@ -290,6 +291,7 @@ def _insights(extras_inputs):
                       "byClass": {"names": names, "current": by_class(trend_year), "prior": by_class(trend_year - 1), "prior2": by_class(trend_year - 2)}},
         "trends": {"months": window, "bound": [bound[m] for m in window], "renew": [renew[m] for m in window], "new": [new[m] for m in window]},
         "reinsurersByCases": {"rows": rows, "policies": len(everyone)},
+        "overdueOutstanding": {"receivable": x['overdue1'], "payable": x['overdue2']},
         "grossPremiumUsd": ({"amount": x['gross_usd'], "basis": "recognition-month"} if x['usd_available'] else None),
     }
 
@@ -359,6 +361,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     new_business_mtd += len([b for b in bound if b["month"][:7] == current_month and b["newOrRenew"] == "New"])
 
     gross = out1 = out2 = 0.0
+    overdue1 = overdue2 = 0.0   # extras：未結清應收／應付中「實際到期日早於今天」的部分（2026-11-26 業主決定；是 out1／out2 的子集）
     gross_usd = 0.0   # extras：每張保單用認列月匯率換成台幣、再用同月的 USD 匯率換成美金後加總
     class_totals, reinsurer_totals = {}, {}
     reinsurer_cases = {}   # extras：再保人 → 參與的在保保單（新系統用保單的根案件 id，舊資料用清單序號）
@@ -464,10 +467,17 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
                 missing_fx.append({'currency': currency, 'month': posting_month or None, 'caseId': r.get('id')})
                 continue
             value = abs(detail['outstanding']) * rate
+            # 逾期＝實際到期日（合約到期日，沒有就用到期日；與 Accounting 同一規則）早於今天（台北日期）；到期當天不算，沒有到期日不算
+            due_day = str(detail.get('contractDueDate') or detail.get('dueDate') or '')[:10]
+            late = bool(due_day) and due_day < today
             if detail['paymentDirection'] == 'receivable':
                 out1 += value
+                if late:
+                    overdue1 += value
             else:
                 out2 += value
+                if late:
+                    overdue2 += value
 
     for item in (legacy or {}).get("outstanding", []):
         if item.get("ageDate") and item["ageDate"] < outstanding_since:
@@ -486,10 +496,15 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             missing_fx.append({'currency': cur, 'month': item.get('postedMonth') or None, 'caseId': None})
             continue
         value = item["outstanding"] * rate
+        late = bool(item.get("due")) and str(item["due"])[:10] < today
         if item.get("paymentDirection") == "receivable":
             out1 += value
+            if late:
+                overdue1 += value
         else:
             out2 += value
+            if late:
+                overdue2 += value
 
     trend_year = year if brokerage_year is None else brokerage_year
     trend_months = month_number if trend_year == year else 12
@@ -559,7 +574,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         extras.update(_insights(extras_inputs={
             'monthly': monthly, 'class_monthly': class_monthly, 'OTHER': OTHER, 'trend_year': trend_year, 'months': months,
             'closed_months': closed_months, 'reinsurer_cases': reinsurer_cases, 'roots': roots, 'live': _live, 'posted_month': posted_month,
-            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force), 'gross_usd': gross_usd, 'usd_available': month_rate('USD', current_month) > 0,
+            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force), 'overdue1': overdue1, 'overdue2': overdue2, 'gross_usd': gross_usd, 'usd_available': month_rate('USD', current_month) > 0,
         }))
     return {
         "ok": True,

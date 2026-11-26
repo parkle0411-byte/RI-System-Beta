@@ -143,6 +143,7 @@ def _compute_inputs():
         outstanding.append({'txNo': row.get('txNo'), 'currency': str(row.get('currency') or t.currency or 'TWD').upper(),
                             'outstanding': abs(float(row['outstanding'])), 'paymentDirection': row.get('paymentDirection'),
                             'ageDate': age[:10], 'postedRate': snapshot.get('rate'),
+                            'due': str(row.get('contractDueDate') or next((s.get('contractDueDate') for s in (row.get('schedules') or []) if isinstance(s, dict) and s.get('contractDueDate')), '') or row.get('dueDate') or '')[:10],
                             'postedMonth': t.revenue_month or _taipei_day(t.first_confirmed_at)[:7]})
     return {'policies': list(policies.values()), 'trend': trend, 'outstanding': outstanding, 'bound': list(bound.values()),
             'endorsements': [{'expiry': expiry} for expiry in endorsements.values()]}

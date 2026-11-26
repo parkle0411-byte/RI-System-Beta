@@ -22,7 +22,8 @@ def insights(months):
     return {"brokerage": {"prior2": pri2, "prior2Status": ["closed"] * months, "byClass": {"names": list(share), "current": by(cur), "prior": by(pri), "prior2": by(pri2)}},
             "trends": {"months": window, "bound": [3, 4, 5, 4, 6, 5, 7, 6, 5, 4, 8, 12], "renew": [1, 2, 2, 1, 3, 2, 3, 2, 2, 1, 4, 5], "new": [2, 2, 3, 3, 3, 3, 4, 4, 3, 3, 4, 7]},
             "reinsurersByCases": {"rows": [{"name": "Allianz", "cases": 30}, {"name": "Swiss Re", "cases": 20}], "policies": 40},
-            "grossPremiumUsd": {"amount": 15006340.5, "basis": "recognition-month"}}
+            "grossPremiumUsd": {"amount": 15006340.5, "basis": "recognition-month"},
+            "overdueOutstanding": {"receivable": 5234500, "payable": 810000}}
 
 def make(year=2026, retention=91.4, months=10, negative=False, with_insights=True):
     labels = [f"{m:02d}" for m in range(1, months + 1)]
@@ -67,7 +68,9 @@ with sync_playwright() as p:
     # --- the real server (before the mock goes in): the new insights are present and consistent with the existing numbers
     api = page.request.get(BASE + "/api/dashboard"); body = api.json()
     ins = body.get("insights") or {}
-    check("the real /api/dashboard carries insights without changing the existing fields", api.ok and set(ins) == {"brokerage", "trends", "reinsurersByCases", "grossPremiumUsd"} and "insights" not in body["brokerage"] and {"labels", "current", "prior", "target"} <= set(body["brokerage"]), list(ins))
+    check("the real /api/dashboard carries insights without changing the existing fields", api.ok and set(ins) == {"brokerage", "trends", "reinsurersByCases", "grossPremiumUsd", "overdueOutstanding"} and "insights" not in body["brokerage"] and {"labels", "current", "prior", "target"} <= set(body["brokerage"]), list(ins))
+    ov = ins["overdueOutstanding"]
+    check("real data: the overdue amounts are part of the receivable and payable totals (never more than them)", 0 <= ov["receivable"] <= body["metrics"]["outstandingLeg1Ntd"] + 0.01 and 0 <= ov["payable"] <= body["metrics"]["outstandingLeg2Ntd"] + 0.01, (ov, body["metrics"]["outstandingLeg1Ntd"], body["metrics"]["outstandingLeg2Ntd"]))
     usd = ins["grossPremiumUsd"]
     check("real data: the USD amount is per-policy at each recognition month (so not one simple division), positive, and absent only when there is no USD rate", usd is None or (usd["amount"] > 0 and usd["basis"] == "recognition-month"), usd)
     bc = ins["brokerage"]["byClass"]; n_real = len(body["brokerage"]["current"])
@@ -107,6 +110,11 @@ with sync_playwright() as p:
     check("hovering the rating lists the seven levels and marks the current one", page.locator(".rate-pop .rp-row").count() == 7 and page.locator(".rate-pop .rp-row.on").inner_text().startswith("Excellent") and page.locator(".rate-pop").is_visible())
     page.mouse.move(5, 5)
 
+    # --- Overdue Receivable / Payable (2026-11-26): the part of the amount above that is past its actual due date
+    od = page.get_by_test_id("dashboard-overdue"); acc_box = acc.locator(".acc-val").bounding_box(); od_box = od.bounding_box()
+    check("the Accounting card shows an Overdue line with its own receivable and payable", od.inner_text().replace("\n", " ") == "Overdue TWD 5,234,500 / 810,000", od.inner_text())
+    check("the Overdue line sits right below the main Receivable / Payable amount and is in the status red", od_box["y"] >= acc_box["y"] + acc_box["height"] - 2 and page.evaluate("() => getComputedStyle(document.querySelector('[data-testid=dashboard-overdue]')).color") == "rgb(121, 31, 31)")
+    check("hovering the Overdue line explains it is part of the amount above", "actual due date" in od.get_attribute("title"))
     # --- claims by original currency expand
     check("claims list is collapsed at first", not page.locator(".acc-claims.open").count())
     page.get_by_role("button", name="Claims by original currency").click(); page.wait_for_timeout(350)
@@ -292,7 +300,7 @@ with sync_playwright() as p:
     check("Share returns to the amount ranking", rnames() == ["Swiss Re", "Allianz"])
     # without insights (older server response) every new control stays out of the way
     state["insights"] = False; page.reload(); page.locator(".rdash").wait_for(); page.wait_for_selector(".trend-bar.current"); page.wait_for_timeout(1200)
-    check("without insights nothing new is shown and nothing breaks", page.locator(".spark").count() == 0 and page.get_by_test_id("dashboard-gross-premium-usd").count() == 0 and page.locator(".cls-select").count() == 0 and page.get_by_role("button", name="vs 2024").count() == 0
+    check("without insights nothing new is shown and nothing breaks", page.locator(".spark").count() == 0 and page.get_by_test_id("dashboard-gross-premium-usd").count() == 0 and page.get_by_test_id("dashboard-overdue").count() == 0 and page.locator(".cls-select").count() == 0 and page.get_by_role("button", name="vs 2024").count() == 0
           and page.get_by_role("button", name="Cases").count() == 0 and page.locator(".trend-bar.current").count() == n and page.get_by_test_id("dashboard-yoy").count() == 1)
     state["insights"] = True
 

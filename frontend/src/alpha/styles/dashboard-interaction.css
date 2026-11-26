@@ -76,6 +76,8 @@
 
 /* Accounting 小卡 */
 .rdash .acc-val { color: var(--dink); font-family: var(--mono); font-size: 18px; font-weight: 500; }
+.rdash .acc-overdue { margin-top: 4px; color: #791F1F; font-size: 14px; font-weight: 500; cursor: help; }
+.rdash .acc-overdue.clear { color: var(--inkm); font-weight: 400; }
 .rdash .acc-claims { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--m-base) var(--m-ease); }
 .rdash .acc-claims > div { overflow: hidden; }
 .rdash .acc-claims.open { grid-template-rows: 1fr; }

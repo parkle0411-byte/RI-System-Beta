@@ -93,6 +93,8 @@ const rowTip = row => `TWD ${formatAmount(row.amount)} · ${Number(row.pct || 0)
 
 // 補充資料（後端 insights；沒有時各項互動自動隱藏）
 const insights = computed(() => dashboard.value.insights || {})
+// Accounting 小卡的逾期部分（2026-11-26）：實際到期日早於今天的未結清應收／應付，已包含在上方總額內
+const overdue = computed(() => insights.value.overdueOutstanding || null)
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const trendMonthLabel = key => `${MONTH_NAMES[Number(String(key).slice(5, 7)) - 1] || key} ${String(key).slice(0, 4)}`
 const trends = computed(() => insights.value.trends)
@@ -177,6 +179,7 @@ onBeforeUnmount(() => clearInterval(clock))
     <section class="card accounting-card" data-testid="dashboard-accounting">
       <h3 style="margin-bottom:14px">Accounting · Receivable / Payable</h3>
       <div class="val acc-val">TWD <span v-countup="{ to: dashboard.metrics?.outstandingLeg1Ntd || 0, fmt: formatAmount }"></span> / <span v-countup="{ to: dashboard.metrics?.outstandingLeg2Ntd || 0, fmt: formatAmount }"></span></div>
+      <div v-if="overdue" class="acc-overdue" :class="{ clear: !overdue.receivable && !overdue.payable }" data-testid="dashboard-overdue" title="Part of the amount above whose actual due date is before today">Overdue TWD <span v-countup="{ to: overdue.receivable || 0, fmt: formatAmount }"></span> / <span v-countup="{ to: overdue.payable || 0, fmt: formatAmount }"></span></div>
       <div class="acc-notes"><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — Past 5 years record only.</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small><small v-if="dashboard.metrics?.outstandingSince && !dashboard.metrics?.missingPostingRates?.length" data-testid="outstanding-since">Past 5 years record only.</small></div>
       <div v-if="dashboard.metrics?.claimOutstandingByCurrency?.length">
         <button type="button" class="el-button secondary-button acc-toggle" :class="{ open: claimsOpen }" :aria-expanded="claimsOpen" style="margin-top:8px" @click="claimsOpen = !claimsOpen"><span class="chev">▸</span>Claims by original currency</button>
