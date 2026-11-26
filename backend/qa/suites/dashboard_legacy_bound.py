@@ -29,13 +29,19 @@ bound = [{'month': '2026-11', 'newOrRenew': 'Renew'}, {'month': '2026-11', 'newO
          {'month': '2026-02', 'newOrRenew': 'Renew'}, {'month': '2026-12', 'newOrRenew': 'Renew'},
          {'month': '2025-11', 'newOrRenew': 'New'}, {'month': '2025-12', 'newOrRenew': 'Renew'}, {'month': '2025-01', 'newOrRenew': ''}]
 m = build_dashboard(rows, [], [], now, legacy={'policies': [], 'trend': [], 'outstanding': [], 'bound': bound})['metrics']
-check('Renewals Bound MTD adds legacy renewals bound this month', m['renewalsMtd'] == base['renewalsMtd'] + 2, (m['renewalsMtd'], base['renewalsMtd']))
+check('Renewals Bound MTD ignores legacy renewals (new system only, 2026-11-26 owner decision)', m['renewalsMtd'] == base['renewalsMtd'], (m['renewalsMtd'], base['renewalsMtd']))
 check('New Business MTD adds legacy new policies bound this month', m['newBusinessMtd'] == base['newBusinessMtd'] + 1, (m['newBusinessMtd'], base['newBusinessMtd']))
 check('Total Bound YTD adds this year up to this month (later months excluded)', m['ytdCurrent'] == base['ytdCurrent'] + 4, (m['ytdCurrent'], base['ytdCurrent']))
 check('Prior-Year YTD adds the same months of last year (December excluded, blank New / Renew included)', m['ytdPrior'] == base['ytdPrior'] + 2, (m['ytdPrior'], base['ytdPrior']))
 only = build_dashboard([], [], [], now, legacy={'policies': [], 'trend': [], 'outstanding': [], 'bound': bound})['metrics']
-check('legacy alone: 2 renewals and 1 new this month, 4 bound this year, 2 last year', (only['renewalsMtd'], only['newBusinessMtd'], only['ytdCurrent'], only['ytdPrior']) == (2, 1, 4, 2), only)
-check('Retention Ratio uses the legacy renewals (3 this year / 2 last year)', abs(only['retentionRatio'] - 150) < 1e-9, only['retentionRatio'])
+check('legacy alone: 0 renewals (not counted), 1 new this month, 4 bound this year, 2 last year', (only['renewalsMtd'], only['newBusinessMtd'], only['ytdCurrent'], only['ytdPrior']) == (0, 1, 4, 2), only)
+check('Retention Ratio is new system only: legacy alone gives N/A, and legacy never changes it', only['retentionRatio'] is None and m['retentionRatio'] == base['retentionRatio'], (only['retentionRatio'], m['retentionRatio'], base['retentionRatio']))
+live = [dict(r, status='posted') for r in rows]
+live_base = build_dashboard(live, [], [], now)['metrics']; live_m = build_dashboard(live, [], [], now, legacy={'policies': [], 'trend': [], 'outstanding': [], 'bound': bound})['metrics']
+check('with live new-system cases: Retention is 2 renewals this year over 1 policy last year, with or without legacy', live_base['retentionRatio'] == 200 and live_m['retentionRatio'] == 200, (live_base['retentionRatio'], live_m['retentionRatio']))
+check('Prior-Year YTD and Total Bound YTD still include legacy while Retention does not', live_m['ytdPrior'] == live_base['ytdPrior'] + 2 and live_m['ytdCurrent'] == live_base['ytdCurrent'] + 4, (live_m['ytdPrior'], live_base['ytdPrior']))
+exp = build_dashboard(rows, [], [], now, legacy={'policies': [{'expiry': '2026-11-30', 'items': []}, {'expiry': '2026-11-02', 'items': []}], 'trend': [], 'outstanding': [], 'bound': bound})['metrics']
+check('Expected Renewals MTD ignores legacy policies expiring this month (new system only)', exp['expectedRenewalsMtd'] == base['expectedRenewalsMtd'], (exp['expectedRenewalsMtd'], base['expectedRenewalsMtd']))
 check('Expected Renewals and In-Force are not changed by bound counts', m['expectedRenewalsMtd'] == base['expectedRenewalsMtd'] and m['inForcePolicies'] == base['inForcePolicies'])
 check('without legacy input (personal Dashboard) nothing changes', build_dashboard(rows, [], [], now, legacy=None)['metrics'] == base)
 ends = [{'expiry': '2026-11-19'}, {'expiry': '2027-01-31'}, {'expiry': '2026-11-18'}, {'expiry': ''}]

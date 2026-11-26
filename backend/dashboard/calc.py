@@ -187,7 +187,7 @@ def _insights(extras_inputs):
       - brokerage.prior2：前前年每月佣金（與 prior、current 同一套規則；已結算月份用 Production 關帳數字）
       - byClass：每月佣金按險種拆分；前 5 大險種各一列，其餘（含舊資料與 Facility 沒有險種的收入）併入 Other，
         各險種加總永遠等於當月總額
-      - trends：近 12 個月的新承保件數（含舊資料；Total Bound YTD 為今年各月加總）
+      - trends：近 12 個月的新承保件數（bound、new 含舊資料，Total Bound YTD 為今年各月 bound 加總；renew 只算新系統）
       - reinsurersByCases：在保保單件數的再保人排行（新系統保單＋舊資料在保保單，與金額榜同一批）
     """
     x = extras_inputs
@@ -242,10 +242,8 @@ def _insights(extras_inputs):
         key = b["month"][:7]
         if key in bound:
             bound[key] += 1
-            if b["newOrRenew"] == "Renew":
-                renew[key] += 1
-            elif b["newOrRenew"] == "New":
-                new[key] += 1
+            if b["newOrRenew"] == "New":
+                new[key] += 1   # 續保件數只算新系統（與 Renewals Bound MTD 同一口徑），舊資料不加
 
     # 再保人件數：由多到少，同件數維持與金額榜相同的名稱順序；前 6 名＋其餘併成 Other（其餘的件數是聯集，不重複計算）
     cases = x['reinsurer_cases']
@@ -325,9 +323,10 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     def legacy_ytd(target_year, kind=None):
         low, high = f"{js_num_str(target_year)}-01", f"{js_num_str(target_year)}-{_pad2(month_number)}"
         return len([b for b in bound if low <= b["month"][:7] <= high and (kind is None or b["newOrRenew"] == kind)])
+    # 2026-11-26 owner: Renewals Bound MTD, Expected Renewals MTD and the Retention Ratio count the new system only
+    # (legacy policies still count in Total Bound YTD, Prior-Year YTD and New Business MTD).
+    ytd_prior_new_system = ytd_prior
     ytd_current += legacy_ytd(year); ytd_prior += legacy_ytd(year - 1)
-    renewals_ytd += legacy_ytd(year, "Renew")
-    renewals_mtd += len([b for b in bound if b["month"][:7] == current_month and b["newOrRenew"] == "Renew"])
     new_business_mtd += len([b for b in bound if b["month"][:7] == current_month and b["newOrRenew"] == "New"])
 
     gross = out1 = out2 = 0.0
@@ -368,7 +367,6 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             reinsurer_totals[name] = reinsurer_totals.get(name, 0.0) + amount
             if extras is not None:
                 reinsurer_cases.setdefault(name, set()).add(("legacy", policy_index))
-    expected_renewals_mtd += legacy_renewals
     # 2026-11-19 owner: legacy endorsements still in force (company-wide Dashboard).
     legacy_active_endorsements = len([e for e in (legacy or {}).get("endorsements", [])
                                       if isinstance(e.get("expiry"), str) and e["expiry"] and _ge_text(e["expiry"], today)])
@@ -524,7 +522,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             "expectedRenewalsMtd": expected_renewals_mtd, "newBusinessMtd": new_business_mtd,
             "inForcePolicies": len(in_force) + legacy_in_force, "activeEndorsements": len(active_endorsements) + legacy_active_endorsements,
             "openQuotes": len([r for r in roots if get(r, "status") == "draft"]),
-            "retentionRatio": renewals_ytd / ytd_prior * 100 if ytd_prior > 0 else None,
+            "retentionRatio": renewals_ytd / ytd_prior_new_system * 100 if ytd_prior_new_system > 0 else None,
             "grossPremiumNtd": gross, "outstandingLeg1Ntd": out1, "outstandingLeg2Ntd": out2, "outstandingSince": outstanding_since,
             "claimOutstandingByCurrency": [dict(currency=key, receivable=round(group['receivable'], 2), payable=round(group['payable'], 2)) for key, group in sorted(claim_outstanding.items())],
             "accountingTotalIncomplete": bool(missing_fx or data_errors), "missingPostingRates": missing_fx,

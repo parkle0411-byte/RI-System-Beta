@@ -79,6 +79,7 @@ check('trends cover the last 12 months ending this month', len(t['months']) == 1
 this_year = [i for i, m in enumerate(t['months']) if m.startswith('2026')]
 check('this year\'s monthly counts add up to Total Bound YTD', sum(t['bound'][i] for i in this_year) == with_extras['metrics']['ytdCurrent'], (sum(t['bound'][i] for i in this_year), with_extras['metrics']['ytdCurrent']))
 check('this month\'s counts equal Renewals and New Business Bound MTD', t['renew'][-1] == with_extras['metrics']['renewalsMtd'] and t['new'][-1] == with_extras['metrics']['newBusinessMtd'], (t['renew'][-1], t['new'][-1]))
+check('the renewal series is new system only (legacy bound a Renew this month and it is not counted)', t['renew'][-1] == 1 and t['renew'][t['months'].index('2026-11')] == with_extras['metrics']['renewalsMtd'], t['renew'])
 check('legacy bound policies are counted (Feb 2026 new, Dec 2025 blank kind only in the total)', t['new'][t['months'].index('2026-02')] == 1 and t['bound'][t['months'].index('2025-12')] == 1 and t['renew'][t['months'].index('2025-12')] == 0)
 check('counts have the same length as the month list', all(len(t[k]) == 12 for k in ('bound', 'renew', 'new')))
 
