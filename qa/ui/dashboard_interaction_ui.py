@@ -21,7 +21,8 @@ def insights(months):
     window = [f"{2025 + (11 + i) // 12}-{(11 + i) % 12 + 1:02d}" for i in range(12)]   # 2025-12 … 2026-11
     return {"brokerage": {"prior2": pri2, "prior2Status": ["closed"] * months, "byClass": {"names": list(share), "current": by(cur), "prior": by(pri), "prior2": by(pri2)}},
             "trends": {"months": window, "bound": [3, 4, 5, 4, 6, 5, 7, 6, 5, 4, 8, 12], "renew": [1, 2, 2, 1, 3, 2, 3, 2, 2, 1, 4, 5], "new": [2, 2, 3, 3, 3, 3, 4, 4, 3, 3, 4, 7]},
-            "reinsurersByCases": {"rows": [{"name": "Allianz", "cases": 30}, {"name": "Swiss Re", "cases": 20}], "policies": 40}}
+            "reinsurersByCases": {"rows": [{"name": "Allianz", "cases": 30}, {"name": "Swiss Re", "cases": 20}], "policies": 40},
+            "grossPremiumUsd": {"amount": 15006340.5, "rate": 32.14, "month": "2026-10"}}
 
 def make(year=2026, retention=91.4, months=10, negative=False, with_insights=True):
     labels = [f"{m:02d}" for m in range(1, months + 1)]
@@ -34,7 +35,7 @@ def make(year=2026, retention=91.4, months=10, negative=False, with_insights=Tru
         "period": {"year": 2026, "currentMonth": "2026-11", "monthNumber": months},
         "metrics": {"ytdCurrent": 482, "ytdPrior": 431, "renewalsMtd": 37, "expectedRenewalsMtd": 41, "newBusinessMtd": 12,
                     "inForcePolicies": 1284, "activeEndorsements": 73, "openQuotes": 56, "retentionRatio": retention,
-                    "grossPremiumNtd": 482316540, "outstandingLeg1Ntd": 12480000, "outstandingLeg2Ntd": 9320000,
+                    "grossPremiumNtd": 482316540.416, "outstandingLeg1Ntd": 12480000, "outstandingLeg2Ntd": 9320000,
                     "claimOutstandingByCurrency": [{"currency": "USD", "receivable": 1200, "payable": 800}, {"currency": "EUR", "receivable": 50, "payable": 0}],
                     "missingPostingRates": [], "accountingTotalEstimated": False},
         "brokerage": {"labels": labels, "currentStatus": status, "priorStatus": ["closed"] * months, "current": current, "prior": prior, "target": target, "annualTarget": 6000000},
@@ -66,7 +67,9 @@ with sync_playwright() as p:
     # --- the real server (before the mock goes in): the new insights are present and consistent with the existing numbers
     api = page.request.get(BASE + "/api/dashboard"); body = api.json()
     ins = body.get("insights") or {}
-    check("the real /api/dashboard carries insights without changing the existing fields", api.ok and set(ins) == {"brokerage", "trends", "reinsurersByCases"} and "insights" not in body["brokerage"] and {"labels", "current", "prior", "target"} <= set(body["brokerage"]), list(ins))
+    check("the real /api/dashboard carries insights without changing the existing fields", api.ok and set(ins) == {"brokerage", "trends", "reinsurersByCases", "grossPremiumUsd"} and "insights" not in body["brokerage"] and {"labels", "current", "prior", "target"} <= set(body["brokerage"]), list(ins))
+    usd = ins["grossPremiumUsd"]
+    check("real data: the USD amount is the TWD Total Gross Premium divided by the USD rate it names (or absent when there is no USD rate)", usd is None or (usd["rate"] > 0 and abs(usd["amount"] - body["metrics"]["grossPremiumNtd"] / usd["rate"]) < 0.01 and re.match(r"^\d{4}-\d{2}$", usd["month"]) is not None), usd)
     bc = ins["brokerage"]["byClass"]; n_real = len(body["brokerage"]["current"])
     check("real data: the classes add up to the month totals for current, prior and prior2", all(abs(sum(bc[k][name][i] for name in bc["names"]) - ref[i]) < 0.01 for k, ref in (("current", body["brokerage"]["current"]), ("prior", body["brokerage"]["prior"]), ("prior2", ins["brokerage"]["prior2"])) for i in range(n_real)))
     this_year = [i for i, m in enumerate(ins["trends"]["months"]) if m.startswith(str(body["period"]["year"]))]
@@ -90,7 +93,12 @@ with sync_playwright() as p:
     check("Total Gross Premium is no longer a KPI cell", page.locator(".kpi", has_text="Total Gross Premium").count() == 0 and page.locator(".kpi").count() == 4)
     acc = page.get_by_test_id("dashboard-accounting")
     check("Accounting is its own card (not inside the KPI grid)", acc.count() == 1 and acc.locator("xpath=ancestor::*[contains(@class,'kpi-grid')]").count() == 0 and "Accounting · Receivable / Payable" in acc.inner_text())
-    check("Gross premium keeps its original format", "TWD 482,316,540.00" in page.get_by_test_id("dashboard-gross-premium").inner_text().replace("\n", " "), page.get_by_test_id("dashboard-gross-premium").inner_text())
+    gp_text = page.get_by_test_id("dashboard-gross-premium").inner_text().replace("\n", " ")
+    check("Total Gross Premium is a whole number of TWD (no decimals, rounded)", "TWD 482,316,540" in gp_text and "482,316,540." not in gp_text, gp_text)
+    check("a USD amount sits to the right of the TWD amount with two decimals", "USD 15,006,340.50" in gp_text and gp_text.index("TWD") < gp_text.index("USD"), gp_text)
+    gp_box = page.get_by_test_id("dashboard-gross-premium").locator(".gp-v").nth(0).bounding_box(); usd_box = page.get_by_test_id("dashboard-gross-premium-usd").bounding_box()
+    check("the USD amount is on the same line, right of the TWD amount", usd_box["x"] >= gp_box["x"] + gp_box["width"] - 1 and abs(usd_box["y"] + usd_box["height"] / 2 - (gp_box["y"] + gp_box["height"] / 2)) <= 12, (gp_box, usd_box))
+    check("hovering the USD amount names the rate and month used", page.get_by_test_id("dashboard-gross-premium-usd").get_attribute("title") == "USD 1 = TWD 32.14 (2026-10)")
     check("count-up ends on the original text (no thousands separator on counts)", page.locator(".kpi", has_text="In-Force Policies").locator(".val").inner_text() == "1284"
           and page.locator(".stat-value").first.inner_text() == "482")
     check("Accounting totals keep the original format", "TWD 12,480,000 / 9,320,000" in acc.inner_text().replace("\n", " "), acc.inner_text())
@@ -218,6 +226,14 @@ with sync_playwright() as p:
     state["retention"] = 91.4; page.reload(); page.locator(".rdash").wait_for(); page.wait_for_selector(".trend-bar.current"); page.wait_for_timeout(1500)
     yoy = page.get_by_test_id("dashboard-yoy")
     check("Total Bound YTD shows its year-over-year change from the existing numbers", yoy.inner_text() == "▲ 11.8% vs 2025", yoy.inner_text())
+    check("the target line is a smooth curve through every month (one polyline, ten samples between months, vertices land on the dots)", page.evaluate("""() => {
+      const line = document.querySelector('.trend-svg polyline.target');
+      const pts = line.getAttribute('points').trim().split(/\\s+/).map(p => p.split(',').map(Number));
+      const cols = [...document.querySelectorAll('.trend-chart .col')];
+      if (pts.length !== (cols.length - 1) * 10 + 1) return false;
+      return cols.every((g, i) => { const tx = parseFloat(g.style.transform.match(/translateX\\(([-\\d.]+)px\\)/)[1]); const c = g.querySelector('.trend-point.target'); const v = pts[i * 10];
+        return Math.abs(v[0] - (tx + parseFloat(c.getAttribute('cx')))) < 0.02 && Math.abs(v[1] - parseFloat(c.getAttribute('cy'))) < 0.02; });
+    }"""))
     check("each of the three stat cards has a sparkline", page.locator(".row3 .spark").count() == 3)
     label = page.locator(".row3 .card").first.locator(".spark").get_attribute("aria-label")
     nums = [int(x) for x in re.findall(r"\d+", label.split(":", 1)[1])]
@@ -274,7 +290,7 @@ with sync_playwright() as p:
     check("Share returns to the amount ranking", rnames() == ["Swiss Re", "Allianz"])
     # without insights (older server response) every new control stays out of the way
     state["insights"] = False; page.reload(); page.locator(".rdash").wait_for(); page.wait_for_selector(".trend-bar.current"); page.wait_for_timeout(1200)
-    check("without insights nothing new is shown and nothing breaks", page.locator(".spark").count() == 0 and page.locator(".cls-select").count() == 0 and page.get_by_role("button", name="vs 2024").count() == 0
+    check("without insights nothing new is shown and nothing breaks", page.locator(".spark").count() == 0 and page.get_by_test_id("dashboard-gross-premium-usd").count() == 0 and page.locator(".cls-select").count() == 0 and page.get_by_role("button", name="vs 2024").count() == 0
           and page.get_by_role("button", name="Cases").count() == 0 and page.locator(".trend-bar.current").count() == n and page.get_by_test_id("dashboard-yoy").count() == 1)
     state["insights"] = True
 

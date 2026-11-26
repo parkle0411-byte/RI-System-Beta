@@ -6,6 +6,7 @@
 .rdash .dash-bar { display: flex; align-items: center; gap: 10px; margin-bottom: -6px; color: var(--inkm); font-size: 12px; }
 .rdash .dash-bar .gp { margin-right: auto; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .rdash .gp-l { color: var(--inkm); font-size: 11px; }
+.rdash .gp-usd { padding-left: 14px; border-left: 1px solid var(--border); color: var(--ink2); font-size: 16px; cursor: help; }
 .rdash .gp-v { color: var(--dink); font-family: var(--mono); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .rdash .gp-note { color: var(--inkm); font-size: 11px; }
 .rdash .dash-bar b { color: var(--ink2); font-weight: 500; }

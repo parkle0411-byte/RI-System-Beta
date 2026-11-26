@@ -130,7 +130,24 @@ function geoStyle(g) { return { x: g.x + 'px', y: g.y + 'px', width: g.width + '
 const hit = c => !classFilter.value && c.T > 0 && c.C >= c.T
 const dimmed = c => classFilter.value ? false : (highlight.value === 'above' ? !hit(c) : highlight.value === 'below' ? hit(c) : false)
 const stackOn = computed(() => stack.value && !classFilter.value && hasClass.value)
-const targetPoints = computed(() => shown.value.map((c, s) => `${L + s * slotW.value + slotW.value / 2},${y(c.T)}`).join(' '))
+// 目標線：一般平滑曲線（Catmull-Rom，2026-11-26 業主決定），通過每個月的點；仍用單一 polyline（每兩個月之間取樣 10 點）
+const CURVE_STEPS = 10
+const round2 = v => Math.round(v * 100) / 100
+function smoothPoints(points) {
+  if (points.length < 3) return points.map(p => `${round2(p[0])},${round2(p[1])}`).join(' ')
+  const out = []
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] || points[i], p1 = points[i], p2 = points[i + 1], p3 = points[i + 2] || p2
+    const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6], c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]
+    for (let k = 0; k < CURVE_STEPS; k++) {
+      const t = k / CURVE_STEPS, u = 1 - t
+      out.push([u * u * u * p1[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * p2[0], u * u * u * p1[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * p2[1]])
+    }
+  }
+  out.push(points[points.length - 1])
+  return out.map(p => `${round2(p[0])},${round2(p[1])}`).join(' ')
+}
+const targetPoints = computed(() => smoothPoints(shown.value.map((c, s) => [L + s * slotW.value + slotW.value / 2, y(c.T)])))
 const labelText = c => {
   const d = pct(c.C, c.P)
   return d == null ? '' : `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(0)}%`

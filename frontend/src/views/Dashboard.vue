@@ -17,6 +17,9 @@ import '../alpha/styles/dashboard-interaction.css'
 
 const twoDecimals = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const formatTwoDecimals = value => twoDecimals.format(Number(value) || 0)
+// 台幣金額不顯示小數（2026-11-26 業主決定）
+const wholeNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+const formatTwd = value => wholeNumber.format(Math.round(Number(value) || 0))
 
 const router = useRouter()
 const dashboardLoading = ref(false)
@@ -93,6 +96,8 @@ const insights = computed(() => dashboard.value.insights || {})
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const trendMonthLabel = key => `${MONTH_NAMES[Number(String(key).slice(5, 7)) - 1] || key} ${String(key).slice(0, 4)}`
 const trends = computed(() => insights.value.trends)
+// Total Gross Premium 的美金對照：用本月或以前最新的 USD 匯率反推（後端提供；沒有匯率時不顯示）
+const grossUsd = computed(() => insights.value.grossPremiumUsd || null)
 // Total Bound YTD：今年 1 月到本月逐月累計（只有一個月時不畫）；Renewals／New Business：近 12 個月逐月件數
 const sparkTotal = computed(() => {
   const t = trends.value
@@ -130,7 +135,7 @@ onBeforeUnmount(() => clearInterval(clock))
 <div class="rdash" v-loading="dashboardLoading">
   <el-alert v-if="dashboard.metrics?.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation and excluded from financial totals. Correct the saved case data before using complete totals." />
   <div class="dash-bar">
-    <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwoDecimals }"></span></span></div>
+    <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwd }"></span></span><span v-if="grossUsd" class="gp-v gp-usd" data-testid="dashboard-gross-premium-usd" :title="`USD 1 = TWD ${grossUsd.rate} (${grossUsd.month})`">USD <span v-countup="{ to: grossUsd.amount, fmt: formatTwoDecimals }"></span></span></div>
     <span class="upd">Loaded <b>{{ loadedText }}</b></span>
     <el-button class="secondary-button" size="small" data-testid="dashboard-refresh" :disabled="dashboardLoading" @click="refresh">Refresh</el-button>
   </div>

@@ -182,6 +182,24 @@ def _previous_months(current_month, count):
     return list(reversed(result))
 
 
+def usd_rate_info(fx_rows, current_month):
+    """USD 匯率（1 USD 換多少 TWD）：本月或以前最新月份的匯率；沒有就用任何月份中最新的（與 build_rate_lookup 同一套規則）。
+    回傳 (rate, year_month)；完全沒有可用的 USD 匯率時回傳 (None, None)。"""
+    at_or_before = any_latest = None
+    for row in (fx_rows if is_array(fx_rows) else []):
+        if js_upper(js_to_string(js_or(get(row, "currency"), ""))) != "USD":
+            continue
+        year_month = js_to_string(js_or(get(row, "year_month"), ""))
+        rate = js_to_number(get(row, "rate"))
+        if not js_is_finite(rate) or rate <= 0:
+            continue
+        if any_latest is None or _u16(year_month) > _u16(any_latest[1]):
+            any_latest = (rate, year_month)
+        if _u16(year_month) <= _u16(current_month) and (at_or_before is None or _u16(year_month) > _u16(at_or_before[1])):
+            at_or_before = (rate, year_month)
+    return at_or_before or any_latest or (None, None)
+
+
 def _insights(extras_inputs):
     """趨勢圖與統計卡的補充資料（2026-11-25）：全部由 build_dashboard 已算好的資料整理，不改任何既有數字。
       - brokerage.prior2：前前年每月佣金（與 prior、current 同一套規則；已結算月份用 Production 關帳數字）
@@ -189,8 +207,10 @@ def _insights(extras_inputs):
         各險種加總永遠等於當月總額
       - trends：近 12 個月的新承保件數（bound、new 含舊資料，Total Bound YTD 為今年各月 bound 加總；renew 只算新系統）
       - reinsurersByCases：在保保單件數的再保人排行（新系統保單＋舊資料在保保單，與金額榜同一批）
+      - grossPremiumUsd（2026-11-26）：Total Gross Premium 用本月或以前最新的 USD 匯率反推成美金（沒有 USD 匯率時為 None）
     """
     x = extras_inputs
+    usd_rate, usd_month = usd_rate_info(x['fx_rows'], x['current_month'])
     monthly, class_monthly, other = x['monthly'], x['class_monthly'], x['OTHER']
     trend_year, months = x['trend_year'], x['months']
 
@@ -263,6 +283,7 @@ def _insights(extras_inputs):
                       "byClass": {"names": names, "current": by_class(trend_year), "prior": by_class(trend_year - 1), "prior2": by_class(trend_year - 2)}},
         "trends": {"months": window, "bound": [bound[m] for m in window], "renew": [renew[m] for m in window], "new": [new[m] for m in window]},
         "reinsurersByCases": {"rows": rows, "policies": len(everyone)},
+        "grossPremiumUsd": ({"amount": x['gross'] / usd_rate, "rate": usd_rate, "month": usd_month} if usd_rate else None),
     }
 
 
@@ -512,7 +533,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         extras.update(_insights(extras_inputs={
             'monthly': monthly, 'class_monthly': class_monthly, 'OTHER': OTHER, 'trend_year': trend_year, 'months': months,
             'closed_months': closed_months, 'reinsurer_cases': reinsurer_cases, 'roots': roots, 'live': _live, 'posted_month': posted_month,
-            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force),
+            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force), 'gross': gross, 'fx_rows': fx_rows,
         }))
     return {
         "ok": True,
