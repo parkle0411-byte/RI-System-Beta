@@ -129,7 +129,7 @@ onMounted(loadProductionPreview)
 
 <template>
   <div class="overview-stack">
-    <section class="table-card production-report-card" v-skeleton="{ on: productionLoading, kind: 'table', cols: 9, rows: 8 }">
+    <section class="table-card production-report-card" v-skeleton="{ on: productionLoading, kind: 'table', rows: 8, rowH: 48 }">
       <div class="section-heading production-heading">
         <div><span class="pending-badge">Versioned monthly close</span><h2>Production Report</h2><p v-if="productionPreview.scope?.canOperate">Preview current rows, defer exceptions, generate an immutable Excel version, then close the latest unchanged version.</p><p v-else>View monthly Production rows and download existing report versions as Excel.</p></div>
         <div class="production-month-control"><label for="production-month">Report month</label><el-date-picker id="production-month" v-model="productionMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM"></el-date-picker><el-button class="primary-button" :loading="productionLoading" @click="loadProductionPreview">Preview</el-button></div>
@@ -137,13 +137,14 @@ onMounted(loadProductionPreview)
       <el-alert v-if="productionPreview.scope?.historicalMonth" class="case-readiness-alert" type="info" :closable="false" show-icon :title="productionMonth + ' is a historical month (treated as closed)'" :description="'Months before ' + (productionPreview.scope?.productionStartMonth || '') + ' are not generated or closed. The Legacy Data rows listed here are its recognized Production; new-system production is recognized in ' + (productionPreview.scope?.productionStartMonth || '') + '.'" />
       <el-alert v-else-if="productionPreview.scope?.monthClosed" class="case-readiness-alert" type="success" :closable="false" show-icon :title="productionMonth + ' is closed'" description="The report version and source rows are fixed. The monthly FX rate is locked."></el-alert>
       <el-alert v-else-if="productionPreview.summary?.missingRateCurrencies?.length" class="case-readiness-alert" type="warning" :closable="false" show-icon :title="'Official ' + productionMonth + ' exchange rate required for ' + productionPreview.summary.missingRateCurrencies.join(', ')" description="Preview remains available, but report generation is blocked until the official monthly rate is stored in FX Rates."></el-alert>
+      <div v-if="productionLoading && !productionPreview.sourceSignature" class="sk-space sk-space-alert" data-sk></div>
       <el-alert v-if="productionPreview.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation. Correct the saved case data before including those cases in a Production report." />
       <el-alert v-if="productionPreview.accountingRows?.length" type="info" :closable="false" :title="productionPreview.accountingRows.length+' zero-income item(s) will be confirmed on close without appearing in Production performance rows.'" />
       <div class="document-summary production-summary">
-        <article><span>Included rows</span><strong>{{ productionPreview.summary?.rowCount || 0 }}</strong></article>
-        <article><span>Deferred rows</span><strong>{{ productionPreview.summary?.excludedRowCount || 0 }}</strong></article>
-        <article><span>Premium (NTD)</span><strong>{{ formatCurrency(productionPreview.summary?.premiumNtd, 'TWD') }}</strong></article>
-        <article><span>Income (NTD)</span><strong>{{ formatCurrency(productionPreview.summary?.incomeNtd, 'TWD') }}</strong></article>
+        <article><span>Included rows</span><strong data-sk>{{ productionPreview.summary?.rowCount || 0 }}</strong></article>
+        <article><span>Deferred rows</span><strong data-sk>{{ productionPreview.summary?.excludedRowCount || 0 }}</strong></article>
+        <article><span>Premium (NTD)</span><strong data-sk>{{ formatCurrency(productionPreview.summary?.premiumNtd, 'TWD') }}</strong></article>
+        <article><span>Income (NTD)</span><strong data-sk>{{ formatCurrency(productionPreview.summary?.incomeNtd, 'TWD') }}</strong></article>
       </div>
       <div class="production-table-wrap">
         <el-select v-model="aeFilter" clearable filterable placeholder="Filter by Account Executive" aria-label="Filter by Account Executive" style="max-width: 300px; margin-bottom: 10px"><el-option v-for="person in aeOptions" :key="person.id" :label="person.label" :value="person.id" /></el-select>

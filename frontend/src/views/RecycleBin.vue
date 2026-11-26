@@ -55,8 +55,8 @@ onMounted(loadRecycleBin)
       <el-button class="secondary-button" :loading="recycleLoading" @click="loadRecycleBin">Refresh</el-button>
     </div>
     <el-alert class="case-readiness-alert" type="info" :closable="false" show-icon title="No permanent delete" :description="'Retention: ' + recyclePolicy.retentionYears + ' years. Records remain retained; only Restore is available.'"></el-alert>
-    <section class="table-card" v-skeleton="{ on: recycleLoading, kind: 'table', cols: 4, rows: 5 }">
-      <div class="section-heading"><div><h2>Draft Recycle Bin</h2><p>{{ recycleItems.length }} retained Draft{{ recycleItems.length === 1 ? '' : 's' }}</p></div></div>
+    <section class="table-card" v-skeleton="{ on: recycleLoading, kind: 'table', rows: 5, rowH: 58 }">
+      <div class="section-heading"><div><h2>Draft Recycle Bin</h2><p data-sk>{{ recycleItems.length }} retained Draft{{ recycleItems.length === 1 ? '' : 's' }}</p></div></div>
       <el-table :data="recycleItems" class="case-table" row-key="id" empty-text="No Drafts in the recycle bin.">
         <el-table-column prop="originalInsured" label="Insured" min-width="200"><template #default="{ row }">{{ row.originalInsured || 'Unnamed Draft' }}<br><small class="case-ref">{{ row.caseUid }}</small></template></el-table-column>
         <el-table-column prop="deletedBy" label="Recycled by" min-width="140"><template #default="{ row }">{{ row.deletedBy }}<br><small>{{ formatDateTime(row.deletedAt) }}</small></template></el-table-column>

@@ -158,7 +158,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                   <el-option label="Reversed" value="reversed"></el-option>
                 </el-select>
               </div>
-              <el-table v-accounting-scroll="'Scroll account list horizontally'" v-skeleton="{ on: loading && !filteredCases.length, kind: 'table', cols: 8, rows: 8, tool: false }" :max-height="listViewportHeight" :data="filteredCases" class="case-table development-case-table" data-testid="account-list-table" empty-text="No cases yet. Select + New case to create the first draft." row-key="id" @row-click="openCasePreview">
+              <el-table v-accounting-scroll="'Scroll account list horizontally'" v-skeleton="{ on: loading && !filteredCases.length, kind: 'table', rows: 8, rowH: 51 }" :max-height="listViewportHeight" :data="filteredCases" class="case-table development-case-table" data-testid="account-list-table" empty-text="No cases yet. Select + New case to create the first draft." row-key="id" @row-click="openCasePreview">
                 <el-table-column prop="originalInsured" label="Insured (EN)" min-width="220" fixed="left" sortable><template #default="{ row }"><el-button link type="primary" class="insured-preview-link" @click.stop="openCasePreview(row)">{{ row.originalInsured || (overseaEnabled(row) ? 'Oversea Business' : 'Unnamed case') }}</el-button></template></el-table-column>
                 <el-table-column prop="originalInsuredCn" label="Insured (CN)" min-width="180" sortable><template #default="{ row }">{{ row.originalInsuredCn || '—' }}</template></el-table-column>
                 <el-table-column label="Year" width="90" sortable :sort-method="(a,b) => String(a.effectiveDate || '').localeCompare(String(b.effectiveDate || ''))"><template #default="{ row }">{{ String(row.effectiveDate || '').slice(0,4) || '—' }}</template></el-table-column>
@@ -192,7 +192,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
           </template>
 
           <template v-else-if="activeView === 'case-detail'">
-            <div v-if="selectedCase && selectedPayload.reinsuranceStructure === 'FACILITY'" v-skeleton="{ on: caseDetailLoading, kind: 'form', rows: 4 }">
+            <div v-if="selectedCase && selectedPayload.reinsuranceStructure === 'FACILITY'" v-skeleton="{ on: caseDetailLoading, rows: 4 }">
               <FacilityCaseSummary :payload="selectedPayload" />
               <section v-if="can('documents.read')" class="overview-card"><h2>Facility attachments</h2>
                 <div v-for="doc in caseDocuments" :key="doc.id"><el-button link @click="downloadCaseDocument(doc)">{{ doc.filename }}</el-button><el-button v-if="selectedCase.status === 'draft' && can('documents.write')" link @click="deleteCaseDocument(doc)">Remove</el-button></div>
@@ -209,7 +209,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
               </section>
             </div>
             <PlacingSlipPanel v-if="selectedCase && selectedPayload.reinsuranceStructure !== 'FACILITY' && placingRulesEnabled(selectedCase.payload)" :case-record="selectedCase" />
-            <div v-if="selectedPayload.reinsuranceStructure !== 'FACILITY'" v-skeleton="{ on: caseDetailLoading, kind: 'form', rows: 4 }">
+            <div v-if="selectedPayload.reinsuranceStructure !== 'FACILITY'" v-skeleton="{ on: caseDetailLoading, rows: 4 }">
               <el-alert v-if="selectedDataIssues.length" data-testid="case-data-error" type="error" :closable="false" show-icon title="Case data is invalid — amounts pending confirmation" :description="selectedDataIssues.map(i=>i.label).join('; ')" />
               <el-alert v-if="caseWorkflow?.actions?.renewalNotice && can('cases.write')" class="case-readiness-alert renewal-notice" :title="caseWorkflow.actions.renewalNotice" type="info" :closable="false" show-icon></el-alert>
               <el-tabs v-model="caseDetailTab" class="case-detail-tabs" @tab-change="onCaseDetailTabChange">
@@ -224,7 +224,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
               <template v-if="caseDetailTab === 'overview' && selectedCase">
                 <div v-if="overseaEnabled(selectedPayload) && can('documents.read')" class="overview-card"><OverseaBrokerEvidence :endorsement="!!selectedPayload.parentTwRef" :documents="caseDocuments" :coverage="documentCoverage" :loading="documentsLoading" :saving="documentsSaving || announcing" :writable="can('documents.write')" :can-delete="selectedCase.status === 'draft'" v-model:kind="documentForm.kind" :file-list="documentFileList" @file-change="onDocumentFileChange" @file-remove="onDocumentFileRemove" @upload="uploadCaseDocument" @select="toggleDocumentSelection" @download="downloadCaseDocument" @delete="deleteCaseDocument" /></div>
                 <section v-if="overseaEnabled(selectedPayload) && selectedCase.status === 'draft'" class="overview-card"><el-button v-if="can('cases.announce')" class="primary-button" :disabled="selectedAnnounceIssues.length > 0" @click="openAnnounceReview">Review &amp; Announce</el-button><p v-if="selectedAnnounceIssues.length" class="document-help">{{ selectedAnnounceIssues.join(', ') }}</p></section>
-                <div v-if="!overseaEnabled(selectedPayload) &amp;&amp; can('documents.read') &amp;&amp; (can('documents.write') || can('cases.announce'))" class="case-placement-actions" data-testid="overview-placement-actions" v-skeleton="{ on: documentsLoading, kind: 'lines', rows: 2 }">
+                <div v-if="!overseaEnabled(selectedPayload) &amp;&amp; can('documents.read') &amp;&amp; (can('documents.write') || can('cases.announce'))" class="case-placement-actions" data-testid="overview-placement-actions" v-skeleton="{ on: documentsLoading, rows: 2 }">
                     <section v-if="can('documents.write')" class="overview-card document-upload-card">
                       <h2>Upload Evidence</h2>
                       <p class="document-help">Supported: PDF, DOCX, PNG, JPG, EML, MSG, XLSX and XLS. Maximum 30 MB per file.</p>
@@ -402,7 +402,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
 
               <template v-else-if="caseDetailTab === 'documents' && selectedCase">
                 <section v-if="overseaEnabled(selectedPayload)" class="overview-card"><OverseaBrokerEvidence :endorsement="!!selectedPayload.parentTwRef" :documents="caseDocuments" :coverage="documentCoverage" :loading="documentsLoading" :saving="documentsSaving || announcing" :writable="can('documents.write')" :can-delete="selectedCase.status === 'draft'" v-model:kind="documentForm.kind" :file-list="documentFileList" @file-change="onDocumentFileChange" @file-remove="onDocumentFileRemove" @upload="uploadCaseDocument" @select="toggleDocumentSelection" @download="downloadCaseDocument" @delete="deleteCaseDocument" /></section>
-                <div v-else class="documents-grid" v-skeleton="{ on: documentsLoading, kind: 'lines', rows: 5 }">
+                <div v-else class="documents-grid" v-skeleton="{ on: documentsLoading, rows: 5 }">
                   <div class="overview-stack">
                     <section v-if="!overseaEnabled(selectedPayload)" class="overview-card">
                       <div class="section-heading">
@@ -613,7 +613,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
               </template>
 
               <template v-else-if="caseDetailTab === 'claims' && selectedCase">
-                <div class="overview-stack" v-skeleton="{ on: claimsLoading, kind: 'lines', rows: 5 }">
+                <div class="overview-stack" v-skeleton="{ on: claimsLoading, rows: 5 }">
                   <section class="overview-card">
                     <div class="section-heading">
                       <div><span class="pending-badge">Policy-period record</span><h2>Claims — {{ claimsState.rootTwRef || 'Draft' }}</h2><p>Claims are stored once on the root case and remain the same from every endorsement view.</p></div>
@@ -684,7 +684,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
               </template>
 
               <template v-else-if="caseDetailTab === 'endorsements' && selectedCase">
-                <section class="overview-card" v-skeleton="{ on: workflowLoading, kind: 'lines', rows: 4 }">
+                <section class="overview-card" v-skeleton="{ on: workflowLoading, rows: 4 }">
                   <div class="section-heading">
                     <div><h2>Endorsement chain</h2><p>Only the latest Announced or Confirmed case can create the next endorsement.</p></div>
                     <el-button v-if="caseWorkflow?.actions?.canCreateEndorsement && can('cases.write') && caseEntryAllowed(selectedPayload)" class="primary-button" :loading="workflowSaving" @click="createEndorsement">Create endorsement</el-button>
@@ -702,7 +702,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
               </template>
 
               <template v-else-if="caseDetailTab === 'reminders' && selectedCase">
-                <div class="overview-stack" v-skeleton="{ on: remindersLoading, kind: 'lines', rows: 4 }">
+                <div class="overview-stack" v-skeleton="{ on: remindersLoading, rows: 4 }">
                   <section class="overview-card">
                     <div class="section-heading">
                       <div><span class="pending-badge">Automated reminders</span><h2>Reminders — {{ displayTwRef(selectedCase, 'Draft') }}</h2><p>Signed Slip reminders run every day at 09:00 and payment reminders at 09:30 (Taiwan time) for Announced and Confirmed cases.</p></div>
@@ -1159,7 +1159,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
 
               </template>
               <section v-if="overseaEnabled(draft) && reviewDraftCase && can('documents.read')" class="review-section"><OverseaBrokerEvidence :endorsement="!!selectedPayload.parentTwRef" :documents="caseDocuments" :coverage="documentCoverage" :loading="documentsLoading" :saving="documentsSaving || announcing" :writable="can('documents.write')" :can-delete="selectedCase.status === 'draft'" v-model:kind="documentForm.kind" :file-list="documentFileList" @file-change="onDocumentFileChange" @file-remove="onDocumentFileRemove" @upload="uploadCaseDocument" @select="toggleDocumentSelection" @download="downloadCaseDocument" @delete="deleteCaseDocument" /><el-checkbox v-if="can('cases.announce')" v-model="announceConfirmed" class="announce-attestation" :disabled="!documentCoverage.ready || documentsSaving || documentsLoading">我已確認國外 RI Broker 的 Note 對應本案，且 Brokerage 金額及實際收付款日期正確。</el-checkbox></section>
-              <section v-if="!overseaEnabled(draft) &amp;&amp; reviewDraftCase &amp;&amp; can('documents.read')" class="review-section" data-testid="review-placement-evidence" v-skeleton="{ on: documentsLoading, kind: 'lines', rows: 3 }">
+              <section v-if="!overseaEnabled(draft) &amp;&amp; reviewDraftCase &amp;&amp; can('documents.read')" class="review-section" data-testid="review-placement-evidence" v-skeleton="{ on: documentsLoading, rows: 3 }">
                 <h3>Placement evidence</h3>
                 <p class="document-help">Upload {{ draft.parentTwRef ? 'Endorsement' : 'Offer Slip' }} and Signed Slip or Confirmation E-mail covering every reinsurer. Uploaded files are automatically selected.</p>
                 <el-form v-if="can('documents.write')" label-position="top" :disabled="documentsSaving || announcing" data-testid="review-evidence-uploader">

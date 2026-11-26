@@ -63,7 +63,7 @@ function selectFile(e) {
 }
 </script>
 <template>
-  <section v-if="state.eligible || state.versions.length" class="overview-card" data-testid="placing-slip-panel" v-skeleton="{ on: busy, kind: 'lines', rows: 3 }">
+  <section v-if="state.eligible || state.versions.length" class="overview-card" data-testid="placing-slip-panel" v-skeleton="{ on: busy, rows: 3 }">
     <h2>Placing Slip</h2>
     <p>Market enquiry documents. These do not replace Offer Slip, Endorsement or Signed Slip evidence.</p>
     <el-alert v-if="state.outdated" title="Existing Placing Slip may not reflect the latest terms. Edit and upload an updated version." type="warning" :closable="false" />

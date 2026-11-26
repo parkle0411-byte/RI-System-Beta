@@ -100,7 +100,7 @@ onMounted(loadFxRates)
 
 <template>
   <!-- Development presents FX Rates as one operational panel. -->
-  <section class="table-card" v-skeleton="{ on: fxLoading, kind: 'table', cols: 8, rows: 6 }">
+  <section class="table-card" v-skeleton="{ on: fxLoading, kind: 'table', rows: 8, rowH: 54 }">
     <div class="section-heading"><div><h2>FX Rates</h2><p>Official monthly rates to TWD for {{ FX_CURRENCIES.slice(0, -1).join(', ') }} and {{ FX_CURRENCIES[FX_CURRENCIES.length - 1] }}. TWD is always 1; closed months are locked.</p></div><div><el-button v-if="can('fx.write')" class="primary-button" @click="openFxDialog()">+ Set monthly rates</el-button><el-button class="secondary-button" :loading="fxLoading" @click="loadFxRates">Refresh</el-button></div></div>
     <el-table :data="fxRates" class="case-table" row-key="id" empty-text="No monthly FX rates set yet.">
       <el-table-column prop="yearMonth" label="Performance month" min-width="180"><template #default="{ row }"><span class="case-ref">{{ row.yearMonth }}</span></template></el-table-column>

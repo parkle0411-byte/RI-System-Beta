@@ -44,7 +44,7 @@ defineExpose({ open })
 </script>
 <template>
 <el-dialog v-model="visible" title="Edit Reconciliation References" width="min(640px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" destroy-on-close>
-  <div v-skeleton="{ on: loading, kind: 'form', rows: 3 }">
+  <div v-skeleton="{ on: loading, rows: 3 }">
     <template v-if="current">
       <p><strong>{{ displayTwRef(current) }}</strong><br>{{ current.originalInsured || '—' }}<template v-if="current.originalInsuredCn"><br>{{ current.originalInsuredCn }}</template></p>
       <p>Updates apply to all entries for this case.</p>

@@ -144,7 +144,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-skeleton="{ on: loading, kind: 'table', cols: 6, rows: 8 }" class="reference-page">
+  <div v-skeleton="{ on: loading, kind: 'table', rows: 3, rowH: 56 }" class="reference-page">
     <el-alert v-if="unreadable" type="warning" :closable="false" show-icon :title="`${unreadable} document template record(s) could not be read and are not listed.`" />
     <p class="reference-sort-help" role="status">{{ ordering ? 'Saving order…' : 'Drag the handles to reorder each list. You can also focus a handle and use the Up or Down arrow key. The saved order is shared by all users.' }}</p>
     <section class="reference-card">

@@ -145,34 +145,38 @@ onBeforeUnmount(() => clearInterval(clock))
 </script>
 
 <template>
-<div class="rdash" v-skeleton="{ on: dashboardLoading, kind: 'dashboard' }">
+<div class="rdash" v-skeleton="{ on: dashboardLoading, kind: 'blocks' }">
   <el-alert v-if="dashboard.metrics?.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation and excluded from financial totals. Correct the saved case data before using complete totals." />
   <div class="dash-bar">
-    <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v" title="Each policy is converted at the rate of the month it is recognized">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwd }"></span></span><span v-if="grossUsd" class="gp-v gp-usd" data-testid="dashboard-gross-premium-usd" title="Each policy is converted to TWD at the rate of the month it is recognized, then to USD at that month's USD rate">USD <span v-countup="{ to: grossUsd.amount, fmt: formatTwoDecimals }"></span></span></div>
-    <span class="upd">Loaded <b>{{ loadedText }}</b></span>
+    <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v" data-sk title="Each policy is converted at the rate of the month it is recognized">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwd }"></span></span><span v-if="grossUsd" class="gp-v gp-usd" data-testid="dashboard-gross-premium-usd" title="Each policy is converted to TWD at the rate of the month it is recognized, then to USD at that month's USD rate">USD <span v-countup="{ to: grossUsd.amount, fmt: formatTwoDecimals }"></span></span><span v-else-if="dashboardLoading" class="gp-v gp-usd" data-sk>USD 0,000,000.00</span></div>
+    <span class="upd">Loaded <b data-sk>{{ loadedText }}</b></span>
     <el-button class="secondary-button" size="small" data-testid="dashboard-refresh" :disabled="dashboardLoading" @click="refresh">Refresh</el-button>
   </div>
   <div class="row3">
     <section class="card">
       <div class="card-head"><h3>Total Bound YTD</h3><span class="chip muted">{{ dashboard.period?.year }}</span></div>
-      <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.ytdCurrent || 0 }"></span><div class="side-stat"><div class="label">Prior-Year YTD</div><div class="val">{{ dashboard.metrics?.ytdPrior || 0 }}</div><div v-if="ytdYoY != null" class="yoy" :class="ytdYoY >= 0 ? 'up' : 'dn'" data-testid="dashboard-yoy">{{ ytdYoY >= 0 ? '▲' : '▼' }} {{ Math.abs(ytdYoY).toFixed(1) }}% vs {{ (dashboard.period?.year || 0) - 1 }}</div></div></div>
-      <DashboardSparkline v-if="sparkTotal && sparkTotal.values.length > 1" :values="sparkTotal.values" :labels="sparkTotal.labels" name="Total Bound YTD by month (cumulative)" unit=" bound" />
+      <div class="stat2"><span class="stat-value" data-sk v-countup="{ to: dashboard.metrics?.ytdCurrent || 0 }"></span><div class="side-stat"><div class="label">Prior-Year YTD</div><div class="val" data-sk>{{ dashboard.metrics?.ytdPrior || 0 }}</div><div v-if="ytdYoY != null" class="yoy" :class="ytdYoY >= 0 ? 'up' : 'dn'" data-testid="dashboard-yoy">{{ ytdYoY >= 0 ? '▲' : '▼' }} {{ Math.abs(ytdYoY).toFixed(1) }}% vs {{ (dashboard.period?.year || 0) - 1 }}</div></div></div>
+      <DashboardSparkline data-sk v-if="sparkTotal && sparkTotal.values.length > 1" :values="sparkTotal.values" :labels="sparkTotal.labels" name="Total Bound YTD by month (cumulative)" unit=" bound" />
+      <div v-else-if="dashboardLoading" class="sk-space sk-space-spark" data-sk></div>
     </section>
     <section class="card">
       <div class="card-head"><h3>Renewals Bound MTD</h3><span class="chip muted">vs. Expected</span></div>
-      <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.renewalsMtd || 0 }"></span><div class="side-stat"><div class="label">Expected Renewals</div><div class="val">{{ dashboard.metrics?.expectedRenewalsMtd || 0 }}</div></div></div>
-      <DashboardSparkline v-if="sparkRenew" :values="sparkRenew.values" :labels="sparkRenew.labels" color="#5F5F5F" name="Renewals bound per month" unit=" renewed" />
+      <div class="stat2"><span class="stat-value" data-sk v-countup="{ to: dashboard.metrics?.renewalsMtd || 0 }"></span><div class="side-stat"><div class="label">Expected Renewals</div><div class="val" data-sk>{{ dashboard.metrics?.expectedRenewalsMtd || 0 }}</div></div></div>
+      <DashboardSparkline data-sk v-if="sparkRenew" :values="sparkRenew.values" :labels="sparkRenew.labels" color="#5F5F5F" name="Renewals bound per month" unit=" renewed" />
+      <div v-else-if="dashboardLoading" class="sk-space sk-space-spark" data-sk></div>
     </section>
     <section class="card new-business-card">
       <div class="card-head"><h3>New Business MTD</h3><span class="chip muted">{{ dashboard.period?.currentMonth }}</span></div>
-      <div class="stat2"><span class="stat-value" v-countup="{ to: dashboard.metrics?.newBusinessMtd || 0 }"></span><el-button v-if="can('cases.write')" size="small" class="primary-button" data-testid="dashboard-new-case" @click="router.push({ path: '/cases', query: { action: 'new' } })">+ New Case</el-button></div>
-      <DashboardSparkline v-if="sparkNew" :values="sparkNew.values" :labels="sparkNew.labels" name="New business bound per month" unit=" new" />
+      <div class="stat2"><span class="stat-value" data-sk v-countup="{ to: dashboard.metrics?.newBusinessMtd || 0 }"></span><el-button v-if="can('cases.write')" size="small" class="primary-button" data-testid="dashboard-new-case" @click="router.push({ path: '/cases', query: { action: 'new' } })">+ New Case</el-button></div>
+      <DashboardSparkline data-sk v-if="sparkNew" :values="sparkNew.values" :labels="sparkNew.labels" name="New business bound per month" unit=" new" />
+      <div v-else-if="dashboardLoading" class="sk-space sk-space-spark" data-sk></div>
     </section>
   </div>
 
   <section class="card trend-card">
     <div class="card-head"><h3>YTD Brokerage Trend (TWD)</h3><el-select v-model="selectedTrendYear" aria-label="Brokerage trend year" data-testid="dashboard-trend-year" size="small" style="width: 110px" :disabled="dashboardLoading" @change="loadDashboard"><el-option v-for="year in trendYears" :key="year" :label="String(year)" :value="year" /></el-select></div>
-    <DashboardTrend v-if="dashboard.brokerage?.labels?.length" :labels="dashboard.brokerage.labels" :current="dashboard.brokerage.current" :prior="dashboard.brokerage.prior" :target="dashboard.brokerage.target" :current-status="dashboard.brokerage.currentStatus || []" :prior-status="dashboard.brokerage.priorStatus || []" :year="selectedTrendYear" :grow-key="growKey" :prior2="insights.brokerage?.prior2 || []" :prior2-status="insights.brokerage?.prior2Status || []" :by-class="insights.brokerage?.byClass || null" v-model:class-filter="trendClass" />
+    <DashboardTrend v-if="dashboard.brokerage?.labels?.length" data-sk :labels="dashboard.brokerage.labels" :current="dashboard.brokerage.current" :prior="dashboard.brokerage.prior" :target="dashboard.brokerage.target" :current-status="dashboard.brokerage.currentStatus || []" :prior-status="dashboard.brokerage.priorStatus || []" :year="selectedTrendYear" :grow-key="growKey" :prior2="insights.brokerage?.prior2 || []" :prior2-status="insights.brokerage?.prior2Status || []" :by-class="insights.brokerage?.byClass || null" v-model:class-filter="trendClass" />
+    <div v-else-if="dashboardLoading" class="sk-space sk-space-trend" data-sk></div>
     <div v-else class="empty-note">No performance months yet.</div>
   </section>
 
@@ -180,10 +184,10 @@ onBeforeUnmount(() => clearInterval(clock))
     <section class="card">
       <h3 style="margin-bottom:14px">Key Performance Indicators</h3>
       <div class="kpi-grid">
-        <div class="kpi"><div class="label">In-Force Policies</div><div class="val"><span v-countup="{ to: dashboard.metrics?.inForcePolicies || 0 }"></span></div></div>
-        <div class="kpi"><div class="label">Active Endorsements</div><div class="val"><span v-countup="{ to: dashboard.metrics?.activeEndorsements || 0 }"></span></div></div>
-        <div class="kpi"><div class="label">Open Quotes</div><div class="val"><span v-countup="{ to: dashboard.metrics?.openQuotes || 0 }"></span></div></div>
-        <div class="kpi"><div class="label">Renewal Retention Ratio</div><div class="val retval"><span><span v-countup="{ to: dashboard.metrics?.retentionRatio, fmt: formatAmount, empty: 'N/A' }"></span><small v-if="dashboard.metrics?.retentionRatio != null">%</small></span>
+        <div class="kpi"><div class="label">In-Force Policies</div><div data-sk class="val"><span v-countup="{ to: dashboard.metrics?.inForcePolicies || 0 }"></span></div></div>
+        <div class="kpi"><div class="label">Active Endorsements</div><div data-sk class="val"><span v-countup="{ to: dashboard.metrics?.activeEndorsements || 0 }"></span></div></div>
+        <div class="kpi"><div class="label">Open Quotes</div><div data-sk class="val"><span v-countup="{ to: dashboard.metrics?.openQuotes || 0 }"></span></div></div>
+        <div class="kpi"><div class="label">Renewal Retention Ratio</div><div data-sk class="val retval"><span><span v-countup="{ to: dashboard.metrics?.retentionRatio, fmt: formatAmount, empty: 'N/A' }"></span><small v-if="dashboard.metrics?.retentionRatio != null">%</small></span>
           <span v-if="rating" class="rate" :class="'rate-' + rating.tone" tabindex="0" aria-describedby="retention-scale">{{ rating.name }}<span id="retention-scale" class="rate-pop" role="tooltip"><b>Renewal Retention Ratio</b><span v-for="band in RATE_BANDS" :key="band.name" class="rp-row" :class="{ on: band === rating }"><i class="rp-dot" :class="'rate-' + band.tone"></i><span>{{ band.name }}</span><em>{{ band.range }}%</em></span></span></span></div></div>
       </div>
     </section>
@@ -193,11 +197,11 @@ onBeforeUnmount(() => clearInterval(clock))
         <thead><tr><th></th><th>Receivable</th><th>Payable</th><th title="Overdue receivable: unsettled, actual due date before today">Overdue R.</th><th title="Overdue payable: unsettled, actual due date before today">Overdue P.</th></tr></thead>
         <tbody>
           <tr v-for="row in outstandingRows" :key="row.currency" :data-currency="row.currency">
-            <td>{{ row.currency }}</td>
-            <td><span v-countup="{ to: row.receivable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
-            <td><span v-countup="{ to: row.payable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
-            <td class="od" :class="{ clear: !row.overdueReceivable }"><span v-countup="{ to: row.overdueReceivable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
-            <td class="od" :class="{ clear: !row.overduePayable }"><span v-countup="{ to: row.overduePayable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td data-sk>{{ row.currency }}</td>
+            <td data-sk><span v-countup="{ to: row.receivable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td data-sk><span v-countup="{ to: row.payable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td data-sk class="od" :class="{ clear: !row.overdueReceivable }"><span v-countup="{ to: row.overdueReceivable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td data-sk class="od" :class="{ clear: !row.overduePayable }"><span v-countup="{ to: row.overduePayable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
           </tr>
         </tbody>
       </table>
@@ -208,12 +212,14 @@ onBeforeUnmount(() => clearInterval(clock))
   <div class="row2">
     <section class="card">
       <div class="card-head"><h3 style="margin-bottom:14px">Mix by Class of Business</h3></div>
-      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
+      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" data-sk class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
+      <div v-else-if="dashboardLoading" class="mix-list"><div v-for="n in 5" :key="n" class="sk-space sk-space-row" data-sk></div></div>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
     <section class="card">
       <div class="card-head"><h3 style="margin-bottom:14px">Top Reinsurers/RI Broker by Ceded Premium</h3><div v-if="insights.reinsurersByCases?.rows?.length && dashboard.reinsurers?.length > 1" class="seg" role="group" aria-label="Sort reinsurers"><button type="button" :class="{ on: reinsurerSort === 'share' }" @click="reinsurerSort = 'share'">Share</button><button type="button" :class="{ on: reinsurerSort === 'cases' }" @click="reinsurerSort = 'cases'">Cases</button></div></div>
-      <transition-group v-if="dashboard.reinsurers?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in reinsurerRows" :key="'reinsurer-' + row.name" class="mix-row" :data-tip="row.tip"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ row.label }}</strong></div></transition-group>
+      <transition-group v-if="dashboard.reinsurers?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in reinsurerRows" :key="'reinsurer-' + row.name" data-sk class="mix-row" :data-tip="row.tip"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ row.label }}</strong></div></transition-group>
+      <div v-else-if="dashboardLoading" class="mix-list"><div v-for="n in 5" :key="n" class="sk-space sk-space-row" data-sk></div></div>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
   </div>

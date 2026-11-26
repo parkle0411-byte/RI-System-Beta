@@ -47,7 +47,7 @@ async function save() {
     <el-button v-if="allowed" text type="primary" @click="open">Confirm historical Personnel links</el-button>
     <el-dialog v-model="visible" title="Historical Personnel links" width="min(620px, 95vw)">
       <p>Confirming a historical link preserves the name recorded on the case. This is not a new assignment.</p>
-      <el-form label-position="top" v-skeleton="{ on: loading, kind: 'form', rows: 3 }">
+      <el-form label-position="top" v-skeleton="{ on: loading, rows: 3 }">
         <el-form-item label="Case field"><el-select v-model="field"><el-option label="Account Executive" value="ae" /><el-option label="Case Owner" value="owner" /></el-select></el-form-item>
         <el-form-item label="Recorded historical name"><span>{{ previousName || '—' }}</span></el-form-item>
         <el-form-item label="Personnel"><el-select v-model="personnelId" filterable placeholder="Select a historical person"><el-option v-for="person in people" :key="person.id" :value="person.id" :label="person.name + ' — ' + person.department + (person.is_active ? '' : ' (inactive)')" /></el-select></el-form-item>
