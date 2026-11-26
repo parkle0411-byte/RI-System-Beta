@@ -108,7 +108,7 @@ def _compute_inputs():
             amounts = d.get('amounts') if isinstance(d.get('amounts'), dict) else {}
             policy['items'].append({'currency': t.currency, 'premium': amounts.get('premium') or 0,
                                     'className': d.get('classOfBusiness') or CLASS_NAMES.get(str(d.get('classCode') or ''), 'Property'),
-                                    'party': str(d.get('party') or '')})
+                                    'party': str(d.get('party') or ''), 'month': str(t.revenue_month or '')})
         if kind == 'endorsement':
             slot = (_policy_key(d, t.reference), ' '.join(str(d.get('endorsementNo') or '').split()).casefold(), str(d.get('effectiveDate') or ''))
             expiry = str(d.get('expiryDate') or '')

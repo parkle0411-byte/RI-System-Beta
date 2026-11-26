@@ -135,7 +135,7 @@ onBeforeUnmount(() => clearInterval(clock))
 <div class="rdash" v-loading="dashboardLoading">
   <el-alert v-if="dashboard.metrics?.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation and excluded from financial totals. Correct the saved case data before using complete totals." />
   <div class="dash-bar">
-    <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwd }"></span></span><span v-if="grossUsd" class="gp-v gp-usd" data-testid="dashboard-gross-premium-usd" :title="`USD 1 = TWD ${grossUsd.rate} (${grossUsd.month})`">USD <span v-countup="{ to: grossUsd.amount, fmt: formatTwoDecimals }"></span></span></div>
+    <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v" title="Each policy is converted at the rate of the month it is recognized">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwd }"></span></span><span v-if="grossUsd" class="gp-v gp-usd" data-testid="dashboard-gross-premium-usd" title="Each policy is converted to TWD at the rate of the month it is recognized, then to USD at that month's USD rate">USD <span v-countup="{ to: grossUsd.amount, fmt: formatTwoDecimals }"></span></span></div>
     <span class="upd">Loaded <b>{{ loadedText }}</b></span>
     <el-button class="secondary-button" size="small" data-testid="dashboard-refresh" :disabled="dashboardLoading" @click="refresh">Refresh</el-button>
   </div>

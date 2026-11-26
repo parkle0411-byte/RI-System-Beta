@@ -22,7 +22,7 @@ def insights(months):
     return {"brokerage": {"prior2": pri2, "prior2Status": ["closed"] * months, "byClass": {"names": list(share), "current": by(cur), "prior": by(pri), "prior2": by(pri2)}},
             "trends": {"months": window, "bound": [3, 4, 5, 4, 6, 5, 7, 6, 5, 4, 8, 12], "renew": [1, 2, 2, 1, 3, 2, 3, 2, 2, 1, 4, 5], "new": [2, 2, 3, 3, 3, 3, 4, 4, 3, 3, 4, 7]},
             "reinsurersByCases": {"rows": [{"name": "Allianz", "cases": 30}, {"name": "Swiss Re", "cases": 20}], "policies": 40},
-            "grossPremiumUsd": {"amount": 15006340.5, "rate": 32.14, "month": "2026-10"}}
+            "grossPremiumUsd": {"amount": 15006340.5, "basis": "recognition-month"}}
 
 def make(year=2026, retention=91.4, months=10, negative=False, with_insights=True):
     labels = [f"{m:02d}" for m in range(1, months + 1)]
@@ -69,7 +69,7 @@ with sync_playwright() as p:
     ins = body.get("insights") or {}
     check("the real /api/dashboard carries insights without changing the existing fields", api.ok and set(ins) == {"brokerage", "trends", "reinsurersByCases", "grossPremiumUsd"} and "insights" not in body["brokerage"] and {"labels", "current", "prior", "target"} <= set(body["brokerage"]), list(ins))
     usd = ins["grossPremiumUsd"]
-    check("real data: the USD amount is the TWD Total Gross Premium divided by the USD rate it names (or absent when there is no USD rate)", usd is None or (usd["rate"] > 0 and abs(usd["amount"] - body["metrics"]["grossPremiumNtd"] / usd["rate"]) < 0.01 and re.match(r"^\d{4}-\d{2}$", usd["month"]) is not None), usd)
+    check("real data: the USD amount is per-policy at each recognition month (so not one simple division), positive, and absent only when there is no USD rate", usd is None or (usd["amount"] > 0 and usd["basis"] == "recognition-month"), usd)
     bc = ins["brokerage"]["byClass"]; n_real = len(body["brokerage"]["current"])
     check("real data: the classes add up to the month totals for current, prior and prior2", all(abs(sum(bc[k][name][i] for name in bc["names"]) - ref[i]) < 0.01 for k, ref in (("current", body["brokerage"]["current"]), ("prior", body["brokerage"]["prior"]), ("prior2", ins["brokerage"]["prior2"])) for i in range(n_real)))
     this_year = [i for i, m in enumerate(ins["trends"]["months"]) if m.startswith(str(body["period"]["year"]))]
@@ -98,7 +98,7 @@ with sync_playwright() as p:
     check("a USD amount sits to the right of the TWD amount with two decimals", "USD 15,006,340.50" in gp_text and gp_text.index("TWD") < gp_text.index("USD"), gp_text)
     gp_box = page.get_by_test_id("dashboard-gross-premium").locator(".gp-v").nth(0).bounding_box(); usd_box = page.get_by_test_id("dashboard-gross-premium-usd").bounding_box()
     check("the USD amount is on the same line, right of the TWD amount", usd_box["x"] >= gp_box["x"] + gp_box["width"] - 1 and abs(usd_box["y"] + usd_box["height"] / 2 - (gp_box["y"] + gp_box["height"] / 2)) <= 12, (gp_box, usd_box))
-    check("hovering the USD amount names the rate and month used", page.get_by_test_id("dashboard-gross-premium-usd").get_attribute("title") == "USD 1 = TWD 32.14 (2026-10)")
+    check("hovering the amounts explains that every policy uses the rate of the month it is recognized", "recognized" in page.get_by_test_id("dashboard-gross-premium-usd").get_attribute("title") and "recognized" in page.get_by_test_id("dashboard-gross-premium").locator(".gp-v").first.get_attribute("title"))
     check("count-up ends on the original text (no thousands separator on counts)", page.locator(".kpi", has_text="In-Force Policies").locator(".val").inner_text() == "1284"
           and page.locator(".stat-value").first.inner_text() == "482")
     check("Accounting totals keep the original format", "TWD 12,480,000 / 9,320,000" in acc.inner_text().replace("\n", " "), acc.inner_text())

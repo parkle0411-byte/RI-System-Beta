@@ -101,20 +101,14 @@ check('more than six reinsurers: top six then Other counted as a union of polici
 pe = {}
 personal = build_dashboard(rows, [], [], now, production_rules=True, closed_reports=closed, extras=pe)
 check('without legacy input everything still works and the metrics match the plain call', personal['metrics'] == build_dashboard(rows, [], [], now, production_rules=True, closed_reports=closed)['metrics'] and len(pe['trends']['bound']) == 12)
-# ---- Total Gross Premium 的 USD 對照 ----
-fx = [{'year_month': '2026-09', 'currency': 'USD', 'rate': 31.0}, {'year_month': '2026-10', 'currency': 'USD', 'rate': 32.0}, {'year_month': '2026-12', 'currency': 'USD', 'rate': 30.0},
-      {'year_month': '2026-10', 'currency': 'EUR', 'rate': 35.0}, {'year_month': '2026-11', 'currency': 'USD', 'rate': 0}]
+# ---- Total Gross Premium 的 USD 對照（逐月匯率的細節在 dashboard_gross_monthly_fx）----
+fx = [{'year_month': '2026-09', 'currency': 'USD', 'rate': 31.0}, {'year_month': '2026-10', 'currency': 'USD', 'rate': 32.0}]
 gx = {}
 gm = build_dashboard(rows, [], fx, now, production_rules=True, closed_reports=closed, legacy=legacy, extras=gx)
 gu = gx['grossPremiumUsd']
-check('USD uses the latest USD rate at or before this month (October 32, not the future December rate, not a zero rate)', gu['rate'] == 32.0 and gu['month'] == '2026-10', gu)
-check('the USD amount is the TWD Total Gross Premium divided by that rate', abs(gu['amount'] - gm['metrics']['grossPremiumNtd'] / 32.0) < 1e-6, (gu['amount'], gm['metrics']['grossPremiumNtd']))
-only_future = {}
-build_dashboard(rows, [], [{'year_month': '2026-12', 'currency': 'USD', 'rate': 30.0}], now, production_rules=True, extras=only_future)
-check('when every USD rate is in a later month the latest one is used (same fallback as the other conversions)', only_future['grossPremiumUsd']['rate'] == 30.0 and only_future['grossPremiumUsd']['month'] == '2026-12')
+check('with a USD rate on file the insights carry a USD amount that says it is converted at each policy\'s recognition month', gu is not None and gu['basis'] == 'recognition-month' and gu['amount'] > 0, gu)
 none_fx = {}
 build_dashboard(rows, [], [{'year_month': '2026-10', 'currency': 'EUR', 'rate': 35.0}], now, production_rules=True, extras=none_fx)
 check('no USD rate at all: no USD amount', none_fx['grossPremiumUsd'] is None and ex['grossPremiumUsd'] is None)
-check('the USD amount never changes the existing dashboard numbers', gm['metrics'] == build_dashboard(rows, [], fx, now, production_rules=True, closed_reports=closed, legacy=legacy)['metrics'])
 check('empty dashboard still produces well-formed insights', len(build_dashboard([], [], [], now, production_rules=True, extras=(z := {})) and z['trends']['months']) == 12 and z['reinsurersByCases'] == {'rows': [], 'policies': 0} and z['grossPremiumUsd'] is None)
 print(f'{len(checks)}/{len(checks)} dashboard insights checks passed')
