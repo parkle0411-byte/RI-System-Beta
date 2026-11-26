@@ -12,6 +12,9 @@ Class codes come from Master Data Management (PD = PF Property; 2026-11-16). Set
   rules; their settled legs are marked as reconciled before import.
 Imported rows never create Cases or Production rows. No row is ever changed after import.
 
+2026-11-26 (owner): a blank amount cell is stored as 0 (the original Excel data keeps it blank).
+A settled claim may have no usable DOL (blank or text such as "December 2022"); its date stays empty.
+
 2026-11-17 (owner): no upload records are kept. After a commit the stored workbook is deleted and
 the batch keeps only its import counts; it stays as a hidden marker of imported transactions.
 A preview that is not imported is discarded (workbook deleted, contents cleared) when the admin
@@ -28,11 +31,11 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from datetime import timedelta
+from datetime import date, timedelta
 from django.db import transaction
 from cases import storage
 from coordination.services import serialized, PRODUCTION_SOURCES
-from .excel import read_workbook, date_value, label
+from .excel import read_workbook, date_value, label, AMOUNT_COLUMNS
 from .money import number, rounded
 from .models import ImportBatch, LegacyTransaction, LegacyAudit
 from .services import fail, audit
@@ -113,12 +116,15 @@ def _refs(v,side):
 
 def _date(v,key):
     value=date_value(v.get(key))
-    return value if len(value)==10 and value[4]=='-' else ''
+    if len(value)!=10 or value[4]!='-' or value[7]!='-':return ''
+    try:return date.fromisoformat(value).isoformat()
+    except ValueError:return ''
 
 
 def converted(row, rule_cache, classes=None):
     values,_=corrected_values(row)
-    v=values; notes=[]
+    # A new dict: row['values'] is also the stored original and must keep the blank cells.
+    v={**values,**{key:'0' for key in AMOUNT_COLUMNS if not str(values.get(key) or '').strip()}}; notes=[]
     def money(key, required=True):
         value=v.get(key)
         if value in (None,'') and not required:
@@ -152,7 +158,7 @@ def converted(row, rule_cache, classes=None):
         revenueMonth=date_value(v.get('Revenue Month'))[:7] if _date(v,'Revenue Month') else '',
         ae=v.get('AE',''),subAe=v.get('Sub AE',''),
         statementNo=str(v.get("Cedant's Policy No.",'') or ''),policyNo='',reinsurerRef=str(v.get("Reinsurer's Ref. No.",'') or ''),
-        gross=money('100%Premium',False),share=None if v.get('Share') in (None,'') else money('Share')*100,
+        gross=money('100%Premium'),share=None if v.get('Share') in (None,'') else money('Share')*100,
         brokerageNote=v.get('Note for Bkg.',''),claimNote=v.get('Note for Claim',''),remark=v.get('Remark',''),
         kind='claim' if claim else 'endorsement' if v.get('Endorsement No.') else 'premium',
         rule=rule_cache[party],cedantDays=90,reinsurerDays=90,newRenew=v.get('New / Renew',''),
@@ -162,9 +168,8 @@ def converted(row, rule_cache, classes=None):
         accountingReferences={key:str(v.get(key) or '') for key in (
             'Cedant Receipt No','Cedant Payment No','Reinsurer Receipt No','Reinsurer Payment No.')},
         importSettlement={side:_refs(v,side) for side in SETTLEMENT_COLUMNS})
-    if claim and not data['lossDate']:notes.append('Claim without DOL.')
     a=dict(premium=money('Our Share Premium'),commission=money('R/I Comm.'),tax=money('Tax'),
-        claim=money('Claim',False) or 0,brokerage=money('Bkg. (Original Currency)'),
+        claim=money('Claim'),brokerage=money('Bkg. (Original Currency)'),
         cedantNet=money('Net Premium from Cedant'),reinsurerNet=money('Net Premium to Reinsurer'),
         brokeragePct=money('Bkg.(%)',False))
     if a['brokeragePct'] is not None:a['brokeragePct']*=100
@@ -200,7 +205,6 @@ def converted(row, rule_cache, classes=None):
         historicalPreserved=True,aeIncomeTwd=ae,subAeIncomeTwd=people[1]['income'] if data['subAe'] else 0)
     # Owner 2026-11-12: Share is required on premium/endorsement rows (endorsements lock the source Share).
     if not claim and data.get('share') is None:raise ValueError('Share is required for premium and endorsement rows.')
-    if data.get('gross') is None:notes.append('Missing gross; stored historical amounts preserved.')
     # AE / Sub AE split: imported amounts are converted to the 40/60 or 70/30 split (within 1%).
     # Claims carry no brokerage, so they are not split (owner 2026-11-17): 100, as native claims; Sub AE name kept.
     data['aePct']=100
@@ -231,6 +235,8 @@ def converted(row, rule_cache, classes=None):
         if not data['receiveReminder' if receipt else 'payReminder']:
             raise ValueError(('Receive Date' if receipt else 'Pay Date')+' is required for a settled '+side+' account.')
     historical=all(not value or data['importSettlement'][side] for side,value in legs)
+    # Owner 2026-11-26: only an unsettled claim still needs a real DOL.
+    if claim and not historical and not data['lossDate']:notes.append('Claim without DOL.')
     if claim and not historical and not data['claimIssueDate']:
         notes.append('Issue Date of Claim is required for an unsettled claim (its due date is Issue Date of Claim + 15 days).')
     return dict(original_serial=serial,number=serial,reference=reference,currency=currency,

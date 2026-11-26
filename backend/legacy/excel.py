@@ -13,6 +13,10 @@ from xml.etree import ElementTree as ET
 T = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 R = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
 MAX_BYTES = 30 * 1024 * 1024
+# A blank cell in these columns is stored as 0 (owner 2026-11-26), so every one must be in the header:
+# a renamed or missing column must stop the import instead of becoming 0.
+AMOUNT_COLUMNS = ('100%Premium', 'Our Share Premium', 'R/I Comm.', 'Tax', 'Claim', 'Bkg. (Original Currency)',
+                  'Bkg. (in TWD)', 'Re Dept. Bkg. (in TWD)', 'Net Premium from Cedant', 'Net Premium to Reinsurer')
 
 
 def label(value):
@@ -82,6 +86,9 @@ def read_workbook(content):
                 header = {k: label(v) for k,v in cells.items()}
                 if not {'流水號','TW Ref. No.','Currency','Class','Full-closed'}.issubset(set(header.values())):
                     raise ValueError('The Facultative worksheet has missing required headers.')
+                missing = [name for name in AMOUNT_COLUMNS if name not in header.values()]
+                if missing:
+                    raise ValueError('The Facultative worksheet has missing amount columns: ' + ', '.join(missing) + '.')
             elif cells:
                 values = {header[k]:v for k,v in cells.items() if k in header}
                 if values.get('流水號'):

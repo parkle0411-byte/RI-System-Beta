@@ -531,6 +531,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **匯入台幣取整（2026-11-14）**：Register 的台幣金額匯入時取整數：Net Premium from Cedant 與 Brokerage 各自四捨五入，Net Premium to Reinsurer＝前者 − Brokerage；理賠金額取整。原始 Register 值另存 `amountsOriginal`，原始 Excel 保留。
 - **匯入配套**：Note for Claim 以「Claim No:」／「Loss No:」開頭者拆出 Loss No.（原文保留，沒有不擋）；Sub AE 依 Bkg. 金額換算為 40 或 70（±1%），否則預覽警告；保費／批單列缺 Share 為錯誤。
 - **理賠列不拆分（2026-11-17 業主確認）**：理賠沒有 Brokerage，匯入時理賠列不做 AE / Sub AE 40/60、70/30 檢查，比例存 100（與系統內建理賠相同），Register 的 Sub AE 名字保留；保費／批單列照舊檢查。原因：有 Sub AE 的理賠列 Bkg. 為 0，0÷0 算不出比例而全數被擋（當日 Register 34 筆：USD 26、TWD 8）。
+- **匯入空白金額與理賠 DOL（2026-11-26 業主決定）**：金額欄（100%Premium、Our Share Premium、R/I Comm.、Tax、Claim、Bkg. (Original Currency)、Bkg. (in TWD)、Re Dept. Bkg. (in TWD)、Net Premium from Cedant、Net Premium to Reinsurer）空白存為 0，原始 Excel 值保留空白；填了非數字仍為錯誤；這十欄缺任何一個標題，整份不能預覽（避免改名的欄位全部變成 0）。Share（保費／批單列）與 Exchange Rate 仍必填。**已結清**理賠的 DOL 空白或不是日期（例如「December 2022」）時不警告，日期留空（Transactions 顯示「—」），原文字保留在 Original Excel Data；仍有未收付方的理賠照舊需要日期格式的 DOL（否則「Claim without DOL」警告）與 Issue Date of Claim。
 
 ### 17.2 新增批單／理賠（2026-11-10 部署；2026-11-12 業主決定規則）
 
@@ -560,6 +561,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-26 15:01 | 舊資料匯入：金額欄空白視為 0、已結清理賠 DOL 可留空（只換後端；回復：`~/RI System/legacy-blank-work/rollback.sh 20261126_150104`） | `backups/legacy_blank_20261126_150104/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-legacy-blank-20261126_150104` | 候選 `ri-backend:legblank-candidate`（adfb018f1880）：全部 API 145/145 組（新增匯入放寬 13 項，舊程式跑新檢查會失敗）；正式資料副本以業主的 MC Register 實測通過（0 錯誤 0 警告、1,156 列轉換結果與舊版逐欄相同、原有帳款列不變）；全部畫面測試除 M 階段一次偶發逾時外通過，重跑 A＋M 通過（業主同意部署）；無 migration、不改資料 |
 | 11-26 13:35 | Accounting · Receivable / Payable 小卡加 Overdue 應收／應付一行（前後端；回復：`~/RI System/overdue-work/rollback.sh 20261126_133552`） | `backups/overdue_20261126_133552/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-overdue-20261126_133552`／`ri-frontend:before-overdue-20261126_133552` | 候選 `ri-backend:overdue-candidate`（c9171061a2bc）／`ri-frontend:overdue-candidate`（d7db831b0d99）：Dashboard 相關 API 11 組全過（新 `dashboard_overdue` 11 項）、畫面 A～G 與 Dashboard 專項 83 項全過；無 migration、不改資料；部署前正式資料唯讀核對：逾期 68,496.77 / 42,955.11 ≤ 總額 100,604.63 / 746,354.34；後端與前端原始碼逐檔一致 |
 | 11-26 12:16 | 中文字體由標楷體改新細明體（只換前端；回復：`~/RI System/fonts-ming-work/rollback.sh 20261126_121640`） | `backups/fonts_ming_20261126_121640/`（部署前 DB 及被覆蓋原始碼） | `ri-frontend:before-fonts-ming-20261126_121640` | 候選 `ri-frontend:fonts-ming-candidate`（adc386422f78）：全部畫面測試通過（含 DI 79 項、GI 23 項）；無 migration、不改資料、後端未動；前端原始碼與測試用建置逐檔一致。業主已知新細明體沒有真粗體（合成粗體）仍決定採用 |
 | 11-26 11:46 | 全站字體：英文與數字 Lato（自己提供）、中文標楷體（只換前端；回復：`~/RI System/fonts-work/rollback.sh 20261126_114623`） | `backups/fonts_20261126_114623/`（部署前 DB 及被覆蓋原始碼） | `ri-frontend:before-fonts-20261126_114623` | 候選 `ri-frontend:fonts-candidate`（23563b9bb62b）：全部畫面測試通過（含 DI 79 項、GI 23 項）；無 migration、不改資料、後端未動；新增依賴 `@fontsource/lato` 5.3.0（鎖定檔更新）；正式前端含字型檔且 `font/woff2` 回 200；前端原始碼與測試用建置逐檔一致 |
@@ -647,6 +649,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-26：舊資料匯入放寬（業主決定，15:01 部署，只換後端；回復：`~/RI System/legacy-blank-work/rollback.sh 20261126_150104`）：金額欄空白存 0、已結清理賠的 DOL 非日期時日期留空（§17.1）。起因：MC Register 255 筆已結清理賠的 DOL 是月份文字。
 
 - 2026-11-26：Accounting · Receivable / Payable 小卡加 Overdue（業主決定，13:35 部署，前後端；回復：`~/RI System/overdue-work/rollback.sh 20261126_133552`）：逾期＝未結清且實際到期日早於今天，同一批帳款與匯率，是兩個總額的一部分；後端只在 `insights` 新增 `overdueOutstanding`；新增測試組 `dashboard_overdue`（11 項）、畫面專項 DI 改為 83 項。無 migration、不改資料。
 

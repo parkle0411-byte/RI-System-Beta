@@ -330,6 +330,66 @@ try:
               and [n for n in nums if n and n.startswith('LTX-')] == sorted([n for n in nums if n and n.startswith('LTX-')], reverse=True)
               and [int(_re.search(r'[0-9]+', n).group()) for n in rest] == sorted((int(_re.search(r'[0-9]+', n).group()) for n in rest), reverse=True)
               and rest[-1] == 'F2898' and rest[0] == 'QA9205', nums)
+        # ================= 2026-11-26：已結清理賠的 DOL 可留空；金額欄空白視為 0 =================
+        def preview_rows(rows):
+            r = upload(admin, workbook(rows)); data = r.json()
+            keys.append(ImportBatch.objects.get(pk=data['id']).storage_key)
+            return data
+        paid = {'Fac / Claim': 'Claim', 'Claim': '600', 'Our Share Premium': '0', 'R/I Comm.': '0', 'Tax': '0', 'Bkg.(%)': '0',
+                'Bkg.\n(Original Currency)': '0', 'Bkg. (in TWD)': '0', 'Re Dept. Bkg.\n(in TWD)': '0',
+                'Net Premium from Cedant': '-600', 'Net Premium to Reinsurer': '-600', 'Revenue Month': 'N/A', 'Receive Date': 'Claim',
+                'Pay Date': 'Claim', ' Cedant Payment No': 'CP', ' Reinsurer Receipt No': 'RR', 'Closed Month': D('2026-07-01')}
+        dols = {'QA9301': 'December 2022', 'QA9302': 'June', 'QA9303': None, 'QA9304': 'June-22-AB', 'QA9305': D('2026-04-15')}
+        p = preview_rows([row(s, Reinsurer=ORD, **{**paid, 'DOL': v}) for s, v in dols.items()])
+        check('settled claims with a text or blank DOL preview without errors or warnings',
+              p['manifest']['eligible'] == 5 and p['manifest']['settlement'] == {'fully': 5, 'open': 0}
+              and not p['manifest']['errors'] and not p['manifest']['warnings'], p['manifest'])
+        r = commit(admin, p)
+        got = {x.number: x for x in LegacyTransaction.objects.filter(number__in=dols)}
+        check('they import with an empty loss date; a real date is kept', r.status_code == 200
+              and [got[s].data['lossDate'] for s in dols] == ['', '', '', '', '2026-04-15'],
+              (r.content[:300], [x.data.get('lossDate') for x in got.values()]))
+        check('the Register DOL text stays in the original Excel data', got['QA9301'].original.get('DOL') == 'December 2022'
+              and got['QA9302'].original.get('DOL') == 'June' and 'DOL' not in got['QA9303'].original)
+        shown = {x['txNo']: x for x in accounting_get(admin, '?view=list').json()['transactionRows'] if x.get('txNo', '').startswith('QA93')}
+        check('Accounting lists them as settled with no display date', len(shown) == 10
+              and all(x['settlement'] == 'settled' for x in shown.values())
+              and shown['QA9301-C1-T1']['accountDisplayDate'] == '' and shown['QA9305-C1-T1']['accountDisplayDate'] == '2026-04-15',
+              (len(shown), shown.get('QA9301-C1-T1', {}).get('accountDisplayDate')))
+        unpaid = {**paid, ' Cedant Payment No': None, ' Reinsurer Receipt No': None, 'Issue Date of Claim': D('2026-10-13')}
+        p = preview_rows([row('QA9306', Reinsurer=ORD, **{**unpaid, 'DOL': 'December 2022'}),
+                          row('QA9307', Reinsurer=ORD, **{**paid, ' Reinsurer Receipt No': None, 'DOL': None, 'Issue Date of Claim': D('2026-10-13')})])
+        check('open or half-settled claims without a real DOL are still blocking warnings',
+              [(w['serial'], w['message']) for w in p['manifest']['warnings']] == [('QA9306', 'Claim without DOL.'), ('QA9307', 'Claim without DOL.')]
+              and commit(admin, p).status_code == 409, p['manifest'])
+        zero = {k: None for k in ('100%Premium', 'Our Share Premium', 'R/I Comm.', 'Claim', 'Tax', 'Bkg.\n(Original Currency)',
+                                  'Bkg. (in TWD)', 'Re Dept. Bkg.\n(in TWD)', 'Net Premium from Cedant', 'Net Premium to Reinsurer')}
+        p = preview_rows([row('QA9311', Reinsurer=ORD, **{'100%Premium': None, 'Tax': None, 'Claim': '   '}),
+                          row('QA9312', Reinsurer=ORD, **{**zero, 'Endorsement No.': 'E-0', 'Bkg.(%)': None}),
+                          row('QA9313', Reinsurer=ORD, **{**paid, **{k: None for k in zero if paid.get(k) == '0'}, '100%Premium': None, 'DOL': None})])
+        check('blank amount cells preview without errors or warnings', p['manifest']['eligible'] == 3
+              and not p['manifest']['errors'] and not p['manifest']['warnings'], p['manifest'])
+        r = commit(admin, p)
+        got = {x.number: x for x in LegacyTransaction.objects.filter(number__startswith='QA931')}
+        a, z, c = got['QA9311'], got['QA9312'], got['QA9313']
+        check('blank amounts are stored as 0', r.status_code == 200 and a.data['gross'] == 0 and a.data['amounts']['tax'] == 0
+              and a.data['taxRate'] == 0 and a.data['amounts']['claim'] == 0 and a.data['amounts']['premium'] == 10000
+              and all(z.data['amounts'][k] == 0 for k in ('premium', 'commission', 'tax', 'claim', 'brokerage', 'cedantNet', 'reinsurerNet'))
+              and z.data['gross'] == 0 and z.fx_snapshot['incomeTwd'] == 0 and z.historical
+              and c.data['amounts']['claim'] == 600 and c.data['amounts']['premium'] == 0, (r.content[:300], a.data['amounts'], z.data['amounts']))
+        check('the original Excel data keeps the blank cells', '100%Premium' not in a.original and 'Tax' not in a.original
+              and a.original.get('Claim') == '   ' and 'Net Premium from Cedant' not in z.original)
+        p = preview_rows([row('QA9314', Reinsurer=ORD, Share=None), row('QA9315', Reinsurer=ORD, **{'Exchange Rate': None}),
+                          row('QA9316', Reinsurer=ORD, Tax='N/A')])
+        check('Share and Exchange Rate stay required; non-blank text in an amount cell is still an error',
+              [x['message'] for x in p['manifest']['errors']] == ['Share is required for premium and endorsement rows.',
+               'Exchange Rate is required.', 'Tax must be a finite number.'], p['manifest']['errors'])
+        full = list(HEAD)
+        HEAD.remove('Net Premium from Cedant'); HEAD.remove('100%Premium')
+        try: r = upload(admin, workbook([row('QA9317', Reinsurer=ORD)]))
+        finally: HEAD[:] = full
+        check('a workbook without an amount column is refused instead of importing zeros', r.status_code == 400
+              and b'missing amount columns: 100%Premium, Net Premium from Cedant.' in r.content, (r.status_code, r.content[:300]))
         raise Rollback()
 except Rollback:
     pass
