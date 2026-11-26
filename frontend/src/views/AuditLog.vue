@@ -29,7 +29,7 @@ onMounted(loadAuditLog)
 </script>
 
 <template>
-  <section class="table-card" v-loading="auditLoading">
+  <section class="table-card" v-skeleton="{ on: auditLoading, kind: 'table', cols: 7, rows: 8 }">
     <div class="section-heading"><div><h2>Audit events</h2><p v-if="auth.auditLogRecordingEnabled">Append-only on the company VM: recorded with every change and retained for at least 20 years. The latest 250 events are shown.</p><p v-else>Audit Log recording is paused until further notice. New changes are not recorded as audit events.</p></div><el-button class="secondary-button" :loading="auditLoading" @click="loadAuditLog">Refresh</el-button></div>
     <el-table :data="auditEvents" class="case-table" row-key="id" empty-text="No audit events yet.">
       <el-table-column prop="occurred_at" label="Occurred" min-width="180"><template #default="{ row }">{{ formatDateTime(row.occurred_at) }}</template></el-table-column>

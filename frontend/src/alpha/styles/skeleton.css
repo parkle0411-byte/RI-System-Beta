@@ -1,0 +1,31 @@
+/* 載入骨架條（2026-11-26 業主決定）：取代載入遮罩的轉圈。配合 directives/skeleton.js；放在 motion.css 之後。
+   顏色沿用現有的淡粉灰（與占比長條底色同色系），不新增色系；亮光是白色半透明掃過。 */
+.skeleton-parent { position: relative; }
+.skeleton-mask {
+  position: absolute; inset: 0; z-index: 2000; overflow: hidden; box-sizing: border-box;
+  padding: 16px 20px; background: #fff; display: flex; flex-direction: column; gap: 12px;
+}
+.skeleton-mask::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, .8) 50%, transparent 65%);
+  transform: translateX(-100%); animation: sk-sweep 1.5s ease-in-out infinite;
+}
+@keyframes sk-sweep { to { transform: translateX(100%); } }
+.sk-bar { height: 12px; border-radius: 6px; background: #F0E8E5; }
+.sk-pill { height: 30px; border-radius: 8px; }
+.sk-tool { display: flex; gap: 10px; margin-bottom: 4px; }
+.sk-row { display: flex; gap: 16px; align-items: center; min-height: 28px; }
+.sk-row .sk-cell, .sk-row .sk-th { flex: 1; min-width: 0; }
+.sk-head { padding-bottom: 8px; border-bottom: 1px solid rgba(95, 20, 30, .08); }
+.sk-th { height: 10px; background: #E8DDD9; }
+.sk-line { height: 12px; }
+.sk-field { display: grid; gap: 8px; }
+.sk-label { height: 10px; }
+.sk-input { height: 32px; border-radius: 8px; }
+.sk-kpis, .sk-grid { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sk-grid { grid-template-columns: 2fr 1fr; }
+.sk-card { display: grid; gap: 12px; align-content: start; padding: 18px 20px; border: 1px solid rgba(95, 20, 30, .08); border-radius: 14px; }
+.sk-big { height: 24px; }
+.sk-chart { min-height: 180px; background: linear-gradient(#F7F1EE, #F7F1EE) center / calc(100% - 40px) calc(100% - 40px) no-repeat; }
+@media (max-width: 800px) { .sk-kpis, .sk-grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-mask::after { animation: none; display: none; } }

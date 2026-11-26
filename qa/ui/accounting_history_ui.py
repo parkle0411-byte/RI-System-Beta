@@ -32,7 +32,7 @@ with sync_playwright() as p:
     count = lambda: int(re.search(r"\((\d+)\)", heading()).group(1))
     def settle():
         page.wait_for_timeout(400)
-        page.wait_for_function("() => !document.querySelector('[data-testid=accounting-list] .el-loading-mask')")
+        page.wait_for_function("() => !document.querySelector('[data-testid=accounting-list] .skeleton-mask')")
     def tab(name):
         n = len(pages); page.get_by_role("tab", name=name, exact=True).click()
         page.wait_for_function(f"() => true"); page.wait_for_timeout(200)

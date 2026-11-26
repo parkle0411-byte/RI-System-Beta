@@ -4,7 +4,7 @@ const emit = defineEmits(['update:kind', 'file-change', 'file-remove', 'upload',
 const label = kind => ({ broker_credit: 'RI Broker Credit Note', broker_debit: 'RI Broker Debit Note', offer: 'Other evidence', signed: 'Signed Slip', confirmation: 'Confirmation E-mail' }[kind] || kind)
 </script>
 <template>
-  <section data-testid="oversea-broker-evidence" v-loading="loading">
+  <section data-testid="oversea-broker-evidence" v-skeleton="{ on: loading, kind: 'lines', rows: 3 }">
     <h3>Foreign RI Broker Note</h3>
     <p>{{ endorsement ? 'Upload the Debit Note or Credit Note provided by the foreign RI Broker for this endorsement.' : 'Upload the Credit Note provided by the foreign RI Broker for this Original.' }} Uploaded files are automatically selected.</p>
     <el-form v-if="writable" label-position="top" :disabled="saving">

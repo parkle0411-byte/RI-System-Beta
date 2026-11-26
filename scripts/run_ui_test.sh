@@ -147,6 +147,11 @@ case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI} " in *" GI 
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 interaction_global_ui.py || STATUS=1
 esac
+# SK: 載入骨架條（2026-11-26；各頁資料請求先扣住，確認骨架出現在自己的區塊、沒有轉圈遮罩、載入後移除、減少動態效果時不流動；不改資料）。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI SK} " in *" SK "*)
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 skeleton_ui.py || STATUS=1
+esac
 # I: Legacy 網頁匯入（2026-11-11；系統管理員上傳 Register → 預覽 → 匯入 → Accounting）。
 case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" I "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \

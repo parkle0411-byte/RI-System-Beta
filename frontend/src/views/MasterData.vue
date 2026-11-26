@@ -347,7 +347,7 @@ onMounted(() => { if (can('mdm.read')) void loadMasterData(); void loadInsuredCo
   </div>
 
   <InsuredMaster @counts="insuredCountsChanged" v-if="activeMdmType === 'insured' && can('cases.read.all')" />
-  <section v-else-if="can('mdm.read')" class="table-card" v-loading="mdmLoading">
+  <section v-else-if="can('mdm.read')" class="table-card" v-skeleton="{ on: mdmLoading, kind: 'table', cols: 6, rows: 7 }">
     <div class="section-heading"><div><h2>{{ masterTypeLabel(activeMdmType) }}</h2><p>Ordering and Development data are preserved through versioned Edit and lifecycle controls; routine physical deletion is not exposed.</p></div><div><el-button v-if="can('mdm.write')" class="primary-button" @click="openMasterDialog()">+ Add {{ masterTypeLabel(activeMdmType) }}</el-button><el-button class="secondary-button" :loading="mdmLoading" @click="loadMasterData">Refresh</el-button></div></div>
     <el-collapse v-if="activeMdmType === 'reinsurer'" v-model="openReinsurerMarkets" class="mdm-market-groups">
       <el-collapse-item name="lloyds" :title="`Lloyd's Market (${lloydsMarketRecords.length})`">

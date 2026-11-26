@@ -316,7 +316,7 @@ onMounted(loadPersonnel)
   </div>
 
   <template v-if="personnelTab === 'roster'">
-    <section class="table-card personnel-card" v-loading="personnelLoading">
+    <section class="table-card personnel-card" v-skeleton="{ on: personnelLoading, kind: 'table', cols: 7, rows: 6 }">
       <div class="section-heading"><div><h2>Personnel &amp; Accounts</h2><p v-if="personnelScope.readAll">Company Personnel and their account status. There is no permanent deletion.</p><p v-else>Your personnel record and your same-department subordinates.</p></div><div><el-button v-if="canCreatePersonnel" class="primary-button" @click="openPersonnelDialog()">{{ subordinateCreationOnly ? '+ Add subordinate' : '+ Add personnel' }}</el-button><el-button class="secondary-button" :loading="personnelLoading" @click="loadPersonnel">Refresh</el-button></div></div>
       <div class="personnel-table-scroll">
       <el-table :data="sortedPersonnelRecords" class="case-table personnel-table" row-key="id" empty-text="No personnel records yet.">

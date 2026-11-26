@@ -36,7 +36,7 @@ watch(()=>route.query.id,()=>{if(route.query.id){casePage.value=1;void detail(ro
 onMounted(load)
 </script>
 <template>
-  <section class="insured-directory table-card" v-loading="loading" data-testid="insured-directory">
+  <section class="insured-directory table-card" v-skeleton="{ on: loading, kind: 'table', cols: 3, rows: 6 }" data-testid="insured-directory">
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <div class="directory-toolbar"><el-button :type="scope==='formal'?'primary':'default'" @click="selectScope('formal')">Insured ({{ formalTotal }})</el-button><el-button :type="scope==='pending'?'primary':'default'" @click="selectScope('pending')">Pending confirmation ({{ pendingTotal }})</el-button></div>
     <el-alert v-if="scope==='pending'" title="These historical masters have no verified Announce record. They are excluded from the formal count. A matching successful Announce automatically activates the master." type="info" :closable="false" />

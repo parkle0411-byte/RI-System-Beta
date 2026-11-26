@@ -145,7 +145,7 @@ onBeforeUnmount(() => clearInterval(clock))
 </script>
 
 <template>
-<div class="rdash" v-loading="dashboardLoading">
+<div class="rdash" v-skeleton="{ on: dashboardLoading, kind: 'dashboard' }">
   <el-alert v-if="dashboard.metrics?.dataErrors?.length" type="error" :closable="false" show-icon title="Some cases have invalid financial data" description="Their amounts are pending confirmation and excluded from financial totals. Correct the saved case data before using complete totals." />
   <div class="dash-bar">
     <div class="gp" data-testid="dashboard-gross-premium"><span class="gp-l">Total Gross Premium</span><span class="gp-v" title="Each policy is converted at the rate of the month it is recognized">TWD <span v-countup="{ to: dashboard.metrics?.grossPremiumNtd || 0, fmt: formatTwd }"></span></span><span v-if="grossUsd" class="gp-v gp-usd" data-testid="dashboard-gross-premium-usd" title="Each policy is converted to TWD at the rate of the month it is recognized, then to USD at that month's USD rate">USD <span v-countup="{ to: grossUsd.amount, fmt: formatTwoDecimals }"></span></span></div>

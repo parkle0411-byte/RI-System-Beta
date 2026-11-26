@@ -113,7 +113,7 @@ onMounted(loadDashboardTargets)
 
 <template>
   <el-alert class="case-readiness-alert" type="info" :closable="false" show-icon title="Targets feed the Dashboard brokerage trend" :description="auth.auditLogRecordingEnabled ? 'Annual and monthly TWD targets are versioned, and every change is recorded in the Audit Log.' : 'Annual and monthly TWD targets are versioned. Audit Log recording is paused until further notice.'"></el-alert>
-  <section class="table-card" v-loading="targetLoading">
+  <section class="table-card" v-skeleton="{ on: targetLoading, kind: 'table', cols: 6, rows: 5 }">
     <div class="section-heading"><div><h2>Annual brokerage target settings</h2><p>Used by the Dashboard YTD Brokerage Trend chart. Deactivated settings remain in history.</p></div><div><el-button v-if="can('targets.write')" class="primary-button" @click="openTargetDialog(null, 'annual')">+ Add target</el-button><el-button v-if="can('targets.write')" class="secondary-button" @click="openTargetDialog(null, 'monthly')">+ Monthly target</el-button><el-button class="secondary-button" :loading="targetLoading" @click="loadDashboardTargets">Refresh</el-button></div></div>
     <el-table :data="dashboardTargets" class="case-table" row-key="id" empty-text="No target settings yet.">
       <el-table-column prop="periodKey" label="Period" min-width="180"><template #default="{ row }"><span class="case-ref">{{ row.periodKey }}</span></template></el-table-column>

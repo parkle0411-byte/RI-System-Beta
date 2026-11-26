@@ -129,7 +129,7 @@ onMounted(loadProductionPreview)
 
 <template>
   <div class="overview-stack">
-    <section class="table-card production-report-card" v-loading="productionLoading">
+    <section class="table-card production-report-card" v-skeleton="{ on: productionLoading, kind: 'table', cols: 9, rows: 8 }">
       <div class="section-heading production-heading">
         <div><span class="pending-badge">Versioned monthly close</span><h2>Production Report</h2><p v-if="productionPreview.scope?.canOperate">Preview current rows, defer exceptions, generate an immutable Excel version, then close the latest unchanged version.</p><p v-else>View monthly Production rows and download existing report versions as Excel.</p></div>
         <div class="production-month-control"><label for="production-month">Report month</label><el-date-picker id="production-month" v-model="productionMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM"></el-date-picker><el-button class="primary-button" :loading="productionLoading" @click="loadProductionPreview">Preview</el-button></div>

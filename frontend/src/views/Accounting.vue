@@ -188,7 +188,7 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
    <el-form-item label="Due date"><el-date-picker v-model="filters.due" type="date" value-format="YYYY-MM-DD" placeholder="Due on or before" clearable/></el-form-item>
   </div>
  </section>
- <section class="table-card" v-loading="loading||serverTab&&serverLoading" data-testid="accounting-list">
+ <section class="table-card" v-skeleton="{ on: loading||serverTab&&serverLoading, kind: 'table', cols: 9, rows: 8 }" data-testid="accounting-list">
   <div class="section-heading"><div><h2>{{ accountTitle }} ({{ listCount }})</h2><p>{{ isBrokerage?'Retained brokerage settles after premium receipts and payments complete. Oversea cash transactions appear here once fully settled.':tab==='all'?'All premium, claim and Oversea cash transactions, including open and fully settled transactions.':tab==='settled'?'Fully settled T1 and T2 transactions. Open a transaction history to inspect its registrations.':tab==='unreconciled'?'Finance checks the transaction; counterparty confirmation is not required.':'Transactions for the same counterparty share one review batch across currencies. Receipts and payments are recorded separately.' }}</p></div>
    <div v-if="canSelect" class="selection-actions"><el-button :disabled="!selectionAvailable" @click="selectAll">Select all</el-button><el-button :disabled="!selected.length" @click="selected=[]">Deselect all</el-button><el-button class="primary-button" :disabled="!selected.length" @click="tab==='unreconciled'?openReview(selected):openPayment(selected)">{{ tab==='unreconciled'?'Mark reviewed':'Record selected' }} ({{ selected.length }})</el-button></div>
   </div>

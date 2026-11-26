@@ -110,7 +110,7 @@ onMounted(async()=>{await load();if(route.query.id)await open(route.query.id)})
       <el-input v-model="q" placeholder="Search old reference, transaction number, Statement No., insured or settlement party" clearable @keyup.enter="page=1;load()"/>
       <el-button @click="page=1;load()">Search</el-button><el-button v-if="can('accounts.manage')" @click="showImport">Import Register</el-button><el-button v-if="can('accounts.manage')" @click="showReasons">Endorsement Reasons</el-button>
     </div>
-    <el-table v-loading="loading" :data="rows" row-key="uid" @row-dblclick="r=>open(r.uid)">
+    <el-table v-skeleton="{ on: loading, kind: 'table', cols: 9, rows: 8 }" :data="rows" row-key="uid" @row-dblclick="r=>open(r.uid)">
       <el-table-column label="Transaction No." min-width="125"><template #default="{row}"><el-button link type="primary" @click="open(row.uid)">{{row.number || 'Draft'}}</el-button></template></el-table-column>
       <el-table-column prop="reference" label="Old Reference" min-width="135"/><el-table-column prop="data.statementNo" label="Statement No." min-width="170"/>
       <el-table-column prop="data.insured" label="Insured" min-width="240"/><el-table-column prop="data.party" label="Settlement Party" min-width="240"/>
