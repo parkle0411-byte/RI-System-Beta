@@ -88,7 +88,7 @@ with sync_playwright() as p:
     page.goto(BASE + "/dashboard"); page.locator(".rdash").wait_for(); page.wait_for_timeout(800)
     fam = page.evaluate("() => getComputedStyle(document.body).fontFamily")
     names_in_stack = [n.strip().strip('"') for n in fam.split(",")]
-    check("the page font stack starts with Lato, then the Kai fonts, then the previous Chinese fonts", names_in_stack[:5] == ["Lato", "標楷體", "DFKai-SB", "BiauKai", "Kaiti TC"] and "PingFang TC" in names_in_stack and "Microsoft JhengHei" in names_in_stack, fam)
+    check("the page font stack is Lato, then 新細明體 (PMingLiU, Songti TC on a Mac), then the previous Chinese fonts", names_in_stack[:6] == ["Lato", "新細明體", "PMingLiU", "Songti TC", "PingFang TC", "Microsoft JhengHei"] and "標楷體" not in names_in_stack, fam)
     check("buttons, inputs and tables use the same stack (not the browser defaults)", all(page.evaluate("(s) => getComputedStyle(document.querySelector(s)).fontFamily", s).startswith("Lato") for s in [".el-button", ".nav-item", ".rdash .gp-v", ".rdash .stat-value"]))
     check("Lato is loaded from the system itself", page.evaluate("async () => { await document.fonts.ready; return document.fonts.check('14px Lato') && [...document.fonts].some(f => f.family.replace(/\"/g, '') === 'Lato' && f.status === 'loaded'); }"))
     check("numbers use tabular figures so amounts still line up", page.evaluate("() => getComputedStyle(document.querySelector('.rdash .stat-value')).fontVariantNumeric") == "tabular-nums")
