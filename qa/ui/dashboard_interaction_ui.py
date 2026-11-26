@@ -148,6 +148,8 @@ with sync_playwright() as p:
     check("Cumulative accumulates month by month (last bar taller than monthly)", after[-1] > before[-1] and after[-1] > after[0] * 3, (before, after))
     page.get_by_role("button", name="Monthly").click(); page.wait_for_timeout(900)
     check("YoY labels show a signed percentage", re.match(r"^\([+−]\d+%\)$", page.locator(".vlab").first.text_content()) is not None, page.locator(".vlab").first.text_content())
+    trend_text = page.locator(".trend-card").inner_text()
+    check("the closed/estimated status note under the trend chart is gone (the hatched Estimate legend entry remains)", "Closed months use official Production amounts" not in trend_text and re.search(r"\d\d: (closed|estimated)", trend_text) is None and "Estimate" in page.locator(".legend").inner_text(), trend_text[-200:])
     check("the removed controls are gone (Rank, Time, Values, No labels, YoY % toggle, No comparison, Replay)", all(page.get_by_role("button", name=name, exact=True).count() == 0 for name in ["Rank", "Time", "Values", "No labels", "YoY %", "No comparison", "Replay"]), None)
     check("every month with a prior-year value always shows its YoY % above the current bar", page.locator(".vlab").count() == n and re.match(r"^\([+−]\d+%\)$", page.locator(".vlab").first.text_content()) is not None, page.locator(".vlab").first.text_content())
     month0 = page.locator(".trend-month").first.bounding_box(); lab0 = page.locator(".vlab").first.bounding_box(); plot_bottom = page.locator(".trend-zero").bounding_box()

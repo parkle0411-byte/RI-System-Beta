@@ -161,7 +161,6 @@ onBeforeUnmount(() => clearInterval(clock))
     <div class="card-head"><h3>YTD Brokerage Trend (TWD)</h3><el-select v-model="selectedTrendYear" aria-label="Brokerage trend year" data-testid="dashboard-trend-year" size="small" style="width: 110px" :disabled="dashboardLoading" @change="loadDashboard"><el-option v-for="year in trendYears" :key="year" :label="String(year)" :value="year" /></el-select></div>
     <DashboardTrend v-if="dashboard.brokerage?.labels?.length" :labels="dashboard.brokerage.labels" :current="dashboard.brokerage.current" :prior="dashboard.brokerage.prior" :target="dashboard.brokerage.target" :current-status="dashboard.brokerage.currentStatus || []" :prior-status="dashboard.brokerage.priorStatus || []" :year="selectedTrendYear" :grow-key="growKey" :prior2="insights.brokerage?.prior2 || []" :prior2-status="insights.brokerage?.prior2Status || []" :by-class="insights.brokerage?.byClass || null" v-model:class-filter="trendClass" />
     <div v-else class="empty-note">No performance months yet.</div>
-    <p class="empty-note">Closed months use official Production amounts; other months are estimates. {{ (dashboard.brokerage?.labels||[]).map((month,index)=>month+': '+(dashboard.brokerage?.currentStatus?.[index]||'estimated')).join(' · ') }}</p>
   </section>
 
   <div class="row2">
