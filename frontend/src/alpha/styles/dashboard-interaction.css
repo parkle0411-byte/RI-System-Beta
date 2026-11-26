@@ -74,14 +74,15 @@
 .rdash .mix-fill { transform-origin: left; animation: mix-grow 520ms var(--m-ease) backwards; }
 @keyframes mix-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
-/* Accounting 小卡 */
-.rdash .acc-val { color: var(--dink); font-family: var(--mono); font-size: 18px; font-weight: 500; }
-.rdash .acc-overdue { margin-top: 4px; color: #791F1F; font-size: 14px; font-weight: 500; cursor: help; }
-.rdash .acc-overdue.clear { color: var(--inkm); font-weight: 400; }
-.rdash .acc-claims { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--m-base) var(--m-ease); }
-.rdash .acc-claims > div { overflow: hidden; }
-.rdash .acc-claims.open { grid-template-rows: 1fr; }
-.rdash .acc-toggle .chev { display: inline-block; margin-right: 6px; transition: transform var(--m-base) var(--m-ease); } .rdash .acc-toggle.open .chev { transform: rotate(90deg); }
+/* Accounting 小卡：依幣別分開的表格（2026-11-26；字級同 Top Reinsurers 的再保人名稱 12px） */
+.rdash .acc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rdash .acc-table th { padding: 0 0 6px; color: var(--inkm); font-weight: 400; text-align: right; border-bottom: 1px solid var(--bd); cursor: help; }
+.rdash .acc-table th:first-child { text-align: left; cursor: default; }
+.rdash .acc-table td { padding: 6px 0; color: var(--dink); text-align: right; border-bottom: 1px solid var(--bd); }
+.rdash .acc-table td:first-child { text-align: left; font-weight: 700; }
+.rdash .acc-table td.od { color: #791F1F; }
+.rdash .acc-table td.od.clear { color: var(--inkm); }
+.rdash .acc-notes { margin-top: 8px; color: var(--inkm); font-size: 11px; }
 
 /* Retention 評價 */
 .rdash .retval { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

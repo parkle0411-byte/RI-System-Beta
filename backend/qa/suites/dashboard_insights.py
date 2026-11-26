@@ -45,7 +45,7 @@ plain = build_dashboard(rows, [], [], now, production_rules=True, closed_reports
 ex = {}
 with_extras = build_dashboard(rows, [], [], now, production_rules=True, closed_reports=closed, legacy=legacy, extras=ex)
 check('the returned dashboard is identical with or without extras', plain == with_extras)
-check('extras are not written into the returned dashboard (they only fill the dict that was passed in)', 'insights' not in with_extras and set(ex) == {'brokerage', 'trends', 'reinsurersByCases', 'grossPremiumUsd', 'overdueOutstanding'}, set(ex))
+check('extras are not written into the returned dashboard (they only fill the dict that was passed in)', 'insights' not in with_extras and set(ex) == {'brokerage', 'trends', 'reinsurersByCases', 'grossPremiumUsd', 'overdueOutstanding', 'outstandingByCurrency'}, set(ex))
 for year in (2025, 2024):
     a = build_dashboard(rows, [], [], now, production_rules=True, closed_reports=closed, legacy=legacy, brokerage_year=year)
     b = build_dashboard(rows, [], [], now, production_rules=True, closed_reports=closed, legacy=legacy, brokerage_year=year, extras={})

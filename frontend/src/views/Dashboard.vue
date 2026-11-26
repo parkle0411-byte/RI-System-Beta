@@ -93,8 +93,21 @@ const rowTip = row => `TWD ${formatAmount(row.amount)} · ${Number(row.pct || 0)
 
 // 補充資料（後端 insights；沒有時各項互動自動隱藏）
 const insights = computed(() => dashboard.value.insights || {})
-// Accounting 小卡的逾期部分（2026-11-26）：實際到期日早於今天的未結清應收／應付，已包含在上方總額內
-const overdue = computed(() => insights.value.overdueOutstanding || null)
+// Accounting 小卡（2026-11-26 業主決定）：未結清應收／應付與逾期，依台幣與非台幣（各幣別原金額）分開；台幣不顯示小數、台幣一定有一列
+const fractionDigits = currency => {
+  if (currency === 'TWD') return 0
+  try { return new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits } catch (error) { return 2 }
+}
+function formatCurrency(value, currency) {
+  const digits = fractionDigits(currency)
+  const number = Number(value) || 0
+  return new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(digits === 0 ? Math.round(number) : number)
+}
+const outstandingRows = computed(() => {
+  const rows = (insights.value.outstandingByCurrency || []).map(row => ({ currency: row.currency, receivable: row.receivable || 0, payable: row.payable || 0, overdueReceivable: row.overdueReceivable || 0, overduePayable: row.overduePayable || 0 }))
+  if (!rows.some(row => row.currency === 'TWD')) rows.unshift({ currency: 'TWD', receivable: 0, payable: 0, overdueReceivable: 0, overduePayable: 0 })
+  return rows
+})
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const trendMonthLabel = key => `${MONTH_NAMES[Number(String(key).slice(5, 7)) - 1] || key} ${String(key).slice(0, 4)}`
 const trends = computed(() => insights.value.trends)
@@ -123,8 +136,6 @@ function pickClass(row) {
   trendClass.value = trendClass.value === row.name ? null : row.name
 }
 
-// Accounting 小卡：原幣別理賠明細可收合
-const claimsOpen = ref(false)
 
 onMounted(() => {
   loadDashboard()
@@ -178,13 +189,19 @@ onBeforeUnmount(() => clearInterval(clock))
     </section>
     <section class="card accounting-card" data-testid="dashboard-accounting">
       <h3 style="margin-bottom:14px">Accounting · Receivable / Payable</h3>
-      <div class="val acc-val">TWD <span v-countup="{ to: dashboard.metrics?.outstandingLeg1Ntd || 0, fmt: formatAmount }"></span> / <span v-countup="{ to: dashboard.metrics?.outstandingLeg2Ntd || 0, fmt: formatAmount }"></span></div>
-      <div v-if="overdue" class="acc-overdue" :class="{ clear: !overdue.receivable && !overdue.payable }" data-testid="dashboard-overdue" title="Part of the amount above whose actual due date is before today">Overdue TWD <span v-countup="{ to: overdue.receivable || 0, fmt: formatAmount }"></span> / <span v-countup="{ to: overdue.payable || 0, fmt: formatAmount }"></span></div>
-      <div class="acc-notes"><small v-if="dashboard.metrics?.missingPostingRates?.length">Awaiting FX — Past 5 years record only.</small><small v-else-if="dashboard.metrics?.accountingTotalEstimated">Estimated using latest FX until Production recognition</small><small v-if="dashboard.metrics?.outstandingSince && !dashboard.metrics?.missingPostingRates?.length" data-testid="outstanding-since">Past 5 years record only.</small></div>
-      <div v-if="dashboard.metrics?.claimOutstandingByCurrency?.length">
-        <button type="button" class="el-button secondary-button acc-toggle" :class="{ open: claimsOpen }" :aria-expanded="claimsOpen" style="margin-top:8px" @click="claimsOpen = !claimsOpen"><span class="chev">▸</span>Claims by original currency</button>
-        <div class="acc-claims" :class="{ open: claimsOpen }"><div><small style="display:block;margin-top:8px">Claim receivable / payable by original currency</small><div v-for="row in dashboard.metrics.claimOutstandingByCurrency" :key="row.currency">{{ row.currency }} {{ formatAmount(row.receivable) }} / {{ formatAmount(row.payable) }}</div></div></div>
-      </div>
+      <table class="acc-table" data-testid="dashboard-outstanding">
+        <thead><tr><th></th><th>Receivable</th><th>Payable</th><th title="Overdue receivable: unsettled, actual due date before today">Overdue R.</th><th title="Overdue payable: unsettled, actual due date before today">Overdue P.</th></tr></thead>
+        <tbody>
+          <tr v-for="row in outstandingRows" :key="row.currency" :data-currency="row.currency">
+            <td>{{ row.currency }}</td>
+            <td><span v-countup="{ to: row.receivable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td><span v-countup="{ to: row.payable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td class="od" :class="{ clear: !row.overdueReceivable }"><span v-countup="{ to: row.overdueReceivable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+            <td class="od" :class="{ clear: !row.overduePayable }"><span v-countup="{ to: row.overduePayable, fmt: v => formatCurrency(v, row.currency) }"></span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="acc-notes"><small v-if="dashboard.metrics?.outstandingSince" data-testid="outstanding-since">Past 5 years record only.</small></div>
     </section>
   </div>
 

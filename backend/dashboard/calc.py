@@ -215,6 +215,7 @@ def _insights(extras_inputs):
         各險種加總永遠等於當月總額
       - trends：近 12 個月的新承保件數（bound、new 含舊資料，Total Bound YTD 為今年各月 bound 加總；renew 只算新系統）
       - reinsurersByCases：在保保單件數的再保人排行（新系統保單＋舊資料在保保單，與金額榜同一批）
+      - outstandingByCurrency（2026-11-26）：未結清應收／應付與其中的逾期，依原幣別分開（不換匯；台幣在前、其他幣別依代碼排序；Accounting · Receivable / Payable 小卡用）
       - overdueOutstanding（2026-11-26）：Accounting · Receivable / Payable 中已逾期的應收與應付（台幣；實際到期日早於今天、同一批帳款與匯率，是兩個總額的一部分）
       - grossPremiumUsd（2026-11-26）：Total Gross Premium 的美金對照；每張保單用認列月匯率換成台幣、再用同一個月的 USD 匯率換成美金後加總（沒有任何 USD 匯率時為 None）
     """
@@ -292,6 +293,8 @@ def _insights(extras_inputs):
         "trends": {"months": window, "bound": [bound[m] for m in window], "renew": [renew[m] for m in window], "new": [new[m] for m in window]},
         "reinsurersByCases": {"rows": rows, "policies": len(everyone)},
         "overdueOutstanding": {"receivable": x['overdue1'], "payable": x['overdue2']},
+        "outstandingByCurrency": [{"currency": c, "receivable": v[0], "payable": v[1], "overdueReceivable": v[2], "overduePayable": v[3]}
+                                  for c, v in sorted(x['by_currency'].items(), key=lambda e: (e[0] != 'TWD', e[0]))],
         "grossPremiumUsd": ({"amount": x['gross_usd'], "basis": "recognition-month"} if x['usd_available'] else None),
     }
 
@@ -361,6 +364,13 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
     new_business_mtd += len([b for b in bound if b["month"][:7] == current_month and b["newOrRenew"] == "New"])
 
     gross = out1 = out2 = 0.0
+    by_currency = {}   # extras：幣別 → [應收, 應付, 逾期應收, 逾期應付]（原幣別金額，不換匯；與 out1／out2 同一批帳款與 5 年窗口，缺匯率的也計入）
+    def add_outstanding(cur, direction, amount, late):
+        row = by_currency.setdefault(str(cur or 'TWD').upper(), [0.0, 0.0, 0.0, 0.0])
+        i = 0 if direction == 'receivable' else 1
+        row[i] += amount
+        if late:
+            row[2 + i] += amount
     overdue1 = overdue2 = 0.0   # extras：未結清應收／應付中「實際到期日早於今天」的部分（2026-11-26 業主決定；是 out1／out2 的子集）
     gross_usd = 0.0   # extras：每張保單用認列月匯率換成台幣、再用同月的 USD 匯率換成美金後加總
     class_totals, reinsurer_totals = {}, {}
@@ -460,6 +470,10 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             # Conflict 2 (2026-11-15): every Claim is converted into the TWD totals at its
             # own currency and posting month (Accounting keeps its 11-14 display).
             currency = str(tx.get('currency') or case_currency).upper() if tx.get('source') == 'claim' else case_currency
+            # 逾期＝實際到期日（合約到期日，沒有就用到期日；與 Accounting 同一規則）早於今天（台北日期）；到期當天不算，沒有到期日不算
+            due_day = str(detail.get('contractDueDate') or detail.get('dueDate') or '')[:10]
+            late = bool(due_day) and due_day < today
+            add_outstanding(currency, detail['paymentDirection'], abs(detail['outstanding']), late)
             from cases.accounting_policy import fx_for_transaction
             rate,posting_month,estimated=fx_for_transaction(payload,tx,rates,latest)
             if estimated:estimated_fx.append({'currency':currency,'month':posting_month or None,'caseId':r.get('id'),'txNo':no})
@@ -467,9 +481,6 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
                 missing_fx.append({'currency': currency, 'month': posting_month or None, 'caseId': r.get('id')})
                 continue
             value = abs(detail['outstanding']) * rate
-            # 逾期＝實際到期日（合約到期日，沒有就用到期日；與 Accounting 同一規則）早於今天（台北日期）；到期當天不算，沒有到期日不算
-            due_day = str(detail.get('contractDueDate') or detail.get('dueDate') or '')[:10]
-            late = bool(due_day) and due_day < today
             if detail['paymentDirection'] == 'receivable':
                 out1 += value
                 if late:
@@ -483,6 +494,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         if item.get("ageDate") and item["ageDate"] < outstanding_since:
             continue
         cur = item.get("currency") or "TWD"
+        add_outstanding(cur, item.get("paymentDirection"), item["outstanding"], bool(item.get("due")) and str(item["due"])[:10] < today)
         if cur == "TWD":
             rate = 1
         elif item.get("postedRate"):
@@ -574,7 +586,7 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
         extras.update(_insights(extras_inputs={
             'monthly': monthly, 'class_monthly': class_monthly, 'OTHER': OTHER, 'trend_year': trend_year, 'months': months,
             'closed_months': closed_months, 'reinsurer_cases': reinsurer_cases, 'roots': roots, 'live': _live, 'posted_month': posted_month,
-            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force), 'overdue1': overdue1, 'overdue2': overdue2, 'gross_usd': gross_usd, 'usd_available': month_rate('USD', current_month) > 0,
+            'legacy_bound': bound, 'current_month': current_month, 'in_force_count': len(in_force), 'overdue1': overdue1, 'overdue2': overdue2, 'by_currency': by_currency, 'gross_usd': gross_usd, 'usd_available': month_rate('USD', current_month) > 0,
         }))
     return {
         "ok": True,
