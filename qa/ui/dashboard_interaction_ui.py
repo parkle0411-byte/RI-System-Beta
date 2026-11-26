@@ -163,7 +163,7 @@ with sync_playwright() as p:
           and page.evaluate("() => getComputedStyle(document.querySelector('[data-testid=dashboard-accounting] tr[data-currency=JPY] td.od')).color") != "rgb(121, 31, 31)")
     ref_size = page.evaluate("() => getComputedStyle(document.querySelector('.card .mix-row span')).fontSize")
     check("the table text is the same size as the reinsurer names in Top Reinsurers (12px)", ref_size == "12px" and page.evaluate("() => getComputedStyle(document.querySelector('[data-testid=dashboard-accounting] td')).fontSize") == ref_size, ref_size)
-    check("the old all-in-TWD total and the claims expander are gone", "TWD 12,480,000" not in acc.inner_text() and acc.get_by_role("button").count() == 0)
+    check("the old all-in-TWD total and the claims expander are gone", "TWD 12,480,000" not in acc.inner_text() and acc.get_by_role("button", name="Claims by original currency").count() == 0)
     check("the removed controls are gone (Rank, Time, Values, No labels, YoY % toggle, No comparison, Replay)", all(page.get_by_role("button", name=name, exact=True).count() == 0 for name in ["Rank", "Time", "Values", "No labels", "YoY %", "No comparison", "Replay"]), None)
     check("every month with a prior-year value always shows its YoY % above the current bar", page.locator(".vlab").count() == n and re.match(r"^\([+−]\d+%\)$", page.locator(".vlab").first.text_content()) is not None, page.locator(".vlab").first.text_content())
     month0 = page.locator(".trend-month").first.bounding_box(); lab0 = page.locator(".vlab").first.bounding_box(); plot_bottom = page.locator(".trend-zero").bounding_box()
@@ -317,6 +317,34 @@ with sync_playwright() as p:
     page.screenshot(path="out/dashboard_interaction.png", full_page=True)
 
     # --- reduced motion: no growth animation, count-up shows the result immediately
+    # --- 2026-11-26: trend filters on one line, Accounting shortcuts, zero-premium class rows
+    ctx3 = b.new_context(viewport={"width": 1440, "height": 1000}); p3 = ctx3.new_page(); p3.set_default_timeout(30000)
+    p3.on("pageerror", lambda e: errors.append(str(e)))
+    login(p3)
+    def zero_rows(route):
+        body = make()
+        body["classMix"] = body["classMix"] + [{"name": "Marine Hull", "amount": 0, "pct": 0}]
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+    p3.route(re.compile(r".*/api/dashboard.*"), zero_rows)
+    p3.goto(BASE + "/dashboard"); p3.wait_for_selector(".trend-bar.current"); p3.wait_for_timeout(1500)
+    mids = p3.evaluate("() => [...document.querySelectorAll('.trend-wrap > .ctools > *')].map(e => { const r = e.getBoundingClientRect(); return Math.round(r.y + r.height / 2) })")
+    check("the trend filters are one line at desktop width (basis, compare, target filters, toggles, class)", p3.locator(".trend-wrap > .ctools").count() == 1 and len(mids) >= 7 and max(mids) - min(mids) <= 3, mids)
+    p3.set_viewport_size({"width": 900, "height": 900}); p3.wait_for_timeout(500)
+    check("on a narrow window the filters wrap instead of overflowing", p3.evaluate("() => { const w = document.querySelector('.trend-wrap > .ctools'); return w.scrollWidth <= w.clientWidth + 1 }"))
+    p3.set_viewport_size({"width": 1440, "height": 1000}); p3.wait_for_timeout(300)
+    zero = p3.locator(".card", has_text="Mix by Class of Business").locator(".mix-row", has_text="Marine Hull")
+    check("a class without premium shows 0.0% and an empty bar", zero.locator("strong").inner_text() == "0.0%" and zero.locator(".mix-fill").bounding_box()["width"] < 0.5, zero.inner_text())
+    card = p3.get_by_test_id("dashboard-accounting"); rec = p3.get_by_test_id("dashboard-to-reconcile"); pay = p3.get_by_test_id("dashboard-to-record")
+    cb, rb, pb, hb = card.bounding_box(), rec.bounding_box(), pay.bounding_box(), card.locator("h3").bounding_box()
+    check("the Accounting card has To Reconcile and To Record at its top right, in that order", rec.inner_text() == "To Reconcile" and pay.inner_text() == "To Record" and rb["x"] < pb["x"] and abs((pb["x"] + pb["width"]) - (cb["x"] + cb["width"])) <= 30 and rb["y"] - cb["y"] < 30 and rb["x"] > hb["x"] + hb["width"], (cb, rb, pb))
+    check("the buttons use the same style as + New Case", "primary-button" in rec.get_attribute("class") and "el-button--small" in pay.get_attribute("class"))
+    rec.click(); p3.wait_for_url(re.compile(r".*/accounting\?tab=unreconciled")); p3.wait_for_selector("[data-testid=accounting-list]")
+    check("To Reconcile opens Accounting on Unreconciled Transactions", p3.locator("[data-testid=accounting-list] h2").inner_text().startswith("Unreconciled Transactions"), p3.locator("[data-testid=accounting-list] h2").inner_text())
+    p3.goto(BASE + "/dashboard"); p3.get_by_test_id("dashboard-to-record").click(); p3.wait_for_url(re.compile(r".*/accounting\?tab=reconciled"))
+    p3.wait_for_function("() => (document.querySelector('[data-testid=accounting-list] h2') || {}).textContent?.startsWith('Reconciled Transactions')")
+    check("To Record opens Accounting on Reconciled Transactions", p3.locator("[data-testid=accounting-list] .selection-actions").inner_text().find("Record selected") >= 0, p3.locator("[data-testid=accounting-list] h2").inner_text())
+    ctx3.close()
+
     ctx2 = b.new_context(viewport={"width": 1440, "height": 1000}, reduced_motion="reduce"); page2 = ctx2.new_page(); page2.set_default_timeout(30000)
     page2.on("pageerror", lambda e: errors.append(str(e)))
     login(page2); page2.route(re.compile(r".*/api/dashboard.*"), handler)

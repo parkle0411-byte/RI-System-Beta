@@ -150,6 +150,28 @@ def top_rows(source, limit):
     return [{"name": name, "amount": amount, "pct": amount / total * 100 if total > 0 else 0} for name, amount in selected]
 
 
+MIX_ROWS = 10   # Mix by Class of Business 至少列出的列數（2026-11-26 業主決定）
+
+
+def class_mix(totals, classes):
+    """classes＝啟用中的險種名稱（依 Master Data 順序）。沒傳（None）時維持原本「前 5 名＋Other」。
+    有傳時：依金額前 10 名（其餘併入 Other）；有金額的不足 10 個時，依 classes 順序補 0% 到 10 列。完全沒有金額時不補（畫面顯示沒有資料）。"""
+    if classes is None:
+        return top_rows(totals, 5)
+    rows = top_rows(totals, MIX_ROWS)
+    if not any(amount > 0 for amount in totals.values()):
+        return rows
+    present = {str(name).strip().casefold() for name in totals}
+    for name in classes:
+        if len(rows) >= MIX_ROWS:
+            break
+        key = str(name).strip().casefold()
+        if key and key not in present:
+            present.add(key)
+            rows.append({"name": name, "amount": 0.0, "pct": 0})
+    return rows
+
+
 def _ge_text(value, text):
     """value >= text（JavaScript 的比較：字串比 UTF-16；其他型別轉成數字，與日期文字比較一律 false）。"""
     if isinstance(value, str):
@@ -299,7 +321,7 @@ def _insights(extras_inputs):
     }
 
 
-def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None, facility_trend=None, extras=None):
+def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.utc, production_rules=False, closed_reports=None, brokerage_year=None, legacy=None, facility_trend=None, extras=None, mix_classes=None):
     """extras（2026-11-25）：傳入 dict 時，另外把趨勢圖與統計卡的補充資料（前前年對照、險種逐月、近 12 個月件數、再保人件數）填進去；
     回傳值與不傳 extras 時逐位元組相同。"""
     now = (now or datetime.now(timezone.utc)).astimezone(tz)
@@ -612,6 +634,6 @@ def build_dashboard(case_rows, target_rows, fx_rows, now=None, *, tz=timezone.ut
             "target": [js_or(targets_monthly.get(f"{trend_year}-{m}"), 0) for m in months],
             "annualTarget": targets_annual,
         },
-        "classMix": top_rows(class_totals, 5),
+        "classMix": class_mix(class_totals, mix_classes),
         "reinsurers": top_rows(reinsurer_totals, 6),
     }

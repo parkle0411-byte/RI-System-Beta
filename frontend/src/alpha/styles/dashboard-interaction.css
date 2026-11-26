@@ -84,6 +84,9 @@
 .rdash .acc-table td.od.clear { color: var(--inkm); }
 .rdash .acc-notes { margin-top: 8px; color: var(--inkm); font-size: 11px; }
 
+.rdash .acc-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.rdash .acc-actions .el-button + .el-button { margin-left: 0; }
+
 /* Retention 評價 */
 .rdash .retval { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .rdash .rate { position: relative; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; line-height: 1.5; cursor: default; animation: m-view 300ms var(--m-ease) 500ms backwards; }

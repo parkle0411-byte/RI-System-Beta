@@ -3,7 +3,7 @@ import vAccountingScroll from '../directives/accountingScroll'
 import { partyKey, isOverseaCash, isDerivedBrokerage, activeAccount, isCedantAccount, accountSource, visibleAccount, cashTotals, cashUuid } from './accountingCash'
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { apiFetch } from '../api'
 import { can } from '../auth'
 import { recall, remember } from './accountingMemory'
@@ -19,7 +19,9 @@ import AccountingEntryActions from '../components/AccountingEntryActions.vue'
 const tableViewportHeight=ref(Math.max(240,Math.min(720,Math.round(window.innerHeight*.65))))
 const wideScreen=ref(window.innerWidth>760), resize=()=>{wideScreen.value=window.innerWidth>760;tableViewportHeight.value=Math.max(240,Math.min(720,Math.round(window.innerHeight*.65)))};window.addEventListener('resize',resize);onUnmounted(()=>window.removeEventListener('resize',resize))
 // 2026-11-13：預設開在 Unreconciled。2026-11-17 起已結清的舊資料歷史不再下載到瀏覽器，只在伺服器分頁的三個分頁出現。
-const router=useRouter(), tab=ref('unreconciled'), loading=ref(false), refreshing=ref(false), shownAt=ref(''), saving=ref(false), loadError=ref('')
+// Dashboard 的 To Reconcile／To Record 用網址指定分頁（2026-11-26）；其他值一律開預設的 Unreconciled
+const route=useRoute()
+const router=useRouter(), tab=ref(route?.query?.tab==='reconciled'?'reconciled':'unreconciled'), loading=ref(false), refreshing=ref(false), shownAt=ref(''), saving=ref(false), loadError=ref('')
 // 2026-11-17：All Accounts／Settled/Closed／Brokerage 由伺服器篩選、排序、分頁（每頁 100 列，含已結清的舊資料歷史，不再背景下載整份歷史）；
 // Unreconciled／Reconciled 照舊在瀏覽器處理（accountingList.js）。下拉選單名單由伺服器提供（含歷史）。
 let loadSeq=0, pageSeq=0, pageTimer=null

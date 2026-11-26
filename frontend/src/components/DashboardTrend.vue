@@ -245,8 +245,6 @@ watch(hasPrior2, value => { if (!value && cmp.value === 'prior2') cmp.value = 'p
         <button type="button" :class="{ on: cmp === 'prior' }" @click="cmp = 'prior'">vs {{ year - 1 }}</button>
         <button type="button" :class="{ on: cmp === 'prior2' }" @click="cmp = 'prior2'">vs {{ year - 2 }}</button>
       </div>
-    </div>
-    <div class="ctools">
       <button type="button" class="fchip" :class="{ active: highlight === 'all' }" @click="highlight = 'all'">All</button>
       <button type="button" class="fchip" :class="{ active: highlight === 'above' }" :disabled="!!classFilter" @click="highlight = 'above'">At/above target</button>
       <button type="button" class="fchip" :class="{ active: highlight === 'below' }" :disabled="!!classFilter" @click="highlight = 'below'">Below target</button>

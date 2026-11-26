@@ -103,6 +103,10 @@ function formatCurrency(value, currency) {
   const number = Number(value) || 0
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(digits === 0 ? Math.round(number) : number)
 }
+// 小卡右上角的捷徑（2026-11-26 業主決定）：To Reconcile 開 Accounting 的 Unreconciled 分頁、To Record 開 Reconciled 分頁；沒有權限就不顯示
+const canReconcile = computed(() => can('accounting.read') && (can('accounting.write') || can('accounting.review.facility_accounts')))
+const canRecordCash = computed(() => can('accounting.read') && can('accounting.write'))
+const openAccounting = tab => router.push({ path: '/accounting', query: { tab } })
 const outstandingRows = computed(() => {
   const rows = (insights.value.outstandingByCurrency || []).map(row => ({ currency: row.currency, receivable: row.receivable || 0, payable: row.payable || 0, overdueReceivable: row.overdueReceivable || 0, overduePayable: row.overduePayable || 0 }))
   if (!rows.some(row => row.currency === 'TWD')) rows.unshift({ currency: 'TWD', receivable: 0, payable: 0, overdueReceivable: 0, overduePayable: 0 })
@@ -192,7 +196,7 @@ onBeforeUnmount(() => clearInterval(clock))
       </div>
     </section>
     <section class="card accounting-card" data-testid="dashboard-accounting">
-      <h3 style="margin-bottom:14px">Accounting · Receivable / Payable</h3>
+      <div class="card-head"><h3>Accounting · Receivable / Payable</h3><div v-if="canReconcile || canRecordCash" class="acc-actions"><el-button v-if="canReconcile" size="small" class="primary-button" data-testid="dashboard-to-reconcile" @click="openAccounting('unreconciled')">To Reconcile</el-button><el-button v-if="canRecordCash" size="small" class="primary-button" data-testid="dashboard-to-record" @click="openAccounting('reconciled')">To Record</el-button></div></div>
       <table class="acc-table" data-testid="dashboard-outstanding">
         <thead><tr><th></th><th>Receivable</th><th>Payable</th><th title="Overdue receivable: unsettled, actual due date before today">Overdue R.</th><th title="Overdue payable: unsettled, actual due date before today">Overdue P.</th></tr></thead>
         <tbody>
@@ -212,8 +216,8 @@ onBeforeUnmount(() => clearInterval(clock))
   <div class="row2">
     <section class="card">
       <div class="card-head"><h3 style="margin-bottom:14px">Mix by Class of Business</h3></div>
-      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" data-sk class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
-      <div v-else-if="dashboardLoading" class="mix-list"><div v-for="n in 5" :key="n" class="sk-space sk-space-row" data-sk></div></div>
+      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" data-sk class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: (Number(row.pct) > 0 ? Math.max(2,Number(row.pct)) : 0) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
+      <div v-else-if="dashboardLoading" class="mix-list"><div v-for="n in 10" :key="n" class="sk-space sk-space-row" data-sk></div></div>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
     <section class="card">

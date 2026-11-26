@@ -101,7 +101,9 @@ class DashboardView(NoStoreMixin, APIView):
             case_fingerprint = result_cache.table_fingerprint(live)   # 只看自己的案件：可見範圍可能因草稿內容改變，用完整指紋
         from legacy.models import LegacyTransaction
         from cases.models import FacilityDeclaration
-        fingerprint = (case_fingerprint, result_cache.table_fingerprint(FacilityDeclaration.objects.all()), result_cache.table_fingerprint(LegacyTransaction.objects.all(), version="version"), result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()), result_cache.table_fingerprint(ProductionReport.objects.filter(status="closed"), stamp="closed_at"))   # 報表沒有 updated_at，用關帳時間
+        from masterdata.models import MasterRecord
+        classes = MasterRecord.objects.filter(entity_type='class')   # Mix by Class of Business 補列用：險種主資料變更也要讓快取失效
+        fingerprint = (result_cache.table_fingerprint(classes), case_fingerprint, result_cache.table_fingerprint(FacilityDeclaration.objects.all()), result_cache.table_fingerprint(LegacyTransaction.objects.all(), version="version"), result_cache.table_fingerprint(FxRate.objects.all()), result_cache.table_fingerprint(DashboardTarget.objects.all()), result_cache.table_fingerprint(ProductionReport.objects.filter(status="closed"), stamp="closed_at"))   # 報表沒有 updated_at，用關帳時間
         key = ("dashboard", "all" if see_all else ("person", person.pk), local.strftime("%Y-%m-%d"), local.strftime("%H:%M") > "12:00", brokerage_year)
 
         def compute():
@@ -121,7 +123,8 @@ class DashboardView(NoStoreMixin, APIView):
             from cases.facility_production import dashboard_trend
             facility = dashboard_trend({r['id'] for r in rows}, fx, local.strftime('%Y-%m'))
             extras = {}
-            result = build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year, legacy=legacy, facility_trend=facility, extras=extras)
+            mix_classes = list(classes.filter(is_active=True).order_by("display_order", "name").values_list("name", flat=True))
+            result = build_dashboard(rows, targets, fx, now, tz=TAIPEI, production_rules=True, closed_reports=closed, brokerage_year=brokerage_year, legacy=legacy, facility_trend=facility, extras=extras, mix_classes=mix_classes)
             result['insights'] = extras   # 補充資料（2026-11-25）：既有欄位與數字不動
             return result
 
