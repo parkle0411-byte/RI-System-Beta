@@ -9,6 +9,7 @@
     "prebuild": "node scripts/check_loss_readiness.cjs"
   },
   "dependencies": {
+    "@fontsource/lato": "5.3.0",
     "element-plus": "2.14.6",
     "jszip": "3.10.1",
     "vue": "3.5.43",

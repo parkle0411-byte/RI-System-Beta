@@ -84,6 +84,21 @@ with sync_playwright() as p:
     check("flagged fields inside the case form shake; unflagged fields and other pages do not", names == ["m-shake", "m-shake", "m-shake", "m-shake", "none", "none"], names)
     dur = page.evaluate("() => parseFloat(getComputedStyle(document.getElementById('t1')).animationDuration)")
     check("the shake is short (about a quarter of a second)", 0.2 <= dur <= 0.3, dur)
+    # --- fonts (2026-11-26 owner decision): Lato for English and digits, Kai (標楷體) for Chinese, self-hosted
+    page.goto(BASE + "/dashboard"); page.locator(".rdash").wait_for(); page.wait_for_timeout(800)
+    fam = page.evaluate("() => getComputedStyle(document.body).fontFamily")
+    names_in_stack = [n.strip().strip('"') for n in fam.split(",")]
+    check("the page font stack starts with Lato, then the Kai fonts, then the previous Chinese fonts", names_in_stack[:5] == ["Lato", "標楷體", "DFKai-SB", "BiauKai", "Kaiti TC"] and "PingFang TC" in names_in_stack and "Microsoft JhengHei" in names_in_stack, fam)
+    check("buttons, inputs and tables use the same stack (not the browser defaults)", all(page.evaluate("(s) => getComputedStyle(document.querySelector(s)).fontFamily", s).startswith("Lato") for s in [".el-button", ".nav-item", ".rdash .gp-v", ".rdash .stat-value"]))
+    check("Lato is loaded from the system itself", page.evaluate("async () => { await document.fonts.ready; return document.fonts.check('14px Lato') && [...document.fonts].some(f => f.family.replace(/\"/g, '') === 'Lato' && f.status === 'loaded'); }"))
+    check("numbers use tabular figures so amounts still line up", page.evaluate("() => getComputedStyle(document.querySelector('.rdash .stat-value')).fontVariantNumeric") == "tabular-nums")
+    hosts = set(); seen = []
+    page2 = ctx.new_page(); page2.on("request", lambda r: (hosts.add(r.url.split("/")[2]), seen.append(r.url)))
+    page2.goto(BASE + "/cases"); page2.wait_for_timeout(1500)
+    font_files = [u for u in seen if u.endswith((".woff2", ".woff"))]
+    check("no request leaves the system (the fonts come from the same server)", hosts <= {"nginx"} and "googleapis" not in " ".join(seen), hosts)
+    page2.close()
+
     ctx.close()
 
     # --- reduced motion: no ripple, no sliding, no shake

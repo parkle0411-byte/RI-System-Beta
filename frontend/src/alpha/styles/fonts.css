@@ -1,0 +1,14 @@
+/* 系統字體（2026-11-26 業主決定）：英文與數字 Lato、中文標楷體。
+   - Lato 由系統自己提供（@fontsource/lato，打包進前端，不對外連線）；只載入 400 與 700 兩種字重（Lato 沒有 500／600：中等粗細會顯示成一般、600 會顯示成粗體）。
+   - 標楷體是電腦內建字體（Windows：標楷體／DFKai-SB；Mac：標楷體／BiauKai），沒有的裝置退回原本的中文字體（蘋方／微軟正黑體）。
+   - 原本用等寬字體的數字與編號（金額、百分比、TW Ref）一併改用同一組字體，開「等寬數字」讓金額在表格裡仍然對齊。
+   Personnel 的臨時密碼對話框維持等寬字體（為了好分辨字元）。放在其他樣式之後載入，覆蓋 --sans／--mono。 */
+:root {
+  --font-cjk: "標楷體", "DFKai-SB", "BiauKai", "Kaiti TC";
+  --sans: "Lato", var(--font-cjk), "PingFang TC", "Microsoft JhengHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: var(--sans);
+  --el-font-family: var(--sans);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+html, body, #app, button, input, select, textarea { font-family: var(--sans); }
