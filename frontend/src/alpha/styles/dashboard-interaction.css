@@ -23,7 +23,6 @@
 .rdash .tgl:hover { background: rgba(175, 45, 65, .07); }
 .rdash .tgl input { accent-color: #AF2D41; }
 .rdash .ctools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
-.rdash .ctools .replay-button { height: 28px; margin-left: auto; }
 
 /* 趨勢圖 */
 .rdash .trend-chart { position: relative; outline: none; cursor: crosshair; user-select: none; touch-action: pan-y; }
@@ -45,7 +44,6 @@
 .rdash .trend-chart.hovering .col.hot .trend-bar { opacity: 1; }
 .rdash .trend-chart.hovering .col .trend-bar.off { opacity: 0; }
 .rdash .trend-chart.spotprior .trend-bar.current, .rdash .trend-chart.spotcurrent .trend-bar.prior { opacity: .15; }
-.rdash .trend-chart .tgt { fill: #4A3AA7; transition: opacity var(--m-base); }
 .rdash .trend-chart .trend-point { transition: opacity var(--m-base); }
 .rdash .trend-chart .trend-line { transition: opacity var(--m-base); }
 .rdash .trend-chart .beat { fill: #27500A; transition: transform 420ms var(--m-ease); animation: m-fade 300ms ease 800ms backwards; }
