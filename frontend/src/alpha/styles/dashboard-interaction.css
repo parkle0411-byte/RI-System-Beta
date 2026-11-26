@@ -47,7 +47,7 @@
 .rdash .trend-chart .trend-point { transition: opacity var(--m-base); }
 .rdash .trend-chart .trend-line { transition: opacity var(--m-base); }
 .rdash .trend-chart .beat { fill: #27500A; transition: transform 420ms var(--m-ease); animation: m-fade 300ms ease 800ms backwards; }
-.rdash .trend-chart .vlab { fill: #5F5F5F; font: 10px var(--mono); animation: m-fade 300ms ease 800ms backwards; }
+.rdash .trend-chart .vlab { fill: #5F5F5F; font-family: var(--mono); }
 .rdash .trend-chart .vlab.up { fill: #27500A; } .rdash .trend-chart .vlab.dn { fill: #791F1F; }
 .rdash .trend-chart .trend-month { fill: var(--inkm); font-size: 10px; font-family: var(--sans); }
 @keyframes trend-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }

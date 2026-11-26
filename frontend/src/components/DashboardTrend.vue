@@ -264,8 +264,8 @@ watch(hasPrior2, value => { if (!value && cmp.value === 'prior2') cmp.value = 'p
           <rect v-for="seg in segments(c)" :key="seg.name" class="trend-seg" :class="{ off: !visible.current, est: c.est }" :x="seg.x" :y="seg.y" :width="seg.width" :height="seg.height" :style="{ ...geoStyle(seg), fill: seg.color }"><title>{{ labels[c.i] }} · {{ seg.name }} {{ formatAmount(seg.v) }}</title></rect>
           <circle class="trend-point target" :cx="slotW / 2" :cy="y(c.T)" r="3" :style="{ opacity: targetOn ? 1 : 0 }"><title>{{ labels[c.i] }} · Target {{ formatAmount(c.T) }}</title></circle>
           <path v-if="targetOn && hit(c) && visible.current" class="beat" d="M-4 0h8l-4-6z" :style="{ transform: `translate(${slotW * .68}px, ${Math.min(y(c.C), y0) - 4}px)` }" />
-          <text v-if="visible.current && labelText(c)" class="vlab" :class="labelClass(c)" :x="slotW * .68" :y="Math.min(y(c.C), y0) - (targetOn && hit(c) ? 14 : 6)" text-anchor="middle">{{ labelText(c) }}</text>
-          <text class="trend-month" :x="slotW / 2" :y="H - 8" text-anchor="middle">{{ c.label }}</text>
+          <!-- 月份與該月 YoY %：同一行「01 (-7%)」，整體置中在兩條柱的正下方（不會被目標線、圓點或達標三角形碰到） -->
+          <text class="trend-month" :x="slotW / 2" :y="H - 8" text-anchor="middle">{{ c.label }}<tspan v-if="visible.current && labelText(c)" class="vlab" :class="labelClass(c)" dx="4">({{ labelText(c) }})</tspan></text>
         </g>
       </svg>
       <div class="ctip" :class="{ on: tip.on && tipRows.length }" :style="{ left: tip.x + 'px', top: tip.y + 'px' }">

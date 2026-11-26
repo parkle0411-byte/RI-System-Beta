@@ -77,17 +77,14 @@ const rating = computed(() => {
   return RATE_BANDS.find(band => Number(value) >= band.min) || RATE_BANDS[RATE_BANDS.length - 1]
 })
 
-// 占比長條：排序（Share／A–Z）
-const mixSort = ref('share')
-const reinsurerSort = ref('share') // share｜cases｜name
-const sortRows = (rows, mode) => (mode === 'name' ? [...(rows || [])].sort((a, b) => String(a.name).localeCompare(String(b.name))) : (rows || []))
-const classRows = computed(() => sortRows(dashboard.value.classMix, mixSort.value))
+// 占比長條：占比卡固定依占比排序；再保人榜可切 Share／Cases（2026-11-26 業主決定：不要 A–Z）
+const reinsurerSort = ref('share') // share｜cases
 const reinsurerRows = computed(() => {
   if (reinsurerSort.value === 'cases' && insights.value.reinsurersByCases?.rows?.length) {
     const { rows, policies } = insights.value.reinsurersByCases
     return rows.map(row => ({ name: row.name, pct: policies ? row.cases / policies * 100 : 0, label: `${row.cases}`, tip: `${row.cases} of ${policies} in-force policies` }))
   }
-  return sortRows(dashboard.value.reinsurers, reinsurerSort.value === 'cases' ? 'share' : reinsurerSort.value).map(row => ({ name: row.name, pct: row.pct, label: `${Number(row.pct || 0).toFixed(1)}%`, tip: rowTip(row) }))
+  return (dashboard.value.reinsurers || []).map(row => ({ name: row.name, pct: row.pct, label: `${Number(row.pct || 0).toFixed(1)}%`, tip: rowTip(row) }))
 })
 const rowTip = row => `TWD ${formatAmount(row.amount)} · ${Number(row.pct || 0).toFixed(1)}%`
 
@@ -186,12 +183,12 @@ onBeforeUnmount(() => clearInterval(clock))
 
   <div class="row2">
     <section class="card">
-      <div class="card-head"><h3 style="margin-bottom:14px">Mix by Class of Business</h3><div v-if="dashboard.classMix?.length > 1" class="seg" role="group" aria-label="Sort classes"><button type="button" :class="{ on: mixSort === 'share' }" @click="mixSort = 'share'">Share</button><button type="button" :class="{ on: mixSort === 'name' }" @click="mixSort = 'name'">A–Z</button></div></div>
-      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in classRows" :key="'class-' + row.name" class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
+      <div class="card-head"><h3 style="margin-bottom:14px">Mix by Class of Business</h3></div>
+      <transition-group v-if="dashboard.classMix?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in dashboard.classMix" :key="'class-' + row.name" class="mix-row" :class="{ pickable: trendClassNames.includes(row.name), picked: trendClass === row.name }" :data-tip="rowTip(row)" :tabindex="trendClassNames.includes(row.name) ? 0 : undefined" :role="trendClassNames.includes(row.name) ? 'button' : undefined" :aria-pressed="trendClassNames.includes(row.name) ? trendClass === row.name : undefined" @click="pickClass(row)" @keydown.enter.prevent="pickClass(row)" @keydown.space.prevent="pickClass(row)"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ Number(row.pct || 0).toFixed(1) }}%</strong></div></transition-group>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
     <section class="card">
-      <div class="card-head"><h3 style="margin-bottom:14px">Top Reinsurers/RI Broker by Ceded Premium</h3><div v-if="dashboard.reinsurers?.length > 1" class="seg" role="group" aria-label="Sort reinsurers"><button type="button" :class="{ on: reinsurerSort === 'share' }" @click="reinsurerSort = 'share'">Share</button><button v-if="insights.reinsurersByCases?.rows?.length" type="button" :class="{ on: reinsurerSort === 'cases' }" @click="reinsurerSort = 'cases'">Cases</button><button type="button" :class="{ on: reinsurerSort === 'name' }" @click="reinsurerSort = 'name'">A–Z</button></div></div>
+      <div class="card-head"><h3 style="margin-bottom:14px">Top Reinsurers/RI Broker by Ceded Premium</h3><div v-if="insights.reinsurersByCases?.rows?.length && dashboard.reinsurers?.length > 1" class="seg" role="group" aria-label="Sort reinsurers"><button type="button" :class="{ on: reinsurerSort === 'share' }" @click="reinsurerSort = 'share'">Share</button><button type="button" :class="{ on: reinsurerSort === 'cases' }" @click="reinsurerSort = 'cases'">Cases</button></div></div>
       <transition-group v-if="dashboard.reinsurers?.length" tag="div" name="mix-flip" class="mix-list"><div v-for="row in reinsurerRows" :key="'reinsurer-' + row.name" class="mix-row" :data-tip="row.tip"><span>{{ row.name }}</span><span class="mix-track"><i class="mix-fill" :style="{width: Math.max(2,Number(row.pct || 0)) + '%'}"></i></span><strong>{{ row.label }}</strong></div></transition-group>
       <div v-else class="empty-note">No in-force premium yet.</div>
     </section>
