@@ -51,8 +51,8 @@ def freeze_report(person,rows):
     if len(records)!=len(ids):fail('A legacy Production source is no longer available.',409)
     for t in records:
         if t.status!='confirmed':fail('A legacy Production source changed.',409)
-        if t.batch_id is not None:
-            continue  # Imported rows keep the Register's TWD amounts and rate from import.
+        if t.batch_id is not None and (t.fx_snapshot or not t.data.get('fxPending')):
+            continue  # Imported rows keep the Register's TWD amounts and rate; rows imported without a rate freeze here.
         snapshot=rate_for(t)
         if snapshot.get('rate') is None:fail('Resolve missing FX before closing Production.',409)
         before=copy.deepcopy(t.fx_snapshot)

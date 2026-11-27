@@ -536,6 +536,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **理賠列不拆分（2026-11-17 業主確認）**：理賠沒有 Brokerage，匯入時理賠列不做 AE / Sub AE 40/60、70/30 檢查，比例存 100（與系統內建理賠相同），Register 的 Sub AE 名字保留；保費／批單列照舊檢查。原因：有 Sub AE 的理賠列 Bkg. 為 0，0÷0 算不出比例而全數被擋（當日 Register 34 筆：USD 26、TWD 8）。
 - **匯入空白金額與理賠 DOL（2026-11-26 業主決定）**：金額欄（100%Premium、Our Share Premium、R/I Comm.、Tax、Claim、Bkg. (Original Currency)、Bkg. (in TWD)、Re Dept. Bkg. (in TWD)、Net Premium from Cedant、Net Premium to Reinsurer）空白存為 0，原始 Excel 值保留空白；填了非數字仍為錯誤；這十欄缺任何一個標題，整份不能預覽（避免改名的欄位全部變成 0）。Share（保費／批單列）與 Exchange Rate 仍必填。**已結清**理賠的 DOL 空白或不是日期（例如「December 2022」）時不警告，日期留空（Transactions 顯示「—」），原文字保留在 Original Excel Data；仍有未收付方的理賠照舊需要日期格式的 DOL（否則「Claim without DOL」警告）與 Issue Date of Claim。
 - **匯入警告：`closed`＝x 的「v-…」註記（2026-11-27 業主決定）**：Register 的 `closed` 欄是 x（不分大小寫），且四個收付編號欄任一個以「v-」開頭（例如「v-11/13」）時預覽警告、不能匯入（逐欄列出）。尚未收付就清空該欄、已收付就改填正式收付編號後重新上傳。`closed` 不是 x 的「v-…」、一般編號與其他文字照舊。起因：F17753、F17953 因此被誤記為已付再保人款（11-27 更正）。
+- **匯率待定的外幣列（2026-11-27 業主決定）**：非台幣列的 `Exchange Rate` 空白或是不含數字的文字（例如 TBA）時可以匯入：`Bkg. (in TWD)`／`Re Dept. Bkg. (in TWD)` 兩欄的公式錯誤不擋、不存台幣值（交易標記 `fxPending`、匯率快照空白）；之後依 Revenue Month 的 FX Rates 換算，缺匯率時顯示 Awaiting FX、該月 Production 不能產生或關帳、Dashboard Brokerage 趨勢暫不含（未收付沿用最近匯率暫估），Production 關帳時凍結。保費／批單列須有 Revenue Month；有 Sub AE 時 40／70 由 `Re Dept.` 欄公式結尾的 `*0.4`／`*0.7` 讀出，讀不出、或沒有 Sub AE 卻有分配比例為警告。台幣列、含數字但不是有效數值的匯率、其他欄位的公式錯誤照舊為錯誤。系統換算取整數，與 Excel 公式可能差 1 元以內。
 
 ### 17.2 新增批單／理賠（2026-11-10 部署；2026-11-12 業主決定規則）
 
@@ -566,6 +567,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-27 14:45 | 舊資料匯入：匯率待定（TBA／空白）的外幣列可匯入，之後依 FX Rates 換算（只換後端；未經事前同意即部署、業主事後同意保留；回復：`~/RI System/legacy-awaitfx-work/rollback.sh 20261127_144504`） | `backups/legacy_awaitfx_20261127_144504/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-awaitfx-20261127_144504` | API 148/148 組（匯入 107/107，新增 15 項、舊程式會失敗）；全部畫面測試 647 項通過；正式資料副本以業主檔案實測 378 筆、0 錯誤、0 警告，原可匯 371 列轉換相同，副本試算匯率後與 Excel 公式差 0.4 元以內；無 migration、部署不改資料 |
 | 11-27 13:22 | 第五次清空舊資料（交易 13,072（含草稿 3）、內部標記 30、未被案件使用的 Insured 2,816（案件使用中的 4 筆保留）、Legacy 操作紀錄 64；業主同意的正式資料刪除） | `backups/legacy_clear_20261127_132220` | —（程式未變） | 正式資料副本演練：其他資料表、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
 | 11-27 12:54 | 舊資料匯入：`closed`＝x 且收付編號是「v-…」時警告擋下（只換後端；回復：`~/RI System/legacy-closed-x-work/rollback.sh 20261127_125442`） | `backups/legacy_closed_x_20261127_125442/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-closed-x-20261127_125442` | API legacy_import_web 92/92（新增 4 項，舊程式會失敗）、legacy_entry_rules 227/227、legacy_readonly 60/60；畫面 A 62/62＋匯入 I 11/11（局部修改範圍）；無 migration、不改資料 |
 | 11-27 12:40 | 必填欄位紅色 *：約 45 個必填但沒有紅色 * 的欄位補上（Facility Declaration／Placement、舊資料新增與轉移、FX Rates、理賠付款、上傳文件、Clause、Oversea Broker Note、Accounting 收付款 Ref. 或 Note、人員歷史、Product Recall、STP、Sum Insured 標題、續保舊理賠）；二選一兩欄都標 * 並加一行說明；只換前端（回復：`~/RI System/required-marks-work/rollback.sh 20261127_124032`） | `backups/required_marks_20261127_124032/`（部署前 DB 及變更檔） | `ri-frontend:before-required-marks-20261127_124032` | 候選 `ri-frontend:required-marks-candidate`（6fc4b334d256，已合併 10:55 舊資料草稿刪除的兩個畫面）：完整畫面 619 項＋新 RM 28 項全過、原始碼標示檢查 59 處（舊版 53 項不過）、前端建置與 7 支檢查程式全過、截圖確認；不改檢查規則與資料；部署後 40 個前端檔案與候選一致 |
@@ -664,6 +666,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-27 第五次，業主要求）**：清空 11-26 匯入的舊資料：交易 13,072 筆（含未確認草稿 3 筆）、上傳內部標記 30 筆（Excel 未保留，0 個檔）、沒有案子使用的 MDM Insured 2,816 筆（案件使用中的 4 筆保留）、Legacy 操作紀錄 64 筆（含 11-27 F17753／F17953 更正紀錄；保護暫時移除後原樣補回）；沒有舊資料的 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261127_132220`。重新匯入時 F17753／F17953 須先清空 Register 的「v-…」編號（§17.1 匯入警告）。
 
 ## 近期變更
+
+- 2026-11-27：舊資料匯入支援匯率待定列（14:45 部署，只換後端。業主要求部署前先詢問，Claude 檢查時誤執行部署腳本而提前部署，業主事後決定保留；回復：`~/RI System/legacy-awaitfx-work/rollback.sh 20261127_144504`；已匯入待定列後回復舊版，這些列會一直顯示缺匯率）：§17.1。
 
 - 2026-11-27：依業主要求第五次清空舊資料（含未被案件使用的 Insured），見 §17 資料清理。
 

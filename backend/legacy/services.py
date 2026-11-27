@@ -54,7 +54,8 @@ def representation(t,person=None):
 
 
 def rate_for(t):
-    if t.historical or t.fx_snapshot:
+    # 2026-11-27: a row imported without an Exchange Rate (fxPending) is converted like a new one until Production freezes it.
+    if t.fx_snapshot or (t.historical and not t.data.get('fxPending')):
         return copy.deepcopy(t.fx_snapshot)
     if t.status != 'confirmed' or t.data.get('kind') == 'claim':
         return {}

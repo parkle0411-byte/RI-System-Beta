@@ -16,6 +16,9 @@ Imported rows never create Cases or Production rows. No row is ever changed afte
 A settled claim may have no usable DOL (blank or text such as "December 2022"); its date stays empty.
 2026-11-27 (owner): when the "closed" column is x, a receipt/payment number that is only a "v-..." note
 is a blocking warning (it would otherwise count that side as received/paid).
+2026-11-27 (owner): a foreign-currency row whose Exchange Rate is not set yet (blank or text without digits,
+e.g. "TBA") is imported without TWD figures (data.fxPending, empty snapshot); errors in its two TWD columns do
+not block. FX Rates of the Revenue Month converts it, and Production freezes it when the month is closed.
 
 2026-11-17 (owner): no upload records are kept. After a commit the stored workbook is deleted and
 the batch keeps only its import counts; it stays as a hidden marker of imported transactions.
@@ -65,6 +68,16 @@ SETTLEMENT_COLUMNS={'cedant':('Cedant Receipt No','Cedant Payment No'),
                     'reinsurer':('Reinsurer Receipt No','Reinsurer Payment No.')}
 IMPORT_NOTE='Settled before import (Register receipt/payment number).'
 NOTE_REF=re.compile(r'^v\s*-',re.I)   # e.g. "v-11/13": a hand-written note, not a receipt/payment number
+TWD_COLUMNS=('Bkg. (in TWD)','Re Dept. Bkg. (in TWD)')
+SHARE_FORMULA=re.compile(r'\*\s*(\d*\.\d+|\d+(?:\.\d+)?\s*%)\s*(?:,\s*-?\d+\s*\)\s*)?$')
+
+
+def _formula_share(text):
+    """The AE share (%) a Register formula ends with (…*0.4, ROUND(…*0.7,0)); None when it takes no share."""
+    m=SHARE_FORMULA.search(str(text or '').strip())
+    if not m:return None
+    s=m.group(1).replace(' ','')
+    return round(float(s[:-1]) if s.endswith('%') else float(s)*100,6)
 
 
 def excluded_row(row):
@@ -134,7 +147,9 @@ def converted(row, rule_cache, classes=None):
             return None
         return number(value,key)
     serial=label(v.get('流水號')); reference=label(v.get('TW Ref. No.'))
-    if row['errors']:raise ValueError('Formula errors or formulas without cached results: '+', '.join(row['errors']))
+    pending=label(v.get('Currency')).upper() not in ('','TWD') and not re.search(r'\d',str(v.get('Exchange Rate') or ''))
+    blocking=[ref for ref,column in zip(row['errors'],row.get('errorColumns') or row['errors']) if not (pending and column in TWD_COLUMNS)]
+    if blocking:raise ValueError('Formula errors or formulas without cached results: '+', '.join(blocking))
     if not serial or len(serial)>80 or not reference or len(reference)>192:
         raise ValueError('A valid original serial and old reference are required.')
     code=label(v.get('Class')).upper()
@@ -198,20 +213,32 @@ def converted(row, rule_cache, classes=None):
         if not claim and a['cedantNet'] is not None and a['brokerage'] is not None:
             a['reinsurerNet'] = whole(a['cedantNet'] - a['brokerage'])
         data['brokerage'] = a['brokerage']; data['claim'] = a['claim']
-    rate=money('Exchange Rate');total=money('Bkg. (in TWD)');ae=money('Re Dept. Bkg. (in TWD)')
-    premium_twd=rounded(a['premium']*rate,'TWD')
-    people=[dict(name=data['ae'],income=ae,premium=premium_twd,incomeOriginal=None,pct=None)]
-    if data['subAe']:
-        residual=Decimal(str(v['Bkg. (in TWD)']))-Decimal(str(v['Re Dept. Bkg. (in TWD)']))
-        people.append(dict(name=data['subAe'],income=float(residual),premium=0,incomeOriginal=None,pct=None))
-    snapshot=dict(rate=rate,incomeTwd=total,premiumTwd=premium_twd,awaitingFx=False,people=people,
-        historicalPreserved=True,aeIncomeTwd=ae,subAeIncomeTwd=people[1]['income'] if data['subAe'] else 0)
+    if pending:
+        data['fxPending']=True;snapshot={}
+    else:
+        rate=money('Exchange Rate');total=money('Bkg. (in TWD)');ae=money('Re Dept. Bkg. (in TWD)')
+        premium_twd=rounded(a['premium']*rate,'TWD')
+        people=[dict(name=data['ae'],income=ae,premium=premium_twd,incomeOriginal=None,pct=None)]
+        if data['subAe']:
+            residual=Decimal(str(v['Bkg. (in TWD)']))-Decimal(str(v['Re Dept. Bkg. (in TWD)']))
+            people.append(dict(name=data['subAe'],income=float(residual),premium=0,incomeOriginal=None,pct=None))
+        snapshot=dict(rate=rate,incomeTwd=total,premiumTwd=premium_twd,awaitingFx=False,people=people,
+            historicalPreserved=True,aeIncomeTwd=ae,subAeIncomeTwd=people[1]['income'] if data['subAe'] else 0)
     # Owner 2026-11-12: Share is required on premium/endorsement rows (endorsements lock the source Share).
     if not claim and data.get('share') is None:raise ValueError('Share is required for premium and endorsement rows.')
     # AE / Sub AE split: imported amounts are converted to the 40/60 or 70/30 split (within 1%).
     # Claims carry no brokerage, so they are not split (owner 2026-11-17): 100, as native claims; Sub AE name kept.
     data['aePct']=100
-    if data['subAe'] and not claim:
+    if pending and not claim:
+        # No TWD figures to compare yet: the split is read from the Re Dept. formula.
+        if not data['revenueMonth']:notes.append('Revenue Month is required while the Exchange Rate is not set.')
+        share=_formula_share((row.get('formulas') or {}).get('Re Dept. Bkg. (in TWD)'))
+        if data['subAe']:
+            if share not in (40,70):
+                notes.append('Exchange Rate is not set: the Re Dept. Bkg. (in TWD) formula must end with *0.4 or *0.7 so the AE / Sub AE split can be read.')
+            data['aePct']=int(share) if share in (40,70) else None
+        elif share not in (None,100):notes.append('The Re Dept. Bkg. (in TWD) formula takes a share but there is no Sub AE.')
+    elif data['subAe'] and not claim:
         pct=float(Decimal(str(v['Re Dept. Bkg. (in TWD)']))/Decimal(str(v['Bkg. (in TWD)']))*100) if float(v.get('Bkg. (in TWD)') or 0) else None
         match=next((p for p in (40,70) if pct is not None and abs(pct-p)<=1),None)
         if match is None:notes.append('AE / Sub AE brokerage split is not 40/60 or 70/30.')

@@ -93,6 +93,7 @@ def read_workbook(content):
                 values = {header[k]:v for k,v in cells.items() if k in header}
                 if values.get('流水號'):
                     rows.append(dict(row=int(row.get('r')), values=values, errors=errors,
+                                     errorColumns=[header.get(re.sub(r'\d', '', ref), '') for ref in errors],
                                      formulas={header[k]: v for k, v in formulas.items() if k in header}))
                     if len(rows) > 50000:
                         raise ValueError('A batch may contain at most 50,000 transactions.')

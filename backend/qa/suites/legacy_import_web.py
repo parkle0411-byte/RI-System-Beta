@@ -56,8 +56,9 @@ def col(i):
 
 def workbook(rows):
     def cell(ref, value):
-        if isinstance(value, tuple):  # (formula, cached value)
-            return f'<c r="{ref}"><f>{escape(value[0])}</f><v>{escape(str(value[1]))}</v></c>'
+        if isinstance(value, tuple):  # (formula, cached value[, 'e' for an error result])
+            kind = ' t="e"' if value[2:] == ('e',) else ''
+            return f'<c r="{ref}"{kind}><f>{escape(value[0])}</f><v>{escape(str(value[1]))}</v></c>'
         return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{escape(str(value))}</t></is></c>'
     lines = []
     for n, values in enumerate([dict(zip(HEAD, HEAD))] + rows, 1):
@@ -419,6 +420,82 @@ try:
         x = LegacyTransaction.objects.filter(number='QA9421').first()
         check('clearing the note imports the row with that side open', r.status_code == 200 and x and not x.historical
               and x.data['importSettlement'] == {'cedant': '202610210', 'reinsurer': ''}, r.content[:300])
+        # ================= 2026-11-27：匯率待定（Exchange Rate 尚未決定）的外幣列 =================
+        from fxrates.models import FxRate
+        from legacy.services import rate_for
+        err = lambda formula: (formula, '#VALUE!', 'e')
+        bkg, redept, twd = 'Bkg.\n(Original Currency)', 'Re Dept. Bkg.\n(in TWD)', 'Bkg. (in TWD)'
+        plain = 'IF(Z2="TWD",AJ2,ROUND(AJ2*AQ2,0))'
+        usd = {'Reinsurer': ORD, 'Currency': 'USD', 'Effective Date': D('2026-11-07'), 'Revenue Month': D('2026-11-30'),
+               '100%Premium': '16748.86', 'Our Share Premium': '8374.43', 'R/I Comm.': '0', 'Tax': '0', bkg: '502.47',
+               'Net Premium from Cedant': '8374.43', 'Net Premium to Reinsurer': '7871.96', 'Receive Date': D('2027-01-15'), 'Pay Date': D('2027-01-20')}
+        tba = {**usd, 'Exchange Rate': 'TBA', twd: err(plain), redept: err(plain)}
+        sub40 = {'Sub AE': 'QA Sub AE', redept: err(plain + '*0.4')}
+        sub70 = {'Sub AE': 'QA Sub AE', redept: err('ROUND(' + plain + '*0.7,0)')}
+        claim_tba = {**paid, 'Reinsurer': ORD, 'Currency': 'USD', 'Exchange Rate': 'TBA', twd: err(plain), redept: err(plain), 'DOL': D('2026-11-02')}
+        p = preview_rows([row('QA9501', **tba), row('QA9502', **{**tba, **sub40}),
+                          row('QA9503', **{**tba, **sub70, ' Cedant Receipt No': 'CR-9503', ' Reinsurer Payment No.': 'RP-9503'}),
+                          row('QA9504', **claim_tba), row('QA9505', **{**usd, 'Exchange Rate': None, twd: None, redept: None}),
+                          row('QA9506', **{**usd, 'Exchange Rate': '30', twd: '15074', redept: '15074'})])
+        check('foreign rows without an exchange rate preview without errors or warnings', p['manifest']['eligible'] == 6
+              and not p['manifest']['errors'] and not p['manifest']['warnings'], p['manifest'])
+        r = commit(admin, p)
+        n = {x.number: x for x in LegacyTransaction.objects.filter(number__startswith='QA950')}
+        check('they import marked as awaiting FX with no TWD figures; the split comes from the formula',
+              r.status_code == 200 and all(n[s].data.get('fxPending') is True and n[s].fx_snapshot == {} for s in ('QA9501', 'QA9502', 'QA9503', 'QA9504', 'QA9505'))
+              and [n[s].data['aePct'] for s in ('QA9501', 'QA9502', 'QA9503', 'QA9504', 'QA9505')] == [100, 40, 70, 100, 100]
+              and n['QA9503'].historical and n['QA9504'].historical and not n['QA9501'].historical, r.content[:400])
+        check('the Register values, TBA and #VALUE! included, stay in the original Excel data',
+              n['QA9501'].original.get('Exchange Rate') == 'TBA' and n['QA9501'].original.get('Bkg. (in TWD)') == '#VALUE!')
+        check('a row with a rate keeps the Register TWD figures', 'fxPending' not in n['QA9506'].data and n['QA9506'].fx_snapshot['incomeTwd'] == 15074)
+        legs = [x['txNo'] for x in accounting_get(admin, '?view=list').json()['transactionRows'] if x.get('txNo', '').startswith('QA9501-')]
+        check('original-currency Accounting accounts exist without a rate', len(legs) == 3, legs)
+        detail = lambda s: admin.get('/api/legacy?id=' + str(n[s].uid)).json()['performance']
+        check('open and settled rows both show Awaiting FX', detail('QA9501').get('awaitingFx') is True and detail('QA9503').get('awaitingFx') is True
+              and detail('QA9506').get('awaitingFx') is False and detail('QA9504') == {}, (detail('QA9501'), detail('QA9504')))
+        nov = lambda: [x['incomeTwd'] for x in dashboard_inputs()['trend'] if x['month'] == '2026-11']
+        check('Dashboard brokerage leaves them out until the rate exists', sorted(nov(), key=str) == [15074, None, None, None, None], nov())
+        prod = lambda: admin.get('/api/production-report?month=2026-11').json()
+        post = lambda **body: admin.post('/api/production-report', json.dumps(dict(month='2026-11', **body)), content_type='application/json')
+        before_fx = prod()
+        r = post(action='generate', sourceSignature=before_fx['sourceSignature'])
+        check('Production lists the missing rate and cannot be generated', before_fx['summary']['missingRateCurrencies'] == ['USD'] and r.status_code == 400
+              and r.json().get('error') == 'fx_rate_required', (before_fx.get('summary'), r.content[:200]))
+        fx = FxRate.objects.create(year_month='2026-11', currency='USD', rate='32.14', created_by='qa', updated_by='qa')
+        got = prod()
+        people = lambda s: [(x['ae'], x['income'], x['premium']) for x in got['rows'] if x.get('legacyTransactionId') == str(n[s].uid)]
+        check('once the month rate exists the system converts them (100%, 40/60, 70/30)', got['summary']['missingRateCurrencies'] == []
+              and people('QA9501') == [('QA AE', 16149, 269154)] and [x[1] for x in people('QA9502')] == [6460, 9689]
+              and [x[1] for x in people('QA9503')] == [11305, 4844] and [x[1] for x in people('QA9506')] == [15074]
+              and people('QA9504') == [], [people(s) for s in n])
+        check('Dashboard brokerage now includes them', None not in nov() and len(nov()) == 5, nov())
+        r = post(action='generate', sourceSignature=got['sourceSignature'])
+        report = ProductionReport.objects.filter(year_month='2026-11').order_by('-version').first()
+        r2 = post(action='close', reportUid=str(report.report_uid), rowVersion=report.row_version, sourceSignature=got['sourceSignature'])
+        check('Production November generates and closes', r.status_code == 201 and r2.status_code in (200, 201), (r.content[:200], r2.content[:200]))
+        frozen = {x.number: x.fx_snapshot for x in LegacyTransaction.objects.filter(number__startswith='QA950')}
+        check('closing freezes the rate on the rows imported without one, and leaves the others',
+              [frozen[s].get('rate') for s in ('QA9501', 'QA9502', 'QA9503', 'QA9505')] == [32.14] * 4 and frozen['QA9504'] == {}
+              and frozen['QA9506'] == n['QA9506'].fx_snapshot
+              and LegacyAudit.objects.filter(action='production_fx_frozen', entity__in=[str(x.uid) for x in n.values()]).count() == 4, frozen)
+        FxRate.objects.filter(pk=fx.pk).update(rate='99', row_version=2)
+        fresh = LegacyTransaction.objects.get(pk=n['QA9503'].pk)
+        check('a later rate change does not move the frozen figures', rate_for(fresh)['rate'] == 32.14 and rate_for(fresh)['incomeTwd'] == 16149)
+        p = preview_rows([row('QA9511', **{'Reinsurer': ORD, 'Exchange Rate': 'TBA'}), row('QA9512', **{**usd, 'Exchange Rate': '32..1'}),
+                          row('QA9513', **{**tba, 'Tax': err('U4*0.01')}), row('QA9514', **{**usd, 'Exchange Rate': '30', twd: err(plain), redept: err(plain)}),
+                          row('QA9515', **{**tba, 'Exchange Rate': err('VLOOKUP(1,2,3)')})])
+        got = {w['serial']: w['message'] for w in p['manifest']['errors']}
+        check('still errors: TWD rows, mistyped rates, other formula errors, rows with a rate', p['manifest']['eligible'] == 0
+              and got['QA9511'] == got['QA9512'] == 'Exchange Rate must be a finite number.'
+              and all(got[s].startswith('Formula errors or formulas without cached results: ') for s in ('QA9513', 'QA9514', 'QA9515'))
+              and ',' not in got['QA9513'], got)
+        p = preview_rows([row('QA9521', **{**tba, 'Sub AE': 'QA Sub AE'}), row('QA9522', **{**tba, redept: err(plain + '*0.4')}),
+                          row('QA9523', **{**tba, 'Revenue Month': 'N/A'}), row('QA9524', **{**tba, 'Sub AE': 'QA Sub AE', redept: err(plain + '*0.5')})])
+        split = 'Exchange Rate is not set: the Re Dept. Bkg. (in TWD) formula must end with *0.4 or *0.7 so the AE / Sub AE split can be read.'
+        check('warnings block: unreadable split, share without Sub AE, no Revenue Month', [(w['serial'], w['message']) for w in p['manifest']['warnings']] == [
+              ('QA9521', split), ('QA9522', 'The Re Dept. Bkg. (in TWD) formula takes a share but there is no Sub AE.'),
+              ('QA9523', 'Revenue Month is required while the Exchange Rate is not set.'), ('QA9524', split)]
+              and commit(admin, p).status_code == 409, p['manifest'])
         raise Rollback()
 except Rollback:
     pass
