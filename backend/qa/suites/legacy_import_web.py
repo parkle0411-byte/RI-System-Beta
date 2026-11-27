@@ -390,6 +390,35 @@ try:
         finally: HEAD[:] = full
         check('a workbook without an amount column is refused instead of importing zeros', r.status_code == 400
               and b'missing amount columns: 100%Premium, Net Premium from Cedant.' in r.content, (r.status_code, r.content[:300]))
+        # ================= 2026-11-27：closed＝x 且收付編號只是「v-…」註記 → 擋住匯入 =================
+        cr, rp = ' Cedant Receipt No', ' Reinsurer Payment No.'
+        message = lambda column, ref: (f'closed is x but {column} is only a note ({ref}); clear it if not yet received or paid, '
+                                       'or enter the receipt/payment number.')
+        p = preview_rows([row('QA9401', Reinsurer=ORD, closed='x', **{cr: '202610210', rp: 'v-11/13'}),
+                          row('QA9402', Reinsurer=ORD, closed=' X ', **{cr: 'V -11/', rp: 'v-11/'}),
+                          row('QA9403', Reinsurer=ORD, **{**paid, 'closed': 'x', ' Cedant Payment No': 'v-3/2', 'DOL': D('2026-04-15')}),
+                          row('QA9404', Reinsurer=ORD, closed='x', **{cr: 'v-11/25'})])
+        check('closed = x with a v- note is a blocking warning naming the column, on premium and claim rows',
+              [(w['serial'], w['message']) for w in p['manifest']['warnings']] == [
+                  ('QA9401', message('Reinsurer Payment No.', 'v-11/13')), ('QA9402', message('Cedant Receipt No', 'V -11/')),
+                  ('QA9402', message('Reinsurer Payment No.', 'v-11/')), ('QA9403', message('Cedant Payment No', 'v-3/2')),
+                  ('QA9404', message('Cedant Receipt No', 'v-11/25'))] and not p['manifest']['errors'], p['manifest'])
+        check('it blocks the import', commit(admin, p).status_code == 409
+              and not LegacyTransaction.objects.filter(number__startswith='QA940').exists())
+        ok = [row('QA9411', Reinsurer=ORD, closed='x', **{cr: '202611106'}),                         # open, real number
+              row('QA9412', Reinsurer=ORD, **{cr: 'v-11/25', rp: 'v-11/18'}),                       # closed blank
+              row('QA9413', Reinsurer=ORD, closed='v', **{cr: 'v-11/25'}),                           # closed
+              row('QA9414', Reinsurer=ORD, closed='x', **{cr: 'CR-1', rp: 'waived premium'}),       # other text
+              row('QA9415', Reinsurer=ORD, closed='x'),                                              # nothing entered
+              row('QA9416', Reinsurer=ORD, closed='x', **{cr: 'Rev-1', rp: 'INV-v-2'})]              # not starting with v-
+        p = preview_rows(ok)
+        check('other rows keep importing: closed not x, real numbers, other text or no number',
+              not p['manifest']['warnings'] and not p['manifest']['errors'] and p['manifest']['eligible'] == 6, p['manifest'])
+        p = preview_rows([row('QA9421', Reinsurer=ORD, closed='x', **{cr: '202610210'})])
+        r = commit(admin, p)
+        x = LegacyTransaction.objects.filter(number='QA9421').first()
+        check('clearing the note imports the row with that side open', r.status_code == 200 and x and not x.historical
+              and x.data['importSettlement'] == {'cedant': '202610210', 'reinsurer': ''}, r.content[:300])
         raise Rollback()
 except Rollback:
     pass

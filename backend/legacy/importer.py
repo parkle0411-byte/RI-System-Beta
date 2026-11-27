@@ -14,6 +14,8 @@ Imported rows never create Cases or Production rows. No row is ever changed afte
 
 2026-11-26 (owner): a blank amount cell is stored as 0 (the original Excel data keeps it blank).
 A settled claim may have no usable DOL (blank or text such as "December 2022"); its date stays empty.
+2026-11-27 (owner): when the "closed" column is x, a receipt/payment number that is only a "v-..." note
+is a blocking warning (it would otherwise count that side as received/paid).
 
 2026-11-17 (owner): no upload records are kept. After a commit the stored workbook is deleted and
 the batch keeps only its import counts; it stays as a hidden marker of imported transactions.
@@ -62,6 +64,7 @@ from fxrates.currencies import ALL as CURRENCIES   # 2026-11-18: TWD + 15 curren
 SETTLEMENT_COLUMNS={'cedant':('Cedant Receipt No','Cedant Payment No'),
                     'reinsurer':('Reinsurer Receipt No','Reinsurer Payment No.')}
 IMPORT_NOTE='Settled before import (Register receipt/payment number).'
+NOTE_REF=re.compile(r'^v\s*-',re.I)   # e.g. "v-11/13": a hand-written note, not a receipt/payment number
 
 
 def excluded_row(row):
@@ -235,6 +238,14 @@ def converted(row, rule_cache, classes=None):
         if not data['receiveReminder' if receipt else 'payReminder']:
             raise ValueError(('Receive Date' if receipt else 'Pay Date')+' is required for a settled '+side+' account.')
     historical=all(not value or data['importSettlement'][side] for side,value in legs)
+    # Owner 2026-11-27: the Register has not closed this row (closed = x), so a note must not settle a side.
+    if label(v.get('closed')).lower()=='x':
+        for columns in SETTLEMENT_COLUMNS.values():
+            for column in columns:
+                ref=label(v.get(column))
+                if NOTE_REF.match(ref):
+                    notes.append(f'closed is x but {column} is only a note ({ref[:40]}); clear it if not yet received or paid, '
+                                 'or enter the receipt/payment number.')
     # Owner 2026-11-26: only an unsettled claim still needs a real DOL.
     if claim and not historical and not data['lossDate']:notes.append('Claim without DOL.')
     if claim and not historical and not data['claimIssueDate']:
