@@ -33,7 +33,7 @@ const totals = computed(() => turnover.value.reduce((acc, row) => {
     <el-form-item label="Premium Rate"><el-input v-model="payload.stpPremiumRate" type="textarea" :rows="2" maxlength="5000" /></el-form-item>
     <el-form-item label="Insured’s Website"><el-input v-model="payload.stpWebsite" maxlength="5000" /></el-form-item>
     <section class="stp-list">
-      <h3>Estimated Turnover <span aria-label="required">*</span></h3>
+      <h3>Estimated Turnover <span class="required-star" aria-label="required">*</span></h3>
       <el-radio-group v-model="payload.stpTurnoverMode">
         <el-radio value="combined">Combined</el-radio><el-radio value="companies">By company</el-radio>
       </el-radio-group>
@@ -50,7 +50,7 @@ const totals = computed(() => turnover.value.reduce((acc, row) => {
       <p v-if="turnover.length > 1" v-for="(total,currency) in totals" :key="currency">{{ currency }} total: {{ sumStpAmounts(total) }}</p>
     </section>
     <section class="stp-list">
-      <h3>HUB List <span aria-label="required">*</span></h3>
+      <h3>HUB List <span class="required-star" aria-label="required">*</span></h3>
       <div v-for="(row, index) in hubs" :key="index" class="stp-hub">
         <strong>Location {{ index + 1 }}</strong>
         <el-input v-model="row.name" maxlength="240" placeholder="Location name *" />

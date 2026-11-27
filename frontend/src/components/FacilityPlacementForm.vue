@@ -36,8 +36,8 @@ function removeReinsurer(index) { props.draft.reinsurers.splice(index, 1) }
     </div>
     <div v-for="[key, label] in textFields" :key="key"><el-form-item :label="label"><el-input v-model="draft[key]" type="textarea" :autosize="{minRows: 2}" /></el-form-item></div>
     <div class="form-grid cols-2">
-      <el-form-item label="Cedant R/I Comm (%)"><el-input v-model="draft.riCommPct" inputmode="decimal" /></el-form-item>
-      <el-form-item label="PPW (days)"><el-input v-model="draft.ppwDays" inputmode="numeric" /></el-form-item>
+      <el-form-item label="Cedant R/I Comm (%)" required><el-input v-model="draft.riCommPct" inputmode="decimal" /></el-form-item>
+      <el-form-item label="PPW (days)" required><el-input v-model="draft.ppwDays" inputmode="numeric" /></el-form-item>
       <el-form-item label="Cedant Tax (%)"><el-input v-model="draft.taxPct" inputmode="decimal" /></el-form-item>
     </div>
     <h3>Security Details</h3>

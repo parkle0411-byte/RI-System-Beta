@@ -256,10 +256,10 @@ onMounted(()=>{const saved=recall();if(saved){apply(saved.body);canEdit.value=fa
   <p>Adjust each Cash Amount. Receipts and payments are registered separately for each currency. Failed transactions stay here for correction; completed transactions are not submitted again.</p>
   <el-form label-position="top"><div class="form-grid cols-3">
    <el-form-item label="Receipt / payment date" required><el-date-picker v-model="payment.date" :disabled="saving" type="date" value-format="YYYY-MM-DD"/></el-form-item>
-   <el-form-item label="Accounting Dept. Ref."><el-input v-model="payment.reference" :disabled="saving" maxlength="200"/></el-form-item>
-   <el-form-item label="Note"><el-input v-model="payment.note" :disabled="saving" maxlength="1000"/></el-form-item>
+   <el-form-item label="Accounting Dept. Ref." required><el-input v-model="payment.reference" :disabled="saving" maxlength="200"/></el-form-item>
+   <el-form-item label="Note" required><el-input v-model="payment.note" :disabled="saving" maxlength="1000"/></el-form-item>
   </div></el-form>
-  <p>Enter an Accounting Dept. Ref. or note. The common details apply to all pending transactions; completed registrations retain their saved details.</p>
+  <p class="either-note">Enter at least one of the two: Accounting Dept. Ref. or Note.</p><p>The common details apply to all pending transactions; completed registrations retain their saved details.</p>
   <el-table class="compact-payment-table" :data="payment.allocations" max-height="420" data-testid="payment-accounts">
    <el-table-column label="Transaction" min-width="200"><template #default="{row}">{{rowTitle(row.row)}}<small v-if="!isT3(row.row)">SoA: {{soa(row.row)}}</small><small>{{displayTwRef(row.row)}} · {{row.row.accountDisplayDate||'—'}}</small></template></el-table-column>
    <el-table-column prop="row.originalInsured" label="Insured (EN)" min-width="120"/><el-table-column prop="row.originalInsuredCn" label="Insured (CN)" min-width="120"/>

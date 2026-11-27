@@ -8,13 +8,13 @@ const label = kind => ({ broker_credit: 'RI Broker Credit Note', broker_debit: '
     <h3>Foreign RI Broker Note</h3>
     <p>{{ endorsement ? 'Upload the Debit Note or Credit Note provided by the foreign RI Broker for this endorsement.' : 'Upload the Credit Note provided by the foreign RI Broker for this Original.' }} Uploaded files are automatically selected.</p>
     <el-form v-if="writable" label-position="top" :disabled="saving">
-      <el-form-item label="Broker Note Type">
+      <el-form-item label="Broker Note Type" required>
         <el-select :model-value="kind" @update:model-value="emit('update:kind', $event)">
           <el-option label="Credit Note" value="broker_credit" />
           <el-option v-if="endorsement" label="Debit Note" value="broker_debit" />
         </el-select>
       </el-form-item>
-      <el-form-item label="Broker Note File">
+      <el-form-item label="Broker Note File" required>
         <el-upload action="#" :auto-upload="false" :limit="1" accept=".pdf,.docx,.png,.jpg,.jpeg,.eml,.msg,.xlsx,.xls" :file-list="fileList" :on-change="file => emit('file-change', file)" :on-remove="() => emit('file-remove')">
           <el-button>Select file</el-button>
           <template #tip><div>Maximum 10 MB per file.</div></template>

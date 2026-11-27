@@ -118,7 +118,7 @@ onMounted(loadFxRates)
       <el-form-item label="Performance month" required><el-date-picker v-model="fxForm.yearMonth" type="month" value-format="YYYY-MM" format="MMM YYYY" placeholder="YYYY-MM" style="width:100%" @change="onFxMonthChange"></el-date-picker></el-form-item>
       <el-table :data="fxForm.rates" row-key="currency" class="case-table" size="small">
         <el-table-column prop="currency" label="Currency" width="150"><template #default="{ row }"><strong>{{ row.currency }}</strong></template></el-table-column>
-        <el-table-column label="Rate to TWD" min-width="280"><template #default="{ row }"><el-input-number v-model="row.rate" :min="0.000001" :max="1000" :precision="6" :controls="false" :disabled="row.isLocked" style="width:100%"></el-input-number></template></el-table-column>
+        <el-table-column label="Rate to TWD" min-width="280"><template #header>Rate to TWD <span class="required-star" aria-label="required">*</span></template><template #default="{ row }"><el-input-number v-model="row.rate" :min="0.000001" :max="1000" :precision="6" :controls="false" :disabled="row.isLocked" style="width:100%"></el-input-number></template></el-table-column>
       </el-table>
     </el-form>
     <template #footer><div class="review-footer"><p>Order: {{ FX_CURRENCIES.join(', ') }}. Blank rates cannot be saved.</p><div><el-button class="secondary-button" @click="fxDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="fxSaving" :disabled="fxForm.rates.some(row => row.isLocked)" @click="saveFxRate">Save monthly rates</el-button></div></div></template>

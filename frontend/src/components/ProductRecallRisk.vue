@@ -34,7 +34,8 @@ async function remove(group, row) {
 <template>
   <div v-if="payload.productRecall" data-testid="product-recall-risk">
     <section v-for="group in ['events', 'losses']" :key="group">
-      <div class="repeat-heading"><h3>{{ group === 'events' ? 'Covered Events' : 'Covered Loss' }}</h3></div>
+      <div class="repeat-heading"><h3>{{ group === 'events' ? 'Covered Events' : 'Covered Loss' }} <span class="required-star" aria-label="required">*</span></h3></div>
+      <small v-if="group === 'losses'" class="either-note">Each selected Covered Loss needs a currency and an amount greater than 0.</small>
       <div v-for="row in orderedRecallRows(payload.productRecall[group], group).filter(r => r.fixed)" :key="row.id" class="repeat-row">
         <el-checkbox :model-value="row.selected" @update:model-value="toggleFixed(row, $event)">{{ row.name }}</el-checkbox>
         <template v-if="group === 'losses' && row.selected">

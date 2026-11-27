@@ -27,10 +27,10 @@ function decide(index, field, choice, sync) {
     <div v-for="(row, index) in rows" :key="row.sourceCaseUid + ':' + row.claimId" class="repeat-card">
       <div class="repeat-heading"><strong>{{ row.sourceTwRef }} · Claim #{{ row.claimId }}</strong><el-button v-if="editable && editing !== index" :disabled="busy" @click="edit(index)">Edit</el-button></div>
       <div v-if="editing === index" class="form-grid cols-2">
-        <el-form-item label="Date of Loss"><DraftDate v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-        <el-form-item label="Cause"><el-input v-model="form.cause" maxlength="1000" /></el-form-item>
+        <el-form-item label="Date of Loss" required><DraftDate v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-form-item label="Cause" required><el-input v-model="form.cause" maxlength="1000" /></el-form-item>
         <el-form-item label="Currency"><el-select v-model="form.currency"><el-option v-for="currency in ALL_CURRENCIES" :key="currency" :label="currency" :value="currency" /></el-select></el-form-item>
-        <el-form-item label="Loss Amount"><DraftNumber v-model="form.lossPaid" :min="0" :controls="false" /></el-form-item>
+        <el-form-item label="Loss Amount" required><DraftNumber v-model="form.lossPaid" :min="0" :controls="false" /></el-form-item>
         <el-button :disabled="busy" @click="editing = -1">Cancel</el-button><el-button type="primary" :loading="busy" @click="save(index)">Save loss detail</el-button>
       </div>
       <p v-else>{{ row.date || '—' }} · {{ row.cause || '—' }} · {{ row.currency || '—' }} {{ row.lossPaid ?? '—' }}</p>

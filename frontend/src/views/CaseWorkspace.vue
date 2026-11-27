@@ -237,12 +237,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                             <el-option label="Reinsurer Confirmation E-mail" value="confirmation"></el-option>
                           </el-select>
                         </el-form-item>
-                        <el-form-item v-if="!['offer', 'facility_attachment'].includes(documentForm.kind)" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
+                        <el-form-item v-if="!['offer', 'facility_attachment'].includes(documentForm.kind)" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'" required>
                           <el-select v-model="documentForm.reinsurers" multiple collapse-tags collapse-tags-tooltip placeholder="Select reinsurer(s)">
                             <el-option v-for="row in selectedReinsurers" :key="row.key" :label="row.label" :value="row.key"></el-option>
                           </el-select>
                         </el-form-item>
-                        <el-form-item label="File">
+                        <el-form-item label="File" required>
                           <el-upload drag action="#" :auto-upload="false" :limit="1" accept=".pdf,.docx,.png,.jpg,.jpeg,.eml,.msg,.xlsx,.xls" :file-list="documentFileList" :on-change="onDocumentFileChange" :on-remove="onDocumentFileRemove">
                             <div class="el-upload__text">Drop a file here or <em>select file</em></div>
                             <template #tip><div class="el-upload__tip">The uploaded file is automatically selected for the current review.</div></template>
@@ -552,12 +552,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                             <el-option label="Reinsurer Confirmation E-mail" value="confirmation"></el-option>
                           </el-select>
                         </el-form-item>
-                        <el-form-item v-if="!['offer', 'facility_attachment'].includes(documentForm.kind)" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
+                        <el-form-item v-if="!['offer', 'facility_attachment'].includes(documentForm.kind)" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'" required>
                           <el-select v-model="documentForm.reinsurers" multiple collapse-tags collapse-tags-tooltip placeholder="Select reinsurer(s)">
                             <el-option v-for="row in selectedReinsurers" :key="row.key" :label="row.label" :value="row.key"></el-option>
                           </el-select>
                         </el-form-item>
-                        <el-form-item label="File">
+                        <el-form-item label="File" required>
                           <el-upload drag action="#" :auto-upload="false" :limit="1" accept=".pdf,.docx,.png,.jpg,.jpeg,.eml,.msg,.xlsx,.xls" :file-list="documentFileList" :on-change="onDocumentFileChange" :on-remove="onDocumentFileRemove">
                             <div class="el-upload__text">Drop a file here or <em>select file</em></div>
                             <template #tip><div class="el-upload__tip">The uploaded file is automatically selected for the current review.</div></template>
@@ -766,7 +766,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
               <template #header><div class="review-heading"><span class="pending-badge">Claim receivable / payable</span><h2>Record claim obligation</h2><p>This creates Claim Leg 1/2 receivable and payable transactions. Record actual cash receipts and payments separately in Accounting. Unprocessed obligations can be corrected with a reason. Obligations with receipt/payment history require a separate adjustment. Due dates follow the applicable Accounting rule.</p><p>Claim deadlines follow the applicable Accounting rule. Swiss CGL claims are due 15 calendar days after system creation in Taiwan, with reminders 7 days before, on the due date, then every 7 days while a balance remains. Full receipts and payments settle automatically; partial entries keep the original deadline.</p></div></template>
               <el-form label-position="top">
                 <el-form-item label="Obligation date" required><DraftDate :relaxed="relaxedDraft" v-model="paymentForm.date" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" style="width:100%"></DraftDate></el-form-item>
-                <el-form-item label="Amount"><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="paymentForm.amount" :controls="false" style="width:100%"></DraftNumber><div class="document-help">A non-zero negative amount may be used as an offsetting correction.</div></el-form-item>
+                <el-form-item label="Amount" required><DraftNumber :relaxed="relaxedDraft" :formatter="formatMoneyInput" :parser="parseMoneyInput" v-model="paymentForm.amount" :controls="false" style="width:100%"></DraftNumber><div class="document-help">A non-zero negative amount may be used as an offsetting correction.</div></el-form-item>
                 <el-form-item label="Note"><el-input v-model="paymentForm.note" maxlength="1000"></el-input></el-form-item><el-form-item v-if="paymentForm.paymentId != null" label="Correction reason" required><el-input v-model="paymentForm.reason" type="textarea" maxlength="1000" /></el-form-item>
               </el-form>
               <template #footer><el-button @click="paymentDialogVisible = false">Cancel</el-button><el-button class="primary-button" :loading="claimsSaving" @click="recordClaimPayment">Record obligation</el-button></template>
@@ -930,19 +930,19 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                   <el-form-item v-if="!isCglInformation && !recallScope(draft) && draft.classOfBusiness !== 'Stock Throughput' && draft.basisOfValuation === 'Other'" label="Basis of Valuation — Other" required :class="{ 'is-required-error': fieldInvalid('basisOfValuationOther') }"><el-input v-model="draft.basisOfValuationOther" maxlength="1000"></el-input></el-form-item>
                   <el-form-item v-if="isCglInformation ? draft.reinsuranceStructure === 'XOL' : draft.reinsuranceStructure !== 'QS'" :label="isCglInformation ? 'Underlying Limits' : 'Underlying Limits (Primary Layer)'" :required="isCglInformation && draft.reinsuranceStructure === 'XOL'" :class="{ 'is-required-error': isCglInformation && draft.reinsuranceStructure === 'XOL' && fieldInvalid('underlyingLimits') }"><el-input v-model="draft.underlyingLimits" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item v-if="!recallScope(draft)" label="Sub-Limits"><el-input v-model="draft.subLimits" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item label="Deductibles" :required="!newCgl(draft) && !recallScope(draft)" :class="{ 'is-required-error': fieldInvalid('deductibles') }"><DraftNumber v-if="recallScope(draft)" :relaxed="relaxedDraft" v-model="draft.deductibles" :min="0" :controls="false" /><el-input v-else v-model="draft.deductibles" type="textarea" :rows="3" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item v-if="isCglInformation || recallScope(draft) || propertyExtraFields(draft)" label="Self-Insured Retention"><el-input v-model="draft.selfInsuredRetention" type="textarea" :autosize="{ minRows: 2 }" maxlength="3000" show-word-limit></el-input></el-form-item>
+                  <el-form-item label="Deductibles" required :class="{ 'is-required-error': fieldInvalid('deductibles') }"><DraftNumber v-if="recallScope(draft)" :relaxed="relaxedDraft" v-model="draft.deductibles" :min="0" :controls="false" /><el-input v-else v-model="draft.deductibles" type="textarea" :rows="3" maxlength="3000"></el-input><small v-if="newCgl(draft) || recallScope(draft)" class="either-note">Enter at least one of the two: Deductibles or Self-Insured Retention.</small></el-form-item>
+                  <el-form-item v-if="isCglInformation || recallScope(draft) || propertyExtraFields(draft)" label="Self-Insured Retention" :required="newCgl(draft) || recallScope(draft)"><el-input v-model="draft.selfInsuredRetention" type="textarea" :autosize="{ minRows: 2 }" maxlength="3000" show-word-limit></el-input></el-form-item>
                   <el-form-item v-if="draft.classOfBusiness !== 'Stock Throughput'" label="Original Exclusions" :required="recallScope(draft)"><el-input v-model="draft.originalExclusions" type="textarea" :rows="3" maxlength="5000"></el-input></el-form-item>
                   <el-form-item label="Original Conditions" :required="!allFacilityReinsurers" :class="{ 'is-required-error': fieldInvalid('originalConditions') }"><el-input v-model="draft.originalConditions" type="textarea" :rows="3" maxlength="5000"></el-input></el-form-item>
-                  <el-form-item v-if="!allFacilityReinsurers" label="Reinsured's Retention" :required="keyInScope(draft) && !placingRulesEnabled(draft)" :class="{ 'is-required-error': keyInScope(draft) && !placingRulesEnabled(draft) && fieldInvalid('reinsuredRetention') }"><el-input v-model="draft.reinsuredRetention" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Reinsured's Retention" :required="keyInScope(draft) && !placingRulesEnabled(draft) || recallScope(draft) || draft.classOfBusiness === 'Stock Throughput'" :class="{ 'is-required-error': keyInScope(draft) && !placingRulesEnabled(draft) && fieldInvalid('reinsuredRetention') }"><el-input v-model="draft.reinsuredRetention" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item v-if="!allFacilityReinsurers" label="Reinstatement Provisions"><el-input v-model="draft.reinstatementProvisions" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                   <el-form-item v-if="propertyExtraFields(draft)" label="Loss Payee"><el-input v-model="draft.lossPayee" type="textarea" :rows="2" maxlength="3000" /></el-form-item>
                   <el-form-item v-if="newCgl(draft) || recallScope(draft) || propertyExtraFields(draft) || draft.classOfBusiness === 'Stock Throughput'" label="Co-Reinsurance Warranty"><el-input v-model="draft.coReinsuranceWarranty" type="textarea" :rows="2" maxlength="3000" /></el-form-item>
                   <el-form-item v-if="isCglInformation || recallScope(draft) || placingRulesEnabled(draft) || draft.classOfBusiness === 'Stock Throughput'" label="Notices"><el-input v-model="draft.notices" type="textarea" :autosize="{ minRows: 2 }" maxlength="5000" show-word-limit></el-input></el-form-item>
                   <el-form-item v-if="!isCglInformation && !recallScope(draft)" label="Indemnity Period"><el-input v-model="draft.indemnityPeriod" :type="draft.classOfBusiness === 'Stock Throughput' ? 'textarea' : 'text'" :rows="2" maxlength="1000"></el-input></el-form-item>
-                  <el-form-item v-if="!allFacilityReinsurers" label="Express Warranties"><el-input v-model="draft.expressWarranties" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item v-if="!allFacilityReinsurers" label="Conditions Precedent"><el-input v-model="draft.conditionsPrecedent" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
-                  <el-form-item label="Subjectivities"><el-input v-model="draft.subjectivities" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Express Warranties" :required="recallScope(draft) || draft.classOfBusiness === 'Stock Throughput'"><el-input v-model="draft.expressWarranties" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item v-if="!allFacilityReinsurers" label="Conditions Precedent" :required="recallScope(draft) || draft.classOfBusiness === 'Stock Throughput'"><el-input v-model="draft.conditionsPrecedent" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
+                  <el-form-item label="Subjectivities" :required="recallScope(draft) || draft.classOfBusiness === 'Stock Throughput'"><el-input v-model="draft.subjectivities" type="textarea" :rows="2" maxlength="3000"></el-input></el-form-item>
                 </CaseFormSection>
 
                 <CaseFormSection v-if="isCglInformation || recallScope(draft)" name="information" title="Information">
@@ -1083,8 +1083,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                       </div>
                     </el-form-item>
                     <div class="form-grid cols-3">
-                      <el-form-item label="Clause code"><el-input v-model="caseClauseDraft.code" maxlength="80" placeholder="e.g. LPO1234"></el-input></el-form-item>
-                      <el-form-item label="Clause name"><el-input v-model="caseClauseDraft.title" maxlength="300" placeholder="Full clause name"></el-input></el-form-item>
+                      <el-form-item label="Clause code" required><el-input v-model="caseClauseDraft.code" maxlength="80" placeholder="e.g. LPO1234"></el-input></el-form-item>
+                      <el-form-item label="Clause name" required><el-input v-model="caseClauseDraft.title" maxlength="300" placeholder="Full clause name"></el-input></el-form-item>
                       <el-form-item label=" "><el-button class="secondary-button" @click="addCaseClause">+ Add clause</el-button></el-form-item>
                     </div>
                   </div>
@@ -1168,10 +1168,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                     <el-option label="Reinsurer Signed Slip" value="signed" />
                     <el-option label="Reinsurer Confirmation E-mail" value="confirmation" />
                   </el-select></el-form-item>
-                  <el-form-item v-if="documentForm.kind !== 'offer'" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'">
+                  <el-form-item v-if="documentForm.kind !== 'offer'" :label="documentForm.kind === 'signed' ? 'Signed by reinsurer(s)' : 'Confirmed by reinsurer(s)'" required>
                     <el-select v-model="documentForm.reinsurers" multiple collapse-tags collapse-tags-tooltip placeholder="Select reinsurer(s)"><el-option v-for="row in selectedReinsurers" :key="row.key" :label="row.label" :value="row.key" /></el-select>
                   </el-form-item>
-                  <el-form-item label="File"><el-upload drag action="#" :auto-upload="false" :limit="1" accept=".pdf,.docx,.png,.jpg,.jpeg,.eml,.msg,.xlsx,.xls" :file-list="documentFileList" :on-change="onDocumentFileChange" :on-remove="onDocumentFileRemove"><div class="el-upload__text">Drop a file here or <em>select file</em></div><template #tip><div class="el-upload__tip">PDF, DOCX, PNG, JPG, EML, MSG, XLSX and XLS. Maximum 30 MB per file.</div></template></el-upload></el-form-item>
+                  <el-form-item label="File" required><el-upload drag action="#" :auto-upload="false" :limit="1" accept=".pdf,.docx,.png,.jpg,.jpeg,.eml,.msg,.xlsx,.xls" :file-list="documentFileList" :on-change="onDocumentFileChange" :on-remove="onDocumentFileRemove"><div class="el-upload__text">Drop a file here or <em>select file</em></div><template #tip><div class="el-upload__tip">PDF, DOCX, PNG, JPG, EML, MSG, XLSX and XLS. Maximum 30 MB per file.</div></template></el-upload></el-form-item>
                   <el-button class="primary-button" :loading="documentsSaving" :disabled="announcing" @click="uploadCaseDocument">Upload Evidence</el-button>
                 </el-form>
                 <el-alert :title="documentReadinessText" :type="documentCoverage.ready ? 'success' : 'warning'" :closable="false" show-icon />

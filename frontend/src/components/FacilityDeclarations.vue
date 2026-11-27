@@ -107,12 +107,12 @@ onMounted(() => load().catch(err => ElMessage.error(err.message)))
       <el-table-column label=""><template #default="{ row }"><el-button v-if="writable && ['draft','posted'].includes(row.status)" link @click="startEdit(row)">{{ row.status === 'posted' ? 'Correct' : 'Edit' }}</el-button></template></el-table-column>
     </el-table>
     <div v-if="editing" class="form-grid cols-2">
-      <el-form-item label="Declaration Period From"><el-date-picker v-model="form.periodFrom" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-      <el-form-item label="Declaration Period To"><el-date-picker v-model="form.periodTo" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-      <el-form-item label="Cedant's Statement No."><el-input v-model="form.statementNo" maxlength="160" /></el-form-item>
+      <el-form-item label="Declaration Period From" required><el-date-picker v-model="form.periodFrom" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+      <el-form-item label="Declaration Period To" required><el-date-picker v-model="form.periodTo" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+      <el-form-item label="Cedant's Statement No." required><el-input v-model="form.statementNo" maxlength="160" /></el-form-item>
       <el-form-item label="Currency"><el-input :model-value="facility.payload?.currency" disabled /></el-form-item>
-      <el-form-item label="Premium"><el-input v-model="form.premium" inputmode="decimal" /></el-form-item>
-      <el-form-item label="Claim"><el-input v-model="form.claim" inputmode="decimal" /></el-form-item>
+      <el-form-item label="Premium" required><el-input v-model="form.premium" inputmode="decimal" /><small class="either-note">Enter at least one of the two: Premium or Claim (they cannot both be zero).</small></el-form-item>
+      <el-form-item label="Claim" required><el-input v-model="form.claim" inputmode="decimal" /></el-form-item>
       <el-button :loading="busy" @click="save">{{ editing.status === 'posted' ? 'Save correction' : 'Save Draft' }}</el-button>
       <div v-if="!editing.isNew"><p>Payment due: {{ editing.payload?.dueDate || '—' }}</p><p v-for="file in files" :key="file.id"><el-button link @click="download(file)">{{ file.filename }}</el-button></p>
         <template v-if="editing.status === 'draft'"><input type="file" aria-label="Declaration evidence" @change="selectedFile = $event.target.files?.[0] || null" />

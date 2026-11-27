@@ -64,7 +64,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **資料庫／API 測試組**：一律用 `scripts/run_isolated_qa.sh [測試組 …]`（隔離 MySQL＋後端、`ri_runtime`＋db_harden、每組全新資料庫、自動清除；全部約 50 分鐘，2026-11-25 為 143 組）。**不要在正式容器跑**（正式 Audit 暫停，測試會失敗）。`KEEP=1` 保留環境除錯；`QA_BACKEND_IMAGE=<映像>` 改測指定映像（不重建，用該映像內建的測試組），見下方「測試版本」。
 - **前後端合計、密碼規則一致性**：`scripts/run_qa.sh totals`／`parity`（`run_qa.sh` 已不再跑測試組）。
 - **Accounting 伺服器分頁一致性**（2026-11-17）：`scripts/run_qa.sh pages`——以正式資料（唯讀）取伺服器各分頁，與畫面原本的程式（`accountingRows.js`、`accountingList.js`，node 執行）逐頁比對；2026-11-24 正式資料 582 頁約 6–10 分鐘。`PAGES_BACKEND=<容器>` 改用其他後端（例：壓測環境）。
-- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16）、人員頁帳號操作 U 10 項（2026-11-17），合計 374 項；另有 Dashboard 互動 DI 93 項（2026-11-25，以假的 /api/dashboard 回應驗證，並對真實後端核對新欄位；完整執行時一併跑）、全站互動 GI 23 項（2026-11-25，側欄滑動底色、按鈕漣漪、必填欄位抖動）、載入骨架條 SK 79 項（2026-11-26，扣住各頁資料請求，檢查 8 個頁面的骨架顯示／移除、表頭不位移、灰條對齊資料欄與第一列、Dashboard 數值位置與減少動態效果；案件明細頁的小區塊沒有專項畫面檢查）。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。
+- **畫面測試**：`scripts/run_ui_test.sh`（無頭 Chromium，用完即丟的環境）。13 個標準階段 A H R B0 B K C D E F G P1 P2，共 206 項；另有專項（完整執行時一併跑）：Oversea Business O 29 項＋分期／批單 26 項、舊案 L 20 項（自動準備舊案測試資料）、Accounting 載入失敗 X 9 項、舊資料網頁匯入 I 9 項、Accounting 伺服器分頁 Y 24 項（2026-11-17 改寫；先準備 160 筆合成的已結清舊資料歷史）、前端拆檔與快取 Z 14 項（2026-11-13）、主資料重新啟用 M 11 項（2026-11-16）、人員頁帳號操作 U 10 項（2026-11-17），合計 374 項；另有 Dashboard 互動 DI 93 項（2026-11-25，以假的 /api/dashboard 回應驗證，並對真實後端核對新欄位；完整執行時一併跑）、全站互動 GI 23 項（2026-11-25，側欄滑動底色、按鈕漣漪、必填欄位抖動）、載入骨架條 SK 79 項（2026-11-26，扣住各頁資料請求，檢查 8 個頁面的骨架顯示／移除、表頭不位移、灰條對齊資料欄與第一列、Dashboard 數值位置與減少動態效果；案件明細頁的小區塊沒有專項畫面檢查）。`UT_BACKEND_IMAGE`／`UT_FRONTEND_IMAGE` 指定測試映像（預設是正式映像，可能比原始碼舊）；`PHASES="A H"` 只跑部分（要從 A 開始）。測試切換登入身分前等待應用 API 完成，不等待預覽 iframe 的外部資源；保留全部 console 錯誤檢查。必填欄位紅色 * RM 28 項（2026-11-27：開各險種新案件表單與 FX 對話框，確認必填欄位與標題的 * 是紅色、選填欄位沒有 *；會先建立 Stock Throughput 險種主檔；不存檔）。
 - **Legacy 網頁匯入 I 專項**（2026-11-11）：`qa/ui/legacy_import_ui.py`，完整執行時一併跑（`run_ui_test.sh` 預設階段加 I）；API 另有 `legacy_import_web` 測試組。
 - **前端檢查**：`frontend/scripts/check_*.cjs`（`check_endorsement_notes.cjs` 需在建置映像內執行，因為要 jszip）。
 - **壓力測試**：`qa/stress/`（1 萬件案件；結果在 `qa/stress/RESULTS-*.md`）。
@@ -565,6 +565,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-27 12:40 | 必填欄位紅色 *：約 45 個必填但沒有紅色 * 的欄位補上（Facility Declaration／Placement、舊資料新增與轉移、FX Rates、理賠付款、上傳文件、Clause、Oversea Broker Note、Accounting 收付款 Ref. 或 Note、人員歷史、Product Recall、STP、Sum Insured 標題、續保舊理賠）；二選一兩欄都標 * 並加一行說明；只換前端（回復：`~/RI System/required-marks-work/rollback.sh 20261127_124032`） | `backups/required_marks_20261127_124032/`（部署前 DB 及變更檔） | `ri-frontend:before-required-marks-20261127_124032` | 候選 `ri-frontend:required-marks-candidate`（6fc4b334d256，已合併 10:55 舊資料草稿刪除的兩個畫面）：完整畫面 619 項＋新 RM 28 項全過、原始碼標示檢查 59 處（舊版 53 項不過）、前端建置與 7 支檢查程式全過、截圖確認；不改檢查規則與資料；部署後 40 個前端檔案與候選一致 |
 | 11-27 10:55 | 舊資料：從未確認過的批單／理賠草稿可刪除（前後端＋資料庫授權與 trigger；回復：`~/RI System/legacy-draft-delete-work/rollback.sh 20261127_105532`） | `backups/legacy_draft_delete_20261127_105532/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-draft-delete-20261127_105532`／`ri-frontend:before-draft-delete-20261127_105532` | 全部 API 148/148 組（新增 legacy_draft_delete 59 項；舊程式與拿掉 trigger 時皆會失敗）；全部畫面測試通過（L 31/31，新增刪除草稿 11 項）；正式資料副本演練：資料庫指令與 db_harden.sh 結果一致、只多 1 個 trigger 與 1 條授權、副本刪 1 筆草稿只動舊資料與操作紀錄、回復指令可還原；無 migration、部署不改資料 |
 | 11-27 09:15 | 舊資料更正：F17953、F17753 再保人款改為未付（業主確認尚未支付；匯入時付款編號只填「v-11/…」被當成已付；業主同意的正式資料修改） | `backups/legacy_unpaid_fix_20261127_091547/`（database.sql、rows-before.json） | —（程式未變） | 正式資料副本演練：只有這 2 筆舊資料與 2 筆 Legacy 操作紀錄改變、其他帳款列與 Production 不變、第二次執行自動停止 |
 | 11-26 15:01 | 舊資料匯入：金額欄空白視為 0、已結清理賠 DOL 可留空（只換後端；回復：`~/RI System/legacy-blank-work/rollback.sh 20261126_150104`） | `backups/legacy_blank_20261126_150104/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-legacy-blank-20261126_150104` | 候選 `ri-backend:legblank-candidate`（adfb018f1880）：全部 API 145/145 組（新增匯入放寬 13 項，舊程式跑新檢查會失敗）；正式資料副本以業主的 MC Register 實測通過（0 錯誤 0 警告、1,156 列轉換結果與舊版逐欄相同、原有帳款列不變）；全部畫面測試除 M 階段一次偶發逾時外通過，重跑 A＋M 通過（業主同意部署）；無 migration、不改資料 |
@@ -659,6 +660,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-27：必填欄位補紅色 *（業主檢查後決定，12:40 部署，只換前端）：約 45 個系統會擋下、但畫面沒有標 * 的欄位補上紅色 *；二選一（Deductibles 或 Self-Insured Retention、Accounting Dept. Ref. 或 Note、Declaration Premium 或 Claim）兩欄都標 * 並加一行英文說明；Sum Insured／STP 表格保留灰色提示字、標題加紅色 *。CGL 新版 Placing 規則的 Principal Address 為選填，不標 *。畫面測試新增 RM 階段（§3）。
 
 - 2026-11-27：舊資料草稿可刪除（業主 11-25 決定，10:55 部署，前後端＋資料庫權限；回復：`~/RI System/legacy-draft-delete-work/rollback.sh 20261127_105532`）：詳情見 §17.2「刪除草稿」。
 

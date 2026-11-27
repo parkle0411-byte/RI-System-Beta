@@ -5,7 +5,7 @@ export const SECTION_EDIT_CONTEXT = Symbol('case-section-edit')
 import { computed, defineComponent, h, inject, provide, reactive, toRefs, unref } from 'vue'
 import { formContextKey } from 'element-plus'
 defineOptions({ inheritAttrs: false })
-const props = defineProps({ name: { type: String, required: true }, title: { type: String, required: true }, fixed: Boolean, direct: Boolean })
+const props = defineProps({ name: { type: String, required: true }, title: { type: String, required: true }, fixed: Boolean, direct: Boolean, required: Boolean })
 const editor = inject(SECTION_EDIT_CONTEXT, null)
 const guarded = computed(() => Boolean(unref(editor?.guarded)) && !props.direct)
 const editing = computed(() => guarded.value && !props.fixed && unref(editor?.active) === props.name)
@@ -29,6 +29,7 @@ const FieldGuard = defineComponent({
       <el-button v-else size="small" :type="editing ? 'primary' : 'default'" :disabled="busy" :loading="editing && busy" :aria-label="(editing ? 'Done editing ' : 'Edit ') + title" @click.stop="editing ? editor.done() : editor.edit(name)">{{ editing ? 'Done' : 'Edit' }}</el-button>
     </div>
     <el-collapse-item v-bind="$attrs" :name="name" :title="title">
+      <template v-if="required" #title>{{ title }}&nbsp;<span class="required-star" aria-label="required">*</span></template>
       <FieldGuard :disabled="locked || (guarded && busy)"><slot /></FieldGuard>
     </el-collapse-item>
   </div>

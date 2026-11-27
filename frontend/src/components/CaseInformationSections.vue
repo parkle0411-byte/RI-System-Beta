@@ -3,7 +3,7 @@ import CaseFormSection from './CaseFormSection.vue'
 defineProps({ combined: Boolean, hideSpecialAgreement: Boolean, stp: Boolean })
 const sections = [
   { name: 'occupation', title: 'Occupation & Construction' },
-  { name: 'sumInsured', title: 'Breakdown of Sum Insured' },
+  { name: 'sumInsured', title: 'Breakdown of Sum Insured', required: true },
   { name: 'loss', title: 'Loss Record' },
   { name: 'specialAgreement', title: 'Special Agreement' },
 ]
@@ -12,12 +12,12 @@ const sections = [
 <template>
   <CaseFormSection v-if="combined" name="information" title="Information" data-testid="property-information">
     <section v-for="section in sections.filter(s => (!hideSpecialAgreement || s.name !== 'specialAgreement') && (!stp || s.name === 'loss'))" :key="section.name" class="information-section" :data-section="section.name">
-      <h3>{{ section.title }}</h3>
+      <h3>{{ section.title }}<span v-if="section.required" class="required-star" aria-label="required"> *</span></h3>
       <slot :name="section.name" />
     </section>
   </CaseFormSection>
   <template v-else>
-    <CaseFormSection v-for="section in sections.filter(s => (!hideSpecialAgreement || s.name !== 'specialAgreement') && (!stp || s.name === 'loss'))" :key="section.name" :name="section.name" :title="section.title">
+    <CaseFormSection v-for="section in sections.filter(s => (!hideSpecialAgreement || s.name !== 'specialAgreement') && (!stp || s.name === 'loss'))" :key="section.name" :name="section.name" :title="section.title" :required="section.required">
       <slot :name="section.name" />
     </CaseFormSection>
   </template>

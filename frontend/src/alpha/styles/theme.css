@@ -241,6 +241,7 @@ button, input, select { font: inherit; }
 /* Review readiness · milestone 3 */
 .required-star, .case-form .el-form-item.is-required > .el-form-item__label::before { color: #c0352b; }
 .case-form .el-form-item.is-required > .el-form-item__label::before { margin-right: 3px; }
+.either-note { display: block; width: 100%; margin-top: 4px; font-size: 12px; line-height: 1.4; color: var(--brand-navy-muted); }
 .case-form .is-required-error .el-input__wrapper,
 .case-form .is-required-error .el-select__wrapper,
 .case-form .required-invalid .el-input__wrapper { box-shadow: 0 0 0 1px #c0352b inset !important; }

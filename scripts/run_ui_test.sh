@@ -152,6 +152,12 @@ case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI SK} " in *" 
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 skeleton_ui.py || STATUS=1
 esac
+# RM: 必填欄位紅色 *（2026-11-27；開各險種新案件表單與 FX 對話框，確認必填欄位與標題的 * 是紅色、選填欄位沒有 *；不存檔）。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI SK RM} " in *" RM "*)
+  docker exec ri-ut-backend python manage.py shell -c "from masterdata.models import MasterRecord; MasterRecord.objects.get_or_create(entity_type='class', name='Stock Throughput', defaults=dict(code='ST', payload={}, created_by='seed', updated_by='seed')); print('stp class ready')" 2>&1 | grep -q 'stp class ready' || STATUS=1
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 required_marks_ui.py || STATUS=1
+esac
 # I: Legacy 網頁匯入（2026-11-11；系統管理員上傳 Register → 預覽 → 匯入 → Accounting）。
 case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" I "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
