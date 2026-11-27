@@ -10,6 +10,8 @@
 #     - django_migrations、django_content_type、auth_permission：只讀
 #     - django_session、ri_case_documents：可 DELETE
 #     - ri_production_exclusions、ri_data_migration_items：只有 SELECT、INSERT（排除紀錄、轉換對照只新增，不修改也不刪除）
+#     - ri_legacy_transactions：SELECT、INSERT、UPDATE、DELETE（2026-11-25 業主決定：可刪除從未確認過的舊資料草稿）；
+#       trigger 只讓 ri_runtime 刪「草稿、非匯入、沒有編號、從未確認」的列，維護帳號（ri_app／root）不受此限
 #     - 其餘所有資料表：SELECT、INSERT、UPDATE，沒有 DELETE
 #       （對應「案件與已被引用的主檔永不實體刪除，只能停用／封存」）
 #     - 沒有 DDL、沒有 TRIGGER、沒有 DROP／TRUNCATE
@@ -42,9 +44,15 @@ in_list() { [[ " $2 " == *" $1 "* ]]; }
 
 {
   echo "DROP USER IF EXISTS 'ri_runtime'@'%';"
+  # 舊資料草稿刪除的列條件（與 backend/legacy/entries.py can_delete 相同）。放在授權之前建立，授權當下一定已受限制。
+  echo "DROP TRIGGER IF EXISTS \`ri_legacy_transactions_runtime_delete\`;"
+  echo "DELIMITER \$\$"
+  echo "CREATE TRIGGER \`ri_legacy_transactions_runtime_delete\` BEFORE DELETE ON \`ri_legacy_transactions\` FOR EACH ROW BEGIN IF SUBSTRING_INDEX(USER(), '@', 1) = 'ri_runtime' AND NOT (OLD.status = 'draft' AND OLD.historical = 0 AND OLD.batch_id IS NULL AND IFNULL(OLD.number, '') = '' AND OLD.first_confirmed_at IS NULL) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ri_legacy_transactions: only a draft that was never confirmed may be deleted'; END IF; END\$\$"
+  echo "DELIMITER ;"
   echo "CREATE USER 'ri_runtime'@'%' IDENTIFIED BY '${RUNTIME_PW}';"
   for t in $TABLES; do
     if   [ "$t" = "ri_entity_snapshots" ]; then privs="SELECT, INSERT, UPDATE"   # UPDATE 由下方 trigger 限制在草稿副本
+    elif [ "$t" = "ri_legacy_transactions" ]; then privs="SELECT, INSERT, UPDATE, DELETE"   # DELETE 由上方 trigger 限制在未確認草稿
     elif in_list "$t" "$APPEND_ONLY"; then privs="SELECT, INSERT"
     elif in_list "$t" "$INSERT_ONLY"; then privs="SELECT, INSERT"
     elif in_list "$t" "$READ_ONLY";   then privs="SELECT"

@@ -52,6 +52,7 @@ class TransactionsView(NoStoreMixin,APIView):
         from .entries import change
         with serialized(PRODUCTION_SOURCES):
             t=change(request.ri_principal,object_body(request))
+            if t is None:return Response({'ok':True,'deleted':True})
             return Response(representation(t,request.ri_principal))
 
 

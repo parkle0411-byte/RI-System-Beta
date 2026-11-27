@@ -36,7 +36,7 @@ VM（`/opt/ri-system`）是再保部系統的**正式系統與唯一規格**。�
 - **Frontend**：`package.json` 精確版本＋`package-lock.json`，`node:22-alpine` 以 `npm ci` 建置。Word 產生程式在 `frontend/public/alpha-documents/`（`docx-templates.js`、`vm-docx-generator.js`），不經 Vite 打包。前端拆檔（2026-11-13）：第三方套件獨立成 `vendor-*` 檔（內容不變時檔名不變，部署後沿用瀏覽器快取），各頁面由 router 動態載入、各自成檔，登入頁留在主檔；部署後舊分頁載入已不存在的頁面檔時，自動整頁重新載入到目的頁（只重試一次）。
 - **Backend**：`requirements.txt` 精確版本，基底 `python:3.13-slim-bookworm`。gunicorn **4 個 worker**（= CPU 核心數；不可用 `--threads`，壓測時會撐爆記憶體）。Admin Panel 是唯讀 Django admin（`/admin/`，只有 System Administrator）。
 - **Nginx**：`nginx:1.28-alpine`（與前端靜態檔同映像）；JSON／JS／CSS 啟用 gzip；轉發逾時 60 秒；`/static`、`/assets` 帶 nosniff 與 X-Frame-Options；SPA HTML 用 no-store、no-referrer；access log 遮蔽密碼重設 token。`/alpha-documents/`（Word 產生程式，不帶雜湊檔名）為 `Cache-Control: no-cache`：瀏覽器可保存但每次使用前以 ETag 確認，未更新回 304（2026-11-13）；SPA HTML 仍為 no-store、`/assets/` 仍為 immutable。
-- **MySQL**：`compose.yaml` 固定映像摘要（不用標籤）；`innodb_buffer_pool_size=512MB`；`sort_buffer_size=2MB`（2026-11-16 業主決定，以 `SET PERSIST` 設定、存在資料庫的 `mysqld-auto.cnf`，不在 `compose.yaml`；重啟後保留。查詢：`SELECT @@global.sort_buffer_size`；還原：`RESET PERSIST sort_buffer_size`）。網站以最小權限的 `ri_runtime` 連線（多數表沒有 DELETE；Audit 表只有 SELECT／INSERT）；維護用 `ri_app`。例外（2026-11-13 業主決定，見 §4.5）：`ri_entity_snapshots` 另有 UPDATE 權限，由 trigger 限制只能覆蓋「案件仍是 Draft 的 draft_updated 副本」；DELETE 仍一律禁止，`ri_audit_log`／`ri_legacy_audit` 不變。
+- **MySQL**：`compose.yaml` 固定映像摘要（不用標籤）；`innodb_buffer_pool_size=512MB`；`sort_buffer_size=2MB`（2026-11-16 業主決定，以 `SET PERSIST` 設定、存在資料庫的 `mysqld-auto.cnf`，不在 `compose.yaml`；重啟後保留。查詢：`SELECT @@global.sort_buffer_size`；還原：`RESET PERSIST sort_buffer_size`）。網站以最小權限的 `ri_runtime` 連線（多數表沒有 DELETE；Audit 表只有 SELECT／INSERT）；維護用 `ri_app`。例外（2026-11-13 業主決定，見 §4.5）：`ri_entity_snapshots` 另有 UPDATE 權限，由 trigger 限制只能覆蓋「案件仍是 Draft 的 draft_updated 副本」；DELETE 仍一律禁止，`ri_audit_log`／`ri_legacy_audit` 不變。另一例外（2026-11-25 業主決定，見 §17.2）：`ri_legacy_transactions` 有 DELETE 權限，由 trigger 限制網站帳號只能刪「從未確認過的舊資料草稿」。
 - **主機**：時區 Asia/Taipei（提醒排程 cron 依賴它）。硬體：Xeon E5-2620 v3、VMware 4 vCPU／8 GB；單一請求吃單核，換新一代 CPU 才會明顯變快。
 - **PDF 已退役**：只產生 Word，PDF 由使用者在 Word 匯出；Gotenberg 已移除，`/api/render-document-pdf` 已整個移除（2026-11-12 起回 404，§16）。
 - 升級任何一項：先更新這張表與鎖定檔，再重跑全部測試。
@@ -516,7 +516,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - 已對帳或有收付歷史等受保護交易的業務金額更正留待下一階段（尚未開放）。
 - 新舊資料用獨立的來源欄區分，不更動既有 premium／claim 分類。
 - **Insured 主檔**：匯入與確認新交易時，依中文名以與 Case 相同規則比對（含 / 組合與曾用名），沒有才新建，並標為正式、連結到該交易（`insuredMasterId`）；中文名空白不建。
-- `ri_runtime` 對 `ri_legacy_transactions`、號碼計數及原因表為 SELECT／INSERT／UPDATE，永無 DELETE；`ri_legacy_import_batches` 為 SELECT／INSERT／UPDATE（2026-11-11 起網頁匯入，仍無 DELETE）；獨立 `ri_legacy_audit` 僅 SELECT／INSERT，永久不可 UPDATE／DELETE。全系統 Audit 暫停與 SMTP 關閉設定維持。
+- `ri_runtime` 對 `ri_legacy_transactions` 為 SELECT／INSERT／UPDATE／DELETE（DELETE 由 trigger `ri_legacy_transactions_runtime_delete` 限制：只能刪草稿、非匯入、沒有編號、從未確認過的列；維護帳號不受此 trigger 限制）；號碼計數及原因表為 SELECT／INSERT／UPDATE，永無 DELETE；`ri_legacy_import_batches` 為 SELECT／INSERT／UPDATE（2026-11-11 起網頁匯入，仍無 DELETE）；獨立 `ri_legacy_audit` 僅 SELECT／INSERT，永久不可 UPDATE／DELETE。全系統 Audit 暫停與 SMTP 關閉設定維持。
 - 歷次清空紀錄見文末「資料清理紀錄（舊資料）」。
 
 ### 17.1 網頁匯入 Register（2026-11-11 業主決定）
@@ -541,6 +541,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **同一張保單**＝同一個 Old Reference（TW Ref；每個 TW Ref 是一家再保人的分保）。**最新期間**＝同一 Old Reference 所有已確認保費列與批單列中最早起日＋最晚到期日。Payment Split（C／R）暫不使用。
 - **來源**：理賠只能從原始保費列新增；批單可從保費列或批單新增，不能從理賠。
 - 從 confirmed 舊交易帶入資料，保留原來源交易關聯及案號快照。新交易只有 Endorsement／Claim；不建立 Case。草稿只由建立者編輯、確認；首次確認產生 `LTX-YYYY-000001`，確認年度採台灣年度。未對帳、無收付歷史且未進已關帳 Production 的交易，建立者可退回草稿；再次確認沿用原號。
+- **刪除草稿（2026-11-25 業主決定）**：從未確認過的批單／理賠草稿（沒有 LTX 編號）可真的刪除，限草稿擁有人（Admin 轉移後為新擁有人）或 System Administrator，必填原因（最多 500 字）；明細視窗與編輯視窗有 Delete Draft。刪除前把草稿完整內容、操作人、原因寫入 Legacy 操作紀錄（`draft_deleted`，永久保留；網頁看不到已刪的草稿，紀錄可在 `/admin/` 唯讀查看）。確認後退回的草稿（已有編號）、匯入與歷史資料不可刪。資料庫以 trigger 做同樣限制。測試 `legacy_draft_delete`、畫面階段 L。
 - **鎖定沿用來源**：Cedant、Settlement Party、Old Reference、New / Renew。批單另鎖幣別、Share、AE／Sub AE 分配（沿用的 Sub AE 不檢查在職；換 AE 須在職）；Insured EN／CN 可改。理賠另鎖 Insured（帶同一 Old Reference 最新已確認批單的名稱，無批單用原保單）；Property 理賠鎖幣別，其他險種可選。
 - **付款規則**依 Settlement Party 自動判斷（各 Facility 名稱，其餘一般），不能選；批單的 Cedant／再保人付款天數一律帶入來源並鎖定（2026-11-14，與新系統批單相同），Facility 的 Cedant 固定 90 天。
 
@@ -564,6 +565,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-27 10:55 | 舊資料：從未確認過的批單／理賠草稿可刪除（前後端＋資料庫授權與 trigger；回復：`~/RI System/legacy-draft-delete-work/rollback.sh 20261127_105532`） | `backups/legacy_draft_delete_20261127_105532/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-draft-delete-20261127_105532`／`ri-frontend:before-draft-delete-20261127_105532` | 全部 API 148/148 組（新增 legacy_draft_delete 59 項；舊程式與拿掉 trigger 時皆會失敗）；全部畫面測試通過（L 31/31，新增刪除草稿 11 項）；正式資料副本演練：資料庫指令與 db_harden.sh 結果一致、只多 1 個 trigger 與 1 條授權、副本刪 1 筆草稿只動舊資料與操作紀錄、回復指令可還原；無 migration、部署不改資料 |
 | 11-27 09:15 | 舊資料更正：F17953、F17753 再保人款改為未付（業主確認尚未支付；匯入時付款編號只填「v-11/…」被當成已付；業主同意的正式資料修改） | `backups/legacy_unpaid_fix_20261127_091547/`（database.sql、rows-before.json） | —（程式未變） | 正式資料副本演練：只有這 2 筆舊資料與 2 筆 Legacy 操作紀錄改變、其他帳款列與 Production 不變、第二次執行自動停止 |
 | 11-26 15:01 | 舊資料匯入：金額欄空白視為 0、已結清理賠 DOL 可留空（只換後端；回復：`~/RI System/legacy-blank-work/rollback.sh 20261126_150104`） | `backups/legacy_blank_20261126_150104/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-legacy-blank-20261126_150104` | 候選 `ri-backend:legblank-candidate`（adfb018f1880）：全部 API 145/145 組（新增匯入放寬 13 項，舊程式跑新檢查會失敗）；正式資料副本以業主的 MC Register 實測通過（0 錯誤 0 警告、1,156 列轉換結果與舊版逐欄相同、原有帳款列不變）；全部畫面測試除 M 階段一次偶發逾時外通過，重跑 A＋M 通過（業主同意部署）；無 migration、不改資料 |
 | 11-26 17:56 | Dashboard：險種榜至少 10 列、Accounting 小卡 To Reconcile／To Record 按鈕、趨勢圖篩選同一行（前後端；回復：`~/RI System/mix-buttons-work/rollback.sh 20261126_175621`） | `backups/mix-buttons_20261126_175621/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-mix-buttons-20261126_175621`／`ri-frontend:before-mix-buttons-20261126_175621` | 候選 `ri-backend:mix-buttons-candidate`（af8d30fa4514）／`ri-frontend:mix-buttons-candidate`（2bf42562c58c）：Dashboard 相關 API 13 組全過（新 `dashboard_class_mix` 12 項）、全部畫面測試 608 項 PASS（DI 93、GI 23、SK 79）；無 migration、不改資料；部署後正式資料唯讀核對：險種榜 10 列（7 個有金額＋3 個 0%） |
@@ -657,6 +659,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-27：舊資料草稿可刪除（業主 11-25 決定，10:55 部署，前後端＋資料庫權限；回復：`~/RI System/legacy-draft-delete-work/rollback.sh 20261127_105532`）：詳情見 §17.2「刪除草稿」。
 
 - 2026-11-27：舊資料更正（業主確認，09:15 執行）：F17953（TWD 再保費 15,064）、F17753（USD 13,699.12）匯入時被當成已付再保人款，改為再保人方未收付（Cedant 收款登錄保留、原始 Excel 值不改），Legacy Audit 動作 `import_settlement_corrected`。匯入前請檢查 Register：`closed`＝x 的列，其收付編號欄若只是「v-月/日」註記，系統仍會視為已收付。
 

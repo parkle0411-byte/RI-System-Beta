@@ -28,7 +28,7 @@ def representation(t,person=None):
         historical=t.historical,imported=bool(t.batch_id),originalSerial=t.original_serial,operation=t.operation,
         referenceTransaction=str(t.reference_transaction_id or ''),corrects='',performance=rate_for(t),
         createdAt=t.created_at.isoformat(),firstConfirmedAt=t.first_confirmed_at.isoformat() if t.first_confirmed_at else '',
-        permissions=dict(edit=False,confirm=False,correct=False,transfer=False,retract=False),readOnly=True)
+        permissions=dict(edit=False,confirm=False,correct=False,transfer=False,retract=False,delete=False),readOnly=True)
     if t.reference_transaction_id:
         source=t.reference_transaction
         result['referenceSource']=dict(uid=str(source.uid),number=source.number,reference=t.data.get('sourceReference',source.reference))
@@ -36,7 +36,8 @@ def representation(t,person=None):
         allowed = bool(person and person.role_code in ('sales','general_manager','admin') and t.owner_id == person.pk and t.status == 'draft')
         result['permissions'].update(edit=allowed, confirm=allowed)
         if person:
-            from .entries import can_retract,can_transfer
+            from .entries import can_retract,can_transfer,can_delete
+            result['permissions']['delete']=can_delete(person,t)
             result['permissions']['retract']=can_retract(person,t)
             result['permissions']['transfer']=can_transfer(person,t)
         result['readOnly'] = not allowed

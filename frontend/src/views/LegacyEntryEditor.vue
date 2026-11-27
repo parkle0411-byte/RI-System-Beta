@@ -4,7 +4,7 @@ import {computed,ref,watch} from 'vue'
 import {api} from '../api'
 import {premiumMoney} from '../alpha/lib/accounting'
 const props=defineProps({transaction:Object,options:Object})
-const emit=defineEmits(['saved','close'])
+const emit=defineEmits(['saved','close','delete'])
 const current=ref(null),form=ref({}),busy=ref(false),error=ref('')
 const inputKeys=['reference','currency','revenueMonth','kind','insured','insuredCn','cedant','party','statementNo','reinsurerRef','effectiveDate','expiryDate','lossDate','lossNo','causeOfLoss','claimNote','gross','share','commissionRate','taxRate','brokerage','claim','claimReason','brokerageNote','ae','subAe','aePct','rule','cedantDays','reinsurerDays','endorsementNo','installmentNo','newRenew','remark','oldReason','oldReasonText']
 watch(()=>props.transaction,t=>{if(t){current.value=t;form.value=JSON.parse(JSON.stringify(t.data));error.value=''}},{immediate:true})
@@ -14,6 +14,9 @@ const ruleLabel=computed(()=>(props.options.rules||[]).find(r=>r.code===form.val
 const claim=computed(()=>form.value.kind==='claim')
 const texts={reference:'Old Reference',insured:'Insured (English)',insuredCn:'Insured (Chinese)',statementNo:'Statement No.',reinsurerRef:"Reinsurer's Ref. No.",installmentNo:'Installment No.'}
 const lockNote='Follows the source transaction'
+// 2026-11-27 owner: required fields show the red * (same rules as legacy/entries.py ready() and legacy/money.py).
+const brokerageNoteRequired=computed(()=>{const a=amounts.value,p=Number(a['Our Share Premium']),b=Number(form.value.brokerage),pct=a['Bkg.(%)'];return !claim.value&&((pct!=null&&pct<0)||(p===0&&b!==0&&Number.isFinite(b)))})
+const overFiveYears=computed(()=>{const e=String(form.value.expiryDate||'');if(claim.value||!/^\d{4}-\d{2}-\d{2}$/.test(e))return false;let limit=`${Number(e.slice(0,4))+5}${e.slice(4)}`;if(limit.endsWith('-02-29'))limit=limit.slice(0,8)+'28';const d=new Date(),today=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;return today>limit})
 const amounts=computed(()=>{
  const d=form.value,r=v=>premiumMoney(Number(v),d)
  if(claim.value)return {Claim:d.claim,'Receivable / Payable':d.claim}
@@ -38,33 +41,33 @@ async function save(confirm=false){
  <el-form v-if="current" label-position="top" class="entry-form" :disabled="busy">
   <el-form-item label="Source Old Reference"><el-input :model-value="form.sourceReference" disabled/></el-form-item>
   <el-form-item label="Transaction Type"><el-input :model-value="claim?'Claim':'Endorsement'" disabled/></el-form-item>
-  <el-form-item v-for="(label,key) in texts" :key="key" :label="label"><el-input v-model="form[key]" :disabled="locked(key)" :maxlength="key==='reference'?192:240"/><small v-if="locked(key)">{{lockNote}}</small></el-form-item>
+  <el-form-item v-for="(label,key) in texts" :key="key" :label="label" :required="key==='insured'&&!locked(key)"><el-input v-model="form[key]" :disabled="locked(key)" :maxlength="key==='reference'?192:240"/><small v-if="locked(key)">{{lockNote}}</small></el-form-item>
   <el-form-item label="Cedant"><el-input :model-value="form.cedant" disabled/><small>{{lockNote}}</small></el-form-item>
   <el-form-item label="Settlement Party"><el-input :model-value="form.party" disabled/><small>{{lockNote}}</small></el-form-item>
-  <el-form-item label="Currency"><el-select v-model="form.currency" :disabled="locked('currency')"><el-option v-for="c in ALL_CURRENCIES" :key="c" :label="c" :value="c"/></el-select><small v-if="locked('currency')">{{lockNote}}</small></el-form-item>
-  <el-form-item :label="claim?'Effective Date (Policy)':'Endorsement Effective Date'"><el-date-picker v-model="form.effectiveDate" :disabled="locked('effectiveDate')" value-format="YYYY-MM-DD"/><small>Policy period: {{form.sourceEffectiveDate||'—'}} ~ {{form.sourceExpiryDate||'—'}}</small></el-form-item>
-  <el-form-item :label="claim?'Expiry Date (Policy)':'Expiry Date (change only to amend the period)'"><el-date-picker v-model="form.expiryDate" :disabled="locked('expiryDate')" value-format="YYYY-MM-DD"/><small v-if="!claim">The policy start stays fixed; the complete period must not exceed 18 months.</small></el-form-item>
+  <el-form-item label="Currency" :required="!locked('currency')"><el-select v-model="form.currency" :disabled="locked('currency')"><el-option v-for="c in ALL_CURRENCIES" :key="c" :label="c" :value="c"/></el-select><small v-if="locked('currency')">{{lockNote}}</small></el-form-item>
+  <el-form-item :label="claim?'Effective Date (Policy)':'Endorsement Effective Date'" :required="!locked('effectiveDate')"><el-date-picker v-model="form.effectiveDate" :disabled="locked('effectiveDate')" value-format="YYYY-MM-DD"/><small>Policy period: {{form.sourceEffectiveDate||'—'}} ~ {{form.sourceExpiryDate||'—'}}</small></el-form-item>
+  <el-form-item :label="claim?'Expiry Date (Policy)':'Expiry Date (change only to amend the period)'" :required="!locked('expiryDate')"><el-date-picker v-model="form.expiryDate" :disabled="locked('expiryDate')" value-format="YYYY-MM-DD"/><small v-if="!claim">The policy start stays fixed; the complete period must not exceed 18 months.</small></el-form-item>
   <template v-if="claim">
    <el-form-item label="Loss No." required><el-input v-model="form.lossNo" maxlength="160"/></el-form-item>
    <el-form-item label="Cause of Loss"><el-input v-model="form.causeOfLoss" type="textarea" maxlength="2000"/></el-form-item>
-   <el-form-item label="DOL"><el-date-picker v-model="form.lossDate" value-format="YYYY-MM-DD"/></el-form-item>
-   <el-form-item label="Claim Amount (Our Share)"><el-input-number v-model="form.claim" :controls="false"/><small>{{form.currency==='TWD'?'TWD: whole numbers only':'At most two decimal places'}}</small></el-form-item>
-   <el-form-item label="Negative Claim Reason"><el-input v-model="form.claimReason" type="textarea"/></el-form-item>
+   <el-form-item label="DOL" required><el-date-picker v-model="form.lossDate" value-format="YYYY-MM-DD"/></el-form-item>
+   <el-form-item label="Claim Amount (Our Share)" required><el-input-number v-model="form.claim" :controls="false"/><small>{{form.currency==='TWD'?'TWD: whole numbers only':'At most two decimal places'}}</small></el-form-item>
+   <el-form-item label="Negative Claim Reason" :required="Number(form.claim)<0"><el-input v-model="form.claimReason" type="textarea"/></el-form-item>
    <el-form-item label="Note for Claim"><el-input v-model="form.claimNote" type="textarea"/></el-form-item>
   </template>
   <template v-else>
-   <el-form-item label="Endorsement No."><el-input v-model="form.endorsementNo"/></el-form-item>
-   <el-form-item label="100% Premium (This Endorsement Adjustment)"><el-input-number v-model="form.gross" :controls="false"/></el-form-item>
+   <el-form-item label="Endorsement No." required><el-input v-model="form.endorsementNo"/></el-form-item>
+   <el-form-item label="100% Premium (This Endorsement Adjustment)" required><el-input-number v-model="form.gross" :controls="false"/></el-form-item>
    <el-form-item label="Share (%)"><el-input-number v-model="form.share" :controls="false" :disabled="locked('share')"/><small v-if="locked('share')">{{lockNote}}</small></el-form-item>
-   <el-form-item label="R/I Commission (%)"><el-input-number v-model="form.commissionRate" :controls="false"/></el-form-item>
-   <el-form-item label="Tax (%)"><el-input-number v-model="form.taxRate" :controls="false"/></el-form-item>
-   <el-form-item label="Brokerage Amount (Original Currency)"><el-input-number v-model="form.brokerage" :controls="false"/></el-form-item>
-   <el-form-item label="Note for Bkg."><el-input v-model="form.brokerageNote" type="textarea"/></el-form-item>
+   <el-form-item label="R/I Commission (%)" required><el-input-number v-model="form.commissionRate" :controls="false"/></el-form-item>
+   <el-form-item label="Tax (%)" required><el-input-number v-model="form.taxRate" :controls="false"/></el-form-item>
+   <el-form-item label="Brokerage Amount (Original Currency)" required><el-input-number v-model="form.brokerage" :controls="false"/></el-form-item>
+   <el-form-item label="Note for Bkg." :required="brokerageNoteRequired"><el-input v-model="form.brokerageNote" type="textarea"/></el-form-item>
    <el-form-item label="Revenue Month (automatic)"><el-input :model-value="current.projectedRevenueMonth||'Set on confirmation'" disabled/><small>Later of the effective month and the confirmation month; a closed month moves to the first open month.</small></el-form-item>
-   <el-form-item label="Endorsement Over 5 Years After Expiry — Reason"><el-select v-model="form.oldReason" clearable><el-option v-for="r in options.reasons.filter(r=>r.active!==false)" :key="r.code" :label="r.label" :value="r.code"/></el-select></el-form-item>
-   <el-form-item label="Reason Details"><el-input v-model="form.oldReasonText" type="textarea"/></el-form-item>
+   <el-form-item label="Endorsement Over 5 Years After Expiry — Reason" :required="overFiveYears"><el-select v-model="form.oldReason" clearable><el-option v-for="r in options.reasons.filter(r=>r.active!==false)" :key="r.code" :label="r.label" :value="r.code"/></el-select></el-form-item>
+   <el-form-item label="Reason Details" :required="form.oldReason==='other'"><el-input v-model="form.oldReasonText" type="textarea"/></el-form-item>
   </template>
-  <el-form-item label="AE"><el-select v-model="form.ae" filterable><el-option v-for="p in options.people" :key="p.id" :label="p.name" :value="p.name"/></el-select><small>Source AE: {{form.sourceAe||'—'}}</small></el-form-item>
+  <el-form-item label="AE" required><el-select v-model="form.ae" filterable><el-option v-for="p in options.people" :key="p.id" :label="p.name" :value="p.name"/></el-select><small>Source AE: {{form.sourceAe||'—'}}</small></el-form-item>
   <template v-if="!claim">
    <el-form-item label="Sub AE"><el-input :model-value="form.subAe||'—'" disabled/><small>{{lockNote}}</small></el-form-item>
    <el-form-item v-if="form.subAe" label="AE / Sub AE Split"><el-input :model-value="form.aePct===40?'40 / 60':form.aePct===70?'70 / 30':'—'" disabled/></el-form-item>
@@ -75,6 +78,6 @@ async function save(confirm=false){
   <el-form-item label="Remark"><el-input v-model="form.remark" type="textarea"/></el-form-item>
  </el-form>
  <el-descriptions title="Calculated Amounts" :column="2" border><el-descriptions-item v-for="(v,k) in amounts" :key="k" :label="k">{{Number.isFinite(v)?new Intl.NumberFormat('en-US',{maximumFractionDigits:8}).format(v):'—'}}</el-descriptions-item></el-descriptions>
- <div class="entry-actions"><el-button :loading="busy" @click="save(false)">Save Draft</el-button><el-button type="primary" :loading="busy" @click="save(true)">Confirm Transaction</el-button><el-button :disabled="busy" @click="emit('close')">Close</el-button></div>
+ <div class="entry-actions"><el-button :loading="busy" @click="save(false)">Save Draft</el-button><el-button type="primary" :loading="busy" @click="save(true)">Confirm Transaction</el-button><el-button :disabled="busy" @click="emit('close')">Close</el-button><el-button v-if="current?.permissions?.delete" type="danger" plain class="entry-delete" :disabled="busy" data-testid="legacy-editor-delete" @click="emit('delete',current)">Delete Draft</el-button></div>
 </template>
-<style scoped>.entry-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px;margin-top:18px}.el-select,.el-input-number,.el-date-editor{width:100%}.entry-actions{display:flex;gap:12px;margin-top:20px}small{display:block;color:var(--el-text-color-secondary)}@media(max-width:700px){.entry-form{grid-template-columns:1fr}}</style>
+<style scoped>.entry-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px;margin-top:18px}.el-select,.el-input-number,.el-date-editor{width:100%}.entry-actions{display:flex;gap:12px;margin-top:20px;flex-wrap:wrap}.entry-delete{margin-left:auto}small{display:block;color:var(--el-text-color-secondary)}@media(max-width:700px){.entry-form{grid-template-columns:1fr}}</style>

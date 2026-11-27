@@ -11,6 +11,8 @@
   premium or brokerage must be non-zero; Revenue Month is automatic.
 - Claims: Loss No. required, Cause of Loss optional, DOL inside the latest period.
 - TWD amounts are whole numbers, others at most two decimals; never rounded silently.
+- 2026-11-25: a draft that was never confirmed can be deleted (owner or System Administrator,
+  reason required). The row is removed; the Legacy audit keeps its full content.
 """
 import copy
 from datetime import date
@@ -173,6 +175,8 @@ def change(person,body):
         return transfer(person,t,body)
     if body.get('action')=='retract':
         return retract(person,t,body)
+    if body.get('action')=='delete':
+        return delete(person,t,body)
     if t.historical or t.status!='draft' or t.owner_id!=person.pk:fail('Only the draft owner can edit or confirm this transaction.',403)
     if type(body.get('version')) is not int or body['version']!=t.version:fail('This transaction changed. Refresh before continuing.',409,'version_conflict')
     action=body.get('action');before=state(t)
@@ -235,6 +239,27 @@ def retract(person,t,body):
     before=state(t);t.status='draft';t.version+=1;t.save()
     audit(person,t.pk,'transaction_retracted',before,state(t))
     return t
+
+
+def can_delete(person,t):
+    """Owner 2026-11-25: only a draft that was never confirmed (no number); its owner or a System Administrator.
+    The database enforces the same row condition for the web account (scripts/db_harden.sh)."""
+    if t.historical or t.batch_id or t.status!='draft' or t.number or t.first_confirmed_at:return False
+    return person.role_code=='admin' or (t.owner_id==person.pk and person.role_code in BUSINESS)
+
+
+def delete(person,t,body):
+    if not can_delete(person,t):fail('Only the draft owner or a System Administrator can delete a draft that has never been confirmed.',403)
+    if type(body.get('version')) is not int or body['version']!=t.version:fail('This transaction changed. Refresh before continuing.',409,'version_conflict')
+    reason=body.get('reason')
+    if not isinstance(reason,str) or not reason.strip():fail('A deletion reason is required.')
+    if len(reason.strip())>500:fail('The deletion reason must be at most 500 characters.')
+    before=dict(state(t),reference=t.reference,currency=t.currency,revenueMonth=t.revenue_month,
+        referenceTransaction=str(t.reference_transaction_id or ''),createdById=t.created_by_id,
+        createdAt=t.created_at.isoformat(),updatedAt=t.updated_at.isoformat(),original=copy.deepcopy(t.original))
+    uid=t.pk;t.delete()
+    audit(person,uid,'draft_deleted',before,{},reason.strip())
+    return None
 
 
 def can_transfer(person,t):
