@@ -12,6 +12,7 @@ from dashboard.views import DashboardTargetsView, DashboardView
 from cases.document_generation_views import DocumentGenerationLogView
 from cases.document_views import CaseDocumentsView
 from cases.generated_document_views import GeneratedCaseDocumentView
+from cases.history_views import CaseHistoryView
 from cases.placing_views import PlacingSlipView
 from cases.recycle_views import DraftRecycleBinView
 from cases.reference_views import ReconciliationReferencesView
@@ -49,6 +50,7 @@ urlpatterns = [
     path("api/audit-log", include("audit.urls")),
     path("api/insured-masters", InsuredMasterView.as_view(), name="insured-masters"),
     path("api/cases", CasesView.as_view(), name="cases"),
+    path("api/case-history", CaseHistoryView.as_view(), name="case-history"),
     path("api/facility-declarations", FacilityDeclarationsView.as_view(), name="facility-declarations"),
     path("api/facility-declaration-announce", FacilityDeclarationAnnounceView.as_view(), name="facility-declaration-announce"),
     path("api/facility-declaration-documents", FacilityDeclarationDocumentsView.as_view(), name="facility-declaration-documents"),

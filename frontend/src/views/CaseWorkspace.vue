@@ -33,6 +33,7 @@ import { recallScope, orderedRecallRows } from '../alpha/productRecall'
 import ProductRecallRisk from '../components/ProductRecallRisk.vue'
 import ClaimLossSnapshots from '../components/ClaimLossSnapshots.vue'
 import CasePersonnelHistory from '../components/CasePersonnelHistory.vue'
+import CaseHistory from '../components/CaseHistory.vue'
 import FacilityPlacementForm from '../components/FacilityPlacementForm.vue'
 import FacilityDeclarations from '../components/FacilityDeclarations.vue'
 import FacilityCaseSummary from '../components/FacilityCaseSummary.vue'
@@ -219,6 +220,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                 <el-tab-pane v-if="!overseaEnabled(selectedPayload)" label="Claim" name="claims"></el-tab-pane>
                 <el-tab-pane label="Endorsements" name="endorsements"></el-tab-pane>
                 <el-tab-pane label="Reminders" name="reminders"></el-tab-pane>
+                <el-tab-pane label="History" name="history"></el-tab-pane>
               </el-tabs>
 
               <template v-if="caseDetailTab === 'overview' && selectedCase">
@@ -699,6 +701,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', resizeList))
                   <el-empty v-else description="No endorsement chain available"></el-empty>
                   <el-alert v-if="caseWorkflow && !caseWorkflow.actions.canCreateEndorsement && caseWorkflow.latestCaseUid !== selectedCase.caseUid" class="case-readiness-alert" title="A newer endorsement exists. Open the latest row to continue the chain." type="info" :closable="false" show-icon></el-alert>
                 </section>
+              </template>
+
+              <template v-else-if="caseDetailTab === 'history' && selectedCase">
+                <CaseHistory :case-uid="selectedCase.caseUid" :row-version="selectedCase.rowVersion" />
               </template>
 
               <template v-else-if="caseDetailTab === 'reminders' && selectedCase">

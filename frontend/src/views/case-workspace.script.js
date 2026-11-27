@@ -466,7 +466,7 @@ export function useCaseWorkspace() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(generatedDocumentCase.value.aeEmail || '')) issues.push('Account Executive must have a valid Email.')
     return issues
   })
-  const caseDetailTabLabel = computed(() => ({ documents: 'Documentation', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders' }[caseDetailTab.value] || 'Case detail'))
+  const caseDetailTabLabel = computed(() => ({ documents: 'Documentation', soa: 'SOA / Transactions', claims: 'Claim', endorsements: 'Endorsements', reminders: 'Reminders', history: 'History' }[caseDetailTab.value] || 'Case detail'))
   function reconciliationRefFor(caseData, transaction) {
     const leg = String(transaction?.legType || '')
     if (transaction?.facilityNet) {

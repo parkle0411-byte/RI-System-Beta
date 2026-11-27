@@ -158,6 +158,12 @@ case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI SK RM} " in 
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 required_marks_ui.py || STATUS=1
 esac
+# HI: 案件 History 分頁（2026-11-27；畫面上修改已 Announce 的案件，History 只列出實際改過的欄位）。
+case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U DI GI SK RM HI} " in *" HI "*)
+  docker exec -i ri-ut-backend python manage.py shell < qa/ui/case_history_seed.py 2>&1 | grep -q 'case history seeded' || STATUS=1
+  docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$PWD/qa/ui:/ui" -w /ui ri-ui-playwright:1.56.0 python3 case_history_ui.py || STATUS=1
+esac
 # I: Legacy 網頁匯入（2026-11-11；系統管理員上傳 Register → 預覽 → 匯入 → Accounting）。
 case " ${PHASES:-A H R B0 B K C D E F G P1 P2 O L X I Y Z M U} " in *" I "*)
   docker run --rm --network ri-uitest_ut --user "$(id -u):$(id -g)" -e HOME=/tmp \
