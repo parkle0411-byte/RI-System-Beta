@@ -566,6 +566,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-27 13:22 | 第五次清空舊資料（交易 13,072（含草稿 3）、內部標記 30、未被案件使用的 Insured 2,816（案件使用中的 4 筆保留）、Legacy 操作紀錄 64；業主同意的正式資料刪除） | `backups/legacy_clear_20261127_132220` | —（程式未變） | 正式資料副本演練：其他資料表、保留的 MDM 與 Finance 紀錄前後完全相同；保護觸發器補回；第二次執行自動停止 |
 | 11-27 12:54 | 舊資料匯入：`closed`＝x 且收付編號是「v-…」時警告擋下（只換後端；回復：`~/RI System/legacy-closed-x-work/rollback.sh 20261127_125442`） | `backups/legacy_closed_x_20261127_125442/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-closed-x-20261127_125442` | API legacy_import_web 92/92（新增 4 項，舊程式會失敗）、legacy_entry_rules 227/227、legacy_readonly 60/60；畫面 A 62/62＋匯入 I 11/11（局部修改範圍）；無 migration、不改資料 |
 | 11-27 12:40 | 必填欄位紅色 *：約 45 個必填但沒有紅色 * 的欄位補上（Facility Declaration／Placement、舊資料新增與轉移、FX Rates、理賠付款、上傳文件、Clause、Oversea Broker Note、Accounting 收付款 Ref. 或 Note、人員歷史、Product Recall、STP、Sum Insured 標題、續保舊理賠）；二選一兩欄都標 * 並加一行說明；只換前端（回復：`~/RI System/required-marks-work/rollback.sh 20261127_124032`） | `backups/required_marks_20261127_124032/`（部署前 DB 及變更檔） | `ri-frontend:before-required-marks-20261127_124032` | 候選 `ri-frontend:required-marks-candidate`（6fc4b334d256，已合併 10:55 舊資料草稿刪除的兩個畫面）：完整畫面 619 項＋新 RM 28 項全過、原始碼標示檢查 59 處（舊版 53 項不過）、前端建置與 7 支檢查程式全過、截圖確認；不改檢查規則與資料；部署後 40 個前端檔案與候選一致 |
 | 11-27 10:55 | 舊資料：從未確認過的批單／理賠草稿可刪除（前後端＋資料庫授權與 trigger；回復：`~/RI System/legacy-draft-delete-work/rollback.sh 20261127_105532`） | `backups/legacy_draft_delete_20261127_105532/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-draft-delete-20261127_105532`／`ri-frontend:before-draft-delete-20261127_105532` | 全部 API 148/148 組（新增 legacy_draft_delete 59 項；舊程式與拿掉 trigger 時皆會失敗）；全部畫面測試通過（L 31/31，新增刪除草稿 11 項）；正式資料副本演練：資料庫指令與 db_harden.sh 結果一致、只多 1 個 trigger 與 1 條授權、副本刪 1 筆草稿只動舊資料與操作紀錄、回復指令可還原；無 migration、部署不改資料 |
@@ -660,8 +661,11 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-17 第二次，業主要求）**：清空 11-17 重新匯入的 AGCS／GAIC 舊資料：交易 1,236 筆、上傳內部標記 4 筆（Excel 先前已刪）、對舊資料的 Finance 對帳紀錄 2 筆（6 筆交易已有的收付登錄隨交易刪除）、MDM Insured 全部 412 筆（新系統案子已於 11-17 清空，沒有任何 Insured 被使用；業主要求一併刪除）、Legacy 操作紀錄 20 筆（保護暫時移除後原樣補回）。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_120204`。
 - **資料清理（2026-11-17 第三次，業主要求）**：清空再次匯入的舊資料：交易 6,102 筆（3 批）、上傳內部標記 4 筆、MDM Insured 全部 1,681 筆（沒有案子使用）、Legacy 操作紀錄 8 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳或收付登錄。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261117_143435`。
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
+- **資料清理（2026-11-27 第五次，業主要求）**：清空 11-26 匯入的舊資料：交易 13,072 筆（含未確認草稿 3 筆）、上傳內部標記 30 筆（Excel 未保留，0 個檔）、沒有案子使用的 MDM Insured 2,816 筆（案件使用中的 4 筆保留）、Legacy 操作紀錄 64 筆（含 11-27 F17753／F17953 更正紀錄；保護暫時移除後原樣補回）；沒有舊資料的 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261127_132220`。重新匯入時 F17753／F17953 須先清空 Register 的「v-…」編號（§17.1 匯入警告）。
 
 ## 近期變更
+
+- 2026-11-27：依業主要求第五次清空舊資料（含未被案件使用的 Insured），見 §17 資料清理。
 
 - 2026-11-27：舊資料匯入新增警告（業主決定，12:54 部署，只換後端；回復：`~/RI System/legacy-closed-x-work/rollback.sh 20261127_125442`）：`closed`＝x 且收付編號是「v-…」註記時擋下（§17.1）。
 
