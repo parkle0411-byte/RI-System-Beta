@@ -564,6 +564,7 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 
 | 日期 | 項目 | 備份 | 回復映像標籤 | 驗證摘要 |
 |---|---|---|---|---|
+| 11-27 09:15 | 舊資料更正：F17953、F17753 再保人款改為未付（業主確認尚未支付；匯入時付款編號只填「v-11/…」被當成已付；業主同意的正式資料修改） | `backups/legacy_unpaid_fix_20261127_091547/`（database.sql、rows-before.json） | —（程式未變） | 正式資料副本演練：只有這 2 筆舊資料與 2 筆 Legacy 操作紀錄改變、其他帳款列與 Production 不變、第二次執行自動停止 |
 | 11-26 15:01 | 舊資料匯入：金額欄空白視為 0、已結清理賠 DOL 可留空（只換後端；回復：`~/RI System/legacy-blank-work/rollback.sh 20261126_150104`） | `backups/legacy_blank_20261126_150104/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-legacy-blank-20261126_150104` | 候選 `ri-backend:legblank-candidate`（adfb018f1880）：全部 API 145/145 組（新增匯入放寬 13 項，舊程式跑新檢查會失敗）；正式資料副本以業主的 MC Register 實測通過（0 錯誤 0 警告、1,156 列轉換結果與舊版逐欄相同、原有帳款列不變）；全部畫面測試除 M 階段一次偶發逾時外通過，重跑 A＋M 通過（業主同意部署）；無 migration、不改資料 |
 | 11-26 17:56 | Dashboard：險種榜至少 10 列、Accounting 小卡 To Reconcile／To Record 按鈕、趨勢圖篩選同一行（前後端；回復：`~/RI System/mix-buttons-work/rollback.sh 20261126_175621`） | `backups/mix-buttons_20261126_175621/`（部署前 DB 及被覆蓋原始碼） | `ri-backend:before-mix-buttons-20261126_175621`／`ri-frontend:before-mix-buttons-20261126_175621` | 候選 `ri-backend:mix-buttons-candidate`（af8d30fa4514）／`ri-frontend:mix-buttons-candidate`（2bf42562c58c）：Dashboard 相關 API 13 組全過（新 `dashboard_class_mix` 12 項）、全部畫面測試 608 項 PASS（DI 93、GI 23、SK 79）；無 migration、不改資料；部署後正式資料唯讀核對：險種榜 10 列（7 個有金額＋3 個 0%） |
 | 11-26 16:55 | 載入骨架條改為對齊真實版面（只換前端；回復到上一版灰條：`~/RI System/skeleton-work/rollback2.sh 20261126_165516`；要回到轉圈再跑 `rollback.sh 20261126_160547`） | `backups/skeleton2_20261126_165516/`（部署前 DB 及被覆蓋原始碼） | `ri-frontend:before-skeleton2-20261126_165516` | 候選 `ri-frontend:skeleton-candidate`（c017db2d68fe）：全部畫面測試通過（601 項 PASS，含 SK 79 項：各表格頁表頭位移 0px、Dashboard 數值位置一致，僅 USD 金額因台幣金額寬度左右移動）；無 migration、不改資料；後端未動 |
@@ -656,6 +657,8 @@ B＝單期為保單生效日、分期為各期 Payment Base Date；C／R＝該�
 - **資料清理（2026-11-18 第四次，業主要求）**：清空再次匯入的舊資料：交易 11,025 筆、上傳內部標記 14 筆（Excel 已不保留，0 個檔）、MDM Insured 2,690 筆（沒有案子使用的全部；案件使用中的 1 筆保留）、Legacy 操作紀錄 28 筆（保護暫時移除後原樣補回）；沒有 Finance 對帳。Legacy 原因設定 4 筆保留。備份 `backups/legacy_clear_20261118_163327`。
 
 ## 近期變更
+
+- 2026-11-27：舊資料更正（業主確認，09:15 執行）：F17953（TWD 再保費 15,064）、F17753（USD 13,699.12）匯入時被當成已付再保人款，改為再保人方未收付（Cedant 收款登錄保留、原始 Excel 值不改），Legacy Audit 動作 `import_settlement_corrected`。匯入前請檢查 Register：`closed`＝x 的列，其收付編號欄若只是「v-月/日」註記，系統仍會視為已收付。
 
 - 2026-11-26：Dashboard 三項（業主決定，17:56 部署，前後端；回復：`~/RI System/mix-buttons-work/rollback.sh 20261126_175621`）：險種榜至少 10 列、Accounting 小卡加 To Reconcile／To Record、趨勢圖篩選併成一行。新增測試組 `dashboard_class_mix`（12 項）、DI 93 項。無 migration、不改資料。
 
